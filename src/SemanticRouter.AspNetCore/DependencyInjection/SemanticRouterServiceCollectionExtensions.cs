@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Options;
 using SemanticRouter;
 using SemanticRouter.AspNetCore;
@@ -12,9 +13,9 @@ public static class SemanticRouterServiceCollectionExtensions
     internal const string EmbeddingsClientName = "SemanticRouter.Embeddings";
 
     /// <summary>
-    /// Registers prompt routing, binding <see cref="SemanticRouterOptions"/> from <paramref name="configuration"/>
-    /// (typically <c>builder.Configuration.GetSection("SemanticRouter")</c>) and the <c>Embeddings</c>,
-    /// <c>Middleware</c> and <c>Endpoints</c> child sections.
+    /// Registers prompt routing, binding <see cref="SemanticRouterOptions"/> (routes, models, selection) from
+    /// <paramref name="configuration"/> (typically <c>builder.Configuration.GetSection("SemanticRouter")</c>) along with
+    /// the <c>Connectors</c>, <c>Embeddings</c> and <c>Middleware</c> child sections.
     /// </summary>
     public static SemanticRouterBuilder AddSemanticPromptRouting(this IServiceCollection services, IConfiguration configuration)
     {
@@ -24,7 +25,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.AddOptions<SemanticRouterOptions>().Bind(configuration);
         services.AddOptions<EmbeddingProviderOptions>().Bind(configuration.GetSection("Embeddings"));
         services.AddOptions<PromptRouterMiddlewareOptions>().Bind(configuration.GetSection("Middleware"));
-        services.AddOptions<PromptDispatchOptions>().Bind(configuration.GetSection("Endpoints"));
+        services.AddOptions<SemanticRouterConnectorsOptions>().Bind(configuration);
 
         return AddCore(services);
     }
@@ -63,14 +64,23 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<IPromptExtractor>(sp => new JsonPromptExtractor(
             sp.GetRequiredService<IOptions<PromptRouterMiddlewareOptions>>().Value.MessageSelection));
 
+        services.TryAddSingleton<IModelSelector>(sp => new DefaultModelSelector(RouterOptions(sp).Selection));
+        services.TryAddSingleton<IModelHealth>(sp => new ModelHealthTracker(
+            RouterOptions(sp).Selection, sp.GetService<TimeProvider>() ?? TimeProvider.System));
+        services.TryAddSingleton<IPromptRouter>(sp => new PromptRouter(
+            sp.GetRequiredService<IPromptClassifier>(),
+            RouterOptions(sp),
+            sp.GetRequiredService<IModelSelector>(),
+            sp.GetRequiredService<IModelHealth>()));
+
         services.TryAddSingleton<PromptRouterMetrics>();
+        services.TryAddSingleton<ICliProcessRunner, SystemCliProcessRunner>();
+        services.TryAddSingleton<ChatConnectorRegistry>();
         services.TryAddSingleton<PromptDispatcher>();
         services.AddHostedService<SemanticRouterWarmupService>();
 
-        services.AddHttpClient(PromptDispatcher.LocalClientName)
-            .ConfigureHttpClient((sp, client) => client.Timeout = DispatchOptions(sp).Local.Timeout);
-        services.AddHttpClient(PromptDispatcher.CloudClientName)
-            .ConfigureHttpClient((sp, client) => client.Timeout = DispatchOptions(sp).Cloud.Timeout);
+        // Connector clients time out per request (time to response headers), so streamed replies are never cut off.
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<HttpClientFactoryOptions>, ConnectorHttpClientOptions>());
         services.AddHttpClient(EmbeddingsClientName)
             .ConfigureHttpClient((sp, client) =>
                 client.Timeout = sp.GetRequiredService<IOptions<EmbeddingProviderOptions>>().Value.Timeout);
@@ -94,6 +104,16 @@ public static class SemanticRouterServiceCollectionExtensions
     private static SemanticRouterOptions RouterOptions(IServiceProvider sp) =>
         sp.GetRequiredService<IOptions<SemanticRouterOptions>>().Value;
 
-    private static PromptDispatchOptions DispatchOptions(IServiceProvider sp) =>
-        sp.GetRequiredService<IOptions<PromptDispatchOptions>>().Value;
+    private sealed class ConnectorHttpClientOptions : IConfigureNamedOptions<HttpClientFactoryOptions>
+    {
+        public void Configure(string? name, HttpClientFactoryOptions options)
+        {
+            if (name?.StartsWith(OpenAICompatibleConnector.HttpClientNamePrefix, StringComparison.Ordinal) == true)
+            {
+                options.HttpClientActions.Add(client => client.Timeout = Timeout.InfiniteTimeSpan);
+            }
+        }
+
+        public void Configure(HttpClientFactoryOptions options) => Configure(Microsoft.Extensions.Options.Options.DefaultName, options);
+    }
 }

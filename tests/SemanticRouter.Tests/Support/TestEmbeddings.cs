@@ -25,15 +25,35 @@ internal static class TestEmbeddings
             ? vector
             : throw new KeyNotFoundException($"No test embedding registered for '{text}'.");
 
-    public static RouteDefinition Route(string name, RouteTarget target, params string[] utterances)
+    public static RouteDefinition Route(string name, int tier, params string[] utterances)
     {
-        var route = new RouteDefinition { Name = name, Target = target };
+        var route = new RouteDefinition { Name = name, Tier = tier };
         foreach (string utterance in utterances)
         {
             route.Utterances.Add(utterance);
         }
 
         return route;
+    }
+
+    public static ModelDefinition Model(
+        string name, int tier, decimal costPerMillion = 0, bool local = false, string connector = "test", params string[] capabilities)
+    {
+        var model = new ModelDefinition
+        {
+            Name = name,
+            Connector = connector,
+            Tier = tier,
+            IsLocal = local,
+            InputCostPerMillionTokens = costPerMillion,
+            OutputCostPerMillionTokens = costPerMillion,
+        };
+        foreach (string capability in capabilities)
+        {
+            model.Capabilities.Add(capability);
+        }
+
+        return model;
     }
 
     public static SemanticRouterOptions Options(params RouteDefinition[] routes)

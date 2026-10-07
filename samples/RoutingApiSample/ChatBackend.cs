@@ -3,9 +3,13 @@ using SemanticRouter;
 
 namespace RoutingApiSample;
 
-public sealed record ChatMessage(string Role, string Content);
+public sealed record ChatMessageBody(string Role, string Content);
 
-public sealed record ChatCompletionRequest(string? Model, IReadOnlyList<ChatMessage> Messages, bool Stream = false);
+public sealed record ChatCompletionBody(string? Model, IReadOnlyList<ChatMessageBody> Messages, bool Stream = false);
+
+public sealed record ChatChoice(int Index, ChatMessageBody Message, [property: JsonPropertyName("finish_reason")] string FinishReason);
+
+public sealed record RoutingSummary(int RequiredTier, RoutingReason Reason, string? Route, float? Similarity, double Complexity, IReadOnlyList<string> Models);
 
 public sealed record ChatCompletionResponse(
     string Id,
@@ -17,39 +21,29 @@ public sealed record ChatCompletionResponse(
     public string ObjectType => "chat.completion";
 }
 
-public sealed record ChatChoice(int Index, ChatMessage Message, [property: JsonPropertyName("finish_reason")] string FinishReason);
-
-public sealed record RoutingSummary(RouteTarget Target, RoutingReason Reason, string? Route, float? Similarity, double Complexity);
-
-/// <summary>A chat model client. Implement this over Ollama, OpenAI, Anthropic, Azure, …</summary>
-public interface IChatBackend
+/// <summary>Annotate-mode stand-in for a real model call, so the sample runs with nothing installed.</summary>
+public static class SimulatedCompletion
 {
-    Task<ChatCompletionResponse> CompleteAsync(
-        ChatCompletionRequest request,
-        PromptClassificationResult? routing,
-        CancellationToken cancellationToken);
-}
-
-/// <summary>Echo backend so the sample runs without any model installed.</summary>
-public sealed class SimulatedChatBackend(string modelName) : IChatBackend
-{
-    public Task<ChatCompletionResponse> CompleteAsync(
-        ChatCompletionRequest request,
-        PromptClassificationResult? routing,
-        CancellationToken cancellationToken)
+    public static ChatCompletionResponse Create(ChatCompletionBody request, RoutingPlan? plan)
     {
+        string model = plan is { Candidates.Count: > 0 } ? plan.Candidates[0].Model.Name : "none";
         string lastUser = request.Messages.LastOrDefault(m => m.Role == "user")?.Content ?? string.Empty;
         string preview = lastUser.Length > 60 ? lastUser[..60] + "…" : lastUser;
 
-        var reply = new ChatMessage("assistant", $"[{modelName}] would answer: \"{preview}\"");
-        RoutingSummary? summary = routing is null
+        RoutingSummary? summary = plan is null
             ? null
-            : new RoutingSummary(routing.Target, routing.Reason, routing.RouteName, routing.Similarity, Math.Round(routing.Complexity.Score, 3));
+            : new RoutingSummary(
+                plan.Classification.RequiredTier,
+                plan.Classification.Reason,
+                plan.Classification.RouteName,
+                plan.Classification.Similarity,
+                Math.Round(plan.Classification.Complexity.Score, 3),
+                plan.Candidates.Select(c => c.Model.Name).ToArray());
 
-        return Task.FromResult(new ChatCompletionResponse(
+        return new ChatCompletionResponse(
             $"chatcmpl-{Guid.NewGuid():N}",
-            modelName,
-            [new ChatChoice(0, reply, "stop")],
-            summary));
+            model,
+            [new ChatChoice(0, new ChatMessageBody("assistant", $"[{model}] would answer: \"{preview}\""), "stop")],
+            summary);
     }
 }

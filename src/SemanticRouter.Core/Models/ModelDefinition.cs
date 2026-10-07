@@ -1,0 +1,78 @@
+namespace SemanticRouter;
+
+/// <summary>
+/// A model the router may dispatch to: which connector serves it, how capable it is and what it costs.
+/// Bindable from <c>SemanticRouter:Models</c>.
+/// </summary>
+public sealed class ModelDefinition
+{
+    /// <summary>Unique catalog name. Clients may request it explicitly as the <c>model</c> of a request.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Name of the connector (configured under <c>SemanticRouter:Connectors</c>) that serves this model.</summary>
+    public string Connector { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The model identifier the connector should request (e.g. <c>gpt-4.1-mini</c>, <c>qwen/qwen3-coder-30b</c>,
+    /// or <c>sonnet</c> for the Claude Code CLI). When <see langword="null"/>, the connector's default is used.
+    /// </summary>
+    public string? Model { get; set; }
+
+    /// <summary>
+    /// Ordinal capability tier, compared with <see cref="RouteDefinition.Tier"/>. Suggested scale: 1 = small local model,
+    /// 2 = mid-size, 3 = strong general model, 4 = frontier, 5 = frontier with extended reasoning. Default 1.
+    /// </summary>
+    public int Tier { get; set; } = 1;
+
+    /// <summary>Capability tags this model supports (e.g. <c>code</c>, <c>tools</c>, <c>vision</c>, <c>reasoning</c>).</summary>
+    public IList<string> Capabilities { get; } = new List<string>();
+
+    /// <summary>
+    /// Whether prompts sent to this model stay on infrastructure you control. Only local models may serve
+    /// <see cref="RouteDefinition.LocalOnly"/> routes.
+    /// </summary>
+    public bool IsLocal { get; set; }
+
+    /// <summary>Context window in tokens. Models too small for a request are skipped. 0 means unknown (never skipped).</summary>
+    public int ContextWindow { get; set; }
+
+    /// <summary>
+    /// Marginal price in USD per million input tokens. Use 0 for local models and for flat-rate subscriptions
+    /// (whose marginal cost is zero until their quota runs out).
+    /// </summary>
+    public decimal InputCostPerMillionTokens { get; set; }
+
+    /// <summary>Marginal price in USD per million output tokens.</summary>
+    public decimal OutputCostPerMillionTokens { get; set; }
+
+    /// <summary>User preference: lower values are preferred. Breaks ties, and is the primary key for <see cref="SelectionStrategy.Priority"/>. Default 0.</summary>
+    public int Priority { get; set; }
+
+    /// <summary>Set to <see langword="false"/> to keep a model in configuration without routing to it. Default <see langword="true"/>.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>Optional free-form description.</summary>
+    public string? Description { get; set; }
+
+    /// <summary>Whether the model declares every tag in <paramref name="required"/> (case-insensitive).</summary>
+    public bool HasCapabilities(IEnumerable<string> required)
+    {
+        ArgumentNullException.ThrowIfNull(required);
+        foreach (string capability in required)
+        {
+            if (!Capabilities.Contains(capability, StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>Estimated marginal cost in USD for a request of the given size.</summary>
+    public decimal EstimateCost(int inputTokens, int outputTokens) =>
+        ((InputCostPerMillionTokens * inputTokens) + (OutputCostPerMillionTokens * outputTokens)) / 1_000_000m;
+
+    /// <inheritdoc />
+    public override string ToString() => $"{Name} via {Connector} (tier {Tier})";
+}

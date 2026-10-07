@@ -13,8 +13,8 @@ public enum PromptRouterMode
     Annotate = 0,
 
     /// <summary>
-    /// Proxy the request to the configured <see cref="PromptDispatchOptions.Local"/> or
-    /// <see cref="PromptDispatchOptions.Cloud"/> endpoint and stream the response back (short-circuits the pipeline).
+    /// Serve the request: try the ranked models through their connectors (with failover) and stream the reply back
+    /// in OpenAI chat-completions format. Short-circuits the pipeline.
     /// </summary>
     Dispatch = 1,
 }
@@ -61,16 +61,10 @@ public sealed class PromptRouterMiddlewareOptions
     public string HeaderPrefix { get; set; } = DefaultHeaderPrefix;
 
     /// <summary>
-    /// When classification throws (for example the embedding endpoint is down), route to
-    /// <see cref="SemanticRouterOptions.FallbackTarget"/> instead of failing the request. Default true.
+    /// When classification throws (for example the embedding endpoint is down), route with
+    /// <see cref="SemanticRouterOptions.FallbackTier"/> instead of failing the request. Default true.
     /// </summary>
     public bool FailOpen { get; set; } = true;
-
-    /// <summary>
-    /// In dispatch mode, retry on the cloud endpoint when the local endpoint is unreachable, times out or
-    /// returns a 5xx. Never applies to routes with <see cref="RouteDefinition.AllowEscalation"/> disabled. Default true.
-    /// </summary>
-    public bool FailoverToCloud { get; set; } = true;
 
     /// <summary>Which chat messages are used as the prompt. Default <see cref="PromptMessageSelection.LastUserMessage"/>.</summary>
     public PromptMessageSelection MessageSelection { get; set; } = PromptMessageSelection.LastUserMessage;

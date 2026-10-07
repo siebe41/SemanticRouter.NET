@@ -6,47 +6,40 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddProblemDetails();
 
-// Routes, thresholds, embedding provider, middleware mode and upstream endpoints all come from
-// the "SemanticRouter" section of appsettings.json (and environment-specific overrides).
+// Routes, the model catalog, connectors, embeddings and the middleware mode all come from the
+// "SemanticRouter" section of appsettings.json (plus appsettings.{Environment}.json overrides).
 builder.Services.AddSemanticPromptRouting(builder.Configuration.GetSection(SemanticRouterOptions.SectionName));
-
-// In Annotate mode the middleware only classifies; endpoints pick a backend themselves.
-// Keyed services make "one client per RouteTarget" explicit. Swap these simulators for real clients.
-builder.Services.AddKeyedSingleton<IChatBackend>(RouteTarget.Local, new SimulatedChatBackend("local-slm"));
-builder.Services.AddKeyedSingleton<IChatBackend>(RouteTarget.Cloud, new SimulatedChatBackend("cloud-frontier"));
 
 var app = builder.Build();
 
 app.UseExceptionHandler();
 app.UseStatusCodePages();
 
-// Classifies POSTed prompts. In Dispatch mode (see appsettings.Dispatch.json) it proxies matching
-// requests straight to Ollama / the cloud provider and the endpoint below is never reached.
+// Annotate mode (default): classifies the prompt, ranks the catalog and lets the endpoint below decide.
+// Dispatch mode (appsettings.Dispatch.json): serves /v1/chat/completions itself through the connectors
+// (LM Studio, Claude Code CLI, …) with failover, so the endpoint below is never reached.
 app.UsePromptRouter();
 
-app.MapPost("/v1/chat/completions", async (
-        ChatCompletionRequest request,
-        HttpContext context,
-        IServiceProvider services,
-        CancellationToken cancellationToken) =>
+app.MapPost("/v1/chat/completions", (ChatCompletionBody request, HttpContext context) =>
     {
-        PromptClassificationResult? routing = context.GetPromptRouting();
-        RouteTarget target = routing?.Target ?? RouteTarget.Cloud;
-        IChatBackend backend = services.GetRequiredKeyedService<IChatBackend>(target);
-
-        return TypedResults.Ok(await backend.CompleteAsync(request, routing, cancellationToken));
+        RoutingPlan? plan = context.GetPromptRouting();
+        return TypedResults.Ok(SimulatedCompletion.Create(request, plan));
     })
     .WithName("ChatCompletions")
-    .WithSummary("OpenAI-compatible chat endpoint served by the backend the router selected.");
+    .WithSummary("Annotate-mode demo: reports which model the router would use instead of calling it.");
 
-// POST { "prompt": "..." } to see the full decision: candidates, similarity and complexity signals.
+// GET /v1/models lists the routing aliases (auto, auto:cheapest, auto:best, auto:priority) and the catalog,
+// including any model that is cooling down after hitting a quota.
+app.MapRouterModels();
+
+// POST { "prompt": "..." } explains a decision: tier, reason, route candidates and the ranked models.
 app.MapPromptClassification();
 
 app.MapGet("/", () => TypedResults.Ok(new
 {
     service = "SemanticRouter sample",
     mode = app.Configuration["SemanticRouter:Middleware:Mode"] ?? "Annotate",
-    endpoints = new[] { "POST /v1/chat/completions", "POST /semantic-router/classify" },
+    endpoints = new[] { "POST /v1/chat/completions", "GET /v1/models", "POST /semantic-router/classify" },
 }));
 
 app.Run();

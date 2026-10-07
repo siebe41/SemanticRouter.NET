@@ -12,21 +12,21 @@ public static class SemanticRouterDiagnostics
     /// <summary>The <see cref="Meter"/> name.</summary>
     public const string MeterName = "SemanticRouter";
 
-    /// <summary>Counter of routing decisions, tagged with <c>target</c>, <c>reason</c> and <c>route</c>.</summary>
+    /// <summary>Counter of routing decisions, tagged with <c>tier</c>, <c>reason</c> and <c>route</c>.</summary>
     public const string DecisionsInstrument = "semantic_router.decisions";
 
-    /// <summary>Histogram of classification latency in seconds, tagged with <c>target</c>.</summary>
+    /// <summary>Histogram of classification latency in seconds, tagged with <c>reason</c>.</summary>
     public const string DurationInstrument = "semantic_router.classification.duration";
 
-    /// <summary>Counter of dispatches that failed over from the local to the cloud endpoint.</summary>
-    public const string FailoverInstrument = "semantic_router.failovers";
+    /// <summary>Counter of model attempts in Dispatch mode, tagged with <c>model</c> and <c>outcome</c> (Completed, Failed, Skipped).</summary>
+    public const string AttemptsInstrument = "semantic_router.attempts";
 }
 
 internal sealed class PromptRouterMetrics
 {
     private readonly Counter<long> _decisions;
     private readonly Histogram<double> _duration;
-    private readonly Counter<long> _failovers;
+    private readonly Counter<long> _attempts;
 
     public PromptRouterMetrics(IMeterFactory meterFactory)
     {
@@ -35,21 +35,22 @@ internal sealed class PromptRouterMetrics
             SemanticRouterDiagnostics.DecisionsInstrument, "{decision}", "Prompt routing decisions.");
         _duration = meter.CreateHistogram<double>(
             SemanticRouterDiagnostics.DurationInstrument, "s", "Time spent classifying a prompt.");
-        _failovers = meter.CreateCounter<long>(
-            SemanticRouterDiagnostics.FailoverInstrument, "{failover}", "Local dispatch failures retried on the cloud endpoint.");
+        _attempts = meter.CreateCounter<long>(
+            SemanticRouterDiagnostics.AttemptsInstrument, "{attempt}", "Model attempts made while dispatching requests.");
     }
 
     public void RecordDecision(PromptClassificationResult result)
     {
         var tags = new TagList
         {
-            { "target", result.Target.ToString() },
+            { "tier", result.RequiredTier },
             { "reason", result.Reason.ToString() },
             { "route", result.RouteName ?? "none" },
         };
         _decisions.Add(1, tags);
-        _duration.Record(result.Elapsed.TotalSeconds, new KeyValuePair<string, object?>("target", result.Target.ToString()));
+        _duration.Record(result.Elapsed.TotalSeconds, new KeyValuePair<string, object?>("reason", result.Reason.ToString()));
     }
 
-    public void RecordFailover() => _failovers.Add(1);
+    public void RecordAttempt(string model, ConnectorOutcome outcome) =>
+        _attempts.Add(1, new KeyValuePair<string, object?>("model", model), new KeyValuePair<string, object?>("outcome", outcome.ToString()));
 }

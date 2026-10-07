@@ -1,11 +1,11 @@
 namespace SemanticRouter;
 
 /// <summary>
-/// Classifies a prompt into a routing decision. The main entry point of the library.
+/// Classifies a prompt into model requirements (tier, capabilities, locality).
 /// </summary>
 public interface IPromptClassifier
 {
-    /// <summary>Classifies <paramref name="prompt"/> and decides where it should be sent.</summary>
+    /// <summary>Classifies <paramref name="prompt"/> and decides what a model must be able to do to answer it.</summary>
     ValueTask<PromptClassificationResult> ClassifyAsync(string prompt, CancellationToken cancellationToken = default);
 
     /// <summary>

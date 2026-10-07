@@ -3,33 +3,33 @@ using System.Text.Json.Serialization;
 namespace SemanticRouter;
 
 /// <summary>
-/// Explains why a <see cref="RouteTarget"/> was selected. Surfaced in telemetry and response headers
-/// so routing decisions can be audited and thresholds tuned.
+/// Explains how the required capability tier for a prompt was decided. Surfaced in telemetry and
+/// response headers so routing decisions can be audited and thresholds tuned.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter<RoutingReason>))]
 public enum RoutingReason
 {
-    /// <summary>The prompt matched a route above its similarity threshold and was sent to that route's target.</summary>
+    /// <summary>The prompt matched a route above its similarity threshold; the route's tier applies.</summary>
     SemanticMatch = 0,
 
-    /// <summary>No route cleared its similarity threshold; the configured fallback target was used.</summary>
+    /// <summary>No route cleared its similarity threshold; <see cref="SemanticRouterOptions.FallbackTier"/> applies.</summary>
     NoMatchFallback = 1,
 
-    /// <summary>A local route matched, but the prompt's heuristic complexity score required the cloud model.</summary>
+    /// <summary>The prompt's heuristic complexity raised the required tier above the matched route's tier.</summary>
     ComplexityEscalation = 2,
 
-    /// <summary>A local route matched, but the estimated prompt size exceeds the local model's context budget.</summary>
-    ContextWindowEscalation = 3,
+    /// <summary>Two routes scored within the ambiguity margin; the higher of their tiers applies.</summary>
+    AmbiguousMatchEscalation = 3,
 
-    /// <summary>A local route won by less than the ambiguity margin over a cloud route, so the safer cloud target was chosen.</summary>
-    AmbiguousMatchEscalation = 4,
+    /// <summary>The prompt was so complex that embedding was skipped and the tier came from complexity alone.</summary>
+    ComplexityShortCircuit = 4,
 
-    /// <summary>The prompt was so complex that embedding was skipped entirely and it was sent straight to the cloud.</summary>
-    ComplexityShortCircuit = 5,
+    /// <summary>The prompt was empty or whitespace; the fallback tier was used without any analysis.</summary>
+    EmptyPrompt = 5,
 
-    /// <summary>The prompt was empty or whitespace; the fallback target was used without any analysis.</summary>
-    EmptyPrompt = 6,
+    /// <summary>Classification failed (for example the embedding endpoint was unreachable) and the router failed open to the fallback tier.</summary>
+    ClassifierFailure = 6,
 
-    /// <summary>Classification failed (for example the embedding endpoint was unreachable) and the router failed open to the fallback target.</summary>
-    ClassifierFailure = 7,
+    /// <summary>The caller asked for a specific catalog model, so classification was skipped.</summary>
+    ModelOverride = 7,
 }

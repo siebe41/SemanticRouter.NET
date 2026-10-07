@@ -13,8 +13,8 @@ public class SemanticRouteIndexTests
         ["code-1"] = [0f, 0f, 5f],
     };
 
-    private static readonly RouteDefinition Greetings = Route("greetings", RouteTarget.Local, "greet-1", "greet-2", "  ");
-    private static readonly RouteDefinition Code = Route("code", RouteTarget.Cloud, "code-1");
+    private static readonly RouteDefinition Greetings = Route("greetings", 1, "greet-1", "greet-2", "  ");
+    private static readonly RouteDefinition Code = Route("code", 4, "code-1");
 
     [Fact]
     public async Task MaxSimilarity_scores_each_route_by_its_nearest_utterance()
@@ -56,7 +56,7 @@ public class SemanticRouteIndexTests
     {
         var table = new Dictionary<string, float[]> { ["a"] = [1f, 0f], ["b"] = [1f, 0f] };
         SemanticRouteIndex index = await SemanticRouteIndex.BuildAsync(
-            [Route("first", RouteTarget.Local, "a"), Route("second", RouteTarget.Cloud, "b")], FromTable(table).Object);
+            [Route("first", 1, "a"), Route("second", 4, "b")], FromTable(table).Object);
 
         index.Score([1f, 0f]).Select(s => s.Route.Name).Should().Equal("first", "second");
     }
@@ -84,7 +84,7 @@ public class SemanticRouteIndexTests
     {
         var table = new Dictionary<string, float[]> { ["a"] = [1f, 0f], ["b"] = [1f, 0f, 0f] };
 
-        Func<Task> act = () => SemanticRouteIndex.BuildAsync([Route("r", RouteTarget.Local, "a", "b")], FromTable(table).Object);
+        Func<Task> act = () => SemanticRouteIndex.BuildAsync([Route("r", 1, "a", "b")], FromTable(table).Object);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*inconsistent size*");
     }

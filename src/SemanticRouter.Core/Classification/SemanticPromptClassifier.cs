@@ -4,7 +4,7 @@ namespace SemanticRouter;
 
 /// <summary>
 /// The default <see cref="IPromptClassifier"/>: complexity heuristics, then embedding similarity
-/// against the route index, then an <see cref="IRouteSelector"/> policy.
+/// against the route index, then an <see cref="IRouteSelector"/> policy that decides the required model tier.
 /// </summary>
 /// <remarks>
 /// The route index is built lazily on first use (or by <see cref="WarmUpAsync"/>) and cached for the
@@ -18,7 +18,7 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
     private readonly IRouteSelector _routeSelector;
     private readonly SemanticRouterOptions _options;
     private readonly RouteDefinition[] _routes;
-    private readonly bool _hasPinnedRoutes;
+    private readonly bool _hasLocalOnlyRoutes;
     private readonly Lock _indexGate = new();
     private Task<SemanticRouteIndex>? _indexTask;
 
@@ -43,7 +43,7 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
         _complexityAnalyzer = complexityAnalyzer ?? new HeuristicComplexityAnalyzer(options.Complexity);
         _routeSelector = routeSelector ?? new DefaultRouteSelector(options);
         _routes = options.Routes.ToArray();
-        _hasPinnedRoutes = _routes.Any(r => !r.AllowEscalation);
+        _hasLocalOnlyRoutes = _routes.Any(r => r.LocalOnly);
     }
 
     /// <inheritdoc />
@@ -59,15 +59,16 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
 
         if (string.IsNullOrWhiteSpace(prompt))
         {
-            return PromptClassificationResult.Bypass(_options.FallbackTarget, RoutingReason.EmptyPrompt);
+            return PromptClassificationResult.Bypass(_options.FallbackTier, RoutingReason.EmptyPrompt);
         }
 
         ComplexityAnalysis complexity = _complexityAnalyzer.Analyze(prompt);
 
-        if (!_hasPinnedRoutes && complexity.Score >= _options.ComplexityShortCircuitThreshold)
+        if (!_hasLocalOnlyRoutes && complexity.Score >= _options.ComplexityShortCircuitThreshold)
         {
+            int tier = _options.TierForComplexity(complexity.Score) is > 0 and var t ? t : _options.FallbackTier;
             return PromptClassificationResult.Bypass(
-                RouteTarget.Cloud, RoutingReason.ComplexityShortCircuit, complexity, Stopwatch.GetElapsedTime(started));
+                tier, RoutingReason.ComplexityShortCircuit, complexity, Stopwatch.GetElapsedTime(started));
         }
 
         RouteScore[] ranked = [];
@@ -83,11 +84,12 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
 
         return new PromptClassificationResult
         {
-            Target = decision.Target,
+            RequiredTier = decision.RequiredTier,
             Reason = decision.Reason,
+            RequiredCapabilities = decision.RequiredCapabilities,
+            LocalOnly = decision.LocalOnly,
             RouteName = decision.Route?.Name,
             Similarity = decision.Similarity,
-            IsPinned = decision.Route is { AllowEscalation: false } && decision.Target == decision.Route.Target,
             Complexity = complexity,
             TopScores = ranked.Length <= _options.MaxReportedScores ? ranked : ranked[.._options.MaxReportedScores],
             Elapsed = Stopwatch.GetElapsedTime(started),

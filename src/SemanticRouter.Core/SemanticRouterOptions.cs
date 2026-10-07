@@ -21,6 +21,16 @@ public enum RouteScoringStrategy
     Centroid = 1,
 }
 
+/// <summary>Raises the required tier once a prompt's complexity score reaches <see cref="MinScore"/>.</summary>
+public sealed class ComplexityTierRule
+{
+    /// <summary>Complexity score (0..1) at which the rule applies.</summary>
+    public double MinScore { get; set; }
+
+    /// <summary>The minimum tier required at that complexity.</summary>
+    public int Tier { get; set; }
+}
+
 /// <summary>
 /// Configuration for semantic prompt routing. Bindable from the <c>SemanticRouter</c> configuration section.
 /// </summary>
@@ -29,42 +39,48 @@ public sealed class SemanticRouterOptions
     /// <summary>The conventional configuration section name.</summary>
     public const string SectionName = "SemanticRouter";
 
-    /// <summary>The semantic intent clusters to route between.</summary>
+    /// <summary>Default complexity → tier rules used when <see cref="ComplexityTiers"/> is not configured.</summary>
+    public static IReadOnlyList<ComplexityTierRule> DefaultComplexityTiers { get; } =
+    [
+        new() { MinScore = 0.45, Tier = 2 },
+        new() { MinScore = 0.65, Tier = 3 },
+        new() { MinScore = 0.85, Tier = 4 },
+    ];
+
+    /// <summary>The semantic intent clusters that decide how capable a model must be.</summary>
     public IList<RouteDefinition> Routes { get; } = new List<RouteDefinition>();
+
+    /// <summary>The models the router may dispatch to.</summary>
+    public IList<ModelDefinition> Models { get; } = new List<ModelDefinition>();
 
     /// <summary>
     /// Cosine similarity a prompt must reach to match a route that does not set its own threshold.
-    /// The right value depends heavily on the embedding model (e.g. ~0.75–0.85 for OpenAI
-    /// <c>text-embedding-3-*</c>, ~0.6–0.7 for <c>nomic-embed-text</c>). Default 0.75.
+    /// The right value depends heavily on the embedding model. Default 0.75.
     /// </summary>
     public float DefaultSimilarityThreshold { get; set; } = 0.75f;
 
-    /// <summary>Where prompts go when no route matches. Default <see cref="RouteTarget.Cloud"/> (quality-safe).</summary>
-    public RouteTarget FallbackTarget { get; set; } = RouteTarget.Cloud;
+    /// <summary>Tier required when no route matches (or classification fails). Default 3, a strong general model.</summary>
+    public int FallbackTier { get; set; } = 3;
 
     /// <summary>
-    /// Complexity score (0..1) at or above which a prompt bound for the local model is escalated to the
-    /// cloud. Set above 1 to disable. Default 0.65.
+    /// Complexity → minimum tier rules: the highest rule whose <see cref="ComplexityTierRule.MinScore"/> the prompt
+    /// reaches raises the required tier. When <see langword="null"/>, <see cref="DefaultComplexityTiers"/> apply
+    /// (0.45 → 2, 0.65 → 3, 0.85 → 4). Configure an empty list to disable complexity escalation.
     /// </summary>
-    public double ComplexityEscalationThreshold { get; set; } = 0.65;
+#pragma warning disable CA2227 // Settable so configuration binding replaces (rather than appends to) the defaults.
+    public IList<ComplexityTierRule>? ComplexityTiers { get; set; }
+#pragma warning restore CA2227
 
     /// <summary>
-    /// Complexity score at or above which the embedding call is skipped and the prompt is sent straight to
-    /// the cloud. Saves an embedding round-trip for obviously hard prompts. Ignored while any route has
-    /// <see cref="RouteDefinition.AllowEscalation"/> disabled, because a pinned route must always get the
-    /// chance to match. Set above 1 to disable. Default 0.9.
+    /// Complexity score at or above which the embedding call is skipped and the tier comes from
+    /// <see cref="ComplexityTiers"/> alone. Ignored while any route is <see cref="RouteDefinition.LocalOnly"/>, because
+    /// such routes must always get the chance to match. Set above 1 to disable. Default 0.9.
     /// </summary>
     public double ComplexityShortCircuitThreshold { get; set; } = 0.9;
 
     /// <summary>
-    /// Estimated prompt tokens above which a local-bound prompt is escalated because it would not fit the
-    /// local model's context window. 0 disables. Default 4096.
-    /// </summary>
-    public int LocalMaxPromptTokens { get; set; } = 4096;
-
-    /// <summary>
-    /// When a local route wins by less than this similarity margin over a matching cloud route, the cloud
-    /// route is chosen instead. 0 disables. Default 0.02.
+    /// When other routes score within this margin of the best route (and above their own thresholds), the highest of
+    /// their tiers applies. 0 disables. Default 0.02.
     /// </summary>
     public float AmbiguityMargin { get; set; } = 0.02f;
 
@@ -76,6 +92,24 @@ public sealed class SemanticRouterOptions
 
     /// <summary>Complexity heuristic tuning.</summary>
     public ComplexityHeuristicsOptions Complexity { get; set; } = new();
+
+    /// <summary>Model selection and failover settings.</summary>
+    public ModelSelectionOptions Selection { get; set; } = new();
+
+    /// <summary>The tier implied by a complexity score alone (0 when no rule applies).</summary>
+    public int TierForComplexity(double score)
+    {
+        int tier = 0;
+        foreach (ComplexityTierRule rule in (IEnumerable<ComplexityTierRule>?)ComplexityTiers ?? DefaultComplexityTiers)
+        {
+            if (score >= rule.MinScore && rule.Tier > tier)
+            {
+                tier = rule.Tier;
+            }
+        }
+
+        return tier;
+    }
 
     /// <summary>Returns human-readable validation errors; empty when the options are valid.</summary>
     public IReadOnlyList<string> GetValidationErrors()
@@ -92,19 +126,27 @@ public sealed class SemanticRouterOptions
             errors.Add($"{nameof(AmbiguityMargin)} must be between 0 and 2.");
         }
 
-        if (double.IsNaN(ComplexityEscalationThreshold) || double.IsNaN(ComplexityShortCircuitThreshold))
+        if (FallbackTier < 0)
         {
-            errors.Add("Complexity thresholds must be numbers.");
+            errors.Add($"{nameof(FallbackTier)} must not be negative.");
         }
 
-        if (LocalMaxPromptTokens < 0)
+        if (double.IsNaN(ComplexityShortCircuitThreshold))
         {
-            errors.Add($"{nameof(LocalMaxPromptTokens)} must not be negative.");
+            errors.Add($"{nameof(ComplexityShortCircuitThreshold)} must be a number.");
         }
 
         if (MaxReportedScores < 0)
         {
             errors.Add($"{nameof(MaxReportedScores)} must not be negative.");
+        }
+
+        foreach (ComplexityTierRule rule in ComplexityTiers ?? [])
+        {
+            if (rule.MinScore is < 0 or > 1 || double.IsNaN(rule.MinScore) || rule.Tier < 0)
+            {
+                errors.Add($"{nameof(ComplexityTiers)} entries need a MinScore between 0 and 1 and a non-negative Tier.");
+            }
         }
 
         if (Complexity is null)
@@ -116,6 +158,37 @@ public sealed class SemanticRouterOptions
             errors.AddRange(Complexity.GetValidationErrors());
         }
 
+        if (Selection is null)
+        {
+            errors.Add($"{nameof(Selection)} must not be null.");
+        }
+        else
+        {
+            errors.AddRange(Selection.GetValidationErrors());
+        }
+
+        ValidateRoutes(errors);
+        ValidateModels(errors);
+        return errors;
+    }
+
+    /// <summary>Throws when <see cref="GetValidationErrors"/> reports any problem.</summary>
+    /// <exception cref="InvalidOperationException">The options are invalid.</exception>
+    public void Validate()
+    {
+        IReadOnlyList<string> errors = GetValidationErrors();
+        if (errors.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "Invalid SemanticRouter configuration:" + Environment.NewLine + " - " +
+                string.Join(Environment.NewLine + " - ", errors));
+        }
+    }
+
+    internal float GetThreshold(RouteDefinition route) => route.SimilarityThreshold ?? DefaultSimilarityThreshold;
+
+    private void ValidateRoutes(List<string> errors)
+    {
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < Routes.Count; i++)
         {
@@ -139,27 +212,44 @@ public sealed class SemanticRouterOptions
                 errors.Add($"Route '{route.Name}' {nameof(RouteDefinition.SimilarityThreshold)} must be between -1 and 1.");
             }
 
-            if (!Enum.IsDefined(route.Target))
+            if (route.Tier < 0)
             {
-                errors.Add($"Route '{route.Name}' has an unknown {nameof(RouteDefinition.Target)} '{route.Target}'.");
+                errors.Add($"Route '{route.Name}' {nameof(RouteDefinition.Tier)} must not be negative.");
+            }
+        }
+    }
+
+    private void ValidateModels(List<string> errors)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < Models.Count; i++)
+        {
+            ModelDefinition model = Models[i];
+            if (string.IsNullOrWhiteSpace(model.Name))
+            {
+                errors.Add($"Models[{i}] must have a {nameof(ModelDefinition.Name)}.");
+            }
+            else if (!names.Add(model.Name))
+            {
+                errors.Add($"Model name '{model.Name}' is used more than once.");
+            }
+
+            if (string.IsNullOrWhiteSpace(model.Connector))
+            {
+                errors.Add($"Model '{model.Name}' must name a {nameof(ModelDefinition.Connector)}.");
+            }
+
+            if (model.Tier < 0 || model.ContextWindow < 0 || model.InputCostPerMillionTokens < 0 || model.OutputCostPerMillionTokens < 0)
+            {
+                errors.Add($"Model '{model.Name}' must not have a negative tier, context window or cost.");
             }
         }
 
-        return errors;
-    }
-
-    /// <summary>Throws when <see cref="GetValidationErrors"/> reports any problem.</summary>
-    /// <exception cref="InvalidOperationException">The options are invalid.</exception>
-    public void Validate()
-    {
-        IReadOnlyList<string> errors = GetValidationErrors();
-        if (errors.Count > 0)
+        if (Models.Count > 0
+            && Routes.Any(r => r.LocalOnly)
+            && !Models.Any(m => m.Enabled && m.IsLocal))
         {
-            throw new InvalidOperationException(
-                "Invalid SemanticRouter configuration:" + Environment.NewLine + " - " +
-                string.Join(Environment.NewLine + " - ", errors));
+            errors.Add("A route is LocalOnly but no enabled model is marked IsLocal, so it could never be served.");
         }
     }
-
-    internal float GetThreshold(RouteDefinition route) => route.SimilarityThreshold ?? DefaultSimilarityThreshold;
 }

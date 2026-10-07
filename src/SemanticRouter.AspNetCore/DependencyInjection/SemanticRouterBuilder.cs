@@ -66,10 +66,33 @@ public sealed class SemanticRouterBuilder
         return this;
     }
 
-    /// <summary>Customizes the dispatch endpoints (applied after configuration binding).</summary>
-    public SemanticRouterBuilder ConfigureEndpoints(Action<PromptDispatchOptions> configure)
+    /// <summary>Adds or replaces a configured connector (applied after configuration binding).</summary>
+    public SemanticRouterBuilder AddConnector(string name, Action<ConnectorOptions> configure)
     {
-        Services.Configure(configure);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(configure);
+        Services.Configure<SemanticRouterConnectorsOptions>(o =>
+        {
+            var options = new ConnectorOptions();
+            configure(options);
+            o.Connectors[name] = options;
+        });
+        return this;
+    }
+
+    /// <summary>Registers a custom <see cref="IChatConnector"/> implementation (singleton), addressable by its <see cref="IChatConnector.Name"/>.</summary>
+    public SemanticRouterBuilder AddConnector<TConnector>()
+        where TConnector : class, IChatConnector
+    {
+        Services.AddSingleton<IChatConnector, TConnector>();
+        return this;
+    }
+
+    /// <summary>Adds a model to the catalog (applied after configuration binding).</summary>
+    public SemanticRouterBuilder AddModel(ModelDefinition model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        Services.Configure<SemanticRouterOptions>(o => o.Models.Add(model));
         return this;
     }
 }

@@ -1,194 +1,129 @@
-using System.Net.Http.Headers;
-using System.Text.Json;
-using System.Text.Json.Nodes;
+using System.Globalization;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>
-/// Forwards a classified request to the selected upstream endpoint and streams the response back
-/// (server-sent events included), with optional local → cloud failover.
+/// Serves a request by trying the plan's candidate models in order through their connectors. A model that fails before
+/// producing output is put into cooldown and the next candidate is tried, up to
+/// <see cref="ModelSelectionOptions.MaxAttempts"/>.
 /// </summary>
 internal sealed partial class PromptDispatcher
 {
-    public const string LocalClientName = "SemanticRouter.Local";
-    public const string CloudClientName = "SemanticRouter.Cloud";
-
-    // Hop-by-hop headers (RFC 9110 §7.6.1) must not be forwarded by a proxy.
-    private static readonly HashSet<string> HopByHopHeaders = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "TE", "Trailer",
-        "Transfer-Encoding", "Upgrade", "Proxy-Connection",
-    };
-
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly PromptDispatchOptions _endpoints;
-    private readonly PromptRouterMiddlewareOptions _middlewareOptions;
+    private readonly ChatConnectorRegistry _connectors;
+    private readonly IPromptRouter _router;
+    private readonly IModelHealth _health;
     private readonly PromptRouterMetrics _metrics;
+    private readonly PromptRouterMiddlewareOptions _middleware;
+    private readonly int _maxAttempts;
     private readonly ILogger _logger;
 
     public PromptDispatcher(
-        IHttpClientFactory httpClientFactory,
-        IOptions<PromptDispatchOptions> endpoints,
-        IOptions<PromptRouterMiddlewareOptions> middlewareOptions,
+        ChatConnectorRegistry connectors,
+        IPromptRouter router,
+        IModelHealth health,
         PromptRouterMetrics metrics,
+        IOptions<PromptRouterMiddlewareOptions> middleware,
+        IOptions<SemanticRouterOptions> routerOptions,
         ILogger<PromptDispatcher> logger)
     {
-        _httpClientFactory = httpClientFactory;
-        _endpoints = endpoints.Value;
-        _middlewareOptions = middlewareOptions.Value;
+        _connectors = connectors;
+        _router = router;
+        _health = health;
         _metrics = metrics;
+        _middleware = middleware.Value;
+        _maxAttempts = Math.Max(1, routerOptions.Value.Selection.MaxAttempts);
         _logger = logger;
     }
 
-    public async Task DispatchAsync(HttpContext context, PromptClassificationResult result, ReadOnlyMemory<byte> body)
+    public async Task DispatchAsync(HttpContext context, RoutingPlan plan, ChatCompletionRequest chat, ReadOnlyMemory<byte> body)
     {
-        RouteTarget target = result.Target;
-        HttpResponseMessage? response = await TrySendAsync(context, target, body).ConfigureAwait(false);
+        var attempts = new List<string>();
+        var cooledDuringRequest = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int tried = 0;
 
-        try
+        foreach (ModelCandidate candidate in plan.Candidates)
         {
-            bool localFailed = response is null || (int)response.StatusCode >= StatusCodes.Status500InternalServerError;
-            if (target == RouteTarget.Local && localFailed && _middlewareOptions.FailoverToCloud && !result.IsPinned
-                && !context.RequestAborted.IsCancellationRequested)
+            if (tried >= _maxAttempts)
             {
-                LogFailover(_logger, response is null ? "unreachable" : ((int)response.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture));
-                response?.Dispose();
-                _metrics.RecordFailover();
-
-                target = RouteTarget.Cloud;
-                if (_middlewareOptions.EmitResponseHeaders)
-                {
-                    context.Response.Headers[_middlewareOptions.HeaderPrefix + "-Target"] = target.ToString();
-                    context.Response.Headers[_middlewareOptions.HeaderPrefix + "-Failover"] = "true";
-                }
-
-                response = await TrySendAsync(context, target, body).ConfigureAwait(false);
+                break;
             }
 
-            if (response is null)
+            ModelDefinition model = candidate.Model;
+            if (cooledDuringRequest.Contains(model.Name))
             {
-                await PromptRoutingMiddleware.WriteProblemAsync(
-                    context,
-                    StatusCodes.Status502BadGateway,
-                    "Upstream model unavailable",
-                    $"The {target} model endpoint could not be reached.").ConfigureAwait(false);
-                return;
-            }
-
-            await CopyResponseAsync(context, response).ConfigureAwait(false);
-        }
-        finally
-        {
-            response?.Dispose();
-        }
-    }
-
-    private async Task<HttpResponseMessage?> TrySendAsync(HttpContext context, RouteTarget target, ReadOnlyMemory<byte> body)
-    {
-        RouteEndpointOptions endpoint = _endpoints.Get(target);
-        HttpRequest incoming = context.Request;
-        string path = endpoint.RequestPath ?? (incoming.PathBase + incoming.Path + incoming.QueryString).ToString();
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(endpoint.BaseAddress!, path))
-        {
-            Content = new ReadOnlyMemoryContent(RewriteModel(body, endpoint.Model)),
-        };
-
-        request.Content.Headers.ContentType = MediaTypeHeaderValue.TryParse(incoming.ContentType, out var contentType)
-            ? contentType
-            : new MediaTypeHeaderValue("application/json");
-
-        foreach (string? accept in incoming.Headers.Accept)
-        {
-            request.Headers.TryAddWithoutValidation("Accept", accept);
-        }
-
-        if (!string.IsNullOrEmpty(endpoint.ApiKey))
-        {
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", endpoint.ApiKey);
-        }
-
-        foreach ((string name, string value) in endpoint.Headers)
-        {
-            request.Headers.Remove(name);
-            request.Headers.TryAddWithoutValidation(name, value);
-        }
-
-        HttpClient client = _httpClientFactory.CreateClient(target == RouteTarget.Local ? LocalClientName : CloudClientName);
-        try
-        {
-            return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException
-                                   && !context.RequestAborted.IsCancellationRequested)
-        {
-            LogUpstreamFailure(_logger, target, request.RequestUri!, ex);
-            return null;
-        }
-    }
-
-    private static ReadOnlyMemory<byte> RewriteModel(ReadOnlyMemory<byte> body, string? model)
-    {
-        if (string.IsNullOrEmpty(model))
-        {
-            return body;
-        }
-
-        try
-        {
-            if (JsonNode.Parse(body.Span) is JsonObject json)
-            {
-                json["model"] = model;
-                return JsonSerializer.SerializeToUtf8Bytes(json, JsonContext.Default.JsonObject);
-            }
-        }
-        catch (JsonException)
-        {
-            // Not an object we can rewrite; forward the original bytes untouched.
-        }
-
-        return body;
-    }
-
-    private static async Task CopyResponseAsync(HttpContext context, HttpResponseMessage response)
-    {
-        HttpResponse outgoing = context.Response;
-        outgoing.StatusCode = (int)response.StatusCode;
-
-        foreach (KeyValuePair<string, IEnumerable<string>> header in response.Headers.Concat(response.Content.Headers))
-        {
-            if (HopByHopHeaders.Contains(header.Key))
-            {
+                attempts.Add($"{model.Name}: skipped (its account hit a limit earlier in this request)");
                 continue;
             }
 
-            // "Server" holds space-separated product tokens, which a parsed header splits into separate values.
-            outgoing.Headers[header.Key] = string.Equals(header.Key, "Server", StringComparison.OrdinalIgnoreCase)
-                ? string.Join(' ', header.Value)
-                : header.Value.ToArray();
+            if (!_connectors.TryGet(model.Connector, out IChatConnector connector))
+            {
+                attempts.Add($"{model.Name}: unknown connector '{model.Connector}'");
+                continue;
+            }
+
+            tried++;
+            if (_middleware.EmitResponseHeaders)
+            {
+                string prefix = _middleware.HeaderPrefix;
+                context.Response.Headers[prefix + "-Model"] = model.Name;
+                context.Response.Headers[prefix + "-Connector"] = connector.Name;
+                context.Response.Headers[prefix + "-Attempt"] = tried.ToString(CultureInfo.InvariantCulture);
+            }
+
+            ConnectorResult result = await connector
+                .SendAsync(new ConnectorRequest(chat, model, body), context, context.RequestAborted)
+                .ConfigureAwait(false);
+
+            _metrics.RecordAttempt(model.Name, result.Outcome);
+            switch (result.Outcome)
+            {
+                case ConnectorOutcome.Completed:
+                    _health.ReportSuccess(model);
+                    LogServed(_logger, model.Name, connector.Name, tried);
+                    return;
+
+                case ConnectorOutcome.Failed:
+                    _health.ReportFailure(model, result.FailureKind);
+                    if (result.AffectsAllConnectorModels)
+                    {
+                        foreach (ModelDefinition sibling in _router.Models.Where(m =>
+                                     m != model && string.Equals(m.Connector, model.Connector, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            _health.ReportFailure(sibling, result.FailureKind);
+                            cooledDuringRequest.Add(sibling.Name);
+                        }
+                    }
+
+                    LogFailover(_logger, model.Name, result.FailureKind, result.Detail ?? "failed");
+                    attempts.Add($"{model.Name}: {result.Detail ?? "failed"}");
+                    break;
+
+                default:
+                    LogSkipped(_logger, model.Name, result.Detail ?? "skipped");
+                    attempts.Add($"{model.Name}: skipped ({result.Detail})");
+                    break;
+            }
         }
 
-        // Stream tokens to the client as they arrive (SSE / NDJSON) instead of buffering the whole reply.
-        context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+        string detail = plan.Candidates.Count == 0
+            ? $"No configured model satisfies the request (tier {plan.Requirements.RequiredTier}" +
+              (plan.Requirements.RequiredCapabilities.Count > 0 ? $", capabilities {string.Join(", ", plan.Requirements.RequiredCapabilities)}" : string.Empty) +
+              (plan.Requirements.LocalOnly ? ", local only" : string.Empty) + ")."
+            : "Every candidate model failed: " + string.Join("; ", attempts);
 
-        Stream upstream = await response.Content.ReadAsStreamAsync(context.RequestAborted).ConfigureAwait(false);
-        await using (upstream.ConfigureAwait(false))
-        {
-            await upstream.CopyToAsync(outgoing.Body, context.RequestAborted).ConfigureAwait(false);
-        }
+        await PromptRoutingMiddleware.WriteProblemAsync(
+            context, StatusCodes.Status503ServiceUnavailable, "No model available", detail).ConfigureAwait(false);
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Local model endpoint failed ({Status}); failing over to the cloud endpoint.")]
-    private static partial void LogFailover(ILogger logger, string status);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Served by {Model} via {Connector} (attempt {Attempt}).")]
+    private static partial void LogServed(ILogger logger, string model, string connector, int attempt);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Dispatch to {Target} endpoint {Uri} failed.")]
-    private static partial void LogUpstreamFailure(ILogger logger, RouteTarget target, Uri uri, Exception exception);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Model {Model} failed ({Kind}): {Detail}. Trying the next candidate.")]
+    private static partial void LogFailover(ILogger logger, string model, ModelFailureKind kind, string detail);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Model {Model} skipped: {Detail}.")]
+    private static partial void LogSkipped(ILogger logger, string model, string detail);
 }
-
-[System.Text.Json.Serialization.JsonSerializable(typeof(JsonObject))]
-internal sealed partial class JsonContext : System.Text.Json.Serialization.JsonSerializerContext;
