@@ -324,7 +324,8 @@ internal sealed class CodexCliAdapter : CliAdapter
 
 /// <summary>
 /// Any other command: <see cref="ConnectorOptions.Arguments"/> is the full argument list with <c>{model}</c> and
-/// <c>{prompt}</c> placeholders; standard output is the reply and a non-zero exit code is a failure.
+/// <c>{prompt}</c> placeholders (a lone <c>{model}</c> argument, and the option before it, are dropped when the model
+/// has no id); standard output is the reply and a non-zero exit code is a failure.
 /// </summary>
 internal sealed class CustomCliAdapter : CliAdapter
 {
@@ -342,6 +343,12 @@ internal sealed class CustomCliAdapter : CliAdapter
         {
             if (template == "{model}" && string.IsNullOrEmpty(request.Model))
             {
+                // Drop the placeholder and the option that introduces it ("-m {model}" → nothing).
+                if (arguments.Count > 0 && arguments[^1].StartsWith('-'))
+                {
+                    arguments.RemoveAt(arguments.Count - 1);
+                }
+
                 continue;
             }
 

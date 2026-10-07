@@ -548,6 +548,17 @@ public sealed class DispatchModeTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Empty_cli_reply_falls_back_to_the_next_model()
+    {
+        ClassifyAs(tier: 4);
+        Cli = FakeCliProcessRunner.Replying(ClaudeStream.Success(string.Empty));
+        HttpClient client = await StartDispatchAsync(withCli: true);
+
+        (await (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).Content.ReadAsStringAsync())
+            .Should().Be("""{"from":"cloud"}""");
+    }
+
+    [Fact]
     public async Task Missing_cli_falls_back_to_the_next_model()
     {
         ClassifyAs(tier: 4);

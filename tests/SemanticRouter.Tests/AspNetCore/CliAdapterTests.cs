@@ -146,8 +146,9 @@ public sealed class CliAdapterTests : IDisposable
         stdin.Should().BeNull();
 
         options.PromptInput = CliPromptInput.Stdin;
+        options.Arguments = ["run", "-m", "{model}", "--quiet"];
         (args, stdin) = new CustomCliAdapter().Build(new CliRequest(null, [new ChatMessage("user", "hi")], _workingDirectory, options));
-        args.Should().Equal("run", "--prompt", string.Empty);
+        args.Should().Equal(["run", "--quiet"], "a missing model drops both the placeholder and its option");
         stdin.Should().Be("hi");
     }
 

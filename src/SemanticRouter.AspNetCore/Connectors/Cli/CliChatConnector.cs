@@ -164,9 +164,11 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
 
         int exitCode = await process.WaitForExitAsync(firstOutputTimeout.Token).ConfigureAwait(false);
         string reply = parser is null ? text.ToString().Trim() : final?.Text ?? string.Empty;
+        // An empty "successful" reply is treated as a failure so the router can try another model.
         bool succeeded = parser is null
             ? exitCode == 0 && reply.Length > 0
-            : final is { IsError: false } || (final is null && exitCode == 0 && writer.HasStarted);
+            : (final is { IsError: false } && (writer.HasStarted || reply.Length > 0))
+              || (final is null && exitCode == 0 && writer.HasStarted);
 
         if (succeeded)
         {
