@@ -1,0 +1,34 @@
+@host = http://localhost:5090
+
+### Easy → LM Studio
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{ "model": "auto", "messages": [ { "role": "user", "content": "hello, how are you today?" } ] }
+
+### Hard → Claude Code CLI
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{ "model": "auto", "messages": [ { "role": "user", "content": "Compare the trade-offs between event sourcing and CRUD for a billing system." } ] }
+
+### Streaming
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{ "model": "auto", "stream": true, "messages": [ { "role": "user", "content": "why does this async code deadlock when I call .Result?" } ] }
+
+### Force a backend
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{ "model": "claude", "messages": [ { "role": "user", "content": "Reply with exactly one word: pong" } ] }
+
+### Explain a decision without calling a model
+POST {{host}}/semantic-router/classify
+Content-Type: application/json
+
+{ "prompt": "design a scalable architecture for a multi-tenant platform" }
+
+### Models, and whether Claude is cooling down after a usage limit
+GET {{host}}/v1/models

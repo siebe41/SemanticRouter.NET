@@ -1,0 +1,83 @@
+@host = http://localhost:5080
+
+### Small talk -> tier 1 -> cheapest capable: lmstudio-small
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "messages": [ { "role": "user", "content": "hello, how are you today?" } ]
+}
+
+### Simple coding task -> tier 2 + "code" capability -> lmstudio-coder
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "messages": [ { "role": "user", "content": "write a unit test for this function: int Add(int a, int b) => a + b;" } ]
+}
+
+### Architecture question -> tier 4 -> claude-code (subscription, marginal cost 0)
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "messages": [ { "role": "user", "content": "Compare the trade-offs between event sourcing and a CRUD data model for our billing system." } ]
+}
+
+### Matches a tier-1 route, but complexity raises it (structure + reasoning keywords)
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "messages": [ { "role": "user", "content": "Summarize this article in three bullet points, then analyze the implications step by step and evaluate the trade-offs:\n1. Revenue grew 12%\n2. Churn doubled\n3. Two competitors merged\nWhat does this mean for us? What should we do next?" } ]
+}
+
+### Sensitive data -> LocalOnly route -> only local models, even on failover
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "messages": [ { "role": "user", "content": "Look up the customer record for account number 4471" } ]
+}
+
+### Per-request strategy: the most capable model available
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto:best",
+  "messages": [ { "role": "user", "content": "hello" } ]
+}
+
+### Force a specific catalog model
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "lmstudio-coder",
+  "messages": [ { "role": "user", "content": "explain closures in JavaScript" } ]
+}
+
+### Streaming (Dispatch mode streams real tokens from LM Studio or the Claude CLI)
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "stream": true,
+  "messages": [ { "role": "user", "content": "tell me a joke" } ]
+}
+
+### Models and aliases (shows cooldowns after a subscription hits its limit)
+GET {{host}}/v1/models
+
+### Diagnostics: tier, reason, route scores and the ranked models, without calling any model
+POST {{host}}/semantic-router/classify
+Content-Type: application/json
+
+{ "prompt": "why does this async code deadlock when I call .Result?" }

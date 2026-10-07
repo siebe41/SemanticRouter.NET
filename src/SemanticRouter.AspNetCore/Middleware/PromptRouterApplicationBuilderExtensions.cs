@@ -1,0 +1,136 @@
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using SemanticRouter;
+using SemanticRouter.AspNetCore;
+
+namespace Microsoft.AspNetCore.Builder;
+
+/// <summary>Adds prompt routing to the request pipeline.</summary>
+public static class PromptRouterApplicationBuilderExtensions
+{
+    /// <summary>
+    /// Adds the prompt routing middleware. Place it after authentication/authorization and rate limiting,
+    /// and before the endpoints that consume the decision (or instead of them, in Dispatch mode).
+    /// </summary>
+    public static IApplicationBuilder UsePromptRouter(this IApplicationBuilder app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+        return app.UseMiddleware<PromptRoutingMiddleware>();
+    }
+
+    /// <summary>
+    /// Maps a diagnostics endpoint that routes <c>{"prompt":"…"}</c> and returns the full decision (requirements,
+    /// route candidates and the ranked models) without calling any model. Protect or omit it in production.
+    /// </summary>
+    public static RouteHandlerBuilder MapPromptClassification(
+        this IEndpointRouteBuilder endpoints,
+        [System.Diagnostics.CodeAnalysis.StringSyntax("Route")] string pattern = "/semantic-router/classify")
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+
+        return endpoints.MapPost(pattern, async (ClassifyPromptRequest request, HttpContext context, IPromptRouter router) =>
+            {
+                if (string.IsNullOrWhiteSpace(request.Prompt))
+                {
+                    return Results.Problem("'prompt' is required.", statusCode: StatusCodes.Status400BadRequest);
+                }
+
+                (SelectionStrategy? strategy, string? requestedModel) = ModelAliases.Resolve(request.Model);
+
+                // Reuse the middleware's plan when it already routed this exact prompt.
+                RoutingPlan plan =
+                    context.Features.Get<IPromptRoutingFeature>() is { } feature && feature.Prompt == request.Prompt
+                        ? feature.Plan
+                        : await router.RouteAsync(
+                            new PromptRoutingRequest { Prompt = request.Prompt, Strategy = strategy, RequestedModel = requestedModel },
+                            context.RequestAborted).ConfigureAwait(false);
+
+                return Results.Ok(PromptClassificationResponse.From(plan));
+            })
+            .WithName("ClassifyPrompt")
+            .WithSummary("Routes a prompt and explains the decision without calling a model.");
+    }
+
+    /// <summary>
+    /// Maps an OpenAI-compatible <c>GET /v1/models</c> listing the routing aliases (<c>auto</c>, <c>auto:cheapest</c>,
+    /// <c>auto:best</c>, <c>auto:priority</c>) and every enabled catalog model, so chat clients can offer them.
+    /// </summary>
+    public static RouteHandlerBuilder MapRouterModels(
+        this IEndpointRouteBuilder endpoints,
+        [System.Diagnostics.CodeAnalysis.StringSyntax("Route")] string pattern = "/v1/models")
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+
+        return endpoints.MapGet(pattern, (IPromptRouter router, IModelHealth health) =>
+            {
+                IReadOnlyDictionary<string, DateTimeOffset> cooldowns = health.GetCooldowns();
+                var data = ModelAliases.All
+                    .Select(a => new RouterModelInfo(a.Id, "model", "semantic-router", null, null, a.Description, null))
+                    .Concat(router.Models.Where(m => m.Enabled).Select(m => new RouterModelInfo(
+                        m.Name, "model", m.Connector, m.Tier, m.IsLocal, m.Description,
+                        cooldowns.TryGetValue(m.Name, out DateTimeOffset until) ? until : null)))
+                    .ToArray();
+                return Results.Ok(new RouterModelList("list", data));
+            })
+            .WithName("ListRouterModels")
+            .WithSummary("Lists routing aliases and catalog models.");
+    }
+}
+
+/// <summary>Request body for the classification endpoint.</summary>
+/// <param name="Prompt">The prompt to route.</param>
+/// <param name="Model">Optional model or alias, as a chat client would send it.</param>
+public sealed record ClassifyPromptRequest(string Prompt, string? Model = null);
+
+/// <summary>An entry in <c>GET /v1/models</c>.</summary>
+public sealed record RouterModelInfo(
+    string Id,
+    [property: System.Text.Json.Serialization.JsonPropertyName("object")] string ObjectType,
+    [property: System.Text.Json.Serialization.JsonPropertyName("owned_by")] string OwnedBy,
+    int? Tier,
+    bool? Local,
+    string? Description,
+    DateTimeOffset? CoolingDownUntil);
+
+/// <summary>The <c>GET /v1/models</c> response.</summary>
+public sealed record RouterModelList(
+    [property: System.Text.Json.Serialization.JsonPropertyName("object")] string ObjectType,
+    IReadOnlyList<RouterModelInfo> Data);
+
+/// <summary>A serializable view of a <see cref="RoutingPlan"/>.</summary>
+public sealed record PromptClassificationResponse(
+    int RequiredTier,
+    RoutingReason Reason,
+    string? Route,
+    float? Similarity,
+    bool LocalOnly,
+    IReadOnlyList<string> RequiredCapabilities,
+    double ElapsedMilliseconds,
+    ComplexityAnalysis Complexity,
+    IReadOnlyList<PromptClassificationResponse.RouteCandidate> Routes,
+    IReadOnlyList<PromptClassificationResponse.ModelChoice> Models)
+{
+    /// <summary>A scored route.</summary>
+    public sealed record RouteCandidate(string Route, int Tier, float Similarity);
+
+    /// <summary>A ranked model, in the order it would be tried.</summary>
+    public sealed record ModelChoice(string Model, string Connector, int Tier, decimal EstimatedCostUsd, bool MeetsRequiredTier);
+
+    /// <summary>Projects a <see cref="RoutingPlan"/>.</summary>
+    public static PromptClassificationResponse From(RoutingPlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        PromptClassificationResult result = plan.Classification;
+        return new(
+            result.RequiredTier,
+            result.Reason,
+            result.RouteName,
+            result.Similarity,
+            plan.Requirements.LocalOnly,
+            plan.Requirements.RequiredCapabilities,
+            Math.Round(result.Elapsed.TotalMilliseconds, 3),
+            result.Complexity,
+            result.TopScores.Select(s => new RouteCandidate(s.Route.Name, s.Route.Tier, s.Similarity)).ToArray(),
+            plan.Candidates.Select(c => new ModelChoice(c.Model.Name, c.Model.Connector, c.Model.Tier, c.EstimatedCost, c.MeetsRequiredTier)).ToArray());
+    }
+}
