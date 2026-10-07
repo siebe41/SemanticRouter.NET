@@ -559,6 +559,27 @@ public sealed class DispatchModeTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Below_tier_answers_are_flagged_as_degraded()
+    {
+        ClassifyAs(tier: 4);
+        CloudHttp = StubHttpMessageHandler.Throws();
+        HttpClient client = await StartDispatchAsync();
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        response.Headers.GetValues("X-Prompt-Route-Model").Should().Equal("local");
+        response.Headers.GetValues("X-Prompt-Route-Degraded").Should().Equal("true");
+    }
+
+    [Fact]
+    public async Task Answers_at_the_required_tier_are_not_flagged()
+    {
+        HttpClient client = await StartDispatchAsync();
+
+        (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).Headers.Contains("X-Prompt-Route-Degraded").Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Missing_cli_falls_back_to_the_next_model()
     {
         ClassifyAs(tier: 4);

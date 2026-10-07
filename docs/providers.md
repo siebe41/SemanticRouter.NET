@@ -91,7 +91,7 @@ Uses your own Claude subscription. **Read [TERMS.md](TERMS.md#anthropic-claude-c
 ```
 
 What the preset does:
-- **Command line.** It runs `claude -p <prompt> --output-format stream-json --verbose --include-partial-messages --tools "" --disallowedTools "mcp__*" --strict-mcp-config --no-session-persistence --permission-mode dontAsk [--model …] [--system-prompt-file …]` in an empty temporary directory.
+- **Command line.** It runs `claude -p <prompt> --output-format stream-json --verbose --include-partial-messages --tools "" --disallowedTools "mcp__*" --strict-mcp-config --no-session-persistence --permission-mode dontAsk [--model …] [--system-prompt …]` in an empty temporary directory. These flags were checked against Claude Code 2.1.293.
 - **Long prompts.** Prompts longer than `MaxArgumentLength` go on stdin.
 - **System messages.** Client system messages replace Claude Code's default system prompt.
 - **Environment.** It removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` from the child environment. In print mode an API key would otherwise be used instead of your subscription. Set `RemoveEnvironmentVariables` yourself to change this.

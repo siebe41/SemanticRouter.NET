@@ -83,7 +83,8 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException
                                        && !cancellationToken.IsCancellationRequested)
             {
-                LogUpstreamFailure(_logger, Name, message.RequestUri!, ex);
+                // Expected operational failures (server down, timeout): one line, no stack trace.
+                LogUpstreamFailure(_logger, Name, message.RequestUri!, ex is OperationCanceledException ? "timed out" : ex.Message);
                 return ConnectorResult.Failed(
                     ModelFailureKind.Unavailable,
                     ex is OperationCanceledException ? "timed out" : $"unreachable ({ex.Message})");
@@ -156,8 +157,8 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         }
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: request to {Uri} failed.")]
-    private static partial void LogUpstreamFailure(ILogger logger, string connector, Uri uri, Exception exception);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: request to {Uri} failed: {Error}")]
+    private static partial void LogUpstreamFailure(ILogger logger, string connector, Uri uri, string error);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: upstream returned HTTP {Status}; trying the next model.")]
     private static partial void LogUpstreamStatus(ILogger logger, string connector, int status);

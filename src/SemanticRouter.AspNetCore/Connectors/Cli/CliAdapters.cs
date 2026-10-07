@@ -88,7 +88,7 @@ internal abstract class CliAdapter
 /// <c>claude -p &lt;prompt&gt; --output-format stream-json --verbose --include-partial-messages --tools ""
 /// --disallowedTools "mcp__*" --strict-mcp-config --no-session-persistence --permission-mode dontAsk</c>.
 /// Built-in and MCP tools are removed so it answers as a plain model; client system messages replace the default
-/// system prompt via <c>--system-prompt-file</c>.
+/// system prompt via <c>--system-prompt</c>. Flags verified against Claude Code 2.1.293's <c>--help</c>.
 /// </summary>
 internal sealed class ClaudeCodeCliAdapter : CliAdapter
 {
@@ -111,6 +111,13 @@ internal sealed class ClaudeCodeCliAdapter : CliAdapter
     public override (List<string> Arguments, string? StandardInput) Build(CliRequest request)
     {
         (string? system, string prompt) = ChatTranscript.Render(request.Messages);
+        if (system is not null && system.Length > request.Options.MaxArgumentLength)
+        {
+            // Too long for an argument: keep it in the conversation text instead.
+            prompt = ChatTranscript.RenderInline(request.Messages);
+            system = null;
+        }
+
         bool useStdin = prompt.Length > request.Options.MaxArgumentLength;
 
         // The prompt comes straight after -p, before any variadic option that could swallow it.
@@ -132,9 +139,7 @@ internal sealed class ClaudeCodeCliAdapter : CliAdapter
 
         if (system is not null)
         {
-            string file = Path.Combine(request.WorkingDirectory, "system-prompt.txt");
-            File.WriteAllText(file, system);
-            arguments.AddRange(["--system-prompt-file", file]);
+            arguments.AddRange(["--system-prompt", AsArgument(system)]);
         }
 
         return (arguments, useStdin ? prompt : null);

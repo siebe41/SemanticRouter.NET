@@ -71,6 +71,15 @@ internal sealed partial class PromptDispatcher
                 context.Response.Headers[prefix + "-Model"] = model.Name;
                 context.Response.Headers[prefix + "-Connector"] = connector.Name;
                 context.Response.Headers[prefix + "-Attempt"] = tried.ToString(CultureInfo.InvariantCulture);
+                if (candidate.MeetsRequiredTier)
+                {
+                    context.Response.Headers.Remove(prefix + "-Degraded");
+                }
+                else
+                {
+                    // Served by a less capable model than the prompt needs (e.g. the frontier model is out of quota).
+                    context.Response.Headers[prefix + "-Degraded"] = "true";
+                }
             }
 
             ConnectorResult result = await connector

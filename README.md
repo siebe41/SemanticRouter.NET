@@ -186,6 +186,8 @@ curl -s http://localhost:5080/semantic-router/classify \
 
 ## Personal setup: LM Studio + your Claude subscription
 
+> **Start here:** [`samples/LmStudioClaudePoc`](samples/LmStudioClaudePoc/README.md) is a ready-to-run proof of concept for exactly this setup. Run `dotnet run --project samples/LmStudioClaudePoc -- --demo`; it checks both backends, then shows prompts being routed live.
+
 This is the "use local models for the easy stuff, my subscription for the hard stuff" configuration.
 
 1. **LM Studio.** Load a small chat model, a coder model and an embedding model (e.g. `text-embedding-nomic-embed-text-v1.5`), then start the server on port 1234. Check the exact model IDs with `curl http://localhost:1234/v1/models` and put them in `appsettings.json` (`Models[].Model`, `Embeddings:Model`).
@@ -402,7 +404,7 @@ Registrations use `TryAdd`, so anything you register before `AddSemanticPromptRo
 
 ```bash
 dotnet build      # warnings are errors; .NET analyzers at latest-recommended
-dotnet test       # 204 tests
+dotnet test       # 207 tests
 dotnet pack -c Release -o artifacts
 ```
 

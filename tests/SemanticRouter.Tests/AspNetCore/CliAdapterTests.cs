@@ -29,15 +29,26 @@ public sealed class CliAdapterTests : IDisposable
     }
 
     [Fact]
-    public void Claude_sends_system_messages_as_a_system_prompt_file()
+    public void Claude_sends_system_messages_as_the_system_prompt()
     {
         (List<string> args, _) = new ClaudeCodeCliAdapter().Build(Request(null,
             new ChatMessage("system", "Be terse."), new ChatMessage("user", "hi")));
 
-        int index = args.IndexOf("--system-prompt-file");
-        index.Should().BePositive();
-        File.ReadAllText(args[index + 1]).Should().Be("Be terse.");
+        args.Should().ContainInOrder("--system-prompt", "Be terse.");
+        args.Should().NotContain("--system-prompt-file", "Claude Code 2.1.293 has no such flag");
         args.Should().NotContain("--model");
+    }
+
+    [Fact]
+    public void Claude_inlines_system_prompts_too_long_for_an_argument()
+    {
+        string system = new('s', 500);
+
+        (List<string> args, string? stdin) = new ClaudeCodeCliAdapter().Build(Request(null,
+            new ChatMessage("system", system), new ChatMessage("user", "hi")));
+
+        args.Should().NotContain("--system-prompt");
+        stdin.Should().StartWith("[system]\n" + system);
     }
 
     [Fact]

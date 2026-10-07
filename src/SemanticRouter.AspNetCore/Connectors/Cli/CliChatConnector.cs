@@ -110,7 +110,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
         catch (FileNotFoundException ex)
         {
-            LogStartFailed(_logger, Name, _executable, ex);
+            LogStartFailed(_logger, Name, _executable, ex.InnerException?.Message ?? ex.Message);
             return ConnectorResult.Failed(ModelFailureKind.Unavailable, $"could not start '{_executable}'");
         }
 
@@ -221,8 +221,8 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: could not start '{Executable}'. Is it installed and on PATH?")]
-    private static partial void LogStartFailed(ILogger logger, string connector, string executable, Exception exception);
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: could not start '{Executable}' ({Error}). Is it installed and on PATH?")]
+    private static partial void LogStartFailed(ILogger logger, string connector, string executable, string error);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: no output within {Timeout}; trying the next model.")]
     private static partial void LogTimedOut(ILogger logger, string connector, TimeSpan timeout);

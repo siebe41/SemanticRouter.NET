@@ -107,7 +107,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
         string claude = Script("claude", """
             input=$(cat)
             while [ $# -gt 0 ]; do
-              if [ "$1" = "--system-prompt-file" ]; then system=$(cat "$2"); fi
+              if [ "$1" = "--system-prompt" ]; then system="$2"; fi
               shift
             done
             printf '{"type":"result","subtype":"success","is_error":false,"result":"system=%s stdin=%s"}\n' "$system" "${#input}"
