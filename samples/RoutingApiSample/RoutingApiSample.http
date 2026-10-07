@@ -1,0 +1,64 @@
+@host = http://localhost:5080
+
+### Small talk -> Local (smalltalk)
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "messages": [ { "role": "user", "content": "hello, how are you today?" } ]
+}
+
+### Light rewrite -> Local (rewrite-summarize)
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "messages": [
+    { "role": "system", "content": "You are a helpful assistant." },
+    { "role": "user", "content": "Please summarize this email in two bullet points: the meeting moved to Friday." }
+  ]
+}
+
+### Architecture question -> Cloud (deep-reasoning)
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "messages": [ { "role": "user", "content": "Compare the trade-offs between event sourcing and a CRUD data model for our billing system." } ]
+}
+
+### Matches a local route (rewrite-summarize), but escalated to Cloud by complexity (structure + reasoning keywords)
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "messages": [ { "role": "user", "content": "Summarize this article in three bullet points, then analyze the implications step by step and evaluate the trade-offs:\n1. Revenue grew 12%\n2. Churn doubled\n3. Two competitors merged\nWhat does this mean for us? What should we do next?" } ]
+}
+
+### No route matches -> FallbackTarget (Cloud)
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "messages": [ { "role": "user", "content": "what is the capital of France?" } ]
+}
+
+### Sensitive data -> pinned Local, never escalated
+POST {{host}}/v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "auto",
+  "messages": [ { "role": "user", "content": "Look up the customer record for account number 4471" } ]
+}
+
+### Diagnostics: full decision with candidates and complexity signals
+POST {{host}}/semantic-router/classify
+Content-Type: application/json
+
+{ "prompt": "why does this async code deadlock when I call .Result?" }
