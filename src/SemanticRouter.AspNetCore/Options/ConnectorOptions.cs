@@ -14,6 +14,26 @@ public enum ConnectorType
 
     /// <summary>Runs a vendor CLI (Claude Code, GitHub Copilot CLI, Codex CLI, or any command) as a subprocess.</summary>
     Cli = 1,
+
+    /// <summary>
+    /// HTTP <c>POST /v1/messages</c> (the Anthropic Messages API) with an API key. Requests from Anthropic-protocol
+    /// clients such as Claude Code pass through untouched; OpenAI-protocol requests are translated.
+    /// </summary>
+    Anthropic = 2,
+}
+
+/// <summary>How a CLI connector handles requests that offer tools (agentic clients such as Claude Code).</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<CliToolCalling>))]
+public enum CliToolCalling
+{
+    /// <summary>Decline such requests; they fall through to a model whose connector can carry tools. Default.</summary>
+    None = 0,
+
+    /// <summary>
+    /// Describe the tools in the prompt and ask the model to answer with a fenced <c>tool_call</c> block, which the
+    /// router turns back into a structured tool call for the client. Text in, text out: the CLI's own tools stay off.
+    /// </summary>
+    Prompted = 1,
 }
 
 /// <summary>Ready-made settings for well-known CLIs. See <c>docs/providers.md</c>.</summary>
@@ -67,6 +87,15 @@ public sealed class ConnectorOptions
     /// <summary>HTTP: extra request headers (e.g. Azure's <c>api-key</c>, GitHub's <c>X-GitHub-Api-Version</c>).</summary>
     public IDictionary<string, string> Headers { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// HTTP: client request headers copied to the upstream request (e.g. <c>anthropic-beta</c>). Authorization headers
+    /// are never forwarded; credentials always come from configuration.
+    /// </summary>
+    public IList<string> ForwardHeaders { get; } = new List<string>();
+
+    /// <summary>Anthropic: the <c>anthropic-version</c> header. Default <c>2023-06-01</c>.</summary>
+    public string AnthropicVersion { get; set; } = "2023-06-01";
+
     // ---- Cli --------------------------------------------------------------------------------------------------
 
     /// <summary>CLI: preset for a well-known tool. Default <see cref="CliPreset.Custom"/>.</summary>
@@ -89,6 +118,9 @@ public sealed class ConnectorOptions
 
     /// <summary>CLI (custom only): how the prompt is passed. Default <see cref="CliPromptInput.Stdin"/>.</summary>
     public CliPromptInput PromptInput { get; set; } = CliPromptInput.Stdin;
+
+    /// <summary>CLI: what to do with requests that offer tools. Default <see cref="CliToolCalling.None"/>.</summary>
+    public CliToolCalling ToolCalling { get; set; } = CliToolCalling.None;
 
     /// <summary>
     /// CLI: output fragments (case-insensitive) that mean "quota or rate limit exhausted". They put the model in the
@@ -134,6 +166,13 @@ public sealed class ConnectorOptions
 
     internal TimeSpan EffectiveTimeout =>
         Timeout > TimeSpan.Zero ? Timeout : Type == ConnectorType.Cli ? TimeSpan.FromMinutes(5) : TimeSpan.FromSeconds(100);
+
+    /// <summary>The wire protocol an HTTP connector speaks.</summary>
+    internal ChatProtocol Protocol => Type == ConnectorType.Anthropic ? ChatProtocol.Anthropic : ChatProtocol.OpenAI;
+
+    /// <summary>The effective request path: the configured one, or the protocol's default when left at the OpenAI default.</summary>
+    internal string EffectiveRequestPath =>
+        Type == ConnectorType.Anthropic && RequestPath == "/v1/chat/completions" ? "/v1/messages" : RequestPath;
 }
 
 /// <summary>The connector catalog, bound from <c>SemanticRouter:Connectors</c>.</summary>

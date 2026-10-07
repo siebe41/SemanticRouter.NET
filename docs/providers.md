@@ -16,7 +16,10 @@ dotnet user-secrets set "SemanticRouter:Connectors:openai:ApiKey" "<key>"
 - Local: [LM Studio](#lm-studio) · [Ollama](#ollama) · [vLLM / llama.cpp / others](#vllm-llamacpp-and-other-openai-compatible-servers)
 - Subscription CLIs: [Claude Code](#claude-code-cli) · [GitHub Copilot CLI](#github-copilot-cli) · [OpenAI Codex CLI](#openai-codex-cli) · [Any other CLI](#any-other-cli)
 - APIs: [OpenAI](#openai-api) · [Anthropic](#anthropic-api) · [Google Gemini](#google-gemini-api) · [Azure OpenAI](#azure-openai) · [OpenRouter](#openrouter)
+- [Tool calling and agentic clients](#tool-calling-and-agentic-clients)
 - [Writing your own connector](#writing-your-own-connector)
+
+Everything on this page can also be edited in the [dashboard](dashboard.md), with hot reload.
 
 ## Choosing tiers, capabilities and costs
 
@@ -30,7 +33,8 @@ dotnet user-secrets set "SemanticRouter:Connectors:openai:ApiKey" "<key>"
   | 4 | frontier models | architecture, debugging, multi-step analysis |
   | 5 | frontier with extended reasoning | the hardest problems |
 
-- **Capabilities** are free-form tags matched against routes' `RequiredCapabilities`. The router also adds two automatically: `tools` when a request defines tools, and `vision` when it contains images. Only declare `tools` and `vision` for models whose **connector** can carry them. HTTP connectors pass both through. CLI connectors can do neither.
+- **Capabilities** are free-form tags matched against routes' `RequiredCapabilities`. The router also adds two automatically: `tools` when a request defines tools, and `vision` when it contains images. Only declare `tools` and `vision` for models whose **connector** can carry them. HTTP connectors (OpenAI-compatible and Anthropic) pass both through. CLI connectors carry neither by default; with `ToolCalling: Prompted` they carry tools (see [below](#tool-calling-and-agentic-clients)), never images.
+- **Tiers** can be named under `SemanticRouter:Tiers` (`{ "Level": 4, "Name": "Frontier", "Description": "…" }`). Names are for people and the dashboard; routing compares the numbers.
 - **Costs** are *marginal* USD per million tokens:
   - Local models and flat-rate subscriptions are `0`. The router learns about quota exhaustion from the error messages and cools those models down.
   - With `CheapestCapable`, `0`-cost models win whenever they qualify, and ties go to the lowest sufficient tier.
@@ -92,6 +96,7 @@ Uses your own Claude subscription. **Read [TERMS.md](TERMS.md#anthropic-claude-c
 
 What the preset does:
 - **Command line.** It runs `claude -p <prompt> --output-format stream-json --verbose --include-partial-messages --tools "" --disallowedTools "mcp__*" --strict-mcp-config --no-session-persistence --permission-mode dontAsk [--model …] [--system-prompt …]` in an empty temporary directory. These flags were checked against Claude Code 2.1.293.
+- **Tools.** Add `"ToolCalling": "Prompted"` (and `tools` to the models' capabilities) to let agentic clients such as Claude Code use this connector for tool-bearing turns; see [Tool calling and agentic clients](#tool-calling-and-agentic-clients).
 - **Long prompts.** Prompts longer than `MaxArgumentLength` go on stdin.
 - **System messages.** Client system messages replace Claude Code's default system prompt.
 - **Environment.** It removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` from the child environment. In print mode an API key would otherwise be used instead of your subscription. Set `RemoveEnvironmentVariables` yourself to change this.
@@ -173,15 +178,17 @@ Set `SemanticRouter:Connectors:openai:ApiKey`. If you need an organization heade
 
 ## Anthropic API
 
-This uses Anthropic's OpenAI-compatible chat-completions endpoint with your API key, which is billed per token and separate from any Claude subscription.
+The `Anthropic` connector speaks the Messages API (`POST /v1/messages`) with your API key, billed per token and separate from any Claude subscription. Requests from Anthropic-protocol clients (Claude Code, the Anthropic SDKs) pass through untouched, prompt caching and all; OpenAI-protocol requests are translated, including tools and streaming.
 
 ```jsonc
-"Connectors": { "anthropic": { "Type": "OpenAICompatible", "BaseAddress": "https://api.anthropic.com" } },
+"Connectors": { "anthropic": { "Type": "Anthropic", "BaseAddress": "https://api.anthropic.com" } },
 "Models": [
   { "Name": "anthropic-opus", "Connector": "anthropic", "Model": "claude-opus-5-5", "Tier": 5, "ContextWindow": 200000,
     "Capabilities": [ "chat", "code", "tools", "vision", "reasoning" ], "InputCostPerMillionTokens": 15, "OutputCostPerMillionTokens": 75 }
 ]
 ```
+
+Set `ApiKey`. `AnthropicVersion` (default `2023-06-01`) is sent as `anthropic-version`; add client headers you want relayed, such as `anthropic-beta`, to `ForwardHeaders`. The client's own `Authorization`/`x-api-key` headers are never forwarded. (Anthropic's OpenAI-compatible endpoint still works through an `OpenAICompatible` connector if you prefer it.)
 
 ## Google Gemini API
 
@@ -222,6 +229,21 @@ Azure puts the deployment in the path and authenticates with an `api-key` header
 ```
 
 Set `ApiKey`, and use OpenRouter's `vendor/model` IDs as `Model`.
+
+## Tool calling and agentic clients
+
+Agentic clients (Claude Code, Codex CLI, agent frameworks) send every turn with tool definitions and expect tool calls back. How each connector type handles that:
+
+| Connector | Tool-bearing requests |
+|---|---|
+| `OpenAICompatible` | Passed through (OpenAI clients) or translated from the Anthropic format: tool definitions, `tool_use`/`tool_calls` and tool results map 1:1, streaming included. Declare `tools` on models whose server supports function calling (LM Studio and Ollama with `qwen3-coder` or similar, vLLM, OpenRouter, OpenAI, Gemini). |
+| `Anthropic` | Passed through (Anthropic clients) or translated from the OpenAI format. |
+| `Cli` with `ToolCalling: None` (default) | Skipped; the request falls through to the next candidate. |
+| `Cli` with `ToolCalling: Prompted` | The tools are described in the system prompt with a fixed call format; the CLI's reply is parsed for fenced `tool_call` blocks, which become structured tool calls for the client. Earlier tool calls and results are rendered into the transcript of the next run. Declare `tools` on the model to make it a candidate. |
+
+Prompted tool calling keeps the CLI text-in/text-out (the vendor CLI's own tools stay disabled; the **client** runs the tools), so it fits the design rules in [TERMS.md](TERMS.md). It costs more than native tool use: every turn re-sends the whole context, there is no prompt caching, and it depends on the model following the format, which frontier models do and small ones often do not.
+
+Across a tool-calling turn the router pins follow-up requests (those carrying tool results) to the model that issued the calls (`Middleware:PinToolCallingTurns`), so a turn never changes models halfway.
 
 ## Writing your own connector
 

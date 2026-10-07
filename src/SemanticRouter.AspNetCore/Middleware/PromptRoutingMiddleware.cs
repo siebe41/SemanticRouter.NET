@@ -1,89 +1,90 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>
 /// Routes JSON chat requests: classifies the prompt, ranks the model catalog, and either annotates the request for
-/// downstream endpoints or serves it through the chosen connectors.
+/// downstream endpoints or serves it through the chosen connectors. Accepts OpenAI chat-completions bodies on
+/// <see cref="PromptRouterMiddlewareOptions.PathPrefixes"/> and Anthropic Messages bodies on
+/// <see cref="PromptRouterMiddlewareOptions.AnthropicPathPrefixes"/>.
 /// </summary>
 internal sealed partial class PromptRoutingMiddleware
 {
     private const int ReadChunkSize = 16 * 1024;
+    private const int PreviewLength = 160;
 
     private readonly RequestDelegate _next;
-    private readonly IPromptRouter _router;
-    private readonly IPromptExtractor _extractor;
+    private readonly RouterRuntimeProvider _runtime;
     private readonly PromptDispatcher _dispatcher;
     private readonly PromptRouterMetrics _metrics;
-    private readonly PromptRouterMiddlewareOptions _options;
-    private readonly int _fallbackTier;
-    private readonly PathString[] _pathPrefixes;
+    private readonly RoutingActivityLog _activity;
+    private readonly IToolCallAffinity? _affinity;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
         RequestDelegate next,
-        IPromptRouter router,
-        IPromptExtractor extractor,
+        RouterRuntimeProvider runtime,
         PromptDispatcher dispatcher,
-        ChatConnectorRegistry connectors,
         PromptRouterMetrics metrics,
-        IOptions<PromptRouterMiddlewareOptions> options,
-        IOptions<SemanticRouterOptions> routerOptions,
-        ILogger<PromptRoutingMiddleware> logger)
+        RoutingActivityLog activity,
+        ILogger<PromptRoutingMiddleware> logger,
+        IToolCallAffinity? affinity = null)
     {
         _next = next;
-        _router = router;
-        _extractor = extractor;
+        _runtime = runtime;
         _dispatcher = dispatcher;
         _metrics = metrics;
-        _options = options.Value;
-        _fallbackTier = routerOptions.Value.FallbackTier;
+        _activity = activity;
+        _affinity = affinity;
         _logger = logger;
-        _pathPrefixes = _options.PathPrefixes
-            .Where(p => !string.IsNullOrWhiteSpace(p))
-            .Select(p => new PathString(p.StartsWith('/') ? p.TrimEnd('/') : "/" + p.TrimEnd('/')))
-            .ToArray();
 
-        ValidateConfiguration(router.Models, connectors);
+        // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
+        _ = runtime.Current;
     }
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (!ShouldIntercept(context.Request))
+        RouterRuntime runtime = _runtime.Current;
+        PromptRouterMiddlewareOptions options = runtime.Configuration.Middleware;
+        if (!ShouldIntercept(context.Request, runtime, out ChatProtocol protocol))
         {
             await _next(context).ConfigureAwait(false);
             return;
         }
 
-        ReadOnlyMemory<byte>? body = await ReadBodyAsync(context.Request, context.RequestAborted).ConfigureAwait(false);
+        ReadOnlyMemory<byte>? body = await ReadBodyAsync(context.Request, options.MaxRequestBodyBytes, context.RequestAborted).ConfigureAwait(false);
         if (body is not { } bodyBytes)
         {
-            await WriteProblemAsync(
-                context,
+            await ProtocolErrors.WriteAsync(
+                context, protocol,
                 StatusCodes.Status413PayloadTooLarge,
                 "Request body too large",
-                $"Prompt routing buffers at most {_options.MaxRequestBodyBytes} bytes.").ConfigureAwait(false);
+                $"Prompt routing buffers at most {options.MaxRequestBodyBytes} bytes.",
+                context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
         // Give downstream handlers a fresh, seekable copy of the body we consumed.
         context.Request.Body = new MemoryStream(bodyBytes.ToArray(), writable: false);
 
-        if (!TryParse(context, bodyBytes, out string? prompt, out ChatCompletionRequest chat))
+        if (!TryParse(context, runtime, protocol, bodyBytes, out string? prompt, out ChatCompletionRequest chat))
         {
             LogNoPrompt(_logger, context.Request.Path);
-            if (_options.Mode == PromptRouterMode.Dispatch)
+            if (options.Mode == PromptRouterMode.Dispatch)
             {
-                await WriteProblemAsync(
-                    context,
+                await ProtocolErrors.WriteAsync(
+                    context, protocol,
                     StatusCodes.Status400BadRequest,
                     "No prompt found",
-                    "Expected an OpenAI chat-completions JSON body with 'messages'.").ConfigureAwait(false);
+                    protocol == ChatProtocol.Anthropic
+                        ? "Expected an Anthropic Messages JSON body with 'messages'."
+                        : "Expected an OpenAI chat-completions JSON body with 'messages'.",
+                    context.RequestAborted).ConfigureAwait(false);
                 return;
             }
 
@@ -91,7 +92,20 @@ internal sealed partial class PromptRoutingMiddleware
             return;
         }
 
-        (SelectionStrategy? strategy, string? requestedModel) = ModelAliases.Resolve(chat.Model);
+        long started = Stopwatch.GetTimestamp();
+        string? mapped = MapModel(runtime, chat.Model);
+        (SelectionStrategy? strategy, string? requestedModel) = ModelAliases.Resolve(mapped);
+        if (requestedModel is not null
+            && !runtime.Router.Models.Any(m => m.Enabled && string.Equals(m.Name, requestedModel, StringComparison.OrdinalIgnoreCase)))
+        {
+            // A vendor model name the catalog does not know (e.g. Claude Code's defaults): route as "auto".
+            requestedModel = null;
+        }
+
+        string? affinityModel = options.PinToolCallingTurns && chat.IsToolResultContinuation && requestedModel is null
+            ? _affinity?.Lookup(chat.AnsweredToolUseIds)
+            : null;
+
         var routingRequest = new PromptRoutingRequest
         {
             Prompt = prompt,
@@ -99,15 +113,16 @@ internal sealed partial class PromptRoutingMiddleware
             AdditionalCapabilities = ImpliedCapabilities(chat),
             RequestedModel = requestedModel,
             Strategy = strategy,
+            AffinityModel = affinityModel,
         };
 
-        RoutingPlan plan = await RouteAsync(routingRequest, context.RequestAborted).ConfigureAwait(false);
+        RoutingPlan plan = await RouteAsync(runtime, routingRequest, options.FailOpen, context.RequestAborted).ConfigureAwait(false);
         PromptClassificationResult result = plan.Classification;
 
         context.Features.Set<IPromptRoutingFeature>(new PromptRoutingFeature(prompt, plan));
-        if (_options.EmitResponseHeaders)
+        if (options.EmitResponseHeaders)
         {
-            WriteHeaders(context.Response.Headers, plan);
+            WriteHeaders(context.Response.Headers, options.HeaderPrefix, plan);
         }
 
         _metrics.RecordDecision(result);
@@ -116,13 +131,102 @@ internal sealed partial class PromptRoutingMiddleware
             result.Similarity ?? float.NaN, result.Complexity.Score,
             plan.Candidates.Count > 0 ? plan.Candidates[0].Model.Name : "none", result.Elapsed.TotalMilliseconds);
 
-        if (_options.Mode == PromptRouterMode.Dispatch)
+        RoutingActivityEntry entry = _activity.Add(new RoutingActivityEntry
         {
-            await _dispatcher.DispatchAsync(context, plan, chat, bodyBytes).ConfigureAwait(false);
+            Id = _activity.Reserve(),
+            Timestamp = DateTimeOffset.UtcNow,
+            Protocol = protocol,
+            Path = context.Request.Path.Value ?? string.Empty,
+            RequestedModel = chat.Model,
+            PromptPreview = prompt.Length <= PreviewLength ? prompt : prompt[..PreviewLength] + "…",
+            Tier = result.RequiredTier,
+            Reason = result.Reason,
+            Route = result.RouteName,
+            Similarity = result.Similarity,
+            Complexity = Math.Round(result.Complexity.Score, 3),
+            HasTools = chat.HasTools,
+            ToolContinuation = chat.IsToolResultContinuation,
+            LocalOnly = plan.Requirements.LocalOnly,
+            EstimatedInputTokens = chat.EstimatedInputTokens,
+            PlannedModel = plan.Candidates.Count > 0 ? plan.Candidates[0].Model.Name : null,
+            ClassificationMilliseconds = Math.Round(result.Elapsed.TotalMilliseconds, 2),
+        });
+
+        if (options.Mode == PromptRouterMode.Dispatch)
+        {
+            await _dispatcher.DispatchAsync(context, runtime, plan, chat, bodyBytes, entry).ConfigureAwait(false);
+            entry.TotalMilliseconds = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1);
             return;
         }
 
         await _next(context).ConfigureAwait(false);
+        entry.TotalMilliseconds = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1);
+    }
+
+    /// <summary>
+    /// Applies the configured model alias globs (first match wins) to the client's model name. Routing aliases and
+    /// catalog model names are returned as they are, so an explicit choice always beats a pattern.
+    /// </summary>
+    internal static string? MapModel(RouterRuntime runtime, string? model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return model;
+        }
+
+        string trimmed = model.Trim();
+        if (trimmed.StartsWith(ModelAliases.Auto, StringComparison.OrdinalIgnoreCase)
+            || runtime.Router.Models.Any(m => string.Equals(m.Name, trimmed, StringComparison.OrdinalIgnoreCase)))
+        {
+            return model;
+        }
+
+        foreach ((string pattern, string target) in runtime.ModelAliases)
+        {
+            if (GlobMatches(pattern, model))
+            {
+                return target;
+            }
+        }
+
+        return model;
+    }
+
+    internal static bool GlobMatches(string pattern, string value)
+    {
+        // Simple '*' glob, case-insensitive.
+        string[] parts = pattern.Split('*');
+        if (parts.Length == 1)
+        {
+            return string.Equals(pattern, value, StringComparison.OrdinalIgnoreCase);
+        }
+
+        int position = 0;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            string part = parts[i];
+            if (part.Length == 0)
+            {
+                continue;
+            }
+
+            int index = i == 0
+                ? (value.StartsWith(part, StringComparison.OrdinalIgnoreCase) ? 0 : -1)
+                : value.IndexOf(part, position, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            if (i == parts.Length - 1 && !value.EndsWith(part, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            position = index + part.Length;
+        }
+
+        return true;
     }
 
     private static string[] ImpliedCapabilities(ChatCompletionRequest chat) =>
@@ -134,19 +238,35 @@ internal sealed partial class PromptRoutingMiddleware
             _ => [],
         };
 
-    private bool ShouldIntercept(HttpRequest request)
+    private static bool ShouldIntercept(HttpRequest request, RouterRuntime runtime, out ChatProtocol protocol)
     {
+        protocol = ChatProtocol.OpenAI;
         if (!HttpMethods.IsPost(request.Method) || !request.HasJsonContentType())
         {
             return false;
         }
 
-        if (_pathPrefixes.Length == 0)
+        foreach (PathString prefix in runtime.AnthropicPrefixes)
         {
-            return true;
+            if (request.Path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase, out PathString remaining))
+            {
+                if (remaining.HasValue && remaining.Value!.EndsWith("/count_tokens", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Token counting is served by its own endpoint and must not be routed.
+                    return false;
+                }
+
+                protocol = ChatProtocol.Anthropic;
+                return true;
+            }
         }
 
-        foreach (PathString prefix in _pathPrefixes)
+        if (runtime.OpenAIPrefixes.Length == 0)
+        {
+            return runtime.Configuration.Middleware.Mode != PromptRouterMode.Dispatch;
+        }
+
+        foreach (PathString prefix in runtime.OpenAIPrefixes)
         {
             if (request.Path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase))
             {
@@ -157,9 +277,8 @@ internal sealed partial class PromptRoutingMiddleware
         return false;
     }
 
-    private async Task<ReadOnlyMemory<byte>?> ReadBodyAsync(HttpRequest request, CancellationToken cancellationToken)
+    private static async Task<ReadOnlyMemory<byte>?> ReadBodyAsync(HttpRequest request, long limit, CancellationToken cancellationToken)
     {
-        long limit = _options.MaxRequestBodyBytes;
         if (request.ContentLength > limit)
         {
             return null;
@@ -184,21 +303,21 @@ internal sealed partial class PromptRoutingMiddleware
         }
     }
 
-    private bool TryParse(HttpContext context, ReadOnlyMemory<byte> body, out string prompt, out ChatCompletionRequest chat)
+    private bool TryParse(HttpContext context, RouterRuntime runtime, ChatProtocol protocol, ReadOnlyMemory<byte> body, out string prompt, out ChatCompletionRequest chat)
     {
         prompt = string.Empty;
         chat = new ChatCompletionRequest();
         try
         {
             using JsonDocument document = JsonDocument.Parse(body);
-            string? extracted = _extractor.ExtractPrompt(context, document.RootElement);
+            string? extracted = runtime.Extractor.ExtractPrompt(context, document.RootElement);
             if (string.IsNullOrWhiteSpace(extracted))
             {
                 return false;
             }
 
             prompt = extracted;
-            chat = ChatCompletionRequest.Parse(document.RootElement);
+            chat = ChatCompletionRequest.Parse(document.RootElement, protocol);
             return true;
         }
         catch (JsonException ex)
@@ -208,23 +327,23 @@ internal sealed partial class PromptRoutingMiddleware
         }
     }
 
-    private async ValueTask<RoutingPlan> RouteAsync(PromptRoutingRequest request, CancellationToken cancellationToken)
+    private async ValueTask<RoutingPlan> RouteAsync(RouterRuntime runtime, PromptRoutingRequest request, bool failOpen, CancellationToken cancellationToken)
     {
         try
         {
-            return await _router.RouteAsync(request, cancellationToken).ConfigureAwait(false);
+            return await runtime.Router.RouteAsync(request, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (_options.FailOpen && !cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (failOpen && !cancellationToken.IsCancellationRequested)
         {
-            LogClassificationFailed(_logger, _fallbackTier, ex);
-            return _router.Plan(PromptClassificationResult.Bypass(_fallbackTier, RoutingReason.ClassifierFailure), request);
+            int fallbackTier = runtime.Configuration.FallbackTier;
+            LogClassificationFailed(_logger, fallbackTier, ex);
+            return runtime.Router.Plan(PromptClassificationResult.Bypass(fallbackTier, RoutingReason.ClassifierFailure), request);
         }
     }
 
-    private void WriteHeaders(IHeaderDictionary headers, RoutingPlan plan)
+    private static void WriteHeaders(IHeaderDictionary headers, string prefix, RoutingPlan plan)
     {
         PromptClassificationResult result = plan.Classification;
-        string prefix = _options.HeaderPrefix;
         headers[prefix] = result.RouteName ?? "none";
         headers[prefix + "-Tier"] = result.RequiredTier.ToString(CultureInfo.InvariantCulture);
         headers[prefix + "-Reason"] = result.Reason.ToString();
@@ -236,47 +355,8 @@ internal sealed partial class PromptRoutingMiddleware
         }
     }
 
-    private void ValidateConfiguration(IReadOnlyList<ModelDefinition> models, ChatConnectorRegistry connectors)
-    {
-        if (_options.MaxRequestBodyBytes <= 0)
-        {
-            throw new InvalidOperationException("SemanticRouter:Middleware:MaxRequestBodyBytes must be positive.");
-        }
-
-        if (string.IsNullOrWhiteSpace(_options.HeaderPrefix))
-        {
-            throw new InvalidOperationException("SemanticRouter:Middleware:HeaderPrefix must not be empty.");
-        }
-
-        if (_options.Mode != PromptRouterMode.Dispatch)
-        {
-            return;
-        }
-
-        if (_pathPrefixes.Length == 0)
-        {
-            throw new InvalidOperationException(
-                "SemanticRouter:Middleware:PathPrefixes must list at least one path in Dispatch mode, " +
-                "otherwise every JSON POST in the application would be proxied.");
-        }
-
-        if (!models.Any(m => m.Enabled))
-        {
-            throw new InvalidOperationException("SemanticRouter:Models must define at least one enabled model in Dispatch mode.");
-        }
-
-        foreach (ModelDefinition model in models.Where(m => m.Enabled))
-        {
-            if (!connectors.TryGet(model.Connector, out _))
-            {
-                throw new InvalidOperationException(
-                    $"Model '{model.Name}' uses connector '{model.Connector}', which is not configured under SemanticRouter:Connectors.");
-            }
-        }
-    }
-
-    internal static Task WriteProblemAsync(HttpContext context, int statusCode, string title, string detail) =>
-        Microsoft.AspNetCore.Http.Results.Problem(detail, statusCode: statusCode, title: title).ExecuteAsync(context);
+    internal static Task WriteProblemAsync(HttpContext context, ChatProtocol protocol, int statusCode, string title, string detail) =>
+        ProtocolErrors.WriteAsync(context, protocol, statusCode, title, detail, context.RequestAborted);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "No prompt found in JSON request to {Path}; passing through.")]
     private static partial void LogNoPrompt(ILogger logger, PathString path);

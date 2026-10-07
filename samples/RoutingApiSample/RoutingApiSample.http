@@ -81,3 +81,24 @@ POST {{host}}/semantic-router/classify
 Content-Type: application/json
 
 { "prompt": "why does this async code deadlock when I call .Result?" }
+
+
+### Anthropic Messages API (what Claude Code sends when ANTHROPIC_BASE_URL points here)
+POST {{host}}/v1/messages
+Content-Type: application/json
+anthropic-version: 2023-06-01
+
+{
+  "model": "claude-sonnet-4-5",
+  "max_tokens": 256,
+  "messages": [ { "role": "user", "content": "Compare event sourcing and CRUD for a billing system." } ]
+}
+
+### Anthropic token count (no model is called)
+POST {{host}}/v1/messages/count_tokens
+Content-Type: application/json
+
+{ "model": "claude-sonnet-4-5", "messages": [ { "role": "user", "content": "hello there" } ] }
+
+### Dashboard status (admin API; loopback only)
+GET {{host}}/router/api/status

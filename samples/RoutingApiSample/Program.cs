@@ -8,7 +8,11 @@ builder.Services.AddProblemDetails();
 
 // Routes, the model catalog, connectors, embeddings and the middleware mode all come from the
 // "SemanticRouter" section of appsettings.json (plus appsettings.{Environment}.json overrides).
-builder.Services.AddSemanticPromptRouting(builder.Configuration.GetSection(SemanticRouterOptions.SectionName));
+// Changes made in the dashboard are applied live and saved to semantic-router.json next to the app;
+// when that file exists it replaces the appsettings section (secrets left empty are inherited).
+builder.Services
+    .AddSemanticPromptRouting(builder.Configuration.GetSection(SemanticRouterOptions.SectionName))
+    .UseConfigurationFile(builder.Configuration["SemanticRouter:Store:Path"] ?? "semantic-router.json");
 
 var app = builder.Build();
 
@@ -16,8 +20,8 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 
 // Annotate mode (default): classifies the prompt, ranks the catalog and lets the endpoint below decide.
-// Dispatch mode (appsettings.Dispatch.json): serves /v1/chat/completions itself through the connectors
-// (LM Studio, Claude Code CLI, …) with failover, so the endpoint below is never reached.
+// Dispatch mode (appsettings.Dispatch.json): serves /v1/chat/completions and /v1/messages itself through
+// the connectors (LM Studio, Claude Code CLI, …) with failover, so the endpoint below is never reached.
 app.UsePromptRouter();
 
 app.MapPost("/v1/chat/completions", (ChatCompletionBody request, HttpContext context) =>
@@ -32,14 +36,21 @@ app.MapPost("/v1/chat/completions", (ChatCompletionBody request, HttpContext con
 // including any model that is cooling down after hitting a quota.
 app.MapRouterModels();
 
+// POST /v1/messages/count_tokens: Claude Code asks for this while tracking its context window.
+app.MapAnthropicTokenCount();
+
 // POST { "prompt": "..." } explains a decision: tier, reason, route candidates and the ranked models.
 app.MapPromptClassification();
+
+// The dashboard: live status, activity, and every setting, editable with hot reload. Local clients only.
+app.MapRouterDashboard("/router");
 
 app.MapGet("/", () => TypedResults.Ok(new
 {
     service = "SemanticRouter sample",
     mode = app.Configuration["SemanticRouter:Middleware:Mode"] ?? "Annotate",
-    endpoints = new[] { "POST /v1/chat/completions", "GET /v1/models", "POST /semantic-router/classify" },
+    dashboard = "/router",
+    endpoints = new[] { "POST /v1/chat/completions", "POST /v1/messages", "POST /v1/messages/count_tokens", "GET /v1/models", "POST /semantic-router/classify" },
 }));
 
 app.Run();

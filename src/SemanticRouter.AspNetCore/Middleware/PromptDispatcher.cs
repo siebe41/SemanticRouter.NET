@@ -1,7 +1,6 @@
 using System.Globalization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace SemanticRouter.AspNetCore;
 
@@ -12,41 +11,29 @@ namespace SemanticRouter.AspNetCore;
 /// </summary>
 internal sealed partial class PromptDispatcher
 {
-    private readonly ChatConnectorRegistry _connectors;
-    private readonly IPromptRouter _router;
     private readonly IModelHealth _health;
     private readonly PromptRouterMetrics _metrics;
-    private readonly PromptRouterMiddlewareOptions _middleware;
-    private readonly int _maxAttempts;
     private readonly ILogger _logger;
 
-    public PromptDispatcher(
-        ChatConnectorRegistry connectors,
-        IPromptRouter router,
-        IModelHealth health,
-        PromptRouterMetrics metrics,
-        IOptions<PromptRouterMiddlewareOptions> middleware,
-        IOptions<SemanticRouterOptions> routerOptions,
-        ILogger<PromptDispatcher> logger)
+    public PromptDispatcher(IModelHealth health, PromptRouterMetrics metrics, ILogger<PromptDispatcher> logger)
     {
-        _connectors = connectors;
-        _router = router;
         _health = health;
         _metrics = metrics;
-        _middleware = middleware.Value;
-        _maxAttempts = Math.Max(1, routerOptions.Value.Selection.MaxAttempts);
         _logger = logger;
     }
 
-    public async Task DispatchAsync(HttpContext context, RoutingPlan plan, ChatCompletionRequest chat, ReadOnlyMemory<byte> body)
+    public async Task DispatchAsync(
+        HttpContext context, RouterRuntime runtime, RoutingPlan plan, ChatCompletionRequest chat, ReadOnlyMemory<byte> body, RoutingActivityEntry? activity = null)
     {
+        PromptRouterMiddlewareOptions middleware = runtime.Configuration.Middleware;
+        int maxAttempts = Math.Max(1, runtime.Configuration.Selection.MaxAttempts);
         var attempts = new List<string>();
         var cooledDuringRequest = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int tried = 0;
 
         foreach (ModelCandidate candidate in plan.Candidates)
         {
-            if (tried >= _maxAttempts)
+            if (tried >= maxAttempts)
             {
                 break;
             }
@@ -58,16 +45,16 @@ internal sealed partial class PromptDispatcher
                 continue;
             }
 
-            if (!_connectors.TryGet(model.Connector, out IChatConnector connector))
+            if (!runtime.Connectors.TryGet(model.Connector, out IChatConnector connector))
             {
                 attempts.Add($"{model.Name}: unknown connector '{model.Connector}'");
                 continue;
             }
 
             tried++;
-            if (_middleware.EmitResponseHeaders)
+            if (middleware.EmitResponseHeaders)
             {
-                string prefix = _middleware.HeaderPrefix;
+                string prefix = middleware.HeaderPrefix;
                 context.Response.Headers[prefix + "-Model"] = model.Name;
                 context.Response.Headers[prefix + "-Connector"] = connector.Name;
                 context.Response.Headers[prefix + "-Attempt"] = tried.ToString(CultureInfo.InvariantCulture);
@@ -92,13 +79,23 @@ internal sealed partial class PromptDispatcher
                 case ConnectorOutcome.Completed:
                     _health.ReportSuccess(model);
                     LogServed(_logger, model.Name, connector.Name, tried);
+                    if (activity is not null)
+                    {
+                        activity.ServedBy = model.Name;
+                        activity.Connector = connector.Name;
+                        activity.Attempt = tried;
+                        activity.Degraded = !candidate.MeetsRequiredTier;
+                        activity.Outcome = "served";
+                        activity.Detail = attempts.Count > 0 ? string.Join("; ", attempts) : null;
+                    }
+
                     return;
 
                 case ConnectorOutcome.Failed:
                     _health.ReportFailure(model, result.FailureKind);
                     if (result.AffectsAllConnectorModels)
                     {
-                        foreach (ModelDefinition sibling in _router.Models.Where(m =>
+                        foreach (ModelDefinition sibling in runtime.Router.Models.Where(m =>
                                      m != model && string.Equals(m.Connector, model.Connector, StringComparison.OrdinalIgnoreCase)))
                         {
                             _health.ReportFailure(sibling, result.FailureKind);
@@ -123,8 +120,14 @@ internal sealed partial class PromptDispatcher
               (plan.Requirements.LocalOnly ? ", local only" : string.Empty) + ")."
             : "Every candidate model failed: " + string.Join("; ", attempts);
 
+        if (activity is not null)
+        {
+            activity.Outcome = "failed";
+            activity.Detail = detail;
+        }
+
         await PromptRoutingMiddleware.WriteProblemAsync(
-            context, StatusCodes.Status503ServiceUnavailable, "No model available", detail).ConfigureAwait(false);
+            context, chat.Protocol, StatusCodes.Status503ServiceUnavailable, "No model available", detail).ConfigureAwait(false);
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Served by {Model} via {Connector} (attempt {Attempt}).")]

@@ -108,7 +108,8 @@ public class ConfigurationBindingTests
         middleware.Mode.Should().Be(PromptRouterMode.Dispatch);
         middleware.PathPrefixes.Should().Equal("/v1/chat/completions");
         middleware.MessageSelection.Should().Be(PromptMessageSelection.AllMessages);
-        provider.GetRequiredService<IEmbeddingProvider>().Should().BeOfType<OpenAICompatibleEmbeddingProvider>();
+        provider.GetRequiredService<IEmbeddingProvider>().Should().BeOfType<RuntimeEmbeddingProviderFacade>()
+            .Which.Inner.Should().BeOfType<OpenAICompatibleEmbeddingProvider>();
         provider.GetRequiredService<IPromptRouter>().Models.Should().HaveCount(3);
     }
 
@@ -120,8 +121,8 @@ public class ConfigurationBindingTests
         services.AddSemanticPromptRouting().UseHashingEmbeddings(dimensions: 64);
         using ServiceProvider provider = services.BuildServiceProvider();
 
-        provider.GetRequiredService<IEmbeddingProvider>()
-            .Should().BeOfType<HashingEmbeddingProvider>()
+        provider.GetRequiredService<IEmbeddingProvider>().Should().BeOfType<RuntimeEmbeddingProviderFacade>()
+            .Which.Inner.Should().BeOfType<HashingEmbeddingProvider>()
             .Which.Dimensions.Should().Be(64);
     }
 

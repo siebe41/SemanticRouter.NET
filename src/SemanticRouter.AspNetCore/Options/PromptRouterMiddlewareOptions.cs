@@ -51,8 +51,42 @@ public sealed class PromptRouterMiddlewareOptions
     /// </summary>
     public IList<string> PathPrefixes { get; } = new List<string>();
 
-    /// <summary>Largest request body (bytes) the middleware will buffer; larger requests receive 413. Default 1 MiB.</summary>
-    public long MaxRequestBodyBytes { get; set; } = 1024 * 1024;
+    /// <summary>The Anthropic path used when <see cref="AnthropicPathPrefixes"/> is empty.</summary>
+    public const string DefaultAnthropicPathPrefix = "/v1/messages";
+
+    /// <summary>
+    /// Request path prefixes that carry Anthropic Messages API bodies (<c>POST /v1/messages</c>), as sent by Claude
+    /// Code and the Anthropic SDKs. When empty, <see cref="DefaultAnthropicPathPrefix"/> applies. Responses and
+    /// errors on these paths use the Anthropic format whatever backend answers.
+    /// </summary>
+    public IList<string> AnthropicPathPrefixes { get; } = new List<string>();
+
+    /// <summary>The Anthropic prefixes in effect: the configured ones, or the default.</summary>
+    public IEnumerable<string> EffectiveAnthropicPathPrefixes =>
+        AnthropicPathPrefixes.Any(p => !string.IsNullOrWhiteSpace(p)) ? AnthropicPathPrefixes : [DefaultAnthropicPathPrefix];
+
+    /// <summary>
+    /// Maps the model names clients send to routing aliases or catalog models, so tools keep their own model
+    /// settings and the router still decides. Keys are case-insensitive globs (<c>*</c> matches anything), e.g.
+    /// <c>"*haiku*": "auto:cheapest"</c>, <c>"*opus*": "auto:best"</c>, <c>"gpt-*": "auto"</c>. Names that match no
+    /// pattern and no catalog model are routed as <c>auto</c>.
+    /// </summary>
+    public IDictionary<string, string> ModelAliases { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Pin the follow-up requests of a tool-calling turn (those carrying tool results) to the model that issued the
+    /// tool calls, instead of classifying them again. Default true.
+    /// </summary>
+    public bool PinToolCallingTurns { get; set; } = true;
+
+    /// <summary>
+    /// Ignore <c>&lt;system-reminder&gt;</c> blocks that agentic clients inject into user messages when classifying,
+    /// so routing reflects what the person asked. Default true.
+    /// </summary>
+    public bool StripSystemReminders { get; set; } = true;
+
+    /// <summary>Largest request body (bytes) the middleware will buffer; larger requests receive 413. Default 8 MiB.</summary>
+    public long MaxRequestBodyBytes { get; set; } = 8 * 1024 * 1024;
 
     /// <summary>Whether to add routing headers to the response. Disable to keep routing opaque to clients. Default true.</summary>
     public bool EmitResponseHeaders { get; set; } = true;

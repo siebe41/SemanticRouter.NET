@@ -16,11 +16,18 @@ namespace SemanticRouter.AspNetCore;
 public sealed class JsonPromptExtractor : IPromptExtractor
 {
     private readonly PromptMessageSelection _selection;
+    private readonly bool _stripSystemReminders;
 
     /// <summary>Creates an extractor.</summary>
-    public JsonPromptExtractor(PromptMessageSelection selection = PromptMessageSelection.LastUserMessage)
+    /// <param name="selection">Which messages contribute.</param>
+    /// <param name="stripSystemReminders">
+    /// Remove <c>&lt;system-reminder&gt;…&lt;/system-reminder&gt;</c> blocks that agentic clients (Claude Code) inject
+    /// into user messages, so the prompt reflects what the person asked.
+    /// </param>
+    public JsonPromptExtractor(PromptMessageSelection selection = PromptMessageSelection.LastUserMessage, bool stripSystemReminders = true)
     {
         _selection = selection;
+        _stripSystemReminders = stripSystemReminders;
     }
 
     /// <inheritdoc />
@@ -33,7 +40,7 @@ public sealed class JsonPromptExtractor : IPromptExtractor
 
         if (body.TryGetProperty("messages", out JsonElement messages) && messages.ValueKind == JsonValueKind.Array)
         {
-            string? fromMessages = ExtractFromMessages(messages);
+            string? fromMessages = Clean(ExtractFromMessages(messages));
             if (!string.IsNullOrWhiteSpace(fromMessages))
             {
                 return fromMessages;
@@ -42,7 +49,7 @@ public sealed class JsonPromptExtractor : IPromptExtractor
 
         foreach (string property in (ReadOnlySpan<string>)["prompt", "input"])
         {
-            if (body.TryGetProperty(property, out JsonElement value) && ReadText(value) is { Length: > 0 } text)
+            if (body.TryGetProperty(property, out JsonElement value) && Clean(ReadText(value)) is { Length: > 0 } text)
             {
                 return text;
             }
@@ -50,6 +57,40 @@ public sealed class JsonPromptExtractor : IPromptExtractor
 
         return null;
     }
+
+    /// <summary>Removes injected <c>&lt;system-reminder&gt;</c> blocks and trims the result.</summary>
+    public static string? StripSystemReminders(string? text)
+    {
+        if (string.IsNullOrEmpty(text) || !text.Contains("<system-reminder>", StringComparison.OrdinalIgnoreCase))
+        {
+            return text;
+        }
+
+        var builder = new StringBuilder(text.Length);
+        int position = 0;
+        while (true)
+        {
+            int start = text.IndexOf("<system-reminder>", position, StringComparison.OrdinalIgnoreCase);
+            if (start < 0)
+            {
+                builder.Append(text, position, text.Length - position);
+                break;
+            }
+
+            builder.Append(text, position, start - position);
+            int end = text.IndexOf("</system-reminder>", start, StringComparison.OrdinalIgnoreCase);
+            if (end < 0)
+            {
+                break;
+            }
+
+            position = end + "</system-reminder>".Length;
+        }
+
+        return builder.ToString().Trim();
+    }
+
+    private string? Clean(string? text) => _stripSystemReminders ? StripSystemReminders(text) : text;
 
     private string? ExtractFromMessages(JsonElement messages)
     {

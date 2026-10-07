@@ -10,6 +10,10 @@ A lightweight **semantic prompt router** for .NET 9 and ASP.NET Core. It sends e
 
 When a subscription hits its usage limit, the router cools that model down and moves on to the next-best one automatically.
 
+It speaks **both the OpenAI and the Anthropic protocol**, so you can point **Claude Code**, Codex CLI, the OpenAI SDKs or any chat tool at it and keep working exactly as before: the tool keeps its own model names and its agentic loop, and the router decides which backend answers each turn. A built-in **dashboard** shows live activity and lets you edit every setting, with hot reload.
+
+![The dashboard](docs/images/dashboard.png)
+
 It decides in two steps:
 
 1. **What does this prompt need?** Embedding similarity against your intent clusters, plus cheap structural complexity heuristics, produce a required **capability tier**, required **capabilities** (`code`, `tools`, `vision`, …) and an optional **local-only** constraint.
@@ -25,7 +29,7 @@ prompt                                              needs                 → se
   … Claude session limit reached …                  tier 4                → lmstudio-coder   (best available; Claude cools down)
 ```
 
-The front door is OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/models`), so any tool that lets you set an OpenAI base URL can use it. Send `"model": "auto"` and let the router choose.
+Two front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/models`) for any tool with a configurable base URL, and the Anthropic Messages API (`POST /v1/messages`) for Claude Code and the Anthropic SDKs. Send `"model": "auto"` and let the router choose, or keep the tool's own model names and map them with aliases.
 
 ---
 
@@ -36,18 +40,24 @@ The front door is OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/model
 - [Providers](#providers)
 - [Quick start](#quick-start)
 - [Personal setup: LM Studio + your Claude subscription](#personal-setup-lm-studio--your-claude-subscription)
+- [Using Claude Code and other tools through the router](#using-claude-code-and-other-tools-through-the-router)
+- [The dashboard](#the-dashboard)
 - [Using it in your application](#using-it-in-your-application)
 - [Configuration reference](#configuration-reference)
 - [Production guidance](#production-guidance)
 - [Extensibility](#extensibility)
 - [Building and testing](#building-and-testing)
 
-Also see [docs/providers.md](docs/providers.md) (connector setup per provider) and [docs/TERMS.md](docs/TERMS.md) (why the subscription CLI connectors are designed the way they are, and where the lines are).
+Also see [docs/clients.md](docs/clients.md) (pointing Claude Code, Codex and SDKs at the router), [docs/dashboard.md](docs/dashboard.md) (the UI and admin API), [docs/providers.md](docs/providers.md) (connector setup per provider) and [docs/TERMS.md](docs/TERMS.md) (why the subscription CLI connectors are designed the way they are, and where the lines are).
 
 ---
 
 ## Features
 
+- **Two protocols in, every backend out.** OpenAI chat completions and the Anthropic Messages API are both accepted; requests and replies are translated between them, including streaming, images and tool calls, and passed through untouched when client and backend speak the same protocol.
+- **Built for agentic clients.** Point Claude Code or Codex at the router: their model names map through aliases, their tool-bearing turns go to tool-capable backends, the follow-up requests of a tool-calling turn stay on the model that started it, injected `<system-reminder>` blocks are ignored when classifying, and `count_tokens` is served locally. A CLI connector can even carry tools for them (*prompted tool calling*), so your Claude subscription can answer agentic turns.
+- **A dashboard with hot reload.** Live status, cooldowns, an activity log with every decision, a prompt tester, and an editor for routes, models, connectors, tiers, routing rules, embeddings and gateway settings. Apply changes to the running router, save them to a file, or revert. Themeable (Machine Dark by default).
+- **Named tiers.** The capability ladder is explicit configuration (`Tiers`), shown everywhere a tier appears, with a matrix of which routes need each rung and which models provide it.
 - **Capability-aware, cost-aware routing.** Routes declare the tier and capabilities an intent needs. Models declare their tier, capabilities, context window, cost and priority. The selector picks the cheapest model that qualifies, the most capable one, or follows your priority order, and clients can choose per request (`auto:cheapest`, `auto:best`, `auto:priority`).
 - **Every kind of provider.** There is an OpenAI-compatible HTTP connector for local servers and APIs, a CLI connector that runs Claude Code, Copilot CLI or Codex CLI on your own login, and an `IChatConnector` interface for anything else.
 - **Automatic failover and quota cooldowns.** A model that is unreachable, times out, returns 5xx/429 or reports a usage limit is skipped for a cooldown period. An account-wide subscription limit cools down every model on that account at once.
@@ -163,7 +173,7 @@ dotnet test
 dotnet run --project samples/RoutingApiSample --launch-profile annotate
 ```
 
-The sample starts in **Annotate** mode with in-memory hashing embeddings. It needs no model, CLI or key, and reports which model it *would* use:
+The sample starts in **Annotate** mode with in-memory hashing embeddings. It needs no model, CLI or key. Open the dashboard at <http://localhost:5080/router>, or ask it which model it *would* use:
 
 ```bash
 curl -s http://localhost:5080/semantic-router/classify \
@@ -202,10 +212,46 @@ This is the "use local models for the easy stuff, my subscription for the hard s
      -d '{"model":"auto","stream":true,"messages":[{"role":"user","content":"Compare event sourcing and CRUD"}]}'
    ```
 
-Enable `copilot`, `codex` or the paid API models in `appsettings.json` as you need them. With `CheapestCapable`:
+5. **Or point Claude Code at it** and keep using Claude Code as before:
+   ```bash
+   ANTHROPIC_BASE_URL=http://localhost:5080 ANTHROPIC_AUTH_TOKEN=semantic-router claude
+   ```
+   See [Using Claude Code and other tools through the router](#using-claude-code-and-other-tools-through-the-router).
+
+Enable `copilot`, `codex` or the paid API models in `appsettings.json` or the dashboard as you need them. With `CheapestCapable`:
 - free local models answer whatever they are good enough for;
 - flat-rate subscriptions take the hard prompts;
 - paid APIs are used only when nothing cheaper qualifies (for example, a request with `tools` or images, which CLI connectors cannot handle) or when everything cheaper is cooling down.
+
+## Using Claude Code and other tools through the router
+
+The router is a drop-in base URL. Claude Code speaks the Anthropic Messages API, so:
+
+```bash
+export ANTHROPIC_BASE_URL=http://localhost:5080
+export ANTHROPIC_AUTH_TOKEN=semantic-router   # any value; the router never reads or forwards it
+claude
+```
+
+Nothing about your workflow changes. Claude Code keeps its system prompt, its tools and its model names; the router decides per turn:
+
+| Claude Code sends… | The router… |
+|---|---|
+| `claude-sonnet-…`, `/model opus`, `haiku` for side tasks | maps the name through `Middleware:ModelAliases` (`*haiku*` → `auto:cheapest`, `*opus*` → `auto:best`, …); unknown names route as `auto`, catalog names force that model |
+| a turn with tools (every main-loop turn) | requires `tools`: HTTP models declaring it (a local coder model, an API-key model) or a CLI connector with `ToolCalling: Prompted` |
+| tool results (the loop continuing) | pins the request to the model that issued the tool calls (`ConversationAffinity`) |
+| `<system-reminder>` blocks, `count_tokens` calls | ignores the former when classifying; answers the latter from its own estimator |
+
+**Where agentic turns can go.** A tool-bearing turn needs a backend that carries tools: an OpenAI-compatible model with function calling (LM Studio or Ollama with `qwen3-coder`, vLLM, OpenRouter, OpenAI), an `Anthropic` connector (API key, requests pass through untouched), or a CLI connector with **prompted tool calling**: the tools are described in the prompt, the model answers with a fenced `tool_call` block, the router turns it into a real `tool_use`, and Claude Code runs the tool as usual. The subscription stays text-in/text-out; it costs more quota than native use because every turn re-sends the context. Details, limits and snippets for Codex, the OpenAI SDKs, Aider and curl: [docs/clients.md](docs/clients.md).
+
+## The dashboard
+
+```csharp
+app.MapRouterDashboard("/router");   // UI at /router, admin API under /router/api (loopback only by default)
+builder.Services.AddSemanticPromptRouting(config).UseConfigurationFile("semantic-router.json");   // optional: persist changes
+```
+
+Overview (models and cooldowns, served-by and required-tier charts, a prompt tester), Activity (every routed request with its decision and outcome), and editors for Tiers, Routes, Models, Connectors, Routing rules, Embeddings and Gateway. **Validate** → **Apply** swaps a new runtime in atomically; **Apply & save** also writes the configuration file, which replaces the `SemanticRouter` section on the next start (secrets left empty are inherited from it). The admin API behind it takes the same JSON document, so a tested configuration can be promoted with one `PUT`. Themes are CSS token blocks; adding one is a block in `app.css` plus an entry in `app.js`. See [docs/dashboard.md](docs/dashboard.md).
 
 ## Using it in your application
 
@@ -216,14 +262,16 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSemanticPromptRouting(builder.Configuration.GetSection("SemanticRouter"));
 
 var app = builder.Build();
-app.UsePromptRouter();      // serves POST /v1/chat/completions (Middleware:PathPrefixes)
-app.MapRouterModels();      // GET /v1/models
+app.UsePromptRouter();          // serves POST /v1/chat/completions and POST /v1/messages (Middleware:PathPrefixes / AnthropicPathPrefixes)
+app.MapRouterModels();          // GET /v1/models
+app.MapAnthropicTokenCount();   // POST /v1/messages/count_tokens
+app.MapRouterDashboard();       // the dashboard and admin API at /router
 app.Run();
 ```
 
-**HTTP connectors** forward the original body untouched apart from `model`, so tool calls, images and SSE pass straight through. The client's own `Authorization` header is never forwarded; credentials come from configuration.
+**HTTP connectors** forward the original body untouched apart from `model` when the client speaks their protocol, so tool calls, images and SSE pass straight through; otherwise they translate the request and the reply (JSON or SSE) between the OpenAI and Anthropic formats. The client's own `Authorization`/`x-api-key` headers are never forwarded; credentials come from configuration.
 
-**CLI connectors** turn the conversation into a prompt, run the CLI with its tools disabled, and return a standard `chat.completion` response (or `chat.completion.chunk` SSE when `stream: true`).
+**CLI connectors** turn the conversation into a prompt, run the CLI with its tools disabled, and return a reply in the client's protocol (`chat.completion` or an Anthropic `message`, streamed when asked). With `ToolCalling: Prompted` they also carry the client's tools.
 
 ### Annotate mode: your endpoint makes the call
 
@@ -284,6 +332,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Routes[]` | `[]` | Intent clusters (below). |
 | `Models[]` | `[]` | The model catalog (below). |
 | `Connectors:{name}` | `{}` | How to reach providers (below). |
+| `Tiers[]` | 5 built-in levels | `{ Level, Name, Description }`: names for the tier numbers, shown by the dashboard and `/v1/models`. Routing compares the numbers. |
 | `DefaultSimilarityThreshold` | `0.75` | Minimum cosine similarity for routes without their own threshold. |
 | `FallbackTier` | `3` | Tier required when nothing matches or classification fails. |
 | `ComplexityTiers[]` | 0.45→2, 0.65→3, 0.85→4 | `{ MinScore, Tier }` rules that raise the tier. An empty list disables them. |
@@ -327,9 +376,12 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 
 | Key | Applies to | Default | Description |
 |---|---|---|---|
-| `Type` | all | `OpenAICompatible` | `OpenAICompatible` or `Cli`. |
-| `BaseAddress`, `RequestPath` | HTTP | –, `/v1/chat/completions` | |
-| `ApiKey`, `Headers` | HTTP | | Bearer token and extra headers. Keep keys in user-secrets or environment variables. |
+| `Type` | all | `OpenAICompatible` | `OpenAICompatible`, `Anthropic` (Messages API) or `Cli`. |
+| `BaseAddress`, `RequestPath` | HTTP | –, `/v1/chat/completions` (`/v1/messages` for Anthropic) | |
+| `ApiKey`, `Headers` | HTTP | | Bearer token (`x-api-key` for Anthropic) and extra headers. Keep keys in user-secrets or environment variables. |
+| `ForwardHeaders[]` | HTTP | `[]` | Client request headers to relay upstream (e.g. `anthropic-beta`). Authorization headers never are. |
+| `AnthropicVersion` | Anthropic | `2023-06-01` | Sent as `anthropic-version`. |
+| `ToolCalling` | CLI | `None` | `None`: decline tool-bearing requests. `Prompted`: describe the tools in the prompt and parse `tool_call` blocks from the reply. |
 | `Preset` | CLI | `Custom` | `ClaudeCode`, `GitHubCopilot`, `Codex` or `Custom`. |
 | `Executable` | CLI | preset's command | Started directly, never through a shell. On Windows use the `.exe`. |
 | `Arguments[]` | CLI | | Custom: the full template (`{model}`, `{prompt}`). Presets: extra arguments appended. |
@@ -348,8 +400,12 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Embeddings:Provider` | `Hashing` | `Hashing` (dev only) or `OpenAICompatible` (`Endpoint`, `Model`, `ApiKey`, `RequestPath`, `MaxBatchSize`, `Timeout`). |
 | `Embeddings:WarmUpOnStartup` | `true` | Embed utterances in the background at startup. |
 | `Middleware:Mode` | `Annotate` | `Annotate` or `Dispatch`. |
-| `Middleware:PathPrefixes[]` | `[]` (all JSON POSTs) | Required in Dispatch mode. |
-| `Middleware:MaxRequestBodyBytes` | `1048576` | Larger bodies get 413. |
+| `Middleware:PathPrefixes[]` | `[]` (all JSON POSTs) | Paths carrying OpenAI chat-completions bodies. Required in Dispatch mode. |
+| `Middleware:AnthropicPathPrefixes[]` | `/v1/messages` | Paths carrying Anthropic Messages bodies (Claude Code). Errors on them use the Anthropic format. |
+| `Middleware:ModelAliases` | `{}` | Glob → alias/model map for client model names: `"*haiku*": "auto:cheapest"`. Catalog names and `auto:*` are never remapped; unmatched names route as `auto`. |
+| `Middleware:PinToolCallingTurns` | `true` | Requests carrying tool results go to the model that issued the tool calls. |
+| `Middleware:StripSystemReminders` | `true` | Ignore `<system-reminder>` blocks when classifying. |
+| `Middleware:MaxRequestBodyBytes` | `8388608` | Larger bodies get 413. Agentic clients send 100 KB+ requests. |
 | `Middleware:EmitResponseHeaders` / `HeaderPrefix` | `true` / `X-Prompt-Route` | `X-Prompt-Route`, `-Tier`, `-Reason`, `-Similarity`, `-Complexity`, `-Model`, `-Connector`, `-Attempt`. |
 | `Middleware:FailOpen` | `true` | Route with `FallbackTier` if classification fails. |
 | `Middleware:MessageSelection` | `LastUserMessage` | Which messages are classified. |
@@ -372,6 +428,7 @@ Similarity scales differ between embedding models. These are starting points; ca
 - **Bind to localhost** when the router fronts your personal subscriptions (the sample does). CLI connectors refuse non-loopback clients anyway, unless `AllowRemoteClients` is set. Behind a reverse proxy, every request appears to come from the proxy, so keep the proxy local too.
 - **Pipeline placement.** Call `UsePromptRouter()` after authentication and rate limiting.
 - **Diagnostics.** Protect `MapPromptClassification()` or map it only in development. Set `EmitResponseHeaders: false` to hide routing from clients.
+- **The dashboard** and its admin API change where prompts go and can show connector settings (keys are masked). They answer loopback clients only unless `RouterDashboardOptions.RequireLocalClient` is turned off; put your own authentication in front before doing that. Keep the saved configuration file out of source control.
 - **Resilience.** HTTP connectors use the named clients `SemanticRouter.Connector.{name}`, and embeddings use `SemanticRouter.Embeddings`. You can add `Microsoft.Extensions.Http.Resilience` handlers to them.
 - **Telemetry.** The `SemanticRouter` meter publishes:
   - `semantic_router.decisions` (tagged `tier`, `reason`, `route`),
@@ -382,8 +439,9 @@ Similarity scales differ between embedding models. These are starting points; ca
 
 ### Known limitations
 
-- **No hot reload.** Routes, models and connectors are read at startup; restart to pick up changes. Cooldowns are kept in memory.
-- **CLI connectors are text in, text out.** Client-defined tools are not supported; requests with `tools` go to HTTP models that declare `tools`. Multi-turn chats are flattened into a labelled transcript. Each request starts a new process, which adds start-up latency compared with an HTTP call.
+- **State is per process.** Cooldowns, tool-call affinity and the activity log live in memory. Configuration applied through the dashboard is persisted only when a configuration file is registered.
+- **CLI connectors are text in, text out.** Without `ToolCalling: Prompted`, requests with `tools` skip them. With it, tool calls depend on the model following the format, every turn re-sends the whole context, and images are never supported. Multi-turn chats are flattened into a labelled transcript. Each request starts a new process, which adds start-up latency compared with an HTTP call.
+- **Cross-protocol translation keeps the common subset.** Tools, tool results, images, system prompts, sampling parameters and stop sequences are translated; vendor-specific extras (extended thinking, prompt-cache hints, `response_format`) only survive on pass-through to a backend that speaks the client's protocol.
 - **Token counts are estimates.** Leave headroom in `ContextWindow`.
 - **The CLI presets track the vendors' documented flags as of October 2026.** If a CLI changes, add flags through `Arguments` or use the `Custom` preset.
 
@@ -392,19 +450,20 @@ Similarity scales differ between embedding models. These are starting points; ca
 | To… | Do this |
 |---|---|
 | Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. |
+| Keep configuration somewhere other than a file | Implement `IRouterConfigurationStore` and call `.UseConfigurationStore<T>()`. |
 | Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. |
 | Change how requirements are derived | Implement `IRouteSelector` or `IComplexityAnalyzer`. |
 | Change how models are ranked (budgets, time of day) | Implement `IModelSelector`. |
 | Persist cooldowns or share them across instances | Implement `IModelHealth`. |
 | Support a custom payload shape | Implement `IPromptExtractor`. |
 
-Registrations use `TryAdd`, so anything you register before `AddSemanticPromptRouting()` wins.
+Registrations use `TryAdd`, so anything you register before `AddSemanticPromptRouting()` wins. The router's own classifier, router, extractor and embedding provider are rebuilt on every configuration reload; a custom implementation you register is used as-is across reloads.
 
 ## Building and testing
 
 ```bash
 dotnet build      # warnings are errors; .NET analyzers at latest-recommended
-dotnet test       # 207 tests
+dotnet test       # 259 tests
 dotnet pack -c Release -o artifacts
 ```
 
@@ -413,7 +472,8 @@ The tests cover:
 - health cooldowns and the router;
 - the CLI adapters' arguments and output parsers;
 - real child processes that stand in for the CLIs (POSIX): environment scrubbing, stdin, timeouts and killing the process;
-- in-process `TestServer` runs of both middleware modes, including failover, quota cooldowns, local-only routing and the remote-client guard.
+- in-process `TestServer` runs of both middleware modes, including failover, quota cooldowns, local-only routing and the remote-client guard;
+- both protocols: parsing, translation in each direction (JSON and SSE), the Anthropic front door end to end, tool-turn affinity, model aliases, prompted tool calling, and the dashboard's admin API, configuration store and hot reload.
 
 No network, model or vendor CLI is needed. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
 
