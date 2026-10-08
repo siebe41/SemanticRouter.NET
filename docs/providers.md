@@ -13,6 +13,7 @@ dotnet user-secrets set "SemanticRouter:Connectors:openai:ApiKey" "<key>"
 ```
 
 - [Choosing tiers, capabilities and costs](#choosing-tiers-capabilities-and-costs)
+- [Model lineups: several models per provider](#model-lineups-several-models-per-provider)
 - Local: [LM Studio](#lm-studio) · [Ollama](#ollama) · [vLLM / llama.cpp / others](#vllm-llamacpp-and-other-openai-compatible-servers)
 - Subscription CLIs: [Claude Code](#claude-code-cli) · [GitHub Copilot CLI](#github-copilot-cli) · [OpenAI Codex CLI](#openai-codex-cli) · [Any other CLI](#any-other-cli)
 - APIs: [OpenAI](#openai-api) · [OpenAI Responses](#openai-responses-api) · [Anthropic](#anthropic-api) · [Google Gemini](#google-gemini-api) · [Azure OpenAI](#azure-openai) · [OpenRouter](#openrouter)
@@ -42,6 +43,52 @@ Everything on this page can also be edited in the [dashboard](dashboard.md), wit
 - **ContextWindow** stops a request from going to a model that cannot hold it. Set it for local models in particular; it should match the context length you loaded the model with.
 - **IsLocal** marks models whose prompts stay on your machine. Only these can serve `LocalOnly` routes.
 
+## Model lineups: several models per provider
+
+A connector can serve any number of catalog models: Claude's four families through one Claude Code login, or every model your LM Studio has downloaded. Each is its own entry under `Models` with the same `Connector`, its own `Model` id and its own `Tier`, so the router sends easy prompts to the small ones and keeps the big ones for prompts that need them.
+
+You don't have to type them in. **Discover models** on the dashboard's Models page, or `semantic-router models` on the command line, asks the connector what it offers and suggests an entry for each model:
+
+| Provider | Asked with | Suggested tier |
+|---|---|---|
+| Claude (Claude Code CLI, Anthropic API, Copilot) | the preset's names (`haiku`, `sonnet`, `opus`, `claude-fable-5-1`), `GET /v1/models`, or the Copilot SDK | by family, one rung each: Haiku **2**, Sonnet **3**, Opus **4**, Fable **5** |
+| LM Studio | `GET /v1/models` and `GET /api/v0/models` | by size: ≤ 9B **1**, ≤ 35B **2**, larger **3** |
+| Ollama | `GET /v1/models`, `/api/tags`, `/api/ps`, `POST /api/show` | by size, as above |
+| vLLM, llama.cpp, other OpenAI-compatible servers | `GET /v1/models` | by the size in the model id, as above |
+| Other APIs (OpenAI, Gemini, OpenRouter, …) | `GET /v1/models` | 2 for `mini`/`nano`/`lite`/`small` models, otherwise 3. Not ticked by default: review the tier and set the prices. |
+
+Each suggestion explains itself, and every field can be changed before it is added:
+- **Capabilities.** `code` for coder models; `tools`, `vision` and `reasoning` when the server reports them (LM Studio's `tool_use`, Ollama's `tools`, `vision` and `thinking`) or the family is known for them. `tools` is only claimed when the connector can carry tools: HTTP, Copilot, or a CLI with `ToolCalling: Prompted`.
+- **Context.** For a local server that reports load state, the context the model is **loaded with**, not the most it supports: LM Studio and Ollama load models with their own default context unless told otherwise. A model that is not loaded gets `0` (unknown) and a note to set it. Claude Code models get 200K, the conservative assumption; raise it if your plan has 1M.
+- **Prices.** Anthropic API models get the list price; local models and subscriptions are free. Check prices before relying on them.
+- **Names.** The connector and the model id: `lmstudio-qwen3-8b`, `ollama-llama3.2`, `claude-sonnet`. Models already in the catalog are marked, not suggested again.
+
+The Claude lineup through Claude Code, as `semantic-router init` writes it:
+
+```jsonc
+"Models": [
+  { "Name": "claude-haiku",     "Connector": "claude-cli", "Model": "haiku",            "Tier": 2, "ContextWindow": 200000, "Capabilities": [ "chat", "code", "reasoning", "tools" ] },
+  { "Name": "claude-sonnet",    "Connector": "claude-cli", "Model": "sonnet",           "Tier": 3, "ContextWindow": 200000, "Capabilities": [ "chat", "code", "reasoning", "tools" ] },
+  { "Name": "claude-opus",      "Connector": "claude-cli", "Model": "opus",             "Tier": 4, "ContextWindow": 200000, "Capabilities": [ "chat", "code", "reasoning", "tools" ] },
+  { "Name": "claude-fable-5-1", "Connector": "claude-cli", "Model": "claude-fable-5-1", "Tier": 5, "ContextWindow": 200000, "Capabilities": [ "chat", "code", "reasoning", "tools" ], "Enabled": false }
+]
+```
+
+With the default ladder, unmatched prompts (tier 3) go to Sonnet, the architecture and debugging routes (tier 4) to Opus, and Fable is used only when a prompt needs tier 5: `auto:best`, a tier-5 route, or [retry escalation](routing-quality.md). Fable starts disabled because not every plan includes it. If Opus is scarce on your plan, put Sonnet on tier 4 as well and give Opus `Priority` 1.
+
+### Loading models on demand
+
+Local servers differ in whether a model has to be loaded before it can answer. Discovery tells you which kind you have:
+
+| Server | Loading | What the router does |
+|---|---|---|
+| LM Studio, just-in-time loading **on** | **On demand**: `/v1/models` lists every downloaded model, and a request for one that is not loaded loads it. The request waits for the load, and LM Studio may unload another model to make room. | Suggests every model; those not loaded get `Priority` 1, so loaded models win ties. |
+| LM Studio, just-in-time loading **off** | **Loaded only**: only loaded models are listed and answer. | Suggests models that are not loaded as **disabled**. `doctor` fails a catalog model that is downloaded but not loaded and says to `lms load` it or turn just-in-time loading on. |
+| Ollama | **On demand**, always: a model loads on its first request and unloads after its keep-alive time (5 minutes by default). `OLLAMA_MAX_LOADED_MODELS` limits how many stay loaded. | As LM Studio with just-in-time loading on. Ollama's cloud models (`…-cloud`) run on ollama.com, so they are never suggested as local, and `init` leaves them out. |
+| vLLM, llama.cpp, other servers | Unknown: the server serves what it lists. | Suggests what is listed, marked local but not ticked: a server on a local address can still be a proxy (LiteLLM, a gateway) that sends prompts to a cloud API, and `IsLocal` is what keeps `LocalOnly` prompts on your machine. |
+
+The first request to a cold model can take long enough to hit the connector's `Timeout`; raise it (LM Studio's default in `init` is 2 minutes) if large models time out while loading. `semantic-router doctor` also warns when a model's `ContextWindow` is larger than the context it is loaded with, since requests between the two would be sent to it and fail.
+
 ## LM Studio
 
 Start the server (the Developer tab, or `lms server start --port 1234`). Load your chat models and an embedding model, then copy their exact IDs from `curl http://localhost:1234/v1/models`.
@@ -55,7 +102,7 @@ dotnet user-secrets set "SemanticRouter:Embeddings:ApiKey" "<token>"     # when 
 # or reference LM Studio's own variable: "ApiKey": "${env:LM_API_TOKEN}"
 ```
 
-Without the token, LM Studio answers `401`. The router reports that as "the server requires authentication; set SemanticRouter:Connectors:lmstudio:ApiKey" (in the log, the 503 detail and the dashboard's **List models**), fails over to the next model and cools `lmstudio` down for the short unavailable cooldown. The PoC sample's preflight reads `LM_API_TOKEN` when no key is configured.
+Without the token, LM Studio answers `401`. The router reports that as "the server requires authentication; set SemanticRouter:Connectors:lmstudio:ApiKey" (in the log, the 503 detail and the dashboard's **Discover models**), fails over to the next model and cools `lmstudio` down for the short unavailable cooldown. The PoC sample's preflight reads `LM_API_TOKEN` when no key is configured.
 
 ```jsonc
 "Connectors": {
@@ -98,12 +145,16 @@ Uses your own Claude subscription. **Read [TERMS.md](TERMS.md#anthropic-claude-c
   "claude-cli": { "Type": "Cli", "Preset": "ClaudeCode", "MaxConcurrency": 2, "Timeout": "00:03:00" }
 },
 "Models": [
-  { "Name": "claude-code", "Connector": "claude-cli", "Model": "sonnet", "Tier": 4, "ContextWindow": 200000,
+  { "Name": "claude-haiku", "Connector": "claude-cli", "Model": "haiku", "Tier": 2, "ContextWindow": 200000,
     "Capabilities": [ "chat", "code", "reasoning" ] },
-  { "Name": "claude-code-opus", "Connector": "claude-cli", "Model": "opus", "Tier": 5, "ContextWindow": 200000,
-    "Capabilities": [ "chat", "code", "reasoning" ], "Priority": 1 }
+  { "Name": "claude-sonnet", "Connector": "claude-cli", "Model": "sonnet", "Tier": 3, "ContextWindow": 200000,
+    "Capabilities": [ "chat", "code", "reasoning" ] },
+  { "Name": "claude-opus", "Connector": "claude-cli", "Model": "opus", "Tier": 4, "ContextWindow": 200000,
+    "Capabilities": [ "chat", "code", "reasoning" ] }
 ]
 ```
+
+The `haiku`, `sonnet` and `opus` aliases follow Anthropic's latest model of each family; add `claude-fable-5-1` on tier 5 if your plan includes it ([Model lineups](#model-lineups-several-models-per-provider)).
 
 What the preset does:
 - **Command line.** It runs `claude -p <prompt> --output-format stream-json --verbose --include-partial-messages --tools "" --disallowedTools "mcp__*" --strict-mcp-config --no-session-persistence --permission-mode dontAsk [--model …] [--system-prompt …]` in an empty temporary directory. These flags were checked against Claude Code 2.1.293.
@@ -232,12 +283,14 @@ The `Anthropic` connector speaks the Messages API (`POST /v1/messages`) with you
 ```jsonc
 "Connectors": { "anthropic": { "Type": "Anthropic", "BaseAddress": "https://api.anthropic.com" } },
 "Models": [
-  { "Name": "anthropic-opus", "Connector": "anthropic", "Model": "claude-opus-5-5", "Tier": 5, "ContextWindow": 200000,
-    "Capabilities": [ "chat", "code", "tools", "vision", "reasoning" ], "InputCostPerMillionTokens": 15, "OutputCostPerMillionTokens": 75 }
+  { "Name": "anthropic-sonnet", "Connector": "anthropic", "Model": "claude-sonnet-5-5", "Tier": 3, "ContextWindow": 1000000,
+    "Capabilities": [ "chat", "code", "tools", "vision", "reasoning" ], "InputCostPerMillionTokens": 2, "OutputCostPerMillionTokens": 10 },
+  { "Name": "anthropic-opus", "Connector": "anthropic", "Model": "claude-opus-5-5", "Tier": 4, "ContextWindow": 1000000,
+    "Capabilities": [ "chat", "code", "tools", "vision", "reasoning" ], "InputCostPerMillionTokens": 4, "OutputCostPerMillionTokens": 20 }
 ]
 ```
 
-Set `ApiKey`. `AnthropicVersion` (default `2023-06-01`) is sent as `anthropic-version`; add client headers you want relayed, such as `anthropic-beta`, to `ForwardHeaders`. The client's own `Authorization`/`x-api-key` headers are never forwarded. (Anthropic's OpenAI-compatible endpoint still works through an `OpenAICompatible` connector if you prefer it.)
+Set `ApiKey`, then **Discover models** lists the models your key can use with their list prices and context windows. `AnthropicVersion` (default `2023-06-01`) is sent as `anthropic-version`; add client headers you want relayed, such as `anthropic-beta`, to `ForwardHeaders`. The client's own `Authorization`/`x-api-key` headers are never forwarded. (Anthropic's OpenAI-compatible endpoint still works through an `OpenAICompatible` connector if you prefer it.)
 
 ## Google Gemini API
 

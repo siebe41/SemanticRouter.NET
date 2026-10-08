@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -155,7 +156,7 @@ public static class RouterDoctor
         string name, ConnectorOptions connector, ModelDefinition[] models, RouterConfiguration resolved, IHttpClientFactory http, CancellationToken cancellationToken)
     {
         string subject = $"connector {name}";
-        ConnectorProbeResult probe = await ConnectorProbe.ListModelsAsync(
+        ConnectorProbeResult probe = await ConnectorProbe.DiscoverAsync(
             name, connector, http.CreateClient(OpenAICompatibleConnector.HttpClientNamePrefix + name), ProbeTimeout, cancellationToken).ConfigureAwait(false);
 
         switch (probe.Failure)
@@ -169,8 +170,7 @@ public static class RouterDoctor
                 return [new RouterCheck(subject, RouterCheckStatus.Failed, probe.Message)];
         }
 
-        var checks = new List<RouterCheck> { new(subject, RouterCheckStatus.Ok, probe.Message) };
-        var offered = new HashSet<string>(probe.Models, StringComparer.OrdinalIgnoreCase);
+        var checks = new List<RouterCheck> { new(subject, RouterCheckStatus.Ok, probe.LoadingNote is null ? probe.Message : $"{probe.Message} {probe.LoadingNote}") };
         foreach (ModelDefinition model in models)
         {
             if (string.IsNullOrEmpty(model.Model))
@@ -179,11 +179,38 @@ public static class RouterDoctor
             }
 
             int index = resolved.Models.IndexOf(model);
-            checks.Add(offered.Contains(model.Model)
-                ? new RouterCheck($"model {model.Name}", RouterCheckStatus.Ok, $"'{model.Model}' is offered by {name}.")
-                : new RouterCheck($"model {model.Name}", RouterCheckStatus.Failed,
+            string modelSubject = $"model {model.Name}";
+            DiscoveredModel? found = probe.Details.FirstOrDefault(d => string.Equals(d.Id, model.Model, StringComparison.OrdinalIgnoreCase));
+            if (found is null)
+            {
+                checks.Add(new RouterCheck(modelSubject, RouterCheckStatus.Failed,
                     $"'{model.Model}' is not offered by {name}; set SemanticRouter:Models:{index}:Model to one of: " +
                     string.Join(", ", probe.Models.Take(12)) + (probe.Models.Count > 12 ? ", …" : string.Empty) + "."));
+                continue;
+            }
+
+            if (!found.Listed)
+            {
+                checks.Add(new RouterCheck(modelSubject, RouterCheckStatus.Failed,
+                    $"'{model.Model}' is downloaded but not loaded, and {probe.Server ?? name} only serves loaded models: load it (`lms load {model.Model}`) " +
+                    "or turn on just-in-time loading in the server settings."));
+                continue;
+            }
+
+            string state = found.Loaded switch
+            {
+                true => " (loaded)",
+                false when probe.Loading == ModelLoading.OnDemand => " (not loaded: its first request waits for it to load)",
+                _ => string.Empty,
+            };
+            checks.Add(new RouterCheck(modelSubject, RouterCheckStatus.Ok, $"'{model.Model}' is offered by {name}{state}."));
+            if (found.LoadedContextLength is { } loaded && model.ContextWindow > loaded)
+            {
+                checks.Add(new RouterCheck(modelSubject, RouterCheckStatus.Warning,
+                    $"ContextWindow {model.ContextWindow.ToString("N0", CultureInfo.InvariantCulture)} is larger than the {loaded.ToString("N0", CultureInfo.InvariantCulture)} " +
+                    $"tokens it is loaded with, so longer requests are sent to it, fail and cool it down; set SemanticRouter:Models:{index}:ContextWindow to " +
+                    $"{loaded.ToString(CultureInfo.InvariantCulture)} or load it with more context."));
+            }
         }
 
         return checks;

@@ -1,6 +1,6 @@
 /* Semantic Router dashboard: Actions behind data-action buttons, and applying configuration. */
 import { lineDiff } from './config.js';
-import { $, api, connectorNames, h, isDirty, setPath, state, tiers, toast } from './core.js';
+import { $, api, connectorNames, h, isDirty, lineupFor, setPath, state, tiers, toast } from './core.js';
 import { graph, loadMemory, updateMemorySide } from './memory.js';
 import { refreshStatus, render, setConfig } from './shell.js';
 
@@ -114,6 +114,45 @@ export const actions = {
       const text = r.models.length ? `${r.models.length} model(s): ${r.models.join(', ')}` : 'No models reported.';
       if (out) out.textContent = (r.note ? r.note + ' ' : '') + text; else toast(text, 'ok');
     } catch (e) { if (out) out.textContent = 'Discovery failed: ' + e.message; else toast('Discovery failed: ' + e.message, 'danger'); }
+  },
+  async 'lineup-discover'(el) {
+    const connector = el.dataset.connector;
+    let l = lineupFor(connector);
+    if (!l) { l = { connector }; state.lineups.push(l); }
+    Object.assign(l, { busy: true, error: null });
+    render();
+    try {
+      const r = await api('POST', `/connectors/${encodeURIComponent(connector)}/discover`);
+      Object.assign(l, r, { busy: false, lineup: r.lineup.map((e) => ({ ...e, selected: e.recommended })) });
+    } catch (e) {
+      Object.assign(l, { busy: false, error: e.status === 404 && isDirty() ? `${e.message} Apply the draft first: discovery asks the running router's connectors.` : e.message });
+    }
+    render();
+  },
+  'lineup-close'(el) { state.lineups = state.lineups.filter((l) => l.connector !== el.dataset.connector); render(); },
+  'lineup-all'(el) {
+    const l = state.lineups[+el.dataset.index];
+    const rows = l.lineup.filter((e) => e.suggestion && !e.inCatalog);
+    const on = !rows.every((e) => e.selected);
+    rows.forEach((e) => { e.selected = on; });
+    render();
+  },
+  'lineup-add'(el) {
+    const l = state.lineups[+el.dataset.index];
+    const models = state.config.Models = state.config.Models || [];
+    const taken = new Set(models.map((m) => (m.Name || '').toLowerCase()));
+    const added = [];
+    l.lineup.filter((e) => e.selected && e.suggestion && !e.inCatalog).forEach((e) => {
+      const model = JSON.parse(JSON.stringify(e.suggestion));
+      let name = (model.Name || '').trim() || e.id; let n = 1;
+      while (taken.has(name.toLowerCase())) name = `${model.Name}-${++n}`;
+      model.Name = name; taken.add(name.toLowerCase());
+      models.push(model);
+      Object.assign(e, { inCatalog: name, selected: false });
+      added.push(name);
+    });
+    render();
+    toast(added.length ? `Added ${added.join(', ')} to the draft. Apply to use ${added.length === 1 ? 'it' : 'them'}.` : 'Nothing selected.', added.length ? 'ok' : '');
   },
   'rule-add'() { state.config.ComplexityTiers.push({ MinScore: 0.5, Tier: 2 }); render(); },
   'rule-remove'(el) { state.config.ComplexityTiers.splice(+el.dataset.index, 1); render(); },

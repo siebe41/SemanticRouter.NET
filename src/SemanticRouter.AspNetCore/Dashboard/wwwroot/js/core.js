@@ -48,7 +48,9 @@ export const state = {
   evaluation: { text: null, location: null, count: 0, report: null, busy: false, health: null, compare: null, addFor: null, add: {}, form: { provider: 'OpenAICompatible', endpoint: '', model: '', apiKey: '', dimensions: 512 } },
   label: null,         // the Activity "label this prompt" form
   profileTester: { prompt: '', results: null, busy: false },
+  lineups: [],         // Discover models: one { connector, busy, error, server, loading, loadingNote, note, lineup } per connector asked
 };
+export const lineupFor = (connector) => state.lineups.find((l) => l.connector === connector);
 
 /* ---------------------------------------------------------------------------------------------
    Helpers

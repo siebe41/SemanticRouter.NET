@@ -126,6 +126,27 @@ test('adding a model puts it in the catalog', async ({ page, request }) => {
   expect(models).toContain('stub-medium');
 });
 
+test('discovering a connector\'s models adds the chosen ones on the chosen tier', async ({ page, request }) => {
+  await open(page, 'models');
+  const group = page.locator('section.model-group', { has: page.locator('h2', { hasText: /^local$/ }) });
+  await group.locator('[data-action="lineup-discover"]').click();
+  const lineup = group.locator('.lineup');
+  await expect(lineup).toContainText('in the catalog as local-small');
+  // The stub is neither LM Studio nor Ollama, so nothing is ticked for you: it could be a proxy to a cloud API.
+  await expect(lineup).toContainText('does not forward prompts to a cloud API');
+  await lineup.locator('input[aria-label="Add stub-large"]').check();
+  expect(await unnamedControls(page), 'every lineup control has an accessible name').toEqual([]);
+  await lineup.locator('input[aria-label="Catalog name for stub-large"]').fill('local-big');
+  await lineup.locator('select[aria-label="Tier for stub-large"]').selectOption('3');
+  await lineup.locator('[data-action="lineup-add"]').click();
+  await expect(group.locator('.item', { hasText: 'local-big' })).toContainText('T3');
+  await expect(lineup).toContainText('in the catalog as local-big');
+  await page.locator('#save-bar [data-action="apply"]').click();
+  await expect(page.locator('#toast')).toContainText('Applied');
+  const config = (await (await request.get('/router/api/config')).json()).config;
+  expect(config.Models.find((m) => m.Name === 'local-big')).toMatchObject({ Connector: 'local', Model: 'stub-large', Tier: 3, IsLocal: true });
+});
+
 test('renaming a connector renames it in the models that use it', async ({ page, request }) => {
   await open(page, 'connectors');
   await page.locator('.item-head', { hasText: 'local' }).first().click();

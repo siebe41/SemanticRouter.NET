@@ -9,7 +9,7 @@ internal sealed record HostSettings
     public const string StateFileName = "semantic-router.db";
     public const string DefaultUrl = "http://localhost:5080";
 
-    /// <summary><c>run</c> (default), <c>init</c>, <c>doctor</c>, <c>help</c> or <c>version</c>.</summary>
+    /// <summary><c>run</c> (default), <c>init</c>, <c>doctor</c>, <c>models</c>, <c>help</c> or <c>version</c>.</summary>
     public string Command { get; init; } = "run";
 
     /// <summary>Where <c>semantic-router.json</c>, its secrets file and an optional <c>appsettings.json</c> live.</summary>
@@ -20,6 +20,9 @@ internal sealed record HostSettings
 
     /// <summary><c>init</c>: skip probing for local servers and CLIs.</summary>
     public bool NoDetect { get; init; }
+
+    /// <summary><c>models</c>: the one connector to list; <see langword="null"/> lists them all.</summary>
+    public string? Connector { get; init; }
 
     /// <summary>Arguments for the web host (<c>--urls</c>, <c>--SemanticRouter:…=…</c>).</summary>
     public IReadOnlyList<string> HostArguments { get; init; } = [];
@@ -34,7 +37,7 @@ internal sealed record HostSettings
     {
         environment ??= Environment.GetEnvironmentVariable;
         string command = "run";
-        string? directory = null;
+        string? directory = null, connector = null;
         bool force = false, noDetect = false;
         var hostArguments = new List<string>();
         string? error = null;
@@ -44,7 +47,7 @@ internal sealed record HostSettings
             string arg = args[i];
             switch (arg)
             {
-                case "run" or "init" or "doctor" or "help" or "version" when i == 0:
+                case "run" or "init" or "doctor" or "models" or "help" or "version" when i == 0:
                     command = arg;
                     break;
                 case "-h" or "--help" or "-?":
@@ -79,6 +82,10 @@ internal sealed record HostSettings
                     {
                         error = $"Unknown command '{arg}'.";
                     }
+                    else if (command == "models" && connector is null && !arg.StartsWith('-'))
+                    {
+                        connector = arg;
+                    }
                     else
                     {
                         hostArguments.Add(arg);
@@ -94,6 +101,7 @@ internal sealed record HostSettings
             ConfigurationDirectory = Path.GetFullPath(directory ?? DefaultConfigurationDirectory(environment, OperatingSystem.IsWindows(), OperatingSystem.IsMacOS())),
             Force = force,
             NoDetect = noDetect,
+            Connector = connector,
             HostArguments = hostArguments,
             Error = error,
         };
