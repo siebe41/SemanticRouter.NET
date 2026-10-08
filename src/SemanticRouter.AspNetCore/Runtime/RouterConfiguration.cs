@@ -33,6 +33,9 @@ public sealed class RouterConfiguration : SemanticRouterOptions
     /// <summary>The gateway (middleware) settings.</summary>
     public PromptRouterMiddlewareOptions Middleware { get; set; } = new();
 
+    /// <summary>Memory sources the dashboard maps, and tracking of which notes reach which model.</summary>
+    public MemoryOptions Memory { get; set; } = new();
+
     /// <summary>Serializes a document (secrets included).</summary>
     public string ToJson() => JsonSerializer.Serialize(this, Json);
 
@@ -51,7 +54,8 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         SemanticRouterOptions routing,
         IReadOnlyDictionary<string, ConnectorOptions> connectors,
         EmbeddingProviderOptions embeddings,
-        PromptRouterMiddlewareOptions middleware)
+        PromptRouterMiddlewareOptions middleware,
+        MemoryOptions? memory = null)
     {
         ArgumentNullException.ThrowIfNull(routing);
         ArgumentNullException.ThrowIfNull(connectors);
@@ -67,6 +71,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
 
         document.Embeddings = JsonSerializer.Deserialize<EmbeddingProviderOptions>(JsonSerializer.Serialize(embeddings, Json), Json)!;
         document.Middleware = JsonSerializer.Deserialize<PromptRouterMiddlewareOptions>(JsonSerializer.Serialize(middleware, Json), Json)!;
+        if (memory is not null)
+        {
+            document.Memory = JsonSerializer.Deserialize<MemoryOptions>(JsonSerializer.Serialize(memory, Json), Json)!;
+        }
+
         return document;
     }
 
@@ -149,6 +158,30 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         if (string.IsNullOrWhiteSpace(Middleware.HeaderPrefix))
         {
             errors.Add("Middleware:HeaderPrefix must not be empty.");
+        }
+
+        var memorySources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (MemorySourceOptions source in Memory.Sources)
+        {
+            if (string.IsNullOrWhiteSpace(source.Name))
+            {
+                errors.Add("Memory:Sources entries must have a Name.");
+            }
+            else if (!memorySources.Add(source.Name))
+            {
+                errors.Add($"Memory source '{source.Name}' is listed more than once.");
+            }
+            else if (source.Enabled && source.Type != MemorySourceType.ClaudeCode && string.IsNullOrWhiteSpace(source.Path))
+            {
+                errors.Add(source.Type == MemorySourceType.KnowledgeGraph
+                    ? $"Memory source '{source.Name}' needs a Path (the memory server's JSONL file)."
+                    : $"Memory source '{source.Name}' needs a Path (the folder of notes).");
+            }
+        }
+
+        if (Memory.MinimumLineLength < 8)
+        {
+            errors.Add("Memory:MinimumLineLength must be at least 8, otherwise common lines would mark unrelated notes as shared.");
         }
 
         if (Middleware.Mode == PromptRouterMode.Dispatch)

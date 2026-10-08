@@ -77,6 +77,15 @@ public sealed class RoutingActivityEntry
 
     /// <summary>Total time from routing to the end of the response, in milliseconds.</summary>
     public double? TotalMilliseconds { get; set; }
+
+    /// <summary>
+    /// The models the request was sent to, in order (Dispatch mode). Failed attempts are included: the backend may have
+    /// received the request before it failed.
+    /// </summary>
+    public IList<string> SentTo { get; } = new List<string>();
+
+    /// <summary>The memory notes found in the request (titles and ids, never their text), when memory sources are configured.</summary>
+    public IReadOnlyList<MemoryReference> Memory { get; init; } = [];
 }
 
 /// <summary>A bounded in-memory log of recent routing decisions.</summary>
@@ -104,6 +113,12 @@ public sealed class RoutingActivityLog
         }
     }
 
+    /// <summary>
+    /// Raised when an entry is added and again when its request finishes, for live views. Handlers run on the request's
+    /// thread and must return quickly.
+    /// </summary>
+    public event Action<RoutingActivityEntry>? Updated;
+
     /// <summary>Adds an entry; its <see cref="RoutingActivityEntry.Id"/> must be unset.</summary>
     public RoutingActivityEntry Add(RoutingActivityEntry entry)
     {
@@ -112,8 +127,17 @@ public sealed class RoutingActivityLog
         {
             _entries[_next % _entries.Length] = entry;
             _next++;
-            return entry;
         }
+
+        Updated?.Invoke(entry);
+        return entry;
+    }
+
+    /// <summary>Announces that <paramref name="entry"/>'s request has finished (raises <see cref="Updated"/>).</summary>
+    public void Complete(RoutingActivityEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        Updated?.Invoke(entry);
     }
 
     /// <summary>Reserves the next id.</summary>

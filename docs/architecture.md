@@ -44,7 +44,7 @@ flowchart TD
 6. **Rank.** `DefaultModelSelector` filters by enabled, available, local (if required), capabilities (the request adds `tools` and `vision` itself), and context window, then orders by strategy. Models below the required tier follow when `AllowBelowRequiredTier` is on.
 7. **Dispatch or annotate.** In Annotate mode the plan is attached to the request and the next endpoint decides. In Dispatch mode `PromptDispatcher` tries up to `MaxAttempts` candidates. A failure before any output cools the model down and moves on; once output has started the connector owns the response. An account-wide limit cools down every model on that connector.
 8. **Write the reply in the client's protocol.** See the next section.
-9. **Record.** A `RoutingActivityEntry` (decision, then outcome and timing) goes into the in-memory log that backs the dashboard's Activity page; metrics and routing headers are emitted.
+9. **Record.** A `RoutingActivityEntry` (decision, then outcome and timing) goes into the in-memory log that backs the dashboard's Activity and Live pages (pushed to them over `api/events`); metrics and routing headers are emitted. When memory sources are configured, the body was checked against the `MemoryIndex` while parsing, and the notes it carried are counted against every model in `SentTo` by the `MemoryExposureLog` ([memory.md](memory.md)).
 
 ## Two protocols, any backend
 
@@ -80,7 +80,7 @@ flowchart LR
 - **`RouterConfiguration`** is one document: the whole `SemanticRouter` section (routing rules, tiers, models, connectors, embeddings, middleware). Its JSON shape equals the `appsettings.json` section, so documents move between the two.
 - **`RouterRuntime`** is an immutable snapshot built from a document: classifier, router, extractor, embedding provider, connector catalog, parsed path prefixes and alias list. `RouterRuntimeProvider.Apply` validates, builds a new runtime, swaps it in with one reference write, starts the route-index warm-up in the background, then disposes the old runtime. In-flight requests keep the runtime they started with.
 - **DI facades** (`RuntimeRouterFacade` and friends) forward every call to the current runtime, so a service that injected `IPromptRouter` at start-up never holds a stale instance. Registering your own implementation of one of these interfaces replaces the facade and is used as-is across reloads.
-- **State that survives a reload** is registered once: `IModelHealth` (cooldowns), `IToolCallAffinity`, `RoutingActivityLog`, the metrics meter and the CLI process runner. All of it is in memory today; see the durable-state item in the [roadmap](roadmap.md).
+- **State that survives a reload** is registered once: `IModelHealth` (cooldowns), `IToolCallAffinity`, `RoutingActivityLog`, `MemoryIndex` and `MemoryExposureLog`, the metrics meter and the CLI process runner. All of it is in memory today; see the durable-state item in the [roadmap](roadmap.md).
 - **Secrets** are masked as `***` on the way to the browser; sending the mask back keeps the stored value, and empty secrets in a stored document are filled from the baseline. Values may be references (`${env:…}`, `${secret:…}`): the runtime keeps the document as written (`Configuration`) and builds connectors and the embedding provider from a resolved copy (`Resolved`), never sent to the browser. A `SecretRedactor` built from the resolved values scrubs them from errors, relayed upstream bodies, activity and logs.
 
 ## The dashboard

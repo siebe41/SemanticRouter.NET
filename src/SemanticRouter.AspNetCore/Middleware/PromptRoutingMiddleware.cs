@@ -23,6 +23,8 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly PromptDispatcher _dispatcher;
     private readonly PromptRouterMetrics _metrics;
     private readonly RoutingActivityLog _activity;
+    private readonly MemoryIndex _memory;
+    private readonly MemoryExposureLog _exposure;
     private readonly IToolCallAffinity? _affinity;
     private readonly ILogger _logger;
 
@@ -32,6 +34,8 @@ internal sealed partial class PromptRoutingMiddleware
         PromptDispatcher dispatcher,
         PromptRouterMetrics metrics,
         RoutingActivityLog activity,
+        MemoryIndex memory,
+        MemoryExposureLog exposure,
         ILogger<PromptRoutingMiddleware> logger,
         IToolCallAffinity? affinity = null)
     {
@@ -40,6 +44,8 @@ internal sealed partial class PromptRoutingMiddleware
         _dispatcher = dispatcher;
         _metrics = metrics;
         _activity = activity;
+        _memory = memory;
+        _exposure = exposure;
         _affinity = affinity;
         _logger = logger;
 
@@ -87,7 +93,7 @@ internal sealed partial class PromptRoutingMiddleware
         // Give downstream handlers a fresh, seekable copy of the body we consumed.
         context.Request.Body = new MemoryStream(bodyBytes.ToArray(), writable: false);
 
-        if (!TryParse(context, runtime, protocol, bodyBytes, out string? prompt, out ChatCompletionRequest chat))
+        if (!TryParse(context, runtime, protocol, bodyBytes, out string? prompt, out ChatCompletionRequest chat, out IReadOnlyList<MemoryReference> memory))
         {
             LogNoPrompt(_logger, context.Request.Path);
             if (options.Mode == PromptRouterMode.Dispatch)
@@ -166,17 +172,41 @@ internal sealed partial class PromptRoutingMiddleware
             EstimatedInputTokens = chat.EstimatedInputTokens,
             PlannedModel = plan.Candidates.Count > 0 ? plan.Candidates[0].Model.Name : null,
             ClassificationMilliseconds = Math.Round(result.Elapsed.TotalMilliseconds, 2),
+            Memory = memory,
         });
 
-        if (options.Mode == PromptRouterMode.Dispatch)
+        try
         {
-            await _dispatcher.DispatchAsync(context, runtime, plan, chat, bodyBytes, entry).ConfigureAwait(false);
+            if (options.Mode == PromptRouterMode.Dispatch)
+            {
+                await _dispatcher.DispatchAsync(context, runtime, plan, chat, bodyBytes, entry).ConfigureAwait(false);
+            }
+            else
+            {
+                await _next(context).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
             entry.TotalMilliseconds = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1);
+            RecordMemoryExposure(runtime, entry);
+            _activity.Complete(entry);
+        }
+    }
+
+    /// <summary>Counts the request's memory notes against every model it was sent to (Dispatch mode only: in Annotate mode the router does not know).</summary>
+    private void RecordMemoryExposure(RouterRuntime runtime, RoutingActivityEntry entry)
+    {
+        if (entry.Memory.Count == 0)
+        {
             return;
         }
 
-        await _next(context).ConfigureAwait(false);
-        entry.TotalMilliseconds = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1);
+        foreach (string name in entry.SentTo.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            ModelDefinition? model = runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
+            _exposure.Record(entry.Memory, name, model?.IsLocal ?? false, entry.Timestamp);
+        }
     }
 
     /// <summary>
@@ -346,10 +376,13 @@ internal sealed partial class PromptRoutingMiddleware
         }
     }
 
-    private bool TryParse(HttpContext context, RouterRuntime runtime, ChatProtocol protocol, ReadOnlyMemory<byte> body, out string prompt, out ChatCompletionRequest chat)
+    private bool TryParse(
+        HttpContext context, RouterRuntime runtime, ChatProtocol protocol, ReadOnlyMemory<byte> body,
+        out string prompt, out ChatCompletionRequest chat, out IReadOnlyList<MemoryReference> memory)
     {
         prompt = string.Empty;
         chat = new ChatCompletionRequest();
+        memory = [];
         try
         {
             using JsonDocument document = JsonDocument.Parse(body);
@@ -361,6 +394,12 @@ internal sealed partial class PromptRoutingMiddleware
 
             prompt = extracted;
             chat = ChatCompletionRequest.Parse(document.RootElement, protocol);
+            if (runtime.Configuration.Memory.TrackSharing)
+            {
+                _memory.EnsureFresh();
+                memory = _memory.Match(document.RootElement);
+            }
+
             return true;
         }
         catch (JsonException ex)

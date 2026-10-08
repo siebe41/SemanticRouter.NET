@@ -4,6 +4,8 @@ using System.Net.Http.Headers;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Threading.Channels;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -90,6 +92,7 @@ public static class RouterDashboardEndpoints
         group.MapGet("/index.html", (HttpContext context) => Asset(context, "index.html", "text/html; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
         group.MapGet("/app.css", (HttpContext context) => Asset(context, "app.css", "text/css; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
         group.MapGet("/app.js", (HttpContext context) => Asset(context, "app.js", "text/javascript; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
+        group.MapGet("/graph.js", (HttpContext context) => Asset(context, "graph.js", "text/javascript; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
 
         RouteGroupBuilder api = group.MapGroup("/api");
         api.MapGet("/session", (HttpContext context) =>
@@ -172,6 +175,32 @@ public static class RouterDashboardEndpoints
         api.MapGet("/activity", (RoutingActivityLog activity, int? limit, long? after) =>
             Results.Json(new ActivityResponse(activity.Recent(limit ?? options.DefaultActivityLimit, after), activity.NextId - 1), ApiJson));
 
+        api.MapGet("/events", StreamEventsAsync);
+
+        api.MapGet("/memory", async (RouterRuntimeProvider provider, MemoryIndex memory, MemoryExposureLog exposure, CancellationToken cancellationToken) =>
+        {
+            MemorySnapshot snapshot = memory.Current;
+            if (snapshot.LoadedAt is null)
+            {
+                snapshot = await memory.RefreshAsync(cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                memory.EnsureFresh();
+            }
+
+            return Results.Json(BuildMemoryMap(provider.Current, snapshot, exposure), ApiJson);
+        });
+
+        api.MapPost("/memory/refresh", async (RouterRuntimeProvider provider, MemoryIndex memory, MemoryExposureLog exposure, CancellationToken cancellationToken) =>
+            Results.Json(BuildMemoryMap(provider.Current, await memory.RefreshAsync(cancellationToken).ConfigureAwait(false), exposure), ApiJson));
+
+        api.MapPost("/memory/exposure/reset", (MemoryExposureLog exposure) =>
+        {
+            exposure.Clear();
+            return Results.Ok(new { cleared = true });
+        }).WithMetadata(DashboardWriteMetadata.Instance);
+
         api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.Prompt))
@@ -236,6 +265,83 @@ public static class RouterDashboardEndpoints
         });
 
         return group;
+    }
+
+    /// <summary>
+    /// Server-sent events for live views: an <c>activity</c> event when a request is routed and again when it finishes
+    /// (the entry as <c>GET api/activity</c> returns it), and a comment every 15 seconds to keep proxies from closing
+    /// the stream. A slow reader loses the oldest events rather than holding up requests.
+    /// </summary>
+    private static async Task StreamEventsAsync(HttpContext context, RoutingActivityLog activity)
+    {
+        CancellationToken aborted = context.RequestAborted;
+        Channel<RoutingActivityEntry> channel = Channel.CreateBounded<RoutingActivityEntry>(
+            new BoundedChannelOptions(256) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
+        void OnUpdated(RoutingActivityEntry entry) => channel.Writer.TryWrite(entry);
+
+        context.Response.ContentType = "text/event-stream";
+        context.Response.Headers.CacheControl = "no-cache";
+        context.Response.Headers["X-Accel-Buffering"] = "no";
+        context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+
+        activity.Updated += OnUpdated;
+        try
+        {
+            await context.Response.WriteAsync(": connected\n\n", aborted).ConfigureAwait(false);
+            await context.Response.Body.FlushAsync(aborted).ConfigureAwait(false);
+            while (!aborted.IsCancellationRequested)
+            {
+                using var keepAlive = CancellationTokenSource.CreateLinkedTokenSource(aborted);
+                keepAlive.CancelAfter(TimeSpan.FromSeconds(15));
+                bool ready;
+                try
+                {
+                    ready = await channel.Reader.WaitToReadAsync(keepAlive.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!aborted.IsCancellationRequested)
+                {
+                    await context.Response.WriteAsync(": ping\n\n", aborted).ConfigureAwait(false);
+                    await context.Response.Body.FlushAsync(aborted).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (!ready)
+                {
+                    break;
+                }
+
+                while (channel.Reader.TryRead(out RoutingActivityEntry? entry))
+                {
+                    string json = JsonSerializer.Serialize(entry, ApiJson);
+                    await context.Response.WriteAsync($"id: {entry.Id}\nevent: activity\ndata: {json}\n\n", aborted).ConfigureAwait(false);
+                }
+
+                await context.Response.Body.FlushAsync(aborted).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (aborted.IsCancellationRequested)
+        {
+            // The browser went away.
+        }
+        finally
+        {
+            activity.Updated -= OnUpdated;
+        }
+    }
+
+    private static MemoryMapResponse BuildMemoryMap(RouterRuntime runtime, MemorySnapshot snapshot, MemoryExposureLog exposure)
+    {
+        IReadOnlyDictionary<string, MemoryExposure> exposures = exposure.Snapshot();
+        return new MemoryMapResponse(
+            snapshot.LoadedAt,
+            snapshot.LoadMilliseconds,
+            runtime.Configuration.Memory.TrackSharing,
+            runtime.Configuration.Middleware.Mode.ToString(),
+            snapshot.Sources,
+            snapshot.Notes.Select(n => new MemoryNodeResponse(
+                n.Id, n.Title, n.Source, n.Path, n.Folder, n.Tags, n.Aliases, n.Size, n.Modified, n.Fingerprints, n.Missing)).ToArray(),
+            snapshot.Links.Select(l => new[] { l.From, l.To }).ToArray(),
+            exposures);
     }
 
     private static RouterDashboardOptions CopyOf(RouterDashboardOptions? source)
@@ -436,6 +542,30 @@ public static class RouterDashboardEndpoints
 
     /// <summary>Recent routing activity.</summary>
     public sealed record ActivityResponse(IReadOnlyList<RoutingActivityEntry> Entries, long Latest);
+
+    /// <summary>The memory map: every note and link, and where notes have been sent.</summary>
+    /// <param name="LoadedAt">When the sources were last scanned; <see langword="null"/> before the first scan.</param>
+    /// <param name="LoadMilliseconds">How long the scan took.</param>
+    /// <param name="TrackSharing">Whether requests are checked for notes.</param>
+    /// <param name="Mode">The gateway mode; sharing is only recorded in Dispatch mode.</param>
+    /// <param name="Sources">Each source with its note count or error.</param>
+    /// <param name="Nodes">Notes, and link targets with no note (<c>missing</c>).</param>
+    /// <param name="Links">Links as pairs of indexes into <paramref name="Nodes"/>.</param>
+    /// <param name="Exposure">By note id: the requests that carried the note, local and cloud, per model.</param>
+    public sealed record MemoryMapResponse(
+        DateTimeOffset? LoadedAt,
+        double LoadMilliseconds,
+        bool TrackSharing,
+        string Mode,
+        IReadOnlyList<MemorySourceStatus> Sources,
+        IReadOnlyList<MemoryNodeResponse> Nodes,
+        IReadOnlyList<int[]> Links,
+        IReadOnlyDictionary<string, MemoryExposure> Exposure);
+
+    /// <summary>A note in the memory map. Its text is never sent.</summary>
+    public sealed record MemoryNodeResponse(
+        string Id, string Title, string Source, string Path, string Folder, IReadOnlyList<string> Tags, IReadOnlyList<string> Aliases,
+        int Size, DateTimeOffset? Modified, int Fingerprints, bool Missing);
 
     /// <summary>Request for the embeddings probe.</summary>
     public sealed record EmbeddingTestRequest(string? Text);

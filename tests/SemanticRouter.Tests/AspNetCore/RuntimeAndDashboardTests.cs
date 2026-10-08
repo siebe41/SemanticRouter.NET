@@ -125,12 +125,15 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         HttpResponseMessage page = await client.GetAsync("/router");
         HttpResponseMessage script = await client.GetAsync("/router/app.js");
         HttpResponseMessage css = await client.GetAsync("/router/app.css");
+        HttpResponseMessage graph = await client.GetAsync("/router/graph.js");
 
         page.StatusCode.Should().Be(HttpStatusCode.OK);
         page.Content.Headers.ContentType!.MediaType.Should().Be("text/html");
         string html = await page.Content.ReadAsStringAsync();
         html.Should().Contain("window.ROUTER_PREFIX = \"/router\"").And.Contain("data-theme=\"machine-dark\"").And.NotContain("__ROUTER_PREFIX__");
         script.Content.Headers.ContentType!.MediaType.Should().Be("text/javascript");
+        (await graph.Content.ReadAsStringAsync()).Should().Contain("window.MemoryGraph");
+        html.Should().Contain("/router/graph.js");
         (await css.Content.ReadAsStringAsync()).Should().Contain("[data-theme=\"machine-light\"]");
     }
 

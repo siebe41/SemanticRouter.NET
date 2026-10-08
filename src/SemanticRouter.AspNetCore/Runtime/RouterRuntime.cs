@@ -148,7 +148,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                         _services.GetRequiredService<IOptions<SemanticRouterOptions>>().Value,
                         new Dictionary<string, ConnectorOptions>(_services.GetRequiredService<IOptions<SemanticRouterConnectorsOptions>>().Value.Connectors, StringComparer.OrdinalIgnoreCase),
                         _services.GetRequiredService<IOptions<EmbeddingProviderOptions>>().Value,
-                        _services.GetRequiredService<IOptions<PromptRouterMiddlewareOptions>>().Value);
+                        _services.GetRequiredService<IOptions<PromptRouterMiddlewareOptions>>().Value,
+                        _services.GetRequiredService<IOptions<MemoryOptions>>().Value);
                 }
             }
 
