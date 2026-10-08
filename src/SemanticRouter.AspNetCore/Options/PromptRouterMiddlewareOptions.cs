@@ -102,4 +102,20 @@ public sealed class PromptRouterMiddlewareOptions
 
     /// <summary>Which chat messages are used as the prompt. Default <see cref="PromptMessageSelection.LastUserMessage"/>.</summary>
     public PromptMessageSelection MessageSelection { get; set; } = PromptMessageSelection.LastUserMessage;
+
+    /// <summary>
+    /// Optional keys that clients present to use the gateway, by client name (for example <c>"laptop": "${env:ROUTER_KEY_LAPTOP}"</c>).
+    /// When any are configured, requests from other machines must send one as <c>Authorization: Bearer {key}</c> or
+    /// <c>x-api-key: {key}</c> (what <c>ANTHROPIC_AUTH_TOKEN</c>, <c>ANTHROPIC_API_KEY</c> and <c>OPENAI_API_KEY</c> send),
+    /// and the client name is recorded in the activity log. Keys are compared, never forwarded: credentials for the
+    /// backends always come from the connector configuration. Empty by default (no gateway authentication).
+    /// </summary>
+    public IDictionary<string, string> GatewayKeys { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Require a gateway key from clients on this machine too. Default <see langword="false"/>: loopback clients may
+    /// omit the key (and are still identified when they send one). Turn this on when a reverse proxy on this machine
+    /// forwards remote traffic, since such requests arrive from loopback.
+    /// </summary>
+    public bool RequireGatewayKeyForLocalClients { get; set; }
 }

@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <IsPackable>false</IsPackable>
+    <UserSecretsId>semantic-router-lmstudio-claude-poc</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

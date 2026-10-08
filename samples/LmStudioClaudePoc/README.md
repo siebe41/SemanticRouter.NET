@@ -141,6 +141,8 @@ Everything is in `appsettings.json`:
 | Symptom | Fix |
 |---|---|
 | `[FAIL] LM Studio: not reachable` | Start LM Studio's server. If you changed its port, update `Connectors:lmstudio:BaseAddress`. |
+| `[FAIL] LM Studio: … requires authentication` | "Require Authentication" is on in LM Studio's server settings. Copy the token there and run `dotnet user-secrets set "SemanticRouter:Connectors:lmstudio:ApiKey" "<token>"` (or `export LM_API_TOKEN=<token>`). Set `SemanticRouter:Embeddings:ApiKey` too if LM Studio serves your embeddings. |
+| `[FAIL] LM Studio: … rejected the API token` | The configured token does not match LM Studio's. Copy it again from the server settings. |
 | `[FAIL] LM Studio: model '…' is not available` | Use one of the ids it lists, or clear `Models:0:Model`. |
 | `[FAIL] Claude CLI: 'claude' not found` | Install Claude Code, or set `Connectors:claude-cli:Executable` to the full path (on Windows, `claude.exe`). |
 | `[FAIL] Claude CLI: … not signed in` | Run `claude`, then `/login`. |

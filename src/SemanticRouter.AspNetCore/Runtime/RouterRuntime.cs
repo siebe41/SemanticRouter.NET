@@ -24,7 +24,26 @@ internal interface IRuntimeFacade;
 /// <summary>Everything built from one configuration document. Immutable; replaced as a whole on reload.</summary>
 internal sealed class RouterRuntime : IDisposable
 {
+    /// <summary>The document as applied: secrets may be references (<c>${env:…}</c>) and are never resolved here.</summary>
     public required RouterConfiguration Configuration { get; init; }
+
+    /// <summary>
+    /// <see cref="Configuration"/> with every secret reference resolved. Connectors and the embedding provider are
+    /// built from it; never send it to a client.
+    /// </summary>
+    public required RouterConfiguration Resolved { get; init; }
+
+    /// <summary>References that could not be resolved, for the dashboard.</summary>
+    public required IReadOnlyList<string> Warnings { get; init; }
+
+    /// <summary>What applying this document did besides swapping the runtime (secrets moved, plain-text secrets saved).</summary>
+    public IReadOnlyList<string> ApplyNotes { get; init; } = [];
+
+    /// <summary>Removes the resolved secret values from text that leaves the router (errors, logs, activity).</summary>
+    public required SecretRedactor Redactor { get; init; }
+
+    /// <summary>Resolved gateway keys: key value to client name.</summary>
+    public required IReadOnlyDictionary<string, string> GatewayKeys { get; init; }
 
     public required int Version { get; init; }
 
@@ -66,16 +85,19 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 {
     private readonly IServiceProvider _services;
     private readonly IRouterConfigurationStore? _store;
+    private readonly IRouterSecretStore? _secrets;
     private readonly ILogger _logger;
     private readonly Lock _gate = new();
     private RouterRuntime? _current;
     private RouterConfiguration? _baseline;
     private int _version;
 
-    public RouterRuntimeProvider(IServiceProvider services, ILogger<RouterRuntimeProvider> logger, IRouterConfigurationStore? store = null)
+    public RouterRuntimeProvider(
+        IServiceProvider services, ILogger<RouterRuntimeProvider> logger, IRouterConfigurationStore? store = null, IRouterSecretStore? secrets = null)
     {
         _services = services;
         _store = store;
+        _secrets = secrets;
         _logger = logger;
     }
 
@@ -84,6 +106,9 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
     /// <summary>The store, when configured.</summary>
     public IRouterConfigurationStore? Store => _store;
+
+    /// <summary>The secret store, when configured.</summary>
+    public IRouterSecretStore? Secrets => _secrets;
 
     /// <summary>The active runtime, built on first access.</summary>
     public RouterRuntime Current
@@ -153,13 +178,35 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
         RouterRuntime? previous;
         RouterRuntime runtime;
+        var notes = new List<string>();
         lock (_gate)
         {
             RouterConfigurationSource source = persist && _store is not null ? RouterConfigurationSource.Store : RouterConfigurationSource.Memory;
-            runtime = Build(configuration.Clone(), source);
+            RouterConfiguration document = configuration.Clone();
             if (persist && _store is not null)
             {
-                _store.Save(configuration);
+                if (_secrets is not null)
+                {
+                    IReadOnlyList<string> moved = document.MoveSecretsToStore(_secrets);
+                    if (moved.Count > 0)
+                    {
+                        notes.Add($"Moved {moved.Count} secret(s) to the secret store ({_secrets.Location}); the saved file refers to them: {string.Join(", ", moved)}.");
+                    }
+                }
+                else if (document.LiteralSecretSettings() is { Count: > 0 } literal)
+                {
+                    LogLiteralSecretsSaved(_logger, _store.Location, string.Join(", ", literal));
+                    notes.Add(
+                        $"{string.Join(", ", literal)} {(literal.Count == 1 ? "is" : "are")} saved in plain text in {_store.Location}. " +
+                        "Use ${env:VARIABLE} references, keep keys in user-secrets or environment variables (leave the field empty), " +
+                        "or register a secret store (UseSecretFile) so typed keys are kept out of the file.");
+                }
+            }
+
+            runtime = Build(document, source, notes);
+            if (persist && _store is not null)
+            {
+                _store.Save(document);
             }
 
             previous = _current;
@@ -229,7 +276,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         return (baseline.Clone(), RouterConfigurationSource.Configuration);
     }
 
-    private RouterRuntime Build(RouterConfiguration configuration, RouterConfigurationSource source)
+    private RouterRuntime Build(RouterConfiguration configuration, RouterConfigurationSource source, IReadOnlyList<string>? notes = null)
     {
         IReadOnlyList<string> errors = configuration.GetDocumentValidationErrors();
         if (errors.Count > 0)
@@ -243,7 +290,14 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             tracker.Configure(configuration.Selection);
         }
 
-        IEmbeddingProvider embeddings = ResolveCustom<IEmbeddingProvider>() ?? CreateEmbeddingProvider(configuration.Embeddings);
+        var warnings = new List<string>();
+        RouterConfiguration resolved = configuration.ResolveSecrets(_secrets, warnings);
+        foreach (string warning in warnings)
+        {
+            LogConfigurationWarning(_logger, warning);
+        }
+
+        IEmbeddingProvider embeddings = ResolveCustom<IEmbeddingProvider>() ?? CreateEmbeddingProvider(resolved.Embeddings);
         IComplexityAnalyzer complexity = ResolveCustom<IComplexityAnalyzer>() ?? new HeuristicComplexityAnalyzer(configuration.Complexity);
         IRouteSelector routeSelector = ResolveCustom<IRouteSelector>() ?? new DefaultRouteSelector(configuration);
         IPromptClassifier classifier = ResolveCustom<IPromptClassifier>() ?? new SemanticPromptClassifier(embeddings, configuration, complexity, routeSelector);
@@ -252,17 +306,27 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         IPromptRouter router = ResolveCustom<IPromptRouter>() ?? new PromptRouter(classifier, configuration, modelSelector, health);
         IPromptExtractor extractor = ResolveCustom<IPromptExtractor>() ?? new JsonPromptExtractor(configuration.Middleware.MessageSelection);
 
+        var redactor = new SecretRedactor(resolved.SecretValues());
         var connectors = new ConnectorCatalog(
-            new Dictionary<string, ConnectorOptions>(configuration.Connectors, StringComparer.OrdinalIgnoreCase),
+            new Dictionary<string, ConnectorOptions>(resolved.Connectors, StringComparer.OrdinalIgnoreCase),
             _services.GetServices<IChatConnector>(),
             _services.GetRequiredService<IHttpClientFactory>(),
             _services.GetRequiredService<ICliProcessRunner>(),
             _services.GetService<IToolCallAffinity>(),
-            _services.GetRequiredService<ILoggerFactory>());
+            _services.GetRequiredService<ILoggerFactory>(),
+            redactor);
 
         return new RouterRuntime
         {
             Configuration = configuration,
+            Resolved = resolved,
+            Warnings = warnings,
+            ApplyNotes = notes ?? [],
+            Redactor = redactor,
+            GatewayKeys = resolved.Middleware.GatewayKeys
+                .Where(kv => !string.IsNullOrEmpty(kv.Value))
+                .GroupBy(kv => kv.Value, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First().Key, StringComparer.Ordinal),
             Version = ++_version,
             CreatedAt = DateTimeOffset.UtcNow,
             Source = source,
@@ -327,6 +391,14 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Router configuration v{Version} applied ({Source}): {Routes} routes, {Models} models, {Connectors} connectors.")]
     private static partial void LogApplied(ILogger logger, int version, RouterConfigurationSource source, int routes, int models, int connectors);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Router configuration: {Warning}")]
+    private static partial void LogConfigurationWarning(ILogger logger, string warning);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Saving secrets in plain text to {Location}: {Settings}. Prefer ${{env:VARIABLE}} references, user-secrets or environment variables, or register a secret store with UseSecretFile().")]
+    private static partial void LogLiteralSecretsSaved(ILogger logger, string location, string settings);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Loaded router configuration from {Location}.")]
     private static partial void LogLoadedStore(ILogger logger, string location);

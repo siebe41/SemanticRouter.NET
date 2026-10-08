@@ -1,12 +1,13 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using SemanticRouter.AspNetCore;
 
 namespace LmStudioClaudePoc;
 
 /// <summary>
 /// Checks both backends before the router starts, without spending any Claude usage:
-/// LM Studio's model list (and auto-selects a chat model if none is configured), and that the `claude`
+/// LM Studio's model list with the configured API token (and auto-selects a chat model if none is configured), and that the `claude`
 /// executable exists, runs, and is signed in.
 /// </summary>
 internal static class Preflight
@@ -31,28 +32,47 @@ internal static class Preflight
 
     private static async Task<bool> CheckLmStudioAsync(ConfigurationManager configuration, bool report)
     {
+        const string ApiKeySetting = "SemanticRouter:Connectors:lmstudio:ApiKey";
         string baseAddress = configuration["SemanticRouter:Connectors:lmstudio:BaseAddress"] ?? "http://localhost:1234";
         string? modelKey = FindModelKey(configuration, "lmstudio");
         string? configured = modelKey is null ? null : configuration[modelKey];
 
-        List<string> ids;
-        try
+        // LM Studio's own docs keep the "Require Authentication" token in LM_API_TOKEN; use it when no key is configured.
+        if (string.IsNullOrEmpty(configuration[ApiKeySetting]) && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("LM_API_TOKEN")))
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-            using JsonDocument json = JsonDocument.Parse(await http.GetStringAsync(new Uri(new Uri(baseAddress), "/v1/models")));
-            ids = json.RootElement.GetProperty("data").EnumerateArray().Select(m => m.GetProperty("id").GetString()!).ToList();
+            configuration[ApiKeySetting] = SecretReference.ForEnvironment("LM_API_TOKEN");
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException)
+
+        var connector = new ConnectorOptions
+        {
+            BaseAddress = new Uri(baseAddress),
+            ApiKey = SecretReference.Resolve(configuration[ApiKeySetting], null, ApiKeySetting),
+        };
+
+        using var http = new HttpClient();
+        ConnectorProbeResult probe = await ConnectorProbe.ListModelsAsync("lmstudio", connector, http, TimeSpan.FromSeconds(5));
+        if (!probe.Ok)
         {
             if (!report)
             {
                 return false;
             }
 
-            Fail("LM Studio", $"not reachable at {baseAddress} ({ex.Message}). Start the server in LM Studio (Developer tab) or `lms server start`.");
+            Fail("LM Studio", probe.Failure switch
+            {
+                ConnectorProbeFailure.AuthenticationRequired =>
+                    $"LM Studio at {baseAddress} requires authentication (\"Require Authentication\" is on). " +
+                    $"Set {ApiKeySetting} (user-secrets or SemanticRouter__Connectors__lmstudio__ApiKey) or LM_API_TOKEN to the server's API token.",
+                ConnectorProbeFailure.CredentialsRejected =>
+                    $"LM Studio at {baseAddress} rejected the API token. Check {ApiKeySetting} (or LM_API_TOKEN) against the token in LM Studio's server settings.",
+                ConnectorProbeFailure.Unreachable =>
+                    $"not reachable at {baseAddress} ({probe.Message}). Start the server in LM Studio (Developer tab) or `lms server start`.",
+                _ => probe.Message,
+            });
             return false;
         }
 
+        List<string> ids = [.. probe.Models];
         List<string> chatModels = ids.Where(id => !id.Contains("embed", StringComparison.OrdinalIgnoreCase)).ToList();
         if (chatModels.Count == 0)
         {

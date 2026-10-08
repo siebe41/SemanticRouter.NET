@@ -46,6 +46,17 @@ Everything on this page can also be edited in the [dashboard](dashboard.md), wit
 
 Start the server (the Developer tab, or `lms server start --port 1234`). Load your chat models and an embedding model, then copy their exact IDs from `curl http://localhost:1234/v1/models`.
 
+**If "Require Authentication" is on** in LM Studio's server settings, every request needs the server's API token, sent as `Authorization: Bearer <token>` (which is what the connector and the embedding provider send when `ApiKey` is set). Give the router the token without writing it into a file:
+
+```bash
+dotnet user-secrets set "SemanticRouter:Connectors:lmstudio:ApiKey" "<token>"
+dotnet user-secrets set "SemanticRouter:Embeddings:ApiKey" "<token>"     # when LM Studio also serves embeddings
+# or: export SemanticRouter__Connectors__lmstudio__ApiKey=<token>
+# or reference LM Studio's own variable: "ApiKey": "${env:LM_API_TOKEN}"
+```
+
+Without the token, LM Studio answers `401`. The router reports that as "the server requires authentication; set SemanticRouter:Connectors:lmstudio:ApiKey" (in the log, the 503 detail and the dashboard's **List models**), fails over to the next model and cools `lmstudio` down for the short unavailable cooldown. The PoC sample's preflight reads `LM_API_TOKEN` when no key is configured.
+
 ```jsonc
 "Connectors": {
   "lmstudio": { "Type": "OpenAICompatible", "BaseAddress": "http://localhost:1234", "Timeout": "00:02:00" }

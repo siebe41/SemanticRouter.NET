@@ -7,20 +7,56 @@ using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using SemanticRouter;
 using SemanticRouter.AspNetCore;
 
 namespace Microsoft.AspNetCore.Builder;
 
-/// <summary>Options for <see cref="RouterDashboardEndpoints.MapRouterDashboard"/>.</summary>
+/// <summary>
+/// Options for <see cref="RouterDashboardEndpoints.MapRouterDashboard"/>. Bound from <c>SemanticRouter:Dashboard</c>
+/// when routing is registered from configuration; the <c>configure</c> callback of <c>MapRouterDashboard</c> runs after.
+/// See <c>docs/dashboard.md</c> for the supported setups.
+/// </summary>
 public sealed class RouterDashboardOptions
 {
+    /// <summary>Shortest token accepted, so a token cannot be guessed.</summary>
+    public const int MinimumTokenLength = 16;
+
     /// <summary>
-    /// Only answer dashboard and admin requests from the loopback interface. Default <see langword="true"/>: the admin
-    /// API can change where prompts go and can read connector settings, so keep it on unless the application
-    /// authenticates these endpoints itself.
+    /// Only answer dashboard and admin requests from the loopback interface. Default <see langword="true"/>. To reach
+    /// the dashboard from other machines, turn this off and set <see cref="AdminToken"/> (or, behind a reverse proxy
+    /// that authenticates callers itself, <see cref="AllowUnauthenticatedRemoteClients"/>).
     /// </summary>
     public bool RequireLocalClient { get; set; } = true;
+
+    /// <summary>
+    /// Token that remote clients present (as <c>Authorization: Bearer {token}</c> or by signing in on the dashboard) for
+    /// full access. At least 16 characters; <c>${env:…}</c> and <c>${secret:…}</c> references are resolved.
+    /// </summary>
+    public string? AdminToken { get; set; }
+
+    /// <summary>Token for view-only access: status, activity, the masked configuration and the prompt tester.</summary>
+    public string? ReadOnlyToken { get; set; }
+
+    /// <summary>
+    /// Serve remote clients without a token. Only for a reverse proxy that authenticates every request itself; ignored
+    /// when a token is configured. Default <see langword="false"/>.
+    /// </summary>
+    public bool AllowUnauthenticatedRemoteClients { get; set; }
+
+    /// <summary>
+    /// Require the token from loopback clients too. Turn this on when a reverse proxy on this machine forwards remote
+    /// traffic, which otherwise arrives from loopback and would be trusted. Default <see langword="false"/>.
+    /// </summary>
+    public bool RequireTokenForLocalClients { get; set; }
+
+    /// <summary>
+    /// Addresses the dashboard is reached at besides <c>localhost</c>, e.g. <c>https://router.home.lan</c>. Changes
+    /// are accepted from these origins, and loopback requests may name them in the Host header.
+    /// </summary>
+    public IList<string> PublicOrigins { get; } = new List<string>();
 
     /// <summary>Entries shown by the activity endpoint when the client gives no limit. Default 100.</summary>
     public int DefaultActivityLimit { get; set; } = 100;
@@ -42,33 +78,43 @@ public static class RouterDashboardEndpoints
         Action<RouterDashboardOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(endpoints);
-        var options = new RouterDashboardOptions();
+        RouterDashboardOptions options = CopyOf(endpoints.ServiceProvider.GetService<IOptions<RouterDashboardOptions>>()?.Value);
         configure?.Invoke(options);
 
         prefix = "/" + prefix.Trim('/');
+        DashboardAccess access = CreateAccess(endpoints.ServiceProvider, options, prefix);
         RouteGroupBuilder group = endpoints.MapGroup(prefix);
-        if (options.RequireLocalClient)
-        {
-            group.AddEndpointFilter(async (context, next) =>
-            {
-                IPAddress? remote = context.HttpContext.Connection.RemoteIpAddress;
-                if (remote is not null && !IPAddress.IsLoopback(remote))
-                {
-                    return Results.Problem(
-                        "The router dashboard only answers requests from this machine (RouterDashboardOptions.RequireLocalClient).",
-                        statusCode: StatusCodes.Status403Forbidden);
-                }
+        group.AddEndpointFilter(access.FilterAsync);
 
-                return await next(context).ConfigureAwait(false);
-            });
-        }
-
-        group.MapGet("/", (HttpContext context) => Asset(context, "index.html", "text/html; charset=utf-8", prefix));
-        group.MapGet("/index.html", (HttpContext context) => Asset(context, "index.html", "text/html; charset=utf-8", prefix));
-        group.MapGet("/app.css", (HttpContext context) => Asset(context, "app.css", "text/css; charset=utf-8", prefix));
-        group.MapGet("/app.js", (HttpContext context) => Asset(context, "app.js", "text/javascript; charset=utf-8", prefix));
+        group.MapGet("/", (HttpContext context) => Asset(context, "index.html", "text/html; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
+        group.MapGet("/index.html", (HttpContext context) => Asset(context, "index.html", "text/html; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
+        group.MapGet("/app.css", (HttpContext context) => Asset(context, "app.css", "text/css; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
+        group.MapGet("/app.js", (HttpContext context) => Asset(context, "app.js", "text/javascript; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
 
         RouteGroupBuilder api = group.MapGroup("/api");
+        api.MapGet("/session", (HttpContext context) =>
+                Results.Json(new SessionResponse(DashboardAccess.RoleOf(context)?.ToString(), access.TokenRequired(context), access.TokensConfigured), ApiJson))
+            .WithMetadata(DashboardAnonymousMetadata.Instance);
+
+        api.MapPost("/session", (HttpContext context, SignInRequest request) =>
+            {
+                if (access.RoleForToken(request.Token) is not { } role)
+                {
+                    return Results.Problem("That token is not valid for this router.", statusCode: StatusCodes.Status401Unauthorized, title: "Sign-in failed");
+                }
+
+                access.SignIn(context, role, prefix);
+                return Results.Json(new SessionResponse(role.ToString(), access.TokenRequired(context), access.TokensConfigured), ApiJson);
+            })
+            .WithMetadata(DashboardAnonymousMetadata.Instance);
+
+        api.MapDelete("/session", (HttpContext context) =>
+            {
+                DashboardAccess.SignOut(context, prefix);
+                return Results.NoContent();
+            })
+            .WithMetadata(DashboardAnonymousMetadata.Instance);
+
         api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity) =>
             Results.Json(BuildStatus(provider, health, activity), ApiJson));
 
@@ -108,17 +154,20 @@ public static class RouterDashboardEndpoints
 
             bool shouldPersist = persist ?? true;
             RouterRuntime runtime = provider.Apply(candidate, shouldPersist);
-            string? warning = shouldPersist && provider.Store is null
-                ? "Applied in memory only: no configuration store is registered (see SemanticRouterBuilder.UseConfigurationFile)."
-                : null;
-            return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), warning);
-        });
+            var warnings = new List<string>(runtime.ApplyNotes);
+            if (shouldPersist && provider.Store is null)
+            {
+                warnings.Insert(0, "Applied in memory only: no configuration store is registered (see SemanticRouterBuilder.UseConfigurationFile).");
+            }
+
+            return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), warnings.Count > 0 ? string.Join(" ", warnings) : null);
+        }).WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapPost("/config/reset", (RouterRuntimeProvider provider) =>
         {
             RouterRuntime runtime = provider.ResetToBaseline();
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), "Reverted to the application's configuration (the stored document was left in place).");
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapGet("/activity", (RoutingActivityLog activity, int? limit, long? after) =>
             Results.Json(new ActivityResponse(activity.Recent(limit ?? options.DefaultActivityLimit, after), activity.NextId - 1), ApiJson));
@@ -146,7 +195,7 @@ public static class RouterDashboardEndpoints
             }
 
             return Results.Problem("The registered IModelHealth does not support clearing cooldowns.", statusCode: StatusCodes.Status501NotImplemented);
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapPost("/embeddings/test", async (EmbeddingTestRequest request, RouterRuntimeProvider provider, CancellationToken cancellationToken) =>
         {
@@ -166,7 +215,7 @@ public static class RouterDashboardEndpoints
 
         api.MapPost("/connectors/{name}/discover", async (string name, RouterRuntimeProvider provider, IHttpClientFactory http, CancellationToken cancellationToken) =>
         {
-            if (!provider.Current.Configuration.Connectors.TryGetValue(name, out ConnectorOptions? connector))
+            if (!provider.Current.Resolved.Connectors.TryGetValue(name, out ConnectorOptions? connector))
             {
                 return Results.Problem($"Connector '{name}' is not configured.", statusCode: StatusCodes.Status404NotFound);
             }
@@ -181,49 +230,74 @@ public static class RouterDashboardEndpoints
                 return Results.Problem("The connector has no BaseAddress.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            try
-            {
-                using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(connector.BaseAddress, "/v1/models"));
-                if (!string.IsNullOrEmpty(connector.ApiKey))
-                {
-                    if (connector.Type == ConnectorType.Anthropic)
-                    {
-                        request.Headers.TryAddWithoutValidation("x-api-key", connector.ApiKey);
-                        request.Headers.TryAddWithoutValidation("anthropic-version", connector.AnthropicVersion);
-                    }
-                    else
-                    {
-                        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", connector.ApiKey);
-                    }
-                }
-
-                foreach ((string header, string value) in connector.Headers)
-                {
-                    request.Headers.TryAddWithoutValidation(header, value);
-                }
-
-                HttpClient client = http.CreateClient(OpenAICompatibleConnector.HttpClientNamePrefix + name);
-                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                timeout.CancelAfter(TimeSpan.FromSeconds(10));
-                using HttpResponseMessage response = await client.SendAsync(request, timeout.Token).ConfigureAwait(false);
-                if (!response.IsSuccessStatusCode)
-                {
-                    return Results.Json(new DiscoverResponse([], $"HTTP {(int)response.StatusCode} from {request.RequestUri}"), ApiJson);
-                }
-
-                using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false));
-                string[] ids = json.RootElement.TryGetArray("data", out JsonElement data)
-                    ? data.EnumerateArray().Select(m => m.GetString("id")).Where(id => !string.IsNullOrEmpty(id)).Cast<string>().ToArray()
-                    : [];
-                return Results.Json(new DiscoverResponse(ids, null), ApiJson);
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
-            {
-                return Results.Json(new DiscoverResponse([], ex.Message), ApiJson);
-            }
+            ConnectorProbeResult probe = await ConnectorProbe.ListModelsAsync(
+                name, connector, http.CreateClient(OpenAICompatibleConnector.HttpClientNamePrefix + name), TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+            return Results.Json(new DiscoverResponse(probe.Models, probe.Ok ? null : provider.Current.Redactor.Redact(probe.Message)), ApiJson);
         });
 
         return group;
+    }
+
+    private static RouterDashboardOptions CopyOf(RouterDashboardOptions? source)
+    {
+        var copy = new RouterDashboardOptions();
+        if (source is not null)
+        {
+            copy.RequireLocalClient = source.RequireLocalClient;
+            copy.AdminToken = source.AdminToken;
+            copy.ReadOnlyToken = source.ReadOnlyToken;
+            copy.AllowUnauthenticatedRemoteClients = source.AllowUnauthenticatedRemoteClients;
+            copy.RequireTokenForLocalClients = source.RequireTokenForLocalClients;
+            copy.DefaultActivityLimit = source.DefaultActivityLimit;
+            foreach (string origin in source.PublicOrigins)
+            {
+                copy.PublicOrigins.Add(origin);
+            }
+        }
+
+        return copy;
+    }
+
+    private static DashboardAccess CreateAccess(IServiceProvider services, RouterDashboardOptions options, string prefix)
+    {
+        IRouterSecretStore? secrets = services.GetService<IRouterSecretStore>();
+        var problems = new List<string>();
+        string? admin = SecretReference.Resolve(options.AdminToken, secrets, "Dashboard:AdminToken", problems);
+        string? readOnly = SecretReference.Resolve(options.ReadOnlyToken, secrets, "Dashboard:ReadOnlyToken", problems);
+        foreach ((string setting, string? token) in new[] { ("AdminToken", admin), ("ReadOnlyToken", readOnly) })
+        {
+            if (!string.IsNullOrEmpty(token) && token.Length < RouterDashboardOptions.MinimumTokenLength)
+            {
+                throw new InvalidOperationException(
+                    $"SemanticRouter:Dashboard:{setting} must be at least {RouterDashboardOptions.MinimumTokenLength} characters (try `openssl rand -hex 24`).");
+            }
+        }
+
+        if (!string.IsNullOrEmpty(admin) && admin == readOnly)
+        {
+            throw new InvalidOperationException("SemanticRouter:Dashboard:AdminToken and ReadOnlyToken must differ.");
+        }
+
+        var access = new DashboardAccess(options, admin, readOnly);
+        ILogger logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("SemanticRouter.Dashboard");
+        foreach (string problem in problems)
+        {
+            DashboardLog.ConfigurationProblem(logger, problem);
+        }
+
+        if (!options.RequireLocalClient && !access.TokensConfigured)
+        {
+            if (options.AllowUnauthenticatedRemoteClients)
+            {
+                DashboardLog.OpenToRemoteClients(logger, prefix);
+            }
+            else
+            {
+                DashboardLog.RemoteRefused(logger, prefix);
+            }
+        }
+
+        return access;
     }
 
     private static IResult Asset(HttpContext context, string name, string contentType, string prefix)
@@ -281,6 +355,7 @@ public static class RouterDashboardEndpoints
             ["source"] = runtime.Source.ToString(),
             ["createdAt"] = runtime.CreatedAt,
             ["store"] = provider.Store?.Location,
+            ["secretStore"] = provider.Secrets?.Location,
             ["warning"] = warning,
             ["config"] = JsonNode.Parse(masked.ToJson()),
         };
@@ -301,6 +376,8 @@ public static class RouterDashboardEndpoints
             runtime.WarmedUp,
             runtime.WarmUpError,
             provider.Store?.Location,
+            provider.Secrets?.Location,
+            runtime.Warnings,
             (typeof(RouterDashboardEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "dev").Split('+')[0],
             new EmbeddingsStatus(config.Embeddings.Provider.ToString(), config.Embeddings.Model, config.Embeddings.Endpoint?.ToString(), config.Embeddings.Dimensions),
             config.EffectiveTiers.Select(t => new TierStatus(t.Level, t.Name, t.Description)).ToArray(),
@@ -313,7 +390,7 @@ public static class RouterDashboardEndpoints
                 kv.Key, kv.Value.Type.ToString(), kv.Value.Type == ConnectorType.Cli ? kv.Value.Preset.ToString() : null,
                 kv.Value.Type == ConnectorType.Cli ? kv.Value.Executable : kv.Value.BaseAddress?.ToString(),
                 kv.Value.Type == ConnectorType.Cli ? kv.Value.ToolCalling.ToString() : "Native",
-                !string.IsNullOrEmpty(kv.Value.ApiKey),
+                !string.IsNullOrEmpty(runtime.Resolved.Connectors.TryGetValue(kv.Key, out ConnectorOptions? resolved) ? resolved.ApiKey : null),
                 config.Models.Count(m => string.Equals(m.Connector, kv.Key, StringComparison.OrdinalIgnoreCase)))).ToArray(),
             config.Routes.Select(r => new RouteStatus(r.Name, r.Tier, r.Utterances.Count, r.LocalOnly, r.RequiredCapabilities.ToArray(), r.SimilarityThreshold ?? config.DefaultSimilarityThreshold)).ToArray(),
             new GatewayStatus(
@@ -339,6 +416,15 @@ public static class RouterDashboardEndpoints
         CliPreset.GitHubCopilot => ["claude-sonnet-5.5", "gpt-6.1-sol"],
         _ => [],
     };
+
+    /// <summary>Who the caller is signed in as.</summary>
+    /// <param name="Role"><c>Admin</c>, <c>ReadOnly</c>, or <see langword="null"/> when not signed in.</param>
+    /// <param name="TokenRequired">Whether this caller needs a token (it is remote, or tokens are required locally).</param>
+    /// <param name="TokensConfigured">Whether the router has a token to sign in with.</param>
+    public sealed record SessionResponse(string? Role, bool TokenRequired, bool TokensConfigured);
+
+    /// <summary>Sign-in request.</summary>
+    public sealed record SignInRequest(string? Token);
 
     /// <summary>Validation outcome.</summary>
     /// <param name="Errors">Problems; empty when valid.</param>
@@ -368,6 +454,8 @@ public static class RouterDashboardEndpoints
         bool WarmedUp,
         string? WarmUpError,
         string? Store,
+        string? SecretStore,
+        IReadOnlyList<string> Warnings,
         string LibraryVersion,
         EmbeddingsStatus Embeddings,
         IReadOnlyList<TierStatus> Tiers,
@@ -401,4 +489,20 @@ public static class RouterDashboardEndpoints
     public sealed record ActivitySummary(
         int Total, int Served, int Failed, int Degraded,
         IReadOnlyDictionary<string, int> ByModel, IReadOnlyDictionary<string, int> ByTier, IReadOnlyDictionary<string, int> ByReason);
+}
+
+internal static partial class DashboardLog
+{
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Router dashboard: {Problem}")]
+    public static partial void ConfigurationProblem(ILogger logger, string problem);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "The router dashboard at {Prefix} is open to remote clients without authentication (AllowUnauthenticatedRemoteClients). Make sure a reverse proxy authenticates every request.")]
+    public static partial void OpenToRemoteClients(ILogger logger, string prefix);
+
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "RequireLocalClient is off but no dashboard token is configured, so remote requests to {Prefix} will be refused. Set SemanticRouter:Dashboard:AdminToken (for example \"${{env:ROUTER_ADMIN_TOKEN}}\"), or AllowUnauthenticatedRemoteClients behind an authenticating reverse proxy.")]
+    public static partial void RemoteRefused(ILogger logger, string prefix);
 }

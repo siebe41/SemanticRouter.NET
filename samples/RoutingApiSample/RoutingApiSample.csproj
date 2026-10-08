@@ -3,6 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <IsPackable>false</IsPackable>
+    <UserSecretsId>semantic-router-routing-api-sample</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

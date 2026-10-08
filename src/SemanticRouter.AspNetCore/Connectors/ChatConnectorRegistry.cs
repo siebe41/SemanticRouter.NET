@@ -14,20 +14,21 @@ internal sealed class ConnectorCatalog : IDisposable
         IHttpClientFactory httpClientFactory,
         ICliProcessRunner processRunner,
         IToolCallAffinity? affinity,
-        ILoggerFactory loggerFactory)
+        ILoggerFactory loggerFactory,
+        SecretRedactor? redactor = null)
     {
         foreach ((string name, ConnectorOptions connector) in options)
         {
             if (connector.Type == ConnectorType.Cli)
             {
-                var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity);
+                var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity, redactor);
                 _owned.Add(cli);
                 _connectors[name] = cli;
             }
             else
             {
                 _connectors[name] = new OpenAICompatibleConnector(
-                    name, connector, httpClientFactory, loggerFactory.CreateLogger<OpenAICompatibleConnector>(), affinity);
+                    name, connector, httpClientFactory, loggerFactory.CreateLogger<OpenAICompatibleConnector>(), affinity, redactor);
             }
         }
 

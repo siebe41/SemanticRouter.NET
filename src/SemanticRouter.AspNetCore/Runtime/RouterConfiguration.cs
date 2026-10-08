@@ -134,6 +134,18 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             errors.Add("Middleware:MaxRequestBodyBytes must be positive.");
         }
 
+        foreach ((string client, string key) in Middleware.GatewayKeys)
+        {
+            if (string.IsNullOrWhiteSpace(client))
+            {
+                errors.Add("Middleware:GatewayKeys entries must have a client name.");
+            }
+            else if (string.IsNullOrWhiteSpace(key))
+            {
+                errors.Add($"Middleware:GatewayKeys:{client} must not be empty.");
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(Middleware.HeaderPrefix))
         {
             errors.Add("Middleware:HeaderPrefix must not be empty.");
@@ -186,28 +198,30 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         {
             document.Embeddings.ApiKey = defaults.Embeddings.ApiKey;
         }
+
+        foreach ((string client, string key) in defaults.Middleware.GatewayKeys)
+        {
+            if (document.Middleware.GatewayKeys.TryGetValue(client, out string? current) && (string.IsNullOrEmpty(current) || current == MaskedSecret))
+            {
+                document.Middleware.GatewayKeys[client] = key;
+            }
+        }
     }
 
-    /// <summary>Returns a copy with secret values replaced by <see cref="MaskedSecret"/>.</summary>
+    /// <summary>
+    /// Returns a copy with secret values replaced by <see cref="MaskedSecret"/>. Values that are references
+    /// (<c>${env:…}</c>, <c>${secret:…}</c>) are not secrets and are returned as they are.
+    /// </summary>
     public RouterConfiguration Masked()
     {
         RouterConfiguration copy = Clone();
-        foreach (ConnectorOptions connector in copy.Connectors.Values)
+        foreach (SecretSlot slot in copy.Slots(secretsOnly: true))
         {
-            if (!string.IsNullOrEmpty(connector.ApiKey))
+            string? value = slot.Get();
+            if (!string.IsNullOrEmpty(value) && !SecretReference.ContainsReference(value))
             {
-                connector.ApiKey = MaskedSecret;
+                slot.Set(MaskedSecret);
             }
-
-            foreach (string header in connector.Headers.Keys.Where(IsSecretHeader).ToArray())
-            {
-                connector.Headers[header] = MaskedSecret;
-            }
-        }
-
-        if (!string.IsNullOrEmpty(copy.Embeddings.ApiKey))
-        {
-            copy.Embeddings.ApiKey = MaskedSecret;
         }
 
         return copy;
@@ -242,7 +256,123 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         {
             Embeddings.ApiKey = current.Embeddings.ApiKey;
         }
+
+        foreach (string client in Middleware.GatewayKeys.Where(k => k.Value == MaskedSecret).Select(k => k.Key).ToArray())
+        {
+            if (current.Middleware.GatewayKeys.TryGetValue(client, out string? value))
+            {
+                Middleware.GatewayKeys[client] = value;
+            }
+            else
+            {
+                Middleware.GatewayKeys.Remove(client);
+            }
+        }
     }
+
+    /// <summary>
+    /// Returns a copy in which every <c>${env:…}</c> and <c>${secret:…}</c> reference is replaced by its value. This is
+    /// what connectors and the embedding provider are built from; the document itself keeps the references.
+    /// </summary>
+    /// <param name="store">The secret store for <c>${secret:…}</c> references, if one is registered.</param>
+    /// <param name="problems">Receives a message for each reference that could not be resolved.</param>
+    public RouterConfiguration ResolveSecrets(IRouterSecretStore? store, ICollection<string>? problems = null)
+    {
+        RouterConfiguration copy = Clone();
+        foreach (SecretSlot slot in copy.Slots(secretsOnly: false))
+        {
+            string? value = slot.Get();
+            if (SecretReference.ContainsReference(value))
+            {
+                slot.Set(SecretReference.Resolve(value, store, slot.Setting, problems));
+            }
+        }
+
+        return copy;
+    }
+
+    /// <summary>
+    /// Moves every literal secret (one that is neither empty, masked nor a reference) into <paramref name="store"/> and
+    /// replaces it in this document with a <c>${secret:…}</c> reference. Returns the settings that were moved.
+    /// </summary>
+    public IReadOnlyList<string> MoveSecretsToStore(IRouterSecretStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        var moved = new List<string>();
+        foreach (SecretSlot slot in Slots(secretsOnly: true))
+        {
+            string? value = slot.Get();
+            if (IsLiteralSecret(value))
+            {
+                store.SetSecret(slot.StoreName, value!);
+                slot.Set(SecretReference.ForStore(slot.StoreName));
+                moved.Add(slot.Setting);
+            }
+        }
+
+        return moved;
+    }
+
+    /// <summary>The settings that hold a secret written out in full (rather than a reference).</summary>
+    public IReadOnlyList<string> LiteralSecretSettings() =>
+        Slots(secretsOnly: true).Where(s => IsLiteralSecret(s.Get())).Select(s => s.Setting).ToArray();
+
+    /// <summary>Every non-empty secret value in this (resolved) document, for redaction.</summary>
+    internal IEnumerable<string> SecretValues() =>
+        Slots(secretsOnly: false)
+            .Where(s => s.IsSecret || s.Setting.Contains(":EnvironmentVariables:", StringComparison.Ordinal))
+            .Select(s => s.Get())
+            .Where(v => !string.IsNullOrEmpty(v) && v != MaskedSecret)
+            .Cast<string>();
+
+    private static bool IsLiteralSecret(string? value) =>
+        !string.IsNullOrEmpty(value) && value != MaskedSecret && !SecretReference.ContainsReference(value);
+
+    /// <summary>
+    /// The configuration values that may hold secrets or references to them. With <paramref name="secretsOnly"/>, only
+    /// the ones that are masked and moved to the secret store: API keys, secret-looking header values and gateway keys.
+    /// </summary>
+    private List<SecretSlot> Slots(bool secretsOnly)
+    {
+        var slots = new List<SecretSlot>();
+        foreach ((string name, ConnectorOptions connector) in Connectors)
+        {
+            slots.Add(new SecretSlot($"Connectors:{name}:ApiKey", $"connectors/{name}/ApiKey", true, () => connector.ApiKey, v => connector.ApiKey = v));
+            foreach (string header in connector.Headers.Keys.ToArray())
+            {
+                bool secret = IsSecretHeader(header);
+                if (secret || !secretsOnly)
+                {
+                    slots.Add(new SecretSlot(
+                        $"Connectors:{name}:Headers:{header}", $"connectors/{name}/headers/{header}", secret,
+                        () => connector.Headers.TryGetValue(header, out string? v) ? v : null, v => connector.Headers[header] = v ?? string.Empty));
+                }
+            }
+
+            if (!secretsOnly)
+            {
+                foreach (string variable in connector.EnvironmentVariables.Keys.ToArray())
+                {
+                    slots.Add(new SecretSlot(
+                        $"Connectors:{name}:EnvironmentVariables:{variable}", $"connectors/{name}/env/{variable}", false,
+                        () => connector.EnvironmentVariables.TryGetValue(variable, out string? v) ? v : null,
+                        v => connector.EnvironmentVariables[variable] = v ?? string.Empty));
+                }
+            }
+        }
+
+        slots.Add(new SecretSlot("Embeddings:ApiKey", "embeddings/ApiKey", true, () => Embeddings.ApiKey, v => Embeddings.ApiKey = v));
+        foreach (string client in Middleware.GatewayKeys.Keys.ToArray())
+        {
+            slots.Add(new SecretSlot(
+                $"Middleware:GatewayKeys:{client}", $"gateway/{client}", true,
+                () => Middleware.GatewayKeys.TryGetValue(client, out string? v) ? v : null, v => Middleware.GatewayKeys[client] = v ?? string.Empty));
+        }
+
+        return slots;
+    }
+
+    private sealed record SecretSlot(string Setting, string StoreName, bool IsSecret, Func<string?> Get, Action<string?> Set);
 
     private static bool IsSecretHeader(string name) =>
         name.Contains("key", StringComparison.OrdinalIgnoreCase)

@@ -10,9 +10,11 @@ builder.Services.AddProblemDetails();
 // "SemanticRouter" section of appsettings.json (plus appsettings.{Environment}.json overrides).
 // Changes made in the dashboard are applied live and saved to semantic-router.json next to the app;
 // when that file exists it replaces the appsettings section (secrets left empty are inherited).
+// Keys typed into the dashboard go to semantic-router.secrets.json, encrypted, and the file keeps a reference.
 builder.Services
     .AddSemanticPromptRouting(builder.Configuration.GetSection(SemanticRouterOptions.SectionName))
-    .UseConfigurationFile(builder.Configuration["SemanticRouter:Store:Path"] ?? "semantic-router.json");
+    .UseConfigurationFile(builder.Configuration["SemanticRouter:Store:Path"] ?? "semantic-router.json")
+    .UseSecretFile();
 
 var app = builder.Build();
 

@@ -64,6 +64,34 @@ public sealed class SemanticRouterBuilder
         return this;
     }
 
+    /// <summary>
+    /// Keeps secrets out of the configuration file: API keys, secret headers and gateway keys typed into the dashboard
+    /// are encrypted (ASP.NET Core Data Protection) into a separate file and the configuration refers to them as
+    /// <c>${secret:…}</c>. Without a <paramref name="path"/>, the file sits next to the configuration file as
+    /// <c>{name}.secrets.json</c> (or <c>semantic-router.secrets.json</c> in the current directory).
+    /// </summary>
+    public SemanticRouterBuilder UseSecretFile(string? path = null)
+    {
+        Services.AddDataProtection();
+        Services.Replace(ServiceDescriptor.Singleton<IRouterSecretStore>(sp =>
+        {
+            string file = path
+                ?? (sp.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store
+                    ? Path.Combine(Path.GetDirectoryName(store.Location)!, Path.GetFileNameWithoutExtension(store.Location) + ".secrets.json")
+                    : "semantic-router.secrets.json");
+            return new ProtectedFileSecretStore(file, sp.GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>());
+        }));
+        return this;
+    }
+
+    /// <summary>Uses a custom <see cref="IRouterSecretStore"/> (a vault, the OS keychain) for <c>${secret:…}</c> references.</summary>
+    public SemanticRouterBuilder UseSecretStore<TStore>()
+        where TStore : class, IRouterSecretStore
+    {
+        Services.Replace(ServiceDescriptor.Singleton<IRouterSecretStore, TStore>());
+        return this;
+    }
+
     /// <summary>Uses a custom <see cref="IRouterConfigurationStore"/>.</summary>
     public SemanticRouterBuilder UseConfigurationStore<TStore>()
         where TStore : class, IRouterConfigurationStore

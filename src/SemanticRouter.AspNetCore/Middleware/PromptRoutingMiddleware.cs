@@ -57,6 +57,21 @@ internal sealed partial class PromptRoutingMiddleware
             return;
         }
 
+        string? client = runtime.GatewayKeys.Count > 0 ? IdentifyClient(context.Request, runtime.GatewayKeys) : null;
+        if (client is null && runtime.GatewayKeys.Count > 0
+            && (!DashboardAccess.IsLocal(context) || options.RequireGatewayKeyForLocalClients))
+        {
+            LogGatewayKeyMissing(_logger, context.Connection.RemoteIpAddress?.ToString() ?? "unknown", context.Request.Path);
+            await ProtocolErrors.WriteAsync(
+                context, protocol,
+                StatusCodes.Status401Unauthorized,
+                "Gateway key required",
+                "This router requires a gateway key: send it as 'Authorization: Bearer <key>' or 'x-api-key: <key>' " +
+                "(ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY or OPENAI_API_KEY in most clients).",
+                context.RequestAborted).ConfigureAwait(false);
+            return;
+        }
+
         ReadOnlyMemory<byte>? body = await ReadBodyAsync(context.Request, options.MaxRequestBodyBytes, context.RequestAborted).ConfigureAwait(false);
         if (body is not { } bodyBytes)
         {
@@ -137,6 +152,7 @@ internal sealed partial class PromptRoutingMiddleware
             Timestamp = DateTimeOffset.UtcNow,
             Protocol = protocol,
             Path = context.Request.Path.Value ?? string.Empty,
+            Client = client,
             RequestedModel = chat.Model,
             PromptPreview = prompt.Length <= PreviewLength ? prompt : prompt[..PreviewLength] + "…",
             Tier = result.RequiredTier,
@@ -227,6 +243,33 @@ internal sealed partial class PromptRoutingMiddleware
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// The name of the gateway key the client presented, or <see langword="null"/>. Keys are compared in constant time
+    /// and are only read for this comparison: they are never logged or forwarded.
+    /// </summary>
+    internal static string? IdentifyClient(HttpRequest request, IReadOnlyDictionary<string, string> keys)
+    {
+        string? bearer = request.Headers.Authorization;
+        bearer = bearer is not null && bearer.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? bearer["Bearer ".Length..].Trim() : null;
+        string? apiKey = request.Headers["x-api-key"];
+        string? match = null;
+        foreach ((string key, string name) in keys)
+        {
+            byte[] expected = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key));
+            foreach (string? presented in new[] { bearer, apiKey })
+            {
+                if (!string.IsNullOrEmpty(presented)
+                    && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                        expected, System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(presented))))
+                {
+                    match ??= name;
+                }
+            }
+        }
+
+        return match;
     }
 
     private static string[] ImpliedCapabilities(ChatCompletionRequest chat) =>
@@ -357,6 +400,9 @@ internal sealed partial class PromptRoutingMiddleware
 
     internal static Task WriteProblemAsync(HttpContext context, ChatProtocol protocol, int statusCode, string title, string detail) =>
         ProtocolErrors.WriteAsync(context, protocol, statusCode, title, detail, context.RequestAborted);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Refused a gateway request from {Remote} to {Path}: no valid gateway key.")]
+    private static partial void LogGatewayKeyMissing(ILogger logger, string remote, PathString path);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "No prompt found in JSON request to {Path}; passing through.")]
     private static partial void LogNoPrompt(ILogger logger, PathString path);
