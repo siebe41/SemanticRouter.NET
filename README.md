@@ -483,6 +483,17 @@ The tests cover:
 
 No network, model or vendor CLI is needed. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
 
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every pull request, on `main`, and weekly so new advisories surface without a push:
+
+| Check | Fails when | Run it locally |
+|---|---|---|
+| `secret-scan` | [gitleaks](https://github.com/gitleaks/gitleaks) finds a credential anywhere in the git history, including in commits whose files were later deleted | `gitleaks git --redact .` |
+| Vulnerable packages | a direct or transitive NuGet package has a published advisory | `dotnet list package --vulnerable --include-transitive` |
+| Formatting | code differs from `dotnet format` under `.editorconfig` | `dotnet format` (fixes in place) |
+| Build, test, pack | any warning, test failure or packaging error | the commands above |
+
+A leaked key must be revoked at the provider; removing it from the code does not remove it from history. For a confirmed false positive, add the fingerprint gitleaks prints to `.gitleaksignore`. Dependabot ([`.github/dependabot.yml`](.github/dependabot.yml)) proposes NuGet and GitHub Actions updates weekly; actions are pinned to commit SHAs.
+
 ## Roadmap
 
 Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: a ready-to-run host (`dotnet tool` and a container), authentication for remote access, durable state, usage and budget tracking, routing evaluation and calibration, a Responses API front door for Codex, and in-process embeddings.
