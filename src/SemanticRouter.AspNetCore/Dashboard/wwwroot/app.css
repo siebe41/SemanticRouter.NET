@@ -1,7 +1,8 @@
 /* ------------------------------------------------------------------------------------------------
    Themes. Every theme is one block of tokens keyed by [data-theme]; the rest of the stylesheet only
-   uses the tokens. To add a theme: copy a block, change the values, and register its id and name in
-   THEMES at the top of app.js. The first block doubles as the fallback for unknown theme ids.
+   uses the tokens. Built-in themes are listed in THEMES (js/core.js); to add your own without
+   rebuilding, drop a token file into the themes directory (docs/dashboard.md#themes). The first block
+   doubles as the fallback for unknown theme ids and for tokens a theme leaves out.
    ------------------------------------------------------------------------------------------------ */
 
 :root,
@@ -18,12 +19,13 @@
   --border-strong: #37434c;
   --text: #e8edf0;
   --text-muted: #94a3ac;
-  --text-faint: #66757e;
+  --text-faint: #788892;
   --accent: #228fa7;
-  --accent-ink: #228fa7;
+  --accent-ink: #2291a9;
   --accent-contrast: #0a1114;
   --accent-soft: rgba(34, 143, 167, 0.2);
   --signal: #d08c34;
+  --signal-ink: #d08c34;
   --signal-soft: rgba(208, 140, 52, 0.18);
   --signal-contrast: #14100a;
   --ok: #a4d037;
@@ -33,9 +35,9 @@
   --series-2: #c97a1e;
   --warn: #d08c34;
   --warn-soft: rgba(208, 140, 52, 0.18);
-  --danger: #e5484d;
+  --danger: #ea696e;
   --danger-soft: rgba(229, 72, 77, 0.16);
-  --info: #738a94;
+  --info: #899ca5;
   --info-soft: rgba(115, 138, 148, 0.18);
   --brand-mark-bg: #0c1013;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.25);
@@ -58,21 +60,22 @@
   --border-strong: #c3cfd6;
   --text: #121a1e;
   --text-muted: #54666f;
-  --text-faint: #86959d;
+  --text-faint: #5f6d75;
   --accent: #228fa7;
   --accent-ink: #1a6f82;
   --accent-contrast: #0a1114;
   --accent-soft: rgba(34, 143, 167, 0.16);
   --signal: #d08c34;
+  --signal-ink: #916022;
   --signal-soft: rgba(208, 140, 52, 0.22);
   --signal-contrast: #14100a;
-  --ok: #4f8a14;
+  --ok: #417210;
   --ok-soft: rgba(164, 208, 55, 0.28);
   --series-1: #1a8aa8;
   --series-2: #b9651a;
   --warn: #8a530c;
   --warn-soft: rgba(208, 140, 52, 0.2);
-  --danger: #c6282d;
+  --danger: #c2272c;
   --danger-soft: rgba(229, 72, 77, 0.13);
   --info: #4e6670;
   --info-soft: rgba(115, 138, 148, 0.18);
@@ -93,12 +96,13 @@
   --border-strong: #2f452f;
   --text: #d8f0d8;
   --text-muted: #7fa27f;
-  --text-faint: #4f6b4f;
+  --text-faint: #628562;
   --accent: #5cff8d;
   --accent-ink: #5cff8d;
   --accent-contrast: #050705;
   --accent-soft: rgba(92, 255, 141, 0.14);
   --signal: #ffd166;
+  --signal-ink: #ffd166;
   --signal-soft: rgba(255, 209, 102, 0.16);
   --signal-contrast: #050705;
   --ok: #5cff8d;
@@ -234,7 +238,18 @@ nav a.active { background: var(--accent-soft); color: var(--text); font-weight: 
 .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 @media (max-width: 1000px) { .grid.cols-3, .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 720px) { .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; } .app { grid-template-columns: 1fr; } .sidebar { position: static; height: auto; } }
+.nav-toggle { display: none; font-size: 18px; line-height: 1; padding: 4px 10px; }
+@media (max-width: 720px) {
+  .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
+  .app { grid-template-columns: 1fr; }
+  /* The navigation becomes a drawer behind the menu button. */
+  .nav-toggle { display: inline-flex; }
+  .sidebar { position: fixed; inset: 0 auto 0 0; width: min(280px, 85vw); z-index: 50; transform: translateX(-100%); visibility: hidden; transition: transform 0.2s, visibility 0.2s; box-shadow: var(--shadow); }
+  body.nav-open .sidebar { transform: none; visibility: visible; }
+  body.nav-open::after { content: ""; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 40; }
+  .topbar { padding: 8px 12px; flex-wrap: wrap; }
+}
+
 .card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -407,11 +422,11 @@ pre.diff .diff-del { color: var(--danger); }
    Live and Memory views. Blue (--accent) marks what stayed local, orange (--signal) what went to the cloud.
    ------------------------------------------------------------------------------------------------ */
 .view.wide { max-width: 1680px; }
-.signal-text, .cloud-text { color: var(--signal); }
+.signal-text, .cloud-text { color: var(--signal-ink); }
 .local-text { color: var(--accent-ink); }
 .none-text, .missing-text { color: var(--text-muted); }
 .cloud-ref-text { color: var(--warn); }
-.stat .value.signal-text { color: var(--signal); }
+.stat .value.signal-text { color: var(--signal-ink); }
 
 .share-legend { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); flex-wrap: wrap; }
 .share-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-left: 6px; background: var(--text-faint); }
@@ -455,7 +470,7 @@ pre.diff .diff-del { color: var(--danger); }
 .feed-row .arrow { color: var(--text-faint); }
 .feed-row .model { font-weight: 600; }
 .feed-row .model.local { color: var(--accent-ink); }
-.feed-row .model.cloud { color: var(--signal); }
+.feed-row .model.cloud { color: var(--signal-ink); }
 .feed-row .why { color: var(--text-muted); }
 .feed-row .ms { margin-left: auto; }
 .feed-row .prompt { flex-basis: 100%; color: var(--text); font-family: var(--font-body); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -486,3 +501,20 @@ pre.diff .diff-del { color: var(--danger); }
 .note-list a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 table.compact th, table.compact td { padding: 3px 6px; }
 .empty-state { text-align: left; max-width: 760px; }
+
+/* ------------------------------------------------------------------------------------------------
+   Accessibility (last, so these win over the component rules above)
+   ------------------------------------------------------------------------------------------------ */
+/* Keyboard focus is always visible, in every theme. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.item-head:focus-visible { outline-offset: -2px; }
+.skip-link { position: absolute; left: 8px; top: -48px; z-index: 100; padding: 8px 12px; background: var(--accent); color: var(--accent-contrast); border-radius: var(--radius); }
+.skip-link:focus { top: 8px; }
+main:focus { outline: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+@media (max-width: 720px) { .view { padding: 16px 12px 48px; } }

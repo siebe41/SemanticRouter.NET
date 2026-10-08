@@ -90,7 +90,7 @@ flowchart LR
 
 ## The dashboard
 
-`MapRouterDashboard` serves three embedded files (`index.html`, `app.css`, `app.js`) and the admin API under `{prefix}/api`. There is no build step and no dependency. The UI keeps one draft of the configuration in the browser, edits it through path-based bindings (`data-bind="Models.2.Tier"`), and talks to the same validation the router uses at start-up. Themes are token blocks keyed by `data-theme`; see [dashboard.md](dashboard.md#themes). The admin API answers loopback clients only unless that guard is turned off.
+`MapRouterDashboard` serves embedded files (`index.html`, `app.css`, `graph.js`, and the native ES modules under `js/`), theme files from the themes directory, and the admin API under `{prefix}/api`. There is no build step and no dependency; `tests/dashboard-e2e` runs Playwright against the real host in CI. The UI keeps one draft of the configuration in the browser, edits it through path-based bindings (`data-bind="Models.2.Tier"`), and talks to the same validation the router uses at start-up. Themes are token blocks keyed by `data-theme`; see [dashboard.md](dashboard.md#themes). The admin API answers loopback clients only unless that guard is turned off.
 
 ## Durable state
 
