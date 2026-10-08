@@ -24,6 +24,12 @@ public interface IModelHealth
     /// <summary>Records a failure, putting the model into cooldown.</summary>
     void ReportFailure(ModelDefinition model, ModelFailureKind kind);
 
+    /// <summary>
+    /// Records a failure whose end is known, e.g. a usage limit that "resets 3:45pm" or an HTTP <c>Retry-After</c>.
+    /// Implementations without support fall back to the usual cooldown.
+    /// </summary>
+    void ReportFailure(ModelDefinition model, ModelFailureKind kind, DateTimeOffset? until) => ReportFailure(model, kind);
+
     /// <summary>The models currently cooling down and when each becomes available again.</summary>
     IReadOnlyDictionary<string, DateTimeOffset> GetCooldowns();
 }
@@ -123,16 +129,25 @@ public sealed class ModelHealthTracker : IModelHealth
         }
     }
 
+    /// <summary>The longest cooldown a parsed reset time may set, so a misread date cannot shelve a model for long.</summary>
+    public static readonly TimeSpan MaximumResetCooldown = TimeSpan.FromDays(8);
+
     /// <inheritdoc />
-    public void ReportFailure(ModelDefinition model, ModelFailureKind kind)
+    public void ReportFailure(ModelDefinition model, ModelFailureKind kind) => ReportFailure(model, kind, null);
+
+    /// <inheritdoc />
+    public void ReportFailure(ModelDefinition model, ModelFailureKind kind, DateTimeOffset? until)
     {
         ArgumentNullException.ThrowIfNull(model);
+        DateTimeOffset now = _time.GetUtcNow();
         TimeSpan cooldown = kind == ModelFailureKind.QuotaExceeded ? _options.QuotaCooldown : _options.FailureCooldown;
-        if (cooldown > TimeSpan.Zero)
+        DateTimeOffset end = until is { } reset && reset > now && reset - now <= MaximumResetCooldown
+            ? reset
+            : now + cooldown;
+        if (end > now)
         {
-            DateTimeOffset until = _time.GetUtcNow() + cooldown;
-            _store?.SaveCooldown(model.Name, until);
-            _cooldownUntil[model.Name] = until;
+            _store?.SaveCooldown(model.Name, end);
+            _cooldownUntil[model.Name] = end;
         }
     }
 

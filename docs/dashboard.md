@@ -17,6 +17,8 @@ builder.Services
 | Page | What it does |
 |---|---|
 | **Overview** | Counters, every model with its tier and health (ready, cooling down, disabled), the runtime (configuration version and source, store, embeddings state, gateway paths), served-by and required-tier charts, and **Try a prompt**: classify without calling a model, or send it through the gateway for real. |
+| **Overview → Trends** | Requests per interval and p50/p95 latency over 1 hour, 24 hours, 7 or 30 days, with a table view. |
+| **Usage** | Tokens and cost by model, connector, route, client or day; "saved by routing" against a reference model; budgets with their state; the usage settings and budget editor. |
 | **Activity** | The last 500 routed requests: prompt preview, protocol, tier, reason, route and similarity, the model that answered, attempt number, degraded flag, timing. Filter by failed, degraded or tool-bearing. |
 | **Tiers** | The capability ladder with names and descriptions, and a matrix of which routes require each tier and which models provide it. Shows at a glance when a tier has nothing that can serve it. |
 | **Routes** | Intent clusters: name, tier, required capabilities, threshold, local-only, utterances. |
@@ -75,6 +77,9 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `GET api/config/history/{id}` | That version's document (masked). |
 | `POST api/config/history/{id}/rollback` | Apply and save that version; recorded as a `rollback`. |
 | `GET api/activity?limit=100&after=<id>` | Recent routing activity. |
+| `GET api/activity/series?window=1h\|24h\|7d\|30d` | Counts, mix and latency percentiles per bucket. |
+| `GET api/activity/export?format=csv\|jsonl&prompts=false&since=&until=` | Download activity; prompt previews only with `prompts=true`. |
+| `GET api/usage?window=day\|week\|month\|7d\|30d&by=model\|connector\|route\|client\|day` | Usage totals and groups, the reference model and every budget's state. |
 | `POST api/classify` | `{ "prompt": "...", "model": "auto" }` → the routing plan, without calling a model. |
 | `POST api/health/reset` | Clear every cooldown. |
 | `POST api/embeddings/test` | Embed a sentence with the applied provider. |

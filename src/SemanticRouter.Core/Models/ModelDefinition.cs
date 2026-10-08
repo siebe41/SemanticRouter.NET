@@ -45,6 +45,12 @@ public sealed class ModelDefinition
     /// <summary>Marginal price in USD per million output tokens.</summary>
     public decimal OutputCostPerMillionTokens { get; set; }
 
+    /// <summary>Price per million input tokens read from the provider's prompt cache. Defaults to <see cref="InputCostPerMillionTokens"/>.</summary>
+    public decimal? CacheReadCostPerMillionTokens { get; set; }
+
+    /// <summary>Price per million input tokens written to the provider's prompt cache. Defaults to <see cref="InputCostPerMillionTokens"/>.</summary>
+    public decimal? CacheWriteCostPerMillionTokens { get; set; }
+
     /// <summary>User preference: lower values are preferred. Breaks ties, and is the primary key for <see cref="SelectionStrategy.Priority"/>. Default 0.</summary>
     public int Priority { get; set; }
 
@@ -68,6 +74,16 @@ public sealed class ModelDefinition
 
         return true;
     }
+
+    /// <summary>
+    /// What a served request cost at this model's prices. <paramref name="inputTokens"/> excludes cached tokens, which
+    /// are priced separately (cache reads and cache writes).
+    /// </summary>
+    public decimal Cost(long inputTokens, long outputTokens, long cacheReadTokens = 0, long cacheWriteTokens = 0) =>
+        ((inputTokens * InputCostPerMillionTokens)
+         + (outputTokens * OutputCostPerMillionTokens)
+         + (cacheReadTokens * (CacheReadCostPerMillionTokens ?? InputCostPerMillionTokens))
+         + (cacheWriteTokens * (CacheWriteCostPerMillionTokens ?? InputCostPerMillionTokens))) / 1_000_000m;
 
     /// <summary>Estimated marginal cost in USD for a request of the given size.</summary>
     public decimal EstimateCost(int inputTokens, int outputTokens) =>

@@ -365,7 +365,8 @@ internal static class AnthropicResponseReader
 /// </summary>
 internal static class PassThroughToolCallScanner
 {
-    public static async Task CopyAsync(Stream upstream, Stream downstream, bool sse, ChatProtocol protocol, Action<string> onToolCall, CancellationToken cancellationToken)
+    public static async Task CopyAsync(
+        Stream upstream, Stream downstream, bool sse, ChatProtocol protocol, Action<string> onToolCall, CancellationToken cancellationToken, Action<ChatUsage>? onUsage = null)
     {
         if (!sse)
         {
@@ -373,7 +374,7 @@ internal static class PassThroughToolCallScanner
             await upstream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
             buffer.Position = 0;
             await buffer.CopyToAsync(downstream, cancellationToken).ConfigureAwait(false);
-            ScanJson(buffer.GetBuffer().AsMemory(0, (int)buffer.Length), protocol, onToolCall);
+            ScanJson(buffer.GetBuffer().AsMemory(0, (int)buffer.Length), protocol, onToolCall, onUsage);
             return;
         }
 
@@ -388,21 +389,27 @@ internal static class PassThroughToolCallScanner
                 continue;
             }
 
-            if (line.StartsWith("data:", StringComparison.Ordinal) && line.Contains("\"id\"", StringComparison.Ordinal))
+            if (line.StartsWith("data:", StringComparison.Ordinal)
+                && (line.Contains("\"id\"", StringComparison.Ordinal) || (onUsage is not null && line.Contains("\"usage\"", StringComparison.Ordinal))))
             {
-                ScanJson(System.Text.Encoding.UTF8.GetBytes(line.AsSpan(5).TrimStart().ToString()), protocol, onToolCall);
+                ScanJson(System.Text.Encoding.UTF8.GetBytes(line.AsSpan(5).TrimStart().ToString()), protocol, onToolCall, onUsage);
             }
         }
 
         await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static void ScanJson(ReadOnlyMemory<byte> json, ChatProtocol protocol, Action<string> onToolCall)
+    private static void ScanJson(ReadOnlyMemory<byte> json, ChatProtocol protocol, Action<string> onToolCall, Action<ChatUsage>? onUsage)
     {
         try
         {
             using JsonDocument document = JsonDocument.Parse(json);
             JsonElement root = document.RootElement;
+            if (onUsage is not null && root.ValueKind == JsonValueKind.Object && UsageCapture.Find(root, protocol) is { } usage)
+            {
+                onUsage(usage);
+            }
+
             if (protocol == ChatProtocol.Anthropic)
             {
                 if (root.TryGetObject("content_block", out JsonElement block) && block.GetString("type") == "tool_use" && block.GetString("id") is { } id)

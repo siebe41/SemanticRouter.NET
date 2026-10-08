@@ -1,0 +1,123 @@
+# Usage, budgets and observability
+
+What the router spent, where, and why. All of this works without extra packages: usage and budgets live in the router (in memory, or on disk with `UseSqliteState`). Traces and metrics use the .NET `ActivitySource` and `Meter` APIs, which OpenTelemetry, `dotnet-counters` and Prometheus exporters read. No span, metric or log line carries prompt text.
+
+## Usage and cost
+
+Every served request records the tokens the backend reported (input, output, prompt-cache reads and writes) and their cost at the model's prices. The data shows up:
+
+- in the activity entry (`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheCreationTokens`, `costUsd`);
+- in the usage ledger, behind the dashboard's **Usage** page and `GET {dashboard}/api/usage`;
+- in the `semantic_router.tokens` and `semantic_router.cost` metrics.
+
+| Backend | Where the numbers come from |
+|---|---|
+| OpenAI-compatible, translated or passed through as JSON | `usage.prompt_tokens` (cached tokens split out of it), `completion_tokens` |
+| OpenAI-compatible, streamed pass-through | The final chunk's `usage`, which servers send only when the client asks with `stream_options.include_usage` |
+| Anthropic, JSON or SSE | `usage` on the message, or on `message_start` plus `message_delta` |
+| Claude Code CLI | The `result` event's `usage` |
+
+Prices come from the catalog: `InputCostPerMillionTokens` and `OutputCostPerMillionTokens`, plus optional `CacheReadCostPerMillionTokens` and `CacheWriteCostPerMillionTokens` (default: the input price). Local models and flat-rate subscriptions are priced at 0.
+
+**Saved by routing.** Set `Usage:ReferenceModel` to a catalog model, which may be disabled. The dashboard then shows what each request would have cost at that model's prices (cache tokens counted as plain input), minus what it did cost.
+
+```jsonc
+"Usage": {
+  "ReferenceModel": "anthropic-opus",
+  "TimeZone": "Europe/Amsterdam",          // budget periods start at midnight here; default: this machine's zone
+  "WarnAtPercent": 80,
+  "Budgets": [
+    { "Name": "daily-openai", "Connector": "openai", "Period": "Day", "MaxCostUsd": 5 },
+    { "Name": "opus-month",   "Model": "anthropic-opus", "Period": "Month", "MaxTokens": 20000000 }
+  ]
+}
+```
+
+## Budgets
+
+A budget covers one model or every model on one connector, per `Day`, `Week` (from Monday) or `Month`, in tokens, dollars or both.
+
+- **At `WarnAtPercent`**, the dashboard shows a banner and the log gets one warning per budget and period.
+- **Once spent**, the model is not tried until the period ends:
+  - The request goes to the next candidate, with the header `X-Prompt-Route-Budget: <name>` and the activity field `budget`.
+  - A request that only that model could serve gets a 503 that names the budget: `budget 'daily-openai' is spent ($5.02 of $5.00 this day)`.
+
+Budgets read the usage ledger. With `UseSqliteState`, spend survives restarts. Otherwise a restart starts the period's count again.
+
+## Usage limits that say when they reset
+
+A provider that reports when its limit ends replaces the fixed `QuotaCooldown` (15 minutes). The model cools down until that time, capped at 8 days:
+
+| Source | Example |
+|---|---|
+| HTTP `Retry-After` | `Retry-After: 3600`, or an HTTP date |
+| Anthropic rate-limit headers | `anthropic-ratelimit-tokens-reset: 2026-10-08T15:00:00Z` |
+| The error message (HTTP body or CLI output) | "You've hit your session limit · resets 3:45pm", "resets Oct 10, 3pm", "resets 9am (Europe/Amsterdam)", "try again in 2 hours 30 minutes", "Please try again in 4h12m" |
+
+A time without a date means the next such time. A time without a zone uses this machine's zone. The dashboard's model table shows "cooling down until …".
+
+## Traces
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .WithTracing(t => t
+        .AddSource(SemanticRouterDiagnostics.ActivitySourceName)   // "SemanticRouter"
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddOtlpExporter())
+    .WithMetrics(m => m
+        .AddMeter(SemanticRouterDiagnostics.MeterName)              // "SemanticRouter"
+        .AddPrometheusExporter());
+```
+
+One routed request is one trace:
+
+```text
+semantic_router.route              protocol, client, request_id, tier, reason, route, planned_model, served_by, outcome
+├─ semantic_router.parse
+├─ semantic_router.classify        tier, reason, route, similarity, complexity   (the embedding call is its child)
+├─ semantic_router.select          candidates, planned_model, local_only
+├─ semantic_router.attempt         model, connector, attempt=1, outcome=Failed, failure.kind, failure.detail (redacted)
+└─ semantic_router.attempt         model, connector, attempt=2, outcome=Completed
+   └─ HTTP POST (backend)          traceparent is sent to the backend
+```
+
+Failed attempts are marked with error status. HTTP backends receive `traceparent`, so a backend that traces joins the same trace.
+
+## Metrics
+
+| Instrument | Unit | Tags |
+|---|---|---|
+| `semantic_router.decisions` | {decision} | `tier`, `reason`, `route` |
+| `semantic_router.classification.duration` | s | `reason` |
+| `semantic_router.attempts` | {attempt} | `model`, `outcome` |
+| `semantic_router.request.duration` | s | `model`, `connector`, `outcome` (`served`, `failed`) |
+| `semantic_router.time_to_first_byte` | s | `model`, `connector` |
+| `semantic_router.tokens` | {token} | `model`, `connector`, `type` (`input`, `output`, `cache_read`, `cache_write`) |
+| `semantic_router.cost` | USD | `model`, `connector` |
+| `semantic_router.cooldowns` | {cooldown} | `model`, `kind` |
+| `semantic_router.failovers` | {failover} | `model` (the one that failed), `kind` |
+| `semantic_router.budget.skips` | {skip} | `budget`, `model` |
+| `semantic_router.cli.active` | {process} | `connector` |
+| `semantic_router.cli.queued` | {request} | `connector` (waiting for `MaxConcurrency`) |
+
+The names are constants on `SemanticRouterDiagnostics`. A Prometheus scrape of the router (with `app.MapPrometheusScrapingEndpoint()` from `OpenTelemetry.Exporter.Prometheus.AspNetCore`):
+
+```yaml
+scrape_configs:
+  - job_name: semantic-router
+    metrics_path: /metrics
+    static_configs:
+      - targets: [ "localhost:5080" ]
+```
+
+Without OpenTelemetry: `dotnet-counters monitor -n semantic-router --counters SemanticRouter`.
+
+## Request ids, logs and export
+
+- **Request ids.** Every routed response carries `X-Prompt-Route-Id`, the id of its activity entry. The entry also stores the W3C `traceId`, so a request a user reports can be found in the dashboard, the export and the tracing backend.
+- **Log scope.** Log lines written while a request is routed carry the scope `RouteRequestId`. Turn on scopes in your logging provider (e.g. `"Console": { "IncludeScopes": true }`).
+- **Export.** `GET {dashboard}/api/activity/export?format=csv|jsonl&since=…&until=…` downloads activity (default: the last 7 days), with tokens, cost, timings and trace ids. Prompt previews are left out unless you add `prompts=true`.
+- **Time series.** `GET {dashboard}/api/activity/series?window=1h|24h|7d|30d` returns requests, served and failed counts, tier and model mix, and p50/p95 latency per bucket, plus p50/p95/p99 for the window. The dashboard's **Trends** card draws it. Percentiles are nearest-rank over served requests' end-to-end time, so they match what you compute from the export.
+
+Both read the activity store. With `UseSqliteState` they cover everything kept on disk (30 days by default); otherwise they cover the last 500 requests.

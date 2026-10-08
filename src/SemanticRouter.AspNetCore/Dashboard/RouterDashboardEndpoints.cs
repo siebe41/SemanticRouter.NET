@@ -115,8 +115,8 @@ public static class RouterDashboardEndpoints
             })
             .WithMetadata(DashboardAnonymousMetadata.Instance);
 
-        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity) =>
-            Results.Json(BuildStatus(provider, health, activity), ApiJson));
+        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets) =>
+            Results.Json(BuildStatus(provider, health, activity, budgets), ApiJson));
 
         api.MapGet("/config", (RouterRuntimeProvider provider) =>
         {
@@ -207,6 +207,43 @@ public static class RouterDashboardEndpoints
         api.MapGet("/activity", (RoutingActivityLog activity, int? limit, long? after) =>
             Results.Json(new ActivityResponse(activity.Recent(limit ?? options.DefaultActivityLimit, after), activity.NextId - 1), ApiJson));
 
+        api.MapGet("/activity/series", (RoutingActivityLog activity, string? window) =>
+        {
+            (TimeSpan span, TimeSpan bucket) = ActivityReports.Window(window);
+            DateTimeOffset until = Align(DateTimeOffset.UtcNow, bucket) + bucket;
+            DateTimeOffset since = until - span;
+            return Results.Json(ActivityReports.Series(activity.Between(since, until), since, until, bucket), ApiJson);
+        });
+
+        api.MapGet("/activity/export", (RoutingActivityLog activity, string? format, bool? prompts, DateTimeOffset? since, DateTimeOffset? until) =>
+        {
+            DateTimeOffset end = until ?? DateTimeOffset.UtcNow.AddMinutes(1);
+            IReadOnlyList<RoutingActivityEntry> entries = activity.Between(since ?? end.AddDays(-7), end);
+            bool includePrompts = prompts ?? false;
+            string stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
+            return string.Equals(format, "jsonl", StringComparison.OrdinalIgnoreCase)
+                ? Results.File(System.Text.Encoding.UTF8.GetBytes(ActivityReports.ToJsonLines(entries, includePrompts)), "application/jsonl", $"semantic-router-activity-{stamp}.jsonl")
+                : Results.File(System.Text.Encoding.UTF8.GetBytes(ActivityReports.ToCsv(entries, includePrompts)), "text/csv", $"semantic-router-activity-{stamp}.csv");
+        });
+
+        api.MapGet("/usage", (RouterRuntimeProvider provider, IUsageLedger ledger, BudgetGate budgets, string? window, string? by) =>
+        {
+            UsageOptions usage = provider.Current.Configuration.Usage;
+            TimeZoneInfo zone = BudgetGate.ZoneOf(usage);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            (DateTimeOffset since, DateTimeOffset until) = window switch
+            {
+                "day" => BudgetGate.PeriodOf(BudgetPeriod.Day, now, zone),
+                "week" => BudgetGate.PeriodOf(BudgetPeriod.Week, now, zone),
+                "month" => BudgetGate.PeriodOf(BudgetPeriod.Month, now, zone),
+                "30d" => (now.AddDays(-30), now.AddMinutes(1)),
+                _ => (now.AddDays(-7), now.AddMinutes(1)),
+            };
+            UsageGrouping grouping = Enum.TryParse(by, ignoreCase: true, out UsageGrouping parsed) ? parsed : UsageGrouping.Model;
+            return Results.Json(new UsageResponse(
+                since, until, grouping, usage.ReferenceModel, ledger.Total(since, until), ledger.Summarize(since, until, grouping, zone), budgets.Status(usage)), ApiJson);
+        });
+
         api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.Prompt))
@@ -272,6 +309,9 @@ public static class RouterDashboardEndpoints
 
         return group;
     }
+
+    private static DateTimeOffset Align(DateTimeOffset time, TimeSpan bucket) =>
+        new(time.UtcTicks - (time.UtcTicks % bucket.Ticks), TimeSpan.Zero);
 
     /// <summary>Who is making a change, for the configuration history. Never contains a token.</summary>
     private static string Actor(HttpContext context)
@@ -406,7 +446,7 @@ public static class RouterDashboardEndpoints
         return Results.Content(envelope.ToJsonString(), "application/json");
     }
 
-    private static StatusResponse BuildStatus(RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity)
+    private static StatusResponse BuildStatus(RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets)
     {
         RouterRuntime runtime = provider.Current;
         RouterConfiguration config = runtime.Configuration;
@@ -450,7 +490,8 @@ public static class RouterDashboardEndpoints
                 recent.Count(e => e.Degraded),
                 recent.Where(e => e.ServedBy is not null).GroupBy(e => e.ServedBy!).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase),
                 recent.GroupBy(e => e.Tier).OrderBy(g => g.Key).ToDictionary(g => g.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), g => g.Count()),
-                recent.GroupBy(e => e.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal)));
+                recent.GroupBy(e => e.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal)),
+            budgets.Status(config.Usage));
     }
 
     private static string[] CliModelHints(CliPreset preset) => preset switch
@@ -477,6 +518,11 @@ public static class RouterDashboardEndpoints
         /// <summary>Whether the document can be applied.</summary>
         public bool Valid => Errors.Count == 0;
     }
+
+    /// <summary>Usage over a window.</summary>
+    public sealed record UsageResponse(
+        DateTimeOffset Since, DateTimeOffset Until, UsageGrouping By, string? ReferenceModel, UsageTotals Totals,
+        IReadOnlyList<UsageGroup> Groups, IReadOnlyList<BudgetStatus> Budgets);
 
     /// <summary>Applied configuration versions, newest first.</summary>
     public sealed record HistoryResponse(IReadOnlyList<RouterConfigurationVersion> Versions);
@@ -510,7 +556,8 @@ public static class RouterDashboardEndpoints
         IReadOnlyList<ConnectorStatus> Connectors,
         IReadOnlyList<RouteStatus> Routes,
         GatewayStatus Gateway,
-        ActivitySummary Activity);
+        ActivitySummary Activity,
+        IReadOnlyList<BudgetStatus> Budgets);
 
     /// <summary>Embedding provider in use.</summary>
     public sealed record EmbeddingsStatus(string Provider, string? Model, string? Endpoint, int Dimensions);

@@ -28,6 +28,9 @@
   --signal-contrast: #14100a;
   --ok: #a4d037;
   --ok-soft: rgba(164, 208, 55, 0.16);
+  /* Chart series, validated as a categorical pair against --bg-elevated (lightness, chroma, colour-blind separation). */
+  --series-1: #2b9fc0;
+  --series-2: #c97a1e;
   --warn: #d08c34;
   --warn-soft: rgba(208, 140, 52, 0.18);
   --danger: #e5484d;
@@ -65,6 +68,8 @@
   --signal-contrast: #14100a;
   --ok: #4f8a14;
   --ok-soft: rgba(164, 208, 55, 0.28);
+  --series-1: #1a8aa8;
+  --series-2: #b9651a;
   --warn: #8a530c;
   --warn-soft: rgba(208, 140, 52, 0.2);
   --danger: #c6282d;
@@ -80,6 +85,8 @@
   color-scheme: dark;
   --bg: #050705;
   --bg-elevated: #0b100b;
+  --series-1: #22a35a;
+  --series-2: #b45fd2;
   --bg-sunken: #020302;
   --bg-hover: #121a12;
   --border: #1d2b1d;
@@ -361,3 +368,27 @@ details summary { cursor: pointer; color: var(--text-muted); font-size: 13px; }
 pre.diff { max-height: 420px; overflow: auto; font-size: 12px; line-height: 1.45; padding: 10px 12px; border-radius: 8px; background: var(--bg-sunken); border: 1px solid var(--border); }
 pre.diff .diff-add { color: var(--ok); }
 pre.diff .diff-del { color: var(--danger); }
+
+/* Charts: thin marks, recessive axes, text in text tokens. */
+.chart { width: 100%; height: auto; display: block; overflow: visible; }
+.chart .grid-line { stroke: var(--border); stroke-width: 1; }
+.chart .axis { fill: var(--text-faint); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.chart .bar-mark { fill: var(--series-1); }
+.chart .line-1 { stroke: var(--series-1); stroke-width: 2; fill: none; }
+.chart .line-2 { stroke: var(--series-2); stroke-width: 2; fill: none; }
+.chart .dot-1 { fill: var(--series-1); stroke: var(--bg-elevated); stroke-width: 2; }
+.chart .dot-2 { fill: var(--series-2); stroke: var(--bg-elevated); stroke-width: 2; }
+.chart .end-label { fill: var(--text-muted); font-size: 11px; }
+.chart .hit { fill: transparent; }
+.chart .hit:hover { fill: var(--accent-soft); }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.legend .key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+.chart-tip { position: fixed; pointer-events: none; z-index: 50; background: var(--bg-elevated); border: 1px solid var(--border-strong); color: var(--text);
+  border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: var(--shadow); white-space: pre; }
+.meter { height: 8px; background: var(--bg-sunken); border-radius: 4px; overflow: hidden; }
+.meter > i { display: block; height: 100%; border-radius: 4px; background: var(--ok); }
+.meter.warn > i { background: var(--warn); }
+.meter.danger > i { background: var(--danger); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: transparent; color: var(--text-muted); padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+.seg button.on { background: var(--accent-soft); color: var(--text); }

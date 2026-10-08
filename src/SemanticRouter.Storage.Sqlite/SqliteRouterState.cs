@@ -23,6 +23,9 @@ public sealed class SqliteStateOptions
     /// <summary>Oldest activity kept. Default 30 days.</summary>
     public TimeSpan ActivityMaxAge { get; set; } = TimeSpan.FromDays(30);
 
+    /// <summary>Oldest usage records kept (budgets need the current month; the dashboard shows longer). Default 400 days.</summary>
+    public TimeSpan UsageRetention { get; set; } = TimeSpan.FromDays(400);
+
     /// <summary>Most configuration versions kept. Default 200.</summary>
     public int HistoryMaxEntries { get; set; } = 200;
 
@@ -53,6 +56,7 @@ public static class SqliteStateBuilderExtensions
         services.Replace(ServiceDescriptor.Singleton<IToolCallAffinity, SqliteToolCallAffinity>());
         services.Replace(ServiceDescriptor.Singleton<IRoutingActivityStore, SqliteActivityStore>());
         services.Replace(ServiceDescriptor.Singleton<IRouterConfigurationHistory, SqliteConfigurationHistory>());
+        services.Replace(ServiceDescriptor.Singleton<IUsageLedger, SqliteUsageLedger>());
         return builder;
     }
 }
@@ -176,6 +180,11 @@ internal sealed partial class SqliteRouterDatabase
             CREATE INDEX IF NOT EXISTS affinity_created ON affinity (created_ticks);
             CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY, timestamp_ticks INTEGER NOT NULL, entry TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS activity_timestamp ON activity (timestamp_ticks);
+            CREATE TABLE IF NOT EXISTS usage (
+                timestamp_ticks INTEGER NOT NULL, model TEXT NOT NULL, connector TEXT NOT NULL, route TEXT, client TEXT,
+                is_local INTEGER NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL, cache_read INTEGER NOT NULL,
+                cache_write INTEGER NOT NULL, cost TEXT NOT NULL, reference_cost TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS usage_timestamp ON usage (timestamp_ticks);
             CREATE TABLE IF NOT EXISTS config_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp_ticks INTEGER NOT NULL,
                 source TEXT NOT NULL, actor TEXT, note TEXT, document TEXT NOT NULL);
@@ -357,6 +366,25 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
             return entries;
         });
 
+    public IReadOnlyList<RoutingActivityEntry> Between(DateTimeOffset since, DateTimeOffset until, int limit) =>
+        database.Run<IReadOnlyList<RoutingActivityEntry>>("reading activity", [], connection =>
+        {
+            var entries = new List<RoutingActivityEntry>();
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection, "SELECT entry FROM activity WHERE timestamp_ticks >= $since AND timestamp_ticks < $until ORDER BY id LIMIT $limit;",
+                ("$since", since.UtcTicks), ("$until", until.UtcTicks), ("$limit", Math.Max(0, limit)));
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                if (JsonSerializer.Deserialize<RoutingActivityEntry>(reader.GetString(0), Json) is { } entry)
+                {
+                    entries.Add(entry);
+                }
+            }
+
+            return entries;
+        });
+
     internal void Prune(SqliteConnection connection)
     {
         using SqliteCommand command = SqliteRouterDatabase.Command(
@@ -429,4 +457,74 @@ internal sealed class SqliteConfigurationHistory(SqliteRouterDatabase database) 
         });
         return json is null ? _fallback.GetVersion(id) : RouterConfiguration.FromJson(json);
     }
+}
+
+/// <summary>Usage records on disk, for the dashboard's usage views and for budgets across restarts.</summary>
+internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageLedger
+{
+    private readonly InMemoryUsageLedger _fallback = new();
+    private int _writes;
+
+    public void Record(UsageRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        bool prune = Interlocked.Increment(ref _writes) % 500 == 0;
+        bool stored = database.Run("recording usage", false, connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "INSERT INTO usage (timestamp_ticks, model, connector, route, client, is_local, input, output, cache_read, cache_write, cost, reference_cost) " +
+                "VALUES ($ts, $model, $connector, $route, $client, $local, $input, $output, $cacheRead, $cacheWrite, $cost, $reference);" +
+                (prune ? "DELETE FROM usage WHERE timestamp_ticks < $oldest;" : string.Empty),
+                ("$ts", record.Timestamp.UtcTicks), ("$model", record.Model), ("$connector", record.Connector), ("$route", record.Route),
+                ("$client", record.Client), ("$local", record.IsLocal ? 1 : 0), ("$input", record.InputTokens), ("$output", record.OutputTokens),
+                ("$cacheRead", record.CacheReadTokens), ("$cacheWrite", record.CacheWriteTokens),
+                ("$cost", record.CostUsd.ToString(CultureInfo.InvariantCulture)), ("$reference", record.ReferenceCostUsd.ToString(CultureInfo.InvariantCulture)),
+                ("$oldest", (record.Timestamp - database.Options.UsageRetention).UtcTicks));
+            command.ExecuteNonQuery();
+            return true;
+        });
+
+        if (!stored)
+        {
+            _fallback.Record(record);
+        }
+    }
+
+    public UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null) =>
+        Read(since, until, model, connector).Aggregate(_fallback.Total(since, until, model, connector), (total, r) => total.Add(r));
+
+    public IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null) =>
+        UsageSummaries.Group(Read(since, until, null, null), by, zone ?? TimeZoneInfo.Local)
+            .Concat(_fallback.Summarize(since, until, by, zone))
+            .GroupBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.Count() == 1 ? g.First() : new UsageGroup(g.Key, Merge(g.Select(x => x.Totals))))
+            .ToArray();
+
+    private static UsageTotals Merge(IEnumerable<UsageTotals> totals) => totals.Aggregate(UsageTotals.Zero, (a, b) => new UsageTotals(
+        a.Requests + b.Requests, a.InputTokens + b.InputTokens, a.OutputTokens + b.OutputTokens, a.CacheReadTokens + b.CacheReadTokens,
+        a.CacheWriteTokens + b.CacheWriteTokens, a.CostUsd + b.CostUsd, a.ReferenceCostUsd + b.ReferenceCostUsd));
+
+    private List<UsageRecord> Read(DateTimeOffset since, DateTimeOffset until, string? model, string? connector) =>
+        database.Run("reading usage", new List<UsageRecord>(), connection =>
+        {
+            var records = new List<UsageRecord>();
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "SELECT timestamp_ticks, model, connector, route, client, is_local, input, output, cache_read, cache_write, cost, reference_cost FROM usage " +
+                "WHERE timestamp_ticks >= $since AND timestamp_ticks < $until AND ($model IS NULL OR model = $model COLLATE NOCASE) " +
+                "AND ($connector IS NULL OR connector = $connector COLLATE NOCASE);",
+                ("$since", since.UtcTicks), ("$until", until.UtcTicks), ("$model", model), ("$connector", connector));
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                records.Add(new UsageRecord(
+                    new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero), reader.GetString(1), reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetInt64(5) != 0,
+                    reader.GetInt64(6), reader.GetInt64(7), reader.GetInt64(8), reader.GetInt64(9),
+                    decimal.Parse(reader.GetString(10), CultureInfo.InvariantCulture), decimal.Parse(reader.GetString(11), CultureInfo.InvariantCulture)));
+            }
+
+            return records;
+        });
 }

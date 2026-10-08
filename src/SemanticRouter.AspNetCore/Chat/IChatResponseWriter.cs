@@ -33,8 +33,9 @@ internal static class ChatResponseWriterFactory
     public static IChatResponseWriter Create(HttpContext context, ChatCompletionRequest request, ModelDefinition model, IToolCallAffinity? affinity)
     {
         Action<string>? onToolCall = affinity is null ? null : id => affinity.Remember(id, model.Name);
-        return request.Protocol == ChatProtocol.Anthropic
+        IChatResponseWriter writer = request.Protocol == ChatProtocol.Anthropic
             ? new AnthropicResponseWriter(context, model.Name, request.Stream, onToolCall)
             : new OpenAIResponseWriter(context, model.Name, request.Stream, onToolCall);
+        return UsageCapture.Of(context) is { } capture ? new UsageRecordingWriter(writer, capture) : writer;
     }
 }
