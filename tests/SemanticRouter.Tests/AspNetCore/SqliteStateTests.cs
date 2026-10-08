@@ -214,6 +214,17 @@ public sealed class SqliteStateTests : IDisposable
         tracker.IsAvailable(Model("claude", 4)).Should().BeFalse("cooldowns still work in memory");
         history.GetVersion(id)!.FallbackTier.Should().Be(2, "history falls back to memory");
         new SqliteToolCallAffinity(database).Lookup(["none"]).Should().BeNull();
+
+        // Nothing is left holding the broken file, so it can be replaced (Windows refuses to delete an open file).
+        SqliteConnection.ClearAllPools();
+        if (OperatingSystem.IsLinux())
+        {
+            Directory.GetFiles("/proc/self/fd")
+                .Select(fd => new FileInfo(fd).LinkTarget)
+                .Should().NotContain(DbPath, "no connection to the corrupt file may stay open");
+        }
+
+        File.Delete(DbPath);
     }
 
     [Fact]
