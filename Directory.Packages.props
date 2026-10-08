@@ -16,6 +16,13 @@
     <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.17" />
   </ItemGroup>
   <ItemGroup>
+    <!-- SemanticRouter.Desktop only: the tray icon and the dashboard window (the platform's own web view). -->
+    <PackageVersion Include="Avalonia" Version="12.1.3" />
+    <PackageVersion Include="Avalonia.Desktop" Version="12.1.3" />
+    <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.3" />
+    <PackageVersion Include="Avalonia.Controls.WebView" Version="12.1.0" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Test-only dependencies. The Core library ships with zero package references. -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

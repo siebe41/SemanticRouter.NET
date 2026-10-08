@@ -17,21 +17,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SemanticRouter.AspNetCore\SemanticRouter.AspNetCore.csproj" />
-    <ProjectReference Include="..\SemanticRouter.Storage.Sqlite\SemanticRouter.Storage.Sqlite.csproj" />
-    <ProjectReference Include="..\SemanticRouter.Embeddings.Onnx\SemanticRouter.Embeddings.Onnx.csproj" />
-    <ProjectReference Include="..\SemanticRouter.Connectors.Copilot\SemanticRouter.Connectors.Copilot.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- The neutral starting configuration: tiers, generic routes, no models until `init` or the dashboard adds them. -->
-    <EmbeddedResource Include="Templates\semantic-router.template.json" LogicalName="semantic-router.template.json" />
-    <EmbeddedResource Include="Templates\semantic-router.evaluation.jsonl" LogicalName="semantic-router.evaluation.jsonl" />
-    <Content Remove="Templates\**" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <InternalsVisibleTo Include="SemanticRouter.Tests" />
+    <!-- Everything but the command-line entry point lives in SemanticRouter.Hosting, shared with the desktop app. -->
+    <ProjectReference Include="..\SemanticRouter.Hosting\SemanticRouter.Hosting.csproj" />
   </ItemGroup>
 
   <!-- ONNX Runtime ships Android and iOS archives (110 MB) that a desktop or server tool never loads. -->

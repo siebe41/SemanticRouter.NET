@@ -190,7 +190,7 @@ semantic-router           # http://localhost:5080, dashboard at /router
 semantic-router service install   # or keep it running in the background, started whenever you sign in
 ```
 
-`init` writes `~/.config/semantic-router/semantic-router.json` (or `%APPDATA%\semantic-router` on Windows). Everything else is done on the dashboard. `service install` sets the router up as a per-user background service (systemd on Linux, launchd on macOS, a sign-in entry on Windows), so no terminal has to stay open. A container image covers API-key and local-model setups. See [docs/host.md](docs/host.md).
+`init` writes `~/.config/semantic-router/semantic-router.json` (or `%APPDATA%\semantic-router` on Windows). Everything else is done on the dashboard. `service install` sets the router up as a per-user background service (systemd on Linux, launchd on macOS, a sign-in entry on Windows), so no terminal has to stay open. Prefer an icon? The [desktop app](docs/desktop.md) runs the router from the tray and shows the dashboard in its own window or your browser. A container image covers API-key and local-model setups. See [docs/host.md](docs/host.md).
 
 ## Quick start
 

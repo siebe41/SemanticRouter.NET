@@ -27,7 +27,7 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - The dashboard is tested end to end in the browser on every change, meets WCAG AA in every theme, works with a keyboard and on a phone, and takes drop-in theme files.
 
-- It runs in the background as a per-user service (`semantic-router service install`: systemd, launchd or a Windows sign-in entry), so no terminal has to stay open.
+- It runs in the background as a per-user service (`semantic-router service install`: systemd, launchd or a Windows sign-in entry), so no terminal has to stay open, or as a desktop app with a tray icon and the dashboard in its own window or the browser.
 
 - A provider's whole lineup can be discovered and tiered at once (dashboard and `semantic-router models`): Claude's four families on four rungs, every local model by size, with LM Studio's and Ollama's load state and on-demand loading taken into account.
 
@@ -45,6 +45,7 @@ Claims in the docs should match what has been exercised.
 | Codex CLI 0.161.0 | Exercised end to end against a stub OpenAI-compatible backend: a streaming Responses session in which Codex ran a shell command and a namespaced tool, and got the answer back. Recorded Codex requests are replayed in the tests against OpenAI-compatible, Anthropic and prompted-CLI backends. |
 | curl, all three protocols | Exercised. |
 | OpenAI SDKs, Aider, Continue, Cline, Open WebUI, LibreChat | Standard OpenAI chat completions; not individually tested. |
+| Desktop app | Exercised on Linux (X11, WebKitGTK): hosting, attaching to a running router, single-instance hand-over, the dashboard window. Windows and macOS builds compile and their logic is tested in CI; the tray and window are untried there. |
 | Windows and macOS | The whole suite runs on Linux, Windows and macOS in CI, including real child processes started from a stand-in CLI (argument quoting, UTF-8 stdin, process-tree kill). The real vendor CLIs have been exercised on Linux only. |
 
 ## Plan
@@ -91,7 +92,7 @@ The order follows dependencies: install and trust first, then visibility (which 
 | Issue | Goal | Notes |
 |---|---|---|
 | — | Background service per user (`semantic-router service`) | Done: systemd user unit, launchd agent, Windows sign-in entry. |
-| — | Desktop app: tray or menu-bar icon, the dashboard in a native window, start at sign-in | Wraps the existing dashboard in the platform web view (WebView2, WKWebView, WebKitGTK) and hosts the router in-process, so there is one UI to maintain. Removes the console flash on Windows. |
+| — | Desktop app: tray or menu-bar icon, the dashboard in a native window or the browser, start at sign-in | Done ([desktop.md](desktop.md)): wraps the existing dashboard in the platform web view (WebView2, WKWebView, WebKitGTK, WPE) and hosts the router in-process or uses the running service. Still to do: exercise it on Windows and macOS, sign and notarize the macOS app, installers. |
 
 ### Continuous
 

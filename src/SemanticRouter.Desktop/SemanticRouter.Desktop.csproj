@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The desktop app: a tray (menu bar) icon that hosts the router in-process, or uses the background service when one
+    already runs, and shows the dashboard in a window on the platform's own web view or in the browser.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <!-- A GUI program: Windows gives it no console window. -->
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>SemanticRouter.Desktop</RootNamespace>
+    <AssemblyName>SemanticRouter</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <ApplicationIcon>Assets\icon.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SemanticRouter.Hosting\SemanticRouter.Hosting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Controls.WebView" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\icon.png" />
+    <!-- The icon a Linux autostart entry points at. -->
+    <None Include="Assets\icon.png" Link="semantic-router.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SemanticRouter.Tests" />
+  </ItemGroup>
+
+  <!-- ONNX Runtime ships Android and iOS archives (110 MB) that a desktop app never loads. -->
+  <Target Name="DropMobileOnnxRuntimeAssets" AfterTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+                                    Condition="'%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'android' Or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'ios'" />
+    </ItemGroup>
+  </Target>
+
+</Project>

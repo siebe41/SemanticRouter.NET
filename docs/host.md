@@ -67,7 +67,7 @@ Things to know:
 - **Other environment variables are not copied.** If your configuration uses `${env:OPENAI_API_KEY}`, `install` names the variables a service will not see. Type the key on the dashboard instead (it is stored encrypted), or give it to the service: `systemctl --user edit semantic-router.service` on Linux, a user environment variable (`setx`) on Windows.
 - **Updating the tool:** on Linux and macOS run `service restart` after `dotnet tool update`. On Windows run `service stop` first, because a running program cannot be replaced.
 - **Exit codes a restart cannot fix are not retried by systemd**: 2 (a command-line error) and 3 (the address is already in use, for example by a router you started in a terminal). The message names `service status`.
-- **Windows shows a console window for a moment at sign-in**, while the sign-in entry starts the background router and returns. A desktop app would remove it (see the [roadmap](roadmap.md)).
+- **Windows shows a console window for a moment at sign-in**, while the sign-in entry starts the background router and returns. The [desktop app](desktop.md) starts without one.
 - **Without systemd** (some containers, WSL without systemd, OpenRC distributions) `install` says so and changes nothing. Run `semantic-router` under the supervisor you have.
 
 While it runs, the router records its process id and addresses in `semantic-router.instance.json`; `service status` reads it.

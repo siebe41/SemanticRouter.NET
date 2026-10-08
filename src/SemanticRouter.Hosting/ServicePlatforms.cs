@@ -352,9 +352,7 @@ internal sealed class WindowsSignInService : ServicePlatform
 
     public string DefinitionFile => Path.Combine(_configurationDirectory, DefinitionFileName);
 
-    public static string LogFileIn(string configurationDirectory) => Path.Combine(configurationDirectory, "logs", "semantic-router.log");
-
-    public override string LogHint => $"Get-Content -Wait \"{LogFileIn(_configurationDirectory)}\"";
+    public override string LogHint => $"Get-Content -Wait \"{RouterLog.FileIn(_configurationDirectory)}\"";
 
     public override string EnvironmentAdvice =>
         "The router started at sign-in sees your user environment variables (set with `setx` or in System Properties), not ones set only in a PowerShell session or profile.";
@@ -434,10 +432,6 @@ internal sealed class WindowsSignInService : ServicePlatform
         }
 
         start.Environment[DetachedVariable] = "1";
-        foreach ((string name, string value) in LaunchAgentService.LogEnvironment)
-        {
-            start.Environment[name] = value;
-        }
 
         try
         {
@@ -503,30 +497,17 @@ internal sealed class WindowsSignInService : ServicePlatform
     public override Task<string> StatusAsync() => Task.FromResult(
         ReadValue() is { } command ? $"starts at sign-in: {command}" : "not set to start at sign-in");
 
-    /// <summary>
-    /// The background router: no console, so the banner and the logs go to <c>logs\semantic-router.log</c>, which is
-    /// rolled over to <c>.1</c> at start once it passes 10 MB.
-    /// </summary>
+    /// <summary>The background router: no console, so the banner and the logs go to <see cref="RouterLog"/>.</summary>
     public static async Task<int> RunDetachedAsync(HostSettings settings)
     {
-        string log = LogFileIn(settings.ConfigurationDirectory);
-        Directory.CreateDirectory(Path.GetDirectoryName(log)!);
-        if (File.Exists(log) && new FileInfo(log).Length > 10 * 1024 * 1024)
-        {
-            File.Move(log, log + ".1", overwrite: true);
-        }
-
-        await using var writer = new StreamWriter(new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
-        TextWriter synchronized = TextWriter.Synchronized(writer);
-        Console.SetOut(synchronized);
-        Console.SetError(synchronized);
+        await using TextWriter log = RouterLog.RedirectConsole(settings.ConfigurationDirectory);
         try
         {
-            return await RouterHost.RunAsync(settings, synchronized).ConfigureAwait(false);
+            return await RouterHost.RunAsync(settings, log, RouterLog.Configure).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            await synchronized.WriteLineAsync($"The router stopped: {ex}").ConfigureAwait(false);
+            await log.WriteLineAsync($"The router stopped: {ex}").ConfigureAwait(false);
             return 1;
         }
     }
