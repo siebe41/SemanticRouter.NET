@@ -4,6 +4,7 @@ using SemanticRouter.Host;
 // semantic-router init       write a starting configuration with the models found on this machine
 // semantic-router doctor     check every connector, model and the embeddings without calling a model
 // semantic-router models     list what each connector offers, with suggested tiers and load state
+// semantic-router service    run it in the background whenever you sign in (systemd, launchd or Windows sign-in)
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 HostSettings settings = HostSettings.Parse(args);
 
@@ -29,6 +30,9 @@ switch (settings.Command)
     case "models":
         return await ModelsCommand.RunAsync(settings, Console.Out);
 
+    case "service" when settings.Error is null:
+        return await ServiceCommand.RunAsync(settings, Console.Out);
+
     default:
         if (settings.Error is not null)
         {
@@ -37,7 +41,9 @@ switch (settings.Command)
             return 2;
         }
 
-        return await RouterHost.RunAsync(settings, Console.Out);
+        return Environment.GetEnvironmentVariable(WindowsSignInService.DetachedVariable) == "1"
+            ? await WindowsSignInService.RunDetachedAsync(settings)
+            : await RouterHost.RunAsync(settings, Console.Out);
 }
 
 static string Help() => $"""
@@ -50,6 +56,15 @@ static string Help() => $"""
       semantic-router doctor            Check every connector, model and the embeddings. Exit code 1 on failure.
       semantic-router models [name]     List the models each connector (or the one named) offers: loaded or not,
                                         context, size, which are in the catalog, and a suggested tier for the rest.
+      semantic-router service <action> [options]
+                                        Run the router in the background whenever you sign in, so no terminal
+                                        stays open: a systemd user service (Linux), a launchd agent (macOS) or a
+                                        sign-in entry (Windows). Per user, no administrator rights needed.
+          install [--dry-run]           Install (or update) and start it with the options given here, e.g. --urls.
+                                        --dry-run prints the definition instead.
+          start | stop | restart        Control it. start --no-wait returns without waiting for it to listen.
+          status                        Whether it is installed and running, where it listens and where it logs.
+          uninstall                     Stop it and stop starting it at sign-in.
       semantic-router --version | --help
 
     Options:
@@ -67,5 +82,6 @@ static string Help() => $"""
       semantic-router.secrets.json   Keys typed into the dashboard, encrypted.
       semantic-router.evaluation.jsonl  Labelled prompts for the dashboard's Evaluate page.
       semantic-router.db             Cooldowns, tool-call affinity, activity and configuration history.
+      semantic-router.instance.json  The running router's process id and addresses, while it runs.
       appsettings.json               Optional: host settings (logging, Kestrel, SemanticRouter overrides).
     """;

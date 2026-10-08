@@ -27,6 +27,8 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - The dashboard is tested end to end in the browser on every change, meets WCAG AA in every theme, works with a keyboard and on a phone, and takes drop-in theme files.
 
+- It runs in the background as a per-user service (`semantic-router service install`: systemd, launchd or a Windows sign-in entry), so no terminal has to stay open.
+
 - A provider's whole lineup can be discovered and tiered at once (dashboard and `semantic-router models`): Claude's four families on four rungs, every local model by size, with LM Studio's and Ollama's load state and on-demand loading taken into account.
 
 ## What done looks like
@@ -83,6 +85,13 @@ The order follows dependencies: install and trust first, then visibility (which 
 | [#12](https://github.com/siebe41/SemanticRouter.NET/issues/12) | Extended thinking, prompt caching and structured output across protocols | Biggest quality gap for Claude Code on non-Anthropic backends. |
 | [#11](https://github.com/siebe41/SemanticRouter.NET/issues/11) | Lower latency and quota cost of prompted CLI turns | Any session-reuse change must be checked against [TERMS.md](TERMS.md) first. |
 | [#17](https://github.com/siebe41/SemanticRouter.NET/issues/17) | GitHub Copilot SDK connector | The vendor-supported path that the CLI preset only approximates. |
+
+### 5. Always on
+
+| Issue | Goal | Notes |
+|---|---|---|
+| — | Background service per user (`semantic-router service`) | Done: systemd user unit, launchd agent, Windows sign-in entry. |
+| — | Desktop app: tray or menu-bar icon, the dashboard in a native window, start at sign-in | Wraps the existing dashboard in the platform web view (WebView2, WKWebView, WebKitGTK) and hosts the router in-process, so there is one UI to maintain. Removes the console flash on Windows. |
 
 ### Continuous
 

@@ -32,9 +32,45 @@ SemanticRouter 0.2.0 is listening on http://localhost:5080
 | `semantic-router init [--force] [--no-detect]` | Writes a starting configuration. It probes LM Studio (`localhost:1234`) and Ollama (`localhost:11434`) for chat and embedding models and looks for `claude`, `codex` and `copilot` on `PATH`. It refuses to overwrite an existing file without `--force`. |
 | `semantic-router doctor` | Loads the configuration exactly as `run` would and checks it without calling a model. It flags unresolved `${env:…}` references, tests the embeddings, and checks each HTTP connector (reachable, credentials accepted, configured model ids offered) and each CLI connector (installed, starts and, for Claude Code, signed in). Every failure names the setting to change. Exit code 1 when anything failed. |
 | `semantic-router models [connector]` | Asks every connector (or the one named) which models it offers, and prints them with their load state, context length and size, the catalog model that already uses each, and a suggested name, tier and capabilities for the rest (see [Model lineups](providers.md#model-lineups-several-models-per-provider)). LM Studio and Ollama also say whether they load models on demand. Changes nothing; add models on the dashboard. |
+| `semantic-router service install\|uninstall\|start\|stop\|restart\|status` | Runs the router in the background whenever you sign in. See [Run it in the background](#run-it-in-the-background). |
 | `semantic-router --version`, `--help` | |
 
 Options: `--config-dir <dir>`, `--urls <urls>`, and any setting as `--SemanticRouter:<key>=<value>` (the same keys as the `SemanticRouter__<key>` environment variables).
+
+## Run it in the background
+
+Keeping a terminal open for the router gets old. `service install` hands it to your operating system's own service manager instead: it starts when you sign in, restarts if it fails, and logs where that platform keeps logs.
+
+```bash
+semantic-router service install            # install, start, and wait until it listens
+semantic-router service status             # installed? running? where it listens, where it logs
+semantic-router service restart            # after `dotnet tool update`, or to pick up new host options
+semantic-router service stop | start
+semantic-router service uninstall          # stop it and stop starting it at sign-in
+```
+
+Options given to `install` are kept for the service: `semantic-router service install --urls http://localhost:6000` runs it on that port, and `--config-dir` picks the configuration directory (the service always passes the directory explicitly, so `SEMANTIC_ROUTER_HOME` in your shell does not matter later). `--dry-run` prints what would be written without installing anything. Running `install` again replaces the definition and restarts the router.
+
+It is a **per-user service on purpose**. The subscription CLI connectors run `claude`, `codex` and `copilot` on your own sign-in, from your PATH, and a system service running as another account would have neither. Nothing needs administrator rights.
+
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| What is installed | systemd user unit `~/.config/systemd/user/semantic-router.service` | launchd agent `~/Library/LaunchAgents/io.github.siebe41.semantic-router.plist` | value `SemanticRouter` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (Task Manager → Startup apps), plus `semantic-router.service.json` in the configuration directory |
+| Runs | while you are signed in; `loginctl enable-linger` keeps it running without a session | while you are signed in | from sign-in, without a console window |
+| Restarts | on failure, every 5 s | on failure, at most every 30 s | not automatically |
+| Logs | `journalctl --user -u semantic-router -f` | `~/Library/Logs/semantic-router/semantic-router.log` | `logs\semantic-router.log` in the configuration directory (rolled to `.1` at start once it passes 10 MB) |
+| Stop | `systemctl --user stop` | `launchctl bootout` (a killed agent would be restarted) | a stop request the router listens for, then ending the process after 20 s |
+
+Things to know:
+
+- **PATH and the .NET runtime are copied from the shell you install from.** Services start with a minimal PATH, so the unit and the agent carry yours (plus `DOTNET_ROOT` if it is set, without which a .NET installed in your home directory is not found). Install a CLI somewhere new? Run `service install` again.
+- **Other environment variables are not copied.** If your configuration uses `${env:OPENAI_API_KEY}`, `install` names the variables a service will not see. Type the key on the dashboard instead (it is stored encrypted), or give it to the service: `systemctl --user edit semantic-router.service` on Linux, a user environment variable (`setx`) on Windows.
+- **Updating the tool:** on Linux and macOS run `service restart` after `dotnet tool update`. On Windows run `service stop` first, because a running program cannot be replaced.
+- **Exit codes a restart cannot fix are not retried by systemd**: 2 (a command-line error) and 3 (the address is already in use, for example by a router you started in a terminal). The message names `service status`.
+- **Windows shows a console window for a moment at sign-in**, while the sign-in entry starts the background router and returns. A desktop app would remove it (see the [roadmap](roadmap.md)).
+- **Without systemd** (some containers, WSL without systemd, OpenRC distributions) `install` says so and changes nothing. Run `semantic-router` under the supervisor you have.
+
+While it runs, the router records its process id and addresses in `semantic-router.instance.json`; `service status` reads it.
 
 ## What `init` adds
 
@@ -59,6 +95,8 @@ On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not
 | `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [dashboard.md](dashboard.md#keeping-secrets-out-of-the-file). |
 | `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [routing-quality.md](routing-quality.md). |
+| `semantic-router.instance.json` | The running router's process id, addresses, start time and version. Removed when it stops. |
+| `semantic-router.service.json`, `logs/` | Windows background service only: what the sign-in entry starts, and what it logs. |
 | `models/` | Downloaded ONNX embedding models, one directory per model. Copy a `models/{name}` directory here to run without internet access. |
 | `appsettings.json` (optional) | Host settings: logging, Kestrel, `SemanticRouter:Dashboard`, overrides. |
 

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Reflection;
 using System.Text;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration.Json;
 using SemanticRouter.AspNetCore;
@@ -84,7 +85,10 @@ internal static class RouterHost
         return app;
     }
 
-    public static async Task<int> RunAsync(HostSettings settings, TextWriter output)
+    /// <summary>The exit code when the listen address is taken; a service manager does not restart on it.</summary>
+    public const int AddressInUseExitCode = 3;
+
+    public static async Task<int> RunAsync(HostSettings settings, TextWriter output, Action<WebApplicationBuilder>? configure = null)
     {
         if (!File.Exists(settings.ConfigurationFile))
         {
@@ -93,10 +97,31 @@ internal static class RouterHost
             await output.WriteLineAsync($"Created {settings.ConfigurationFile} from the built-in template. Run `semantic-router init` to add the models on this machine.").ConfigureAwait(false);
         }
 
-        WebApplication app = Build(settings);
-        await app.StartAsync().ConfigureAwait(false);
-        await WriteBannerAsync(app, settings, output).ConfigureAwait(false);
-        await app.WaitForShutdownAsync().ConfigureAwait(false);
+        await using WebApplication app = Build(settings, configure);
+        try
+        {
+            await app.StartAsync().ConfigureAwait(false);
+        }
+        catch (IOException ex) when (ex.InnerException is AddressInUseException)
+        {
+            await output.WriteLineAsync(
+                $"{ex.Message} Another program is listening there, or the router already runs in the background " +
+                "(`semantic-router service status`). Pick another address with --urls.").ConfigureAwait(false);
+            return AddressInUseExitCode;
+        }
+
+        new RouterInstance(Environment.ProcessId, [.. app.Urls], DateTimeOffset.UtcNow, Version).Write(settings.ConfigurationDirectory);
+        try
+        {
+            using IDisposable? stopListener = OperatingSystem.IsWindows() ? RouterInstance.ListenForStop(app.Lifetime) : null;
+            await WriteBannerAsync(app, settings, output).ConfigureAwait(false);
+            await app.WaitForShutdownAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            RouterInstance.Remove(settings.ConfigurationDirectory, Environment.ProcessId);
+        }
+
         return 0;
     }
 
