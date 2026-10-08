@@ -1,5 +1,5 @@
 /* Semantic Router dashboard: Configuration pages: tiers, routes, models, connectors, routing rules, embeddings, gateway, clients, history. */
-import { CAPABILITY_HINTS, CONNECTOR_TYPES, MESSAGE_SELECTION, PRESETS, SCORING, STRATEGIES, connectorNames, csv, h, isReference, kv, lines, readOnly, state, tiers, views } from './core.js';
+import { CAPABILITY_HINTS, CONNECTOR_TYPES, MESSAGE_SELECTION, PRESETS, SCORING, STRATEGIES, connectorNames, csv, h, isReference, kv, lineupFor, lines, readOnly, state, tiers, views } from './core.js';
 
 views.tiers = () => {
   const c = state.config;
@@ -63,41 +63,93 @@ views.routes = () => {
     }).join('') || '<div class="card muted">No routes. Without routes every prompt gets the fallback tier (plus complexity escalation).</div>'}`;
 };
 
+const modelItem = (m, i) => {
+  const key = 'model:' + i;
+  const names = connectorNames();
+  const conn = state.config.Connectors[m.Connector];
+  const free = !(m.InputCostPerMillionTokens > 0 || m.OutputCostPerMillionTokens > 0);
+  return `<div class="item ${state.open.has(key) ? 'open' : ''} ${m.Enabled === false ? 'disabled' : ''}" data-key="${key}">
+    <div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
+      <span class="chev">▶</span><span class="title">${h(m.Name || '(unnamed)')}</span>
+      <span class="meta"><span class="tier">T${m.Tier}</span><span class="mono">${h(m.Model || '')}</span><span>via ${h(m.Connector)}${conn ? ` <span class="faint">(${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? '/' + h(conn.Preset || 'Custom') : ''})</span>` : ' <span class="badge danger">unknown connector</span>'}</span>
+      ${m.IsLocal ? '<span class="badge info">local</span>' : ''}${free ? '<span class="badge ok">free</span>' : `<span class="badge">$${m.InputCostPerMillionTokens}/$${m.OutputCostPerMillionTokens} per M</span>`}${(m.Capabilities || []).map((c) => `<span class="badge">${h(c)}</span>`).join('')}</span>
+      <span class="spacer"></span><label class="check" onclick="event.stopPropagation()"><input type="checkbox" data-bind="Models.${i}.Enabled" data-kind="bool" ${m.Enabled !== false ? 'checked' : ''}> enabled</label>
+    </div>
+    <div class="item-body"><div class="form-grid">
+      <label class="field"><span class="name">Name</span><input type="text" data-bind="Models.${i}.Name" value="${h(m.Name)}"><span class="hint">Clients can request it directly as <code>model</code>.</span></label>
+      <label class="field"><span class="name">Connector</span><select data-bind="Models.${i}.Connector">${names.map((n) => `<option ${n === m.Connector ? 'selected' : ''}>${h(n)}</option>`).join('')}${names.includes(m.Connector) ? '' : `<option selected>${h(m.Connector)}</option>`}</select></label>
+      <label class="field"><span class="name">Provider model id</span><div class="inline"><input type="text" data-bind="Models.${i}.Model" data-kind="nulltext" value="${h(m.Model || '')}" placeholder="connector default" list="models-${i}"><button class="btn small" data-action="discover" data-connector="${h(m.Connector)}" data-index="${i}" title="Ask the connector which models it has">Discover</button></div><datalist id="models-${i}"></datalist></label>
+      <label class="field"><span class="name">Tier</span><select data-bind="Models.${i}.Tier" data-kind="number">${tierOptions(m.Tier)}</select></label>
+      <label class="field"><span class="name">Capabilities</span><input type="text" data-bind="Models.${i}.Capabilities" data-kind="csv" value="${h(csv(m.Capabilities))}" placeholder="chat, code, tools, vision, reasoning"><span class="hint">Declare <code>tools</code> only when the connector can carry them (HTTP, or a CLI with prompted tool calling).</span></label>
+      <label class="field"><span class="name">Context window (tokens)</span><input type="number" min="0" data-bind="Models.${i}.ContextWindow" data-kind="number" value="${m.ContextWindow || 0}"><span class="hint">0 = unknown (never skipped).</span></label>
+      <label class="field"><span class="name">Input cost ($ / M tokens)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.InputCostPerMillionTokens" data-kind="float" value="${m.InputCostPerMillionTokens || 0}"></label>
+      <label class="field"><span class="name">Output cost ($ / M tokens)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.OutputCostPerMillionTokens" data-kind="float" value="${m.OutputCostPerMillionTokens || 0}"><span class="hint">0 for local models and flat-rate subscriptions.</span></label>
+      <label class="field"><span class="name">Cache read cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheReadCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheReadCostPerMillionTokens ?? ''}" placeholder="input price"><span class="hint">Prompt-cache reads, if the provider prices them differently.</span></label>
+      <label class="field"><span class="name">Cache write cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheWriteCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheWriteCostPerMillionTokens ?? ''}" placeholder="input price"></label>
+      <label class="field"><span class="name">Priority</span><input type="number" data-bind="Models.${i}.Priority" data-kind="number" value="${m.Priority || 0}"><span class="hint">Lower is preferred; breaks ties.</span></label>
+      <label class="field"><span class="name">Active hours</span><input type="text" data-bind="Models.${i}.ActiveHours" data-kind="nulltext" value="${h(m.ActiveHours || '')}" placeholder="always (e.g. 08:00-18:00)"><span class="hint">Outside them the model is not tried. Time zone: Routing rules.</span></label>
+      <label class="field wide"><span class="name">Description</span><input type="text" data-bind="Models.${i}.Description" data-kind="nulltext" value="${h(m.Description || '')}"></label>
+      <label class="check wide"><input type="checkbox" data-bind="Models.${i}.IsLocal" data-kind="bool" ${m.IsLocal ? 'checked' : ''}> Local: prompts stay on this machine (required to serve local-only routes)</label>
+    </div>
+    <div class="row-actions" style="margin-top:10px"><button class="btn small" data-action="model-duplicate" data-index="${i}">Duplicate</button><button class="btn danger small" data-action="model-remove" data-index="${i}">Remove</button></div></div>
+  </div>`;
+};
+
+const LOADING_LABELS = { OnDemand: 'loads models on demand', LoadedOnly: 'serves loaded models only' };
+const sizeText = (b) => (b == null ? '' : (b >= 10 ? Math.round(b) : Math.round(b * 10) / 10) + 'B');
+
+/* Discover models: what a connector offers, each with a suggested catalog entry to tick, adjust and add. */
+export const lineupPanel = (connector) => {
+  const l = lineupFor(connector);
+  if (!l) return '';
+  const index = state.lineups.indexOf(l);
+  const head = `<div class="card-head"><h3>Models ${h(connector)} offers</h3>${l.server ? `<span class="badge accent">${h(l.server)}</span>` : ''}${LOADING_LABELS[l.loading] ? `<span class="badge ${l.loading === 'LoadedOnly' ? 'warn' : 'info'}">${LOADING_LABELS[l.loading]}</span>` : ''}<span class="spacer"></span><button class="btn ghost small" data-action="lineup-close" data-connector="${h(connector)}">Close</button></div>`;
+  if (l.busy) return `<div class="card lineup">${head}<p class="muted small">Asking ${h(connector)}…</p></div>`;
+  if (l.error) return `<div class="card lineup">${head}<p class="small" style="color:var(--danger)">${h(l.error)}</p></div>`;
+  const rows = l.lineup || [];
+  const selectable = rows.filter((e) => e.suggestion && !e.inCatalog);
+  const selected = selectable.filter((e) => e.selected).length;
+  const loadState = (e) => (e.kind === 'Embedding' ? '<span class="badge">embedding</span>'
+    : !e.listed ? '<span class="badge warn" title="The server does not serve it until it is loaded">not served</span>'
+    : e.loaded === true ? '<span class="badge ok">loaded</span>' : e.loaded === false ? '<span class="badge">not loaded</span>' : '');
+  return `<div class="card lineup">${head}
+    ${l.loadingNote ? `<p class="muted small">${h(l.loadingNote)}</p>` : ''}${l.note ? `<p class="muted small">${h(l.note)}</p>` : ''}
+    ${rows.length ? `<div class="table-wrap"><table class="compact lineup-table">
+      <tr><th style="width:44px">${selectable.length ? `<button class="btn ghost small" data-action="lineup-all" data-index="${index}" aria-label="${selected === selectable.length ? 'Select none' : 'Select every model not in the catalog'}">${selected === selectable.length ? 'None' : 'All'}</button>` : ''}</th><th>Provider model</th><th>State</th><th>Size</th><th>Context</th><th>Catalog name</th><th>Tier</th><th>Capabilities</th></tr>
+      ${rows.map((e, i) => {
+        const p = `lineups.${index}.lineup.${i}`;
+        const facts = `<td>${loadState(e)}</td><td class="small">${h(sizeText(e.parametersBillions))}</td><td class="small mono">${e.contextLength ? e.contextLength.toLocaleString() : ''}</td>`;
+        if (e.inCatalog) return `<tr class="muted"><td></td><td class="mono small">${h(e.id)}</td>${facts}<td colspan="3" class="small">in the catalog as <b>${h(e.inCatalog)}</b></td></tr>`;
+        if (!e.suggestion) return `<tr class="muted"><td></td><td class="mono small">${h(e.id)}</td>${facts}<td colspan="3" class="small">${h(e.reason)}</td></tr>`;
+        const s = e.suggestion;
+        return `<tr><td><input type="checkbox" aria-label="Add ${h(e.id)}" data-state="${p}.selected" data-kind="bool" ${e.selected ? 'checked' : ''}></td>
+          <td class="mono small">${h(e.id)}${s.Enabled === false ? ' <span class="badge">added disabled</span>' : ''}</td>${facts}
+          <td><input type="text" aria-label="Catalog name for ${h(e.id)}" data-state="${p}.suggestion.Name" value="${h(s.Name)}"></td>
+          <td><select aria-label="Tier for ${h(e.id)}" data-state="${p}.suggestion.Tier" data-kind="number">${tierOptions(s.Tier)}</select></td>
+          <td><input type="text" aria-label="Capabilities of ${h(e.id)}" data-state="${p}.suggestion.Capabilities" data-kind="csv" value="${h(csv(s.Capabilities))}"></td></tr>
+          <tr class="lineup-reason"><td></td><td colspan="7" class="small muted">${h(e.reason)}</td></tr>`;
+      }).join('')}</table></div>` : ''}
+    ${selectable.length ? `<div class="row-actions" style="margin-top:10px"><button class="btn primary small" data-action="lineup-add" data-index="${index}" ${selected ? '' : 'disabled'}>Add ${selected} selected to the catalog</button><span class="muted small">Added to the draft; Apply to use them. Context, prices and the rest are on each model.</span></div>` : ''}
+  </div>`;
+};
+
 views.models = () => {
   const models = state.config.Models || [];
   const names = connectorNames();
+  const groups = [...names, ...[...new Set(models.map((m) => m.Connector))].filter((c) => !names.some((n) => n.toLowerCase() === (c || '').toLowerCase()))];
+  const byTier = (a, b) => (a.m.Tier - b.m.Tier) || String(a.m.Name).localeCompare(String(b.m.Name));
   return `
-    <div class="section-head"><h1>Models</h1><span class="muted">The catalog the router chooses from.</span><span class="spacer"></span><button class="btn primary small" data-action="model-add">Add model</button></div>
-    ${models.map((m, i) => {
-      const key = 'model:' + i;
-      const conn = state.config.Connectors[m.Connector];
-      const free = !(m.InputCostPerMillionTokens > 0 || m.OutputCostPerMillionTokens > 0);
-      return `<div class="item ${state.open.has(key) ? 'open' : ''} ${m.Enabled === false ? 'disabled' : ''}" data-key="${key}">
-        <div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
-          <span class="chev">▶</span><span class="title">${h(m.Name || '(unnamed)')}</span>
-          <span class="meta"><span class="tier">T${m.Tier}</span><span class="mono">${h(m.Model || '')}</span><span>via ${h(m.Connector)}${conn ? ` <span class="faint">(${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? '/' + h(conn.Preset || 'Custom') : ''})</span>` : ' <span class="badge danger">unknown connector</span>'}</span>
-          ${m.IsLocal ? '<span class="badge info">local</span>' : ''}${free ? '<span class="badge ok">free</span>' : `<span class="badge">$${m.InputCostPerMillionTokens}/$${m.OutputCostPerMillionTokens} per M</span>`}${(m.Capabilities || []).map((c) => `<span class="badge">${h(c)}</span>`).join('')}</span>
-          <span class="spacer"></span><label class="check" onclick="event.stopPropagation()"><input type="checkbox" data-bind="Models.${i}.Enabled" data-kind="bool" ${m.Enabled !== false ? 'checked' : ''}> enabled</label>
-        </div>
-        <div class="item-body"><div class="form-grid">
-          <label class="field"><span class="name">Name</span><input type="text" data-bind="Models.${i}.Name" value="${h(m.Name)}"><span class="hint">Clients can request it directly as <code>model</code>.</span></label>
-          <label class="field"><span class="name">Connector</span><select data-bind="Models.${i}.Connector">${names.map((n) => `<option ${n === m.Connector ? 'selected' : ''}>${h(n)}</option>`).join('')}${names.includes(m.Connector) ? '' : `<option selected>${h(m.Connector)}</option>`}</select></label>
-          <label class="field"><span class="name">Provider model id</span><div class="inline"><input type="text" data-bind="Models.${i}.Model" data-kind="nulltext" value="${h(m.Model || '')}" placeholder="connector default" list="models-${i}"><button class="btn small" data-action="discover" data-connector="${h(m.Connector)}" data-index="${i}" title="Ask the connector which models it has">Discover</button></div><datalist id="models-${i}"></datalist></label>
-          <label class="field"><span class="name">Tier</span><select data-bind="Models.${i}.Tier" data-kind="number">${tierOptions(m.Tier)}</select></label>
-          <label class="field"><span class="name">Capabilities</span><input type="text" data-bind="Models.${i}.Capabilities" data-kind="csv" value="${h(csv(m.Capabilities))}" placeholder="chat, code, tools, vision, reasoning"><span class="hint">Declare <code>tools</code> only when the connector can carry them (HTTP, or a CLI with prompted tool calling).</span></label>
-          <label class="field"><span class="name">Context window (tokens)</span><input type="number" min="0" data-bind="Models.${i}.ContextWindow" data-kind="number" value="${m.ContextWindow || 0}"><span class="hint">0 = unknown (never skipped).</span></label>
-          <label class="field"><span class="name">Input cost ($ / M tokens)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.InputCostPerMillionTokens" data-kind="float" value="${m.InputCostPerMillionTokens || 0}"></label>
-          <label class="field"><span class="name">Output cost ($ / M tokens)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.OutputCostPerMillionTokens" data-kind="float" value="${m.OutputCostPerMillionTokens || 0}"><span class="hint">0 for local models and flat-rate subscriptions.</span></label>
-          <label class="field"><span class="name">Cache read cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheReadCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheReadCostPerMillionTokens ?? ''}" placeholder="input price"><span class="hint">Prompt-cache reads, if the provider prices them differently.</span></label>
-          <label class="field"><span class="name">Cache write cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheWriteCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheWriteCostPerMillionTokens ?? ''}" placeholder="input price"></label>
-          <label class="field"><span class="name">Priority</span><input type="number" data-bind="Models.${i}.Priority" data-kind="number" value="${m.Priority || 0}"><span class="hint">Lower is preferred; breaks ties.</span></label>
-          <label class="field"><span class="name">Active hours</span><input type="text" data-bind="Models.${i}.ActiveHours" data-kind="nulltext" value="${h(m.ActiveHours || '')}" placeholder="always (e.g. 08:00-18:00)"><span class="hint">Outside them the model is not tried. Time zone: Routing rules.</span></label>
-          <label class="field wide"><span class="name">Description</span><input type="text" data-bind="Models.${i}.Description" data-kind="nulltext" value="${h(m.Description || '')}"></label>
-          <label class="check wide"><input type="checkbox" data-bind="Models.${i}.IsLocal" data-kind="bool" ${m.IsLocal ? 'checked' : ''}> Local: prompts stay on this machine (required to serve local-only routes)</label>
-        </div>
-        <div class="row-actions" style="margin-top:10px"><button class="btn small" data-action="model-duplicate" data-index="${i}">Duplicate</button><button class="btn danger small" data-action="model-remove" data-index="${i}">Remove</button></div></div>
-      </div>`;
-    }).join('') || '<div class="card muted">No models yet.</div>'}`;
+    <div class="section-head"><h1>Models</h1><span class="muted">The catalog the router chooses from, by connector. <b>Discover models</b> lists what a provider offers and suggests a tier for each.</span><span class="spacer"></span><button class="btn primary small" data-action="model-add">Add model</button></div>
+    ${groups.map((connector) => {
+      const conn = state.config.Connectors[connector];
+      const own = models.map((m, i) => ({ m, i })).filter((x) => (x.m.Connector || '').toLowerCase() === (connector || '').toLowerCase()).sort(byTier);
+      const tierCounts = [...new Set(own.map((x) => x.m.Tier))].sort((a, b) => a - b).map((t) => `<span class="tier" title="${own.filter((x) => x.m.Tier === t).map((x) => h(x.m.Name)).join(', ')}">T${t}${own.filter((x) => x.m.Tier === t).length > 1 ? ' ×' + own.filter((x) => x.m.Tier === t).length : ''}</span>`).join('');
+      return `<section class="model-group" aria-label="Models via ${h(connector)}">
+        <div class="section-head group-head"><h2>${h(connector || '(no connector)')}</h2>${conn ? `<span class="badge accent">${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? ' / ' + h(conn.Preset || 'Custom') : ''}</span>` : '<span class="badge danger">unknown connector</span>'}<span class="muted small">${own.length} model${own.length === 1 ? '' : 's'}</span>${tierCounts}<span class="spacer"></span>${conn ? `<button class="btn small" data-action="lineup-discover" data-connector="${h(connector)}">Discover models</button>` : ''}</div>
+        ${lineupPanel(connector)}
+        ${own.map((x) => modelItem(x.m, x.i)).join('')}
+      </section>`;
+    }).join('') || '<div class="card muted">No connectors yet. Add one under <a href="#/connectors">Connectors</a>, then discover its models.</div>'}`;
 };
 
 export const secretField = (path, value, label) => `
@@ -159,8 +211,8 @@ views.connectors = () => {
             <label class="field"><span class="name">Extra headers (Name=value)</span><textarea data-bind="${p}.Headers" data-kind="kv" rows="3">${h(kv(c.Headers))}</textarea><span class="hint">Azure: <code>api-key=…</code> · OpenAI org: <code>OpenAI-Organization=org_…</code></span></label>
             <label class="field"><span class="name">Forward client headers</span><textarea data-bind="${p}.ForwardHeaders" data-kind="lines" rows="3">${h(lines(c.ForwardHeaders))}</textarea><span class="hint">Copied from the client request (e.g. <code>anthropic-beta</code>). Authorization headers are never forwarded.</span></label>`}
         </div>
-        <div class="row-actions" style="margin-top:10px"><button class="btn small" data-action="discover" data-connector="${h(name)}">List models</button><button class="btn danger small" data-action="connector-remove" data-name="${h(name)}">Remove</button></div>
-        <div class="small muted" id="discover-${h(name)}" style="margin-top:6px"></div></div>
+        <div class="row-actions" style="margin-top:10px"><button class="btn small" data-action="lineup-discover" data-connector="${h(name)}">Discover models</button><button class="btn danger small" data-action="connector-remove" data-name="${h(name)}">Remove</button></div>
+        ${lineupPanel(name)}</div>
       </div>`;
     }).join('') || '<div class="card muted">No connectors yet.</div>'}`;
 };

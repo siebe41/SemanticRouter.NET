@@ -347,39 +347,19 @@ public static partial class RouterDashboardEndpoints
             }
         });
 
-        api.MapPost("/connectors/{name}/discover", async (string name, RouterRuntimeProvider provider, IHttpClientFactory http, CancellationToken cancellationToken) =>
+        api.MapPost("/connectors/{name}/discover", async (string name, IServiceProvider services, CancellationToken cancellationToken) =>
         {
-            if (!provider.Current.Resolved.Connectors.TryGetValue(name, out ConnectorOptions? connector))
+            ModelLineupReport report;
+            try
             {
-                return Results.Problem($"Connector '{name}' is not configured.", statusCode: StatusCodes.Status404NotFound);
+                report = await ModelLineup.DiscoverAsync(services, name, cancellationToken).ConfigureAwait(false);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: StatusCodes.Status404NotFound);
             }
 
-            if (provider.Current.Connectors.TryGet(name, out IChatConnector? live) && live is IModelDiscovery discovery)
-            {
-                try
-                {
-                    IReadOnlyList<string> found = await discovery.ListModelsAsync(cancellationToken).ConfigureAwait(false);
-                    return Results.Json(new DiscoverResponse(found, found.Count == 0 ? "The provider listed no models." : null), ApiJson);
-                }
-                catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException or TimeoutException)
-                {
-                    return Results.Json(new DiscoverResponse([], provider.Current.Redactor.Redact(ex.Message)), ApiJson);
-                }
-            }
-
-            if (connector.Type == ConnectorType.Cli)
-            {
-                return Results.Json(new DiscoverResponse(CliModelHints(connector.Preset), "CLI presets accept the vendor's model aliases; these are common values."), ApiJson);
-            }
-
-            if (connector.BaseAddress is not { IsAbsoluteUri: true })
-            {
-                return Results.Problem("The connector has no BaseAddress.", statusCode: StatusCodes.Status400BadRequest);
-            }
-
-            ConnectorProbeResult probe = await ConnectorProbe.ListModelsAsync(
-                name, connector, http.CreateClient(OpenAICompatibleConnector.HttpClientNamePrefix + name), TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
-            return Results.Json(new DiscoverResponse(probe.Models, probe.Ok ? null : provider.Current.Redactor.Redact(probe.Message)), ApiJson);
+            return Results.Json(DiscoverResponse.From(report), ApiJson);
         });
 
         EvaluationApi.Map(api, ApiJson, Actor);
@@ -678,14 +658,6 @@ public static partial class RouterDashboardEndpoints
         return sorted.Length == 0 ? null : Math.Round(sorted[Math.Min(sorted.Length - 1, (int)Math.Ceiling(quantile * sorted.Length) - 1)], 0);
     }
 
-    private static string[] CliModelHints(CliPreset preset) => preset switch
-    {
-        CliPreset.ClaudeCode => ["sonnet", "opus", "haiku"],
-        CliPreset.Codex => ["gpt-6.1-sol", "gpt-6-luna"],
-        CliPreset.GitHubCopilot => ["claude-sonnet-5.5", "gpt-6.1-sol"],
-        _ => [],
-    };
-
     /// <summary>Who the caller is signed in as.</summary>
     /// <param name="Role"><c>Admin</c>, <c>ReadOnly</c>, or <see langword="null"/> when not signed in.</param>
     /// <param name="TokenRequired">Whether this caller needs a token (it is remote, or tokens are required locally).</param>
@@ -744,8 +716,42 @@ public static partial class RouterDashboardEndpoints
     /// <summary>Result of the embeddings probe.</summary>
     public sealed record EmbeddingTestResponse(bool Ok, int Dimensions, double Milliseconds, string? Error);
 
-    /// <summary>Models a connector reports.</summary>
-    public sealed record DiscoverResponse(IReadOnlyList<string> Models, string? Note);
+    /// <summary>What a connector offers: <c>POST api/connectors/{name}/discover</c>.</summary>
+    /// <param name="Models">The model ids the provider serves (for the model editor's suggestions).</param>
+    /// <param name="Note">A failure, or how the list was obtained.</param>
+    /// <param name="Server">The server software, when recognised (<c>LM Studio</c>, <c>Ollama</c>).</param>
+    /// <param name="Loading">Whether the server loads models on demand (<c>OnDemand</c>), only serves loaded ones (<c>LoadedOnly</c>), or does not say.</param>
+    /// <param name="LoadingNote">What that means for routing.</param>
+    /// <param name="Lineup">Every model found, with the suggested catalog entry.</param>
+    public sealed record DiscoverResponse(
+        IReadOnlyList<string> Models, string? Note, string? Server, ModelLoading Loading, string? LoadingNote, IReadOnlyList<LineupModel> Lineup)
+    {
+        internal static DiscoverResponse From(ModelLineupReport report) => new(
+            report.Entries.Where(e => e.Model.Listed).Select(e => e.Model.Id).ToArray(),
+            report.Note ?? (report.Ok && report.Entries.Count == 0 ? "The provider listed no models." : null),
+            report.Server,
+            report.Loading,
+            report.LoadingNote,
+            report.Entries.Select(e => new LineupModel(
+                e.Model.Id, e.Model.Kind, e.Model.Listed, e.Model.Loaded, e.Model.LoadedContextLength ?? e.Model.MaxContextLength, e.Model.ParametersBillions,
+                e.Model.Capabilities, e.InCatalog, e.Recommended, e.Reason, e.Suggestion is null ? null : ModelLineup.ToConfigurationJson(e.Suggestion))).ToArray());
+    }
+
+    /// <summary>One model of a <see cref="DiscoverResponse"/>.</summary>
+    /// <param name="Id">The provider's model id.</param>
+    /// <param name="Kind">Chat, vision or embedding.</param>
+    /// <param name="Listed">Whether the server serves it now.</param>
+    /// <param name="Loaded">Whether it is in memory, when the server says.</param>
+    /// <param name="ContextLength">The context it is loaded with, else the most it supports.</param>
+    /// <param name="ParametersBillions">Its size, when known.</param>
+    /// <param name="Capabilities">What the server says it can do.</param>
+    /// <param name="InCatalog">The catalog model that already serves it from this connector.</param>
+    /// <param name="Recommended">Whether adding it is a sensible default.</param>
+    /// <param name="Reason">Why the suggestion looks the way it does.</param>
+    /// <param name="Suggestion">The suggested catalog entry, in the configuration document's shape; <see langword="null"/> for embedding models.</param>
+    public sealed record LineupModel(
+        string Id, DiscoveredModelKind Kind, bool Listed, bool? Loaded, int? ContextLength, double? ParametersBillions, IReadOnlyList<string> Capabilities,
+        string? InCatalog, bool Recommended, string Reason, JsonElement? Suggestion);
 
     /// <summary>The themes the picker offers.</summary>
     /// <param name="Directory">Where theme files are read from, if anywhere.</param>

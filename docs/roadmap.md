@@ -27,6 +27,8 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - The dashboard is tested end to end in the browser on every change, meets WCAG AA in every theme, works with a keyboard and on a phone, and takes drop-in theme files.
 
+- A provider's whole lineup can be discovered and tiered at once (dashboard and `semantic-router models`): Claude's four families on four rungs, every local model by size, with LM Studio's and Ollama's load state and on-demand loading taken into account.
+
 ## What done looks like
 
 You install one tool, point Claude Code, Codex or any chat client at it, and keep working. The router decides per turn between local models, your subscriptions and paid APIs. It tells you what it spent and why it chose what it chose, survives restarts, can be shared safely, and gets better at routing from your own prompts.

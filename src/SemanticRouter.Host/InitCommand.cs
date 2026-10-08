@@ -77,11 +77,11 @@ internal static class InitCommand
         foreach ((string name, Uri address) in new[] { ("lmstudio", InitProbes.LmStudio), ("ollama", InitProbes.Ollama) })
         {
             var connector = new ConnectorOptions { BaseAddress = address, Timeout = TimeSpan.FromMinutes(2) };
-            ConnectorProbeResult probe = await ConnectorProbe.ListModelsAsync(name, connector, probes.Http, TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+            ConnectorProbeResult probe = await ConnectorProbe.DiscoverAsync(name, connector, probes.Http, TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
             if (probe.Failure is ConnectorProbeFailure.AuthenticationRequired or ConnectorProbeFailure.CredentialsRejected)
             {
                 document.Connectors[name] = connector;
-                notes.Add($"{name}: found at {address}, but it requires an API token. Set SemanticRouter:Connectors:{name}:ApiKey (e.g. \"${{env:LM_API_TOKEN}}\"), then add its models on the dashboard.");
+                notes.Add($"{name}: found at {address}, but it requires an API token. Set SemanticRouter:Connectors:{name}:ApiKey (e.g. \"${{env:LM_API_TOKEN}}\"), then add its models on the dashboard (Models → Discover models).");
                 continue;
             }
 
@@ -90,34 +90,40 @@ internal static class InitCommand
                 continue;
             }
 
-            string[] chat = probe.Models.Where(id => !IsEmbedding(id)).ToArray();
-            string? embedding = probe.Models.FirstOrDefault(IsEmbedding);
+            // Every chat model the server runs itself, each on the tier its size suggests; loaded ones preferred when
+            // the server loads the others on demand. Cloud models a local server forwards (Ollama's) are left out.
+            ModelLineupEntry[] lineup = ModelLineup.Suggest(name, connector, probe.Details, probe.Loading, document.Models)
+                .Where(e => e.Suggestion is not null && e.Model.Listed)
+                .ToArray();
+            ModelDefinition[] chat = lineup.Where(e => e.Model.Remote != true).Select(e => e.Suggestion!).ToArray();
+            string[] cloud = lineup.Where(e => e.Model.Remote == true).Select(e => e.Model.Id).ToArray();
+            if (cloud.Length > 0)
+            {
+                notes.Add($"{name}: left out {string.Join(", ", cloud)}: {(cloud.Length == 1 ? "it runs" : "they run")} in the cloud, not on this machine. Add {(cloud.Length == 1 ? "it" : "them")} on the dashboard if you want to.");
+            }
+
+            string? embedding = probe.Details.FirstOrDefault(m => m.Kind == DiscoveredModelKind.Embedding && m.Listed)?.Id;
             if (chat.Length == 0 && embedding is null)
             {
-                notes.Add($"{name}: running at {address} with no model loaded; load one and add it on the dashboard.");
+                notes.Add($"{name}: running at {address} with no model {(probe.Loading == ModelLoading.LoadedOnly ? "loaded" : "available")}; load one and add it on the dashboard.");
                 continue;
             }
 
             document.Connectors[name] = connector;
+            foreach (ModelDefinition model in chat)
+            {
+                document.Models.Add(model);
+            }
+
             if (chat.Length > 0)
             {
-                string general = chat.FirstOrDefault(id => !id.Contains("coder", StringComparison.OrdinalIgnoreCase)) ?? chat[0];
-                document.Models.Add(new ModelDefinition
-                {
-                    Name = name, Connector = name, Model = general, Tier = 1, IsLocal = true, Capabilities = { "chat" },
-                    Description = $"Local model on {address}.",
-                });
-                string? coder = chat.FirstOrDefault(id => id.Contains("coder", StringComparison.OrdinalIgnoreCase) && id != general);
-                if (coder is not null)
-                {
-                    document.Models.Add(new ModelDefinition
-                    {
-                        Name = name + "-coder", Connector = name, Model = coder, Tier = 2, IsLocal = true, Capabilities = { "chat", "code" },
-                        Description = $"Local coder model on {address}. Add \"tools\" if it supports function calling.",
-                    });
-                }
+                notes.Add($"{name}: {address}{(probe.Server is null ? string.Empty : $" ({probe.Server})")}, {chat.Length} chat model(s): " +
+                          string.Join(", ", chat.Select(m => $"{m.Model} (tier {m.Tier})")) + ". Check the tiers on the dashboard's Models page.");
+            }
 
-                notes.Add($"{name}: {address}, using '{general}'{(coder is null ? string.Empty : $" and '{coder}'")} (of {chat.Length} chat model(s)).");
+            if (probe.LoadingNote is not null)
+            {
+                notes.Add($"{name}: {probe.LoadingNote}");
             }
 
             if (embedding is not null && embeddingModel is null)
@@ -146,17 +152,13 @@ internal static class InitCommand
                       $"similarity threshold {model.SuggestedThreshold:0.00} (calibrate on the dashboard's Evaluate page).");
         }
 
-        AddCli(document, probes, notes, "claude", "claude-cli", CliPreset.ClaudeCode, maxConcurrency: 2, enabled: true,
-            ("claude", "sonnet", 4, 0), ("claude-opus", "opus", 5, 1));
-        AddCli(document, probes, notes, "codex", "codex-cli", CliPreset.Codex, maxConcurrency: 1, enabled: true,
-            ("codex", null, 4, 2));
-        AddCli(document, probes, notes, "copilot", "copilot-cli", CliPreset.GitHubCopilot, maxConcurrency: 2, enabled: false,
-            ("copilot", null, 4, 2));
+        AddCli(document, probes, notes, "claude", "claude-cli", CliPreset.ClaudeCode, maxConcurrency: 2, enabled: true);
+        AddCli(document, probes, notes, "codex", "codex-cli", CliPreset.Codex, maxConcurrency: 1, enabled: true);
+        AddCli(document, probes, notes, "copilot", "copilot-cli", CliPreset.GitHubCopilot, maxConcurrency: 2, enabled: false);
     }
 
     private static void AddCli(
-        RouterConfiguration document, InitProbes probes, List<string> notes, string executable, string connector, CliPreset preset,
-        int maxConcurrency, bool enabled, params (string Name, string? Model, int Tier, int Priority)[] models)
+        RouterConfiguration document, InitProbes probes, List<string> notes, string executable, string connector, CliPreset preset, int maxConcurrency, bool enabled)
     {
         CliExecutableLookup lookup = CliExecutableLocator.Find(executable, probes.SearchPath, probes.Windows);
         if (!lookup.Found)
@@ -169,7 +171,7 @@ internal static class InitCommand
             return;
         }
 
-        document.Connectors[connector] = new ConnectorOptions
+        var options = new ConnectorOptions
         {
             Type = ConnectorType.Cli,
             Preset = preset,
@@ -177,30 +179,35 @@ internal static class InitCommand
             Timeout = TimeSpan.FromMinutes(3),
             ToolCalling = preset == CliPreset.ClaudeCode ? CliToolCalling.Prompted : CliToolCalling.None,
         };
-
-        foreach ((string name, string? model, int tier, int priority) in models)
-        {
-            document.Models.Add(new ModelDefinition
-            {
-                Name = name, Connector = connector, Model = model, Tier = tier, Priority = priority, Enabled = enabled,
-                ContextWindow = preset == CliPreset.ClaudeCode ? 200_000 : 0,
-                Capabilities = { "chat", "code", "reasoning" },
-                Description = $"{executable} CLI on your own subscription (personal, local use; see docs/TERMS.md).",
-            });
-        }
+        document.Connectors[connector] = options;
+        string description = $"{executable} CLI on your own subscription (personal, local use; see docs/TERMS.md).";
 
         if (preset == CliPreset.ClaudeCode)
         {
-            foreach (ModelDefinition model in document.Models.Where(m => m.Connector == connector))
+            // Claude's lineup, one tier each: Haiku 2, Sonnet 3, Opus 4, Fable 5 (disabled until you enable it).
+            foreach (ModelLineupEntry entry in ModelLineup.Suggest(
+                         connector, options, ModelLineup.CliModelIds(preset).Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, document.Models))
             {
-                model.Capabilities.Add("tools");
+                ModelDefinition model = entry.Suggestion!;
+                model.Description = description;
+                document.Models.Add(model);
             }
+
+            notes.Add($"{executable}: {lookup.Path} as '{connector}' with " +
+                      string.Join(", ", document.Models.Where(m => m.Connector == connector).Select(m => $"{m.Model} (tier {m.Tier}{(m.Enabled ? string.Empty : ", disabled")})")) +
+                      " (uses your own login; answers only requests from this machine).");
+            return;
         }
 
+        // The CLI's own default model: Codex and Copilot change theirs often, so no model id is pinned.
+        document.Models.Add(new ModelDefinition
+        {
+            Name = executable, Connector = connector, Tier = 4, Priority = 2, Enabled = enabled,
+            Capabilities = { "chat", "code", "reasoning" },
+            Description = description,
+        });
         notes.Add(enabled
             ? $"{executable}: {lookup.Path} as '{connector}' (uses your own login; answers only requests from this machine)."
             : $"{executable}: {lookup.Path} as '{connector}', disabled (it spends your plan's premium requests); enable it on the dashboard.");
     }
-
-    private static bool IsEmbedding(string id) => id.Contains("embed", StringComparison.OrdinalIgnoreCase);
 }

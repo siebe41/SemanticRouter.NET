@@ -354,6 +354,19 @@ label.check { display: inline-flex; align-items: center; gap: 8px; font-size: 13
 .item.open .item-body { display: block; }
 .item.disabled .title { text-decoration: line-through; color: var(--text-muted); }
 
+/* Models grouped by connector, and the Discover models lineup */
+.model-group { margin-bottom: 22px; }
+.model-group .group-head h2 { font-size: 16px; }
+.lineup { margin-bottom: 12px; }
+.lineup .card-head { flex-wrap: wrap; }
+.lineup .card-head h3 { margin: 0; font-size: 14px; }
+.lineup .row-actions { flex-wrap: wrap; align-items: center; }
+.lineup .row-actions .btn { flex: none; }
+.lineup-table td { vertical-align: middle; }
+.lineup-table input[type=text] { min-width: 140px; width: 100%; }
+.lineup-table tr.lineup-reason td { padding-top: 0; border-top: 0; }
+.lineup-table tr.muted td { color: var(--text-muted); }
+
 /* Bars */
 .bars { display: flex; flex-direction: column; gap: 6px; }
 .bar-row { display: grid; grid-template-columns: 140px 1fr 40px; gap: 8px; align-items: center; font-size: 12.5px; }

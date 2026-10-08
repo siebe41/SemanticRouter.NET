@@ -3,6 +3,7 @@ using SemanticRouter.Host;
 // semantic-router            run the router and its dashboard (http://localhost:5080)
 // semantic-router init       write a starting configuration with the models found on this machine
 // semantic-router doctor     check every connector, model and the embeddings without calling a model
+// semantic-router models     list what each connector offers, with suggested tiers and load state
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 HostSettings settings = HostSettings.Parse(args);
 
@@ -25,6 +26,9 @@ switch (settings.Command)
     case "doctor":
         return await DoctorCommand.RunAsync(settings, Console.Out);
 
+    case "models":
+        return await ModelsCommand.RunAsync(settings, Console.Out);
+
     default:
         if (settings.Error is not null)
         {
@@ -44,6 +48,8 @@ static string Help() => $"""
       semantic-router init [--force]    Write a starting configuration with the models found on this machine
                                         (LM Studio, Ollama, and the claude / codex / copilot CLIs on PATH).
       semantic-router doctor            Check every connector, model and the embeddings. Exit code 1 on failure.
+      semantic-router models [name]     List the models each connector (or the one named) offers: loaded or not,
+                                        context, size, which are in the catalog, and a suggested tier for the rest.
       semantic-router --version | --help
 
     Options:

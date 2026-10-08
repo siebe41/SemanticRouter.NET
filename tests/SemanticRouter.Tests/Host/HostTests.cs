@@ -38,6 +38,8 @@ public sealed class HostTests : IDisposable
         init.ConfigurationDirectory.Should().Be(Path.GetFullPath("/tmp/x"));
         unknown.Error.Should().Contain("Unknown command 'serve'");
         HostSettings.Parse(["--help"], _ => null).Command.Should().Be("help");
+        HostSettings.Parse(["models", "lmstudio", "--config-dir=/tmp/x"], _ => null).Should().Match<HostSettings>(s => s.Command == "models" && s.Connector == "lmstudio");
+        HostSettings.Parse(["models"], _ => null).Connector.Should().BeNull();
     }
 
     [Fact]
@@ -114,13 +116,17 @@ public sealed class HostTests : IDisposable
         written.Connectors.Keys.Should().BeEquivalentTo("lmstudio", "claude-cli", "copilot-cli");
         written.Models.Select(m => (m.Name, m.Model, m.Tier, m.Enabled)).Should().BeEquivalentTo(new[]
         {
-            ("lmstudio", "qwen/qwen3-8b", 1, true),
-            ("lmstudio-coder", "qwen/qwen3-coder-30b", 2, true),
-            ("claude", "sonnet", 4, true),
-            ("claude-opus", "opus", 5, true),
+            ("lmstudio-qwen3-coder-30b", "qwen/qwen3-coder-30b", 2, true),
+            ("lmstudio-qwen3-8b", "qwen/qwen3-8b", 1, true),
+            ("claude-haiku", "haiku", 2, true),
+            ("claude-sonnet", "sonnet", 3, true),
+            ("claude-opus", "opus", 4, true),
+            ("claude-fable-5-1", "claude-fable-5-1", 5, false),
             ((string, string?, int, bool))("copilot", null, 4, false),
-        });
-        written.Models.Single(m => m.Name == "lmstudio").IsLocal.Should().BeTrue();
+        }, "every local chat model is added on the tier its size suggests, and Claude gets one tier per family");
+        written.Models.Single(m => m.Name == "lmstudio-qwen3-8b").IsLocal.Should().BeTrue();
+        written.Models.Single(m => m.Name == "lmstudio-qwen3-coder-30b").Capabilities.Should().Contain(["code", "tools"]);
+        written.Models.Where(m => m.Connector == "claude-cli").Should().OnlyContain(m => m.Capabilities.Contains("tools") && m.ContextWindow == 200_000);
         written.Connectors["claude-cli"].ToolCalling.Should().Be(CliToolCalling.Prompted);
         written.Embeddings.Provider.Should().Be(EmbeddingProviderKind.OpenAICompatible);
         written.Embeddings.Model.Should().Be("text-embedding-nomic-embed-text-v1.5");
@@ -181,6 +187,93 @@ public sealed class HostTests : IDisposable
         report.Should().Contain("[FAIL] connector missing:").And.Contain("SemanticRouter:Connectors:missing:Executable");
         report.Should().Contain("[WARN] embeddings: the Hashing provider");
         report.Should().NotContain("sk-doctor-test");
+    }
+
+    [Fact]
+    public async Task Init_adds_every_chat_model_a_local_server_offers_and_says_how_it_loads_them()
+    {
+        var handler = LocalServers.LmStudio(justInTime: true);
+        var output = new StringWriter();
+
+        int exit = await InitCommand.RunAsync(Settings("init"), new InitProbes(new HttpClient(handler), string.Empty, Windows: false), output);
+
+        exit.Should().Be(0, output.ToString());
+        RouterConfiguration written = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+        written.Models.Select(m => (m.Name, m.Tier, m.Priority, m.ContextWindow)).Should().Equal(
+            ("lmstudio-qwen3-8b", 1, 0, 32768),
+            ("lmstudio-qwen3-coder-30b", 2, 1, 0),
+            ("lmstudio-gemma-3-12b", 2, 1, 0));
+        written.Embeddings.Model.Should().Be("text-embedding-nomic-embed-text-v1.5");
+        output.ToString().Should().Contain("(LM Studio), 3 chat model(s)").And.Contain("just-in-time loading is on");
+    }
+
+    [Fact]
+    public async Task Init_leaves_out_ollama_cloud_models()
+    {
+        var ollama = LocalServers.Ollama();
+        var handler = new StubHttpMessageHandler((request, body) => request.RequestUri!.Port == 11434
+            ? ollama.Respond(request, body)
+            : throw new HttpRequestException("Connection refused"));
+        var output = new StringWriter();
+
+        (await InitCommand.RunAsync(Settings("init"), new InitProbes(new HttpClient(handler), string.Empty, Windows: false), output)).Should().Be(0, output.ToString());
+
+        RouterConfiguration written = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+        written.Models.Select(m => m.Model).Should().BeEquivalentTo("llama3.2:latest", "qwen3:30b-a3b");
+        written.Models.Should().OnlyContain(m => m.IsLocal);
+        output.ToString().Should().Contain("left out gpt-oss:120b-cloud").And.Contain("Ollama loads a model on its first request");
+    }
+
+    [Fact]
+    public async Task Models_lists_what_each_connector_offers_with_load_state_and_suggestions()
+    {
+        var document = RouterConfiguration.FromJson(RouterHost.Template());
+        document.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
+        document.Connectors["claude-cli"] = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode, ToolCalling = CliToolCalling.Prompted };
+        document.Models.Add(new ModelDefinition { Name = "small", Connector = "lmstudio", Model = "qwen/qwen3-8b", IsLocal = true });
+        new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(document);
+        void Stub(WebApplicationBuilder builder) => builder.Services.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "lmstudio")
+            .ConfigurePrimaryHttpMessageHandler(() => LocalServers.LmStudio(justInTime: false));
+        var all = new StringWriter();
+        var one = new StringWriter();
+        var unknown = new StringWriter();
+
+        HostSettings Models(params string[] args) => HostSettings.Parse(["models", .. args, "--config-dir", _directory]);
+        (await ModelsCommand.RunAsync(Models(), all, Stub)).Should().Be(0, all.ToString());
+        (await ModelsCommand.RunAsync(Models("claude-cli"), one, Stub)).Should().Be(0);
+        (await ModelsCommand.RunAsync(Models("nope"), unknown, Stub)).Should().Be(1);
+
+        string report = all.ToString();
+        report.Should().Contain("lmstudio (OpenAICompatible, LM Studio)").And.Contain("just-in-time loading is off");
+        report.Should().MatchRegex(@"qwen/qwen3-8b\s+loaded\s+32,768\s+8B\s+small \(T1\)");
+        report.Should().MatchRegex(@"qwen/qwen3-coder-30b\s+not served\s+262,144\s+30B\s+\+ lmstudio-qwen3-coder-30b T2 chat,code,tools \(disabled\)");
+        report.Should().MatchRegex(@"text-embedding-nomic-embed-text-v1.5\s+embedding");
+        report.Should().Contain("claude-cli (Cli)").And.Contain("+ claude-opus T4");
+        one.ToString().Should().Contain("claude-cli").And.NotContain("lmstudio");
+        unknown.ToString().Should().Contain("'nope' is not configured");
+    }
+
+    [Fact]
+    public async Task Doctor_explains_models_a_server_will_not_load_and_context_larger_than_loaded()
+    {
+        var document = RouterConfiguration.FromJson(RouterHost.Template());
+        document.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
+        document.Models.Add(new ModelDefinition { Name = "small", Connector = "lmstudio", Model = "qwen/qwen3-8b", IsLocal = true, ContextWindow = 65536 });
+        document.Models.Add(new ModelDefinition { Name = "coder", Connector = "lmstudio", Model = "qwen/qwen3-coder-30b", IsLocal = true, Tier = 2 });
+        new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(document);
+        var output = new StringWriter();
+
+        int exit = await DoctorCommand.RunAsync(Settings("doctor"), output, builder =>
+            builder.Services.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "lmstudio")
+                .ConfigurePrimaryHttpMessageHandler(() => LocalServers.LmStudio(justInTime: false)));
+
+        string report = output.ToString();
+        exit.Should().Be(1, report);
+        report.Should().Contain("[ OK ] connector lmstudio:").And.Contain("LM Studio, 1 loaded.").And.Contain("just-in-time loading is off");
+        report.Should().Contain("[ OK ] model small: 'qwen/qwen3-8b' is offered by lmstudio (loaded).");
+        report.Should().Contain("[WARN] model small: ContextWindow 65,536 is larger than the 32,768 tokens it is loaded with")
+            .And.Contain("SemanticRouter:Models:0:ContextWindow to 32768");
+        report.Should().Contain("[FAIL] model coder: 'qwen/qwen3-coder-30b' is downloaded but not loaded, and LM Studio only serves loaded models");
     }
 
     [Fact]

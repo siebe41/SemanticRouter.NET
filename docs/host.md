@@ -10,6 +10,7 @@ Prerequisite: the [.NET 9 runtime or SDK](https://dotnet.microsoft.com/download/
 dotnet tool install -g SemanticRouter.Host
 semantic-router init      # write a configuration with the models found on this machine
 semantic-router doctor    # check every connector, model and the embeddings
+semantic-router models    # what each connector offers: loaded or not, suggested tiers
 semantic-router           # start: http://localhost:5080, dashboard at /router
 ```
 
@@ -30,6 +31,7 @@ SemanticRouter 0.2.0 is listening on http://localhost:5080
 | `semantic-router` (or `run`) | Starts the router and the dashboard. Creates the configuration file from the built-in template on first run. |
 | `semantic-router init [--force] [--no-detect]` | Writes a starting configuration. It probes LM Studio (`localhost:1234`) and Ollama (`localhost:11434`) for chat and embedding models and looks for `claude`, `codex` and `copilot` on `PATH`. It refuses to overwrite an existing file without `--force`. |
 | `semantic-router doctor` | Loads the configuration exactly as `run` would and checks it without calling a model. It flags unresolved `${env:…}` references, tests the embeddings, and checks each HTTP connector (reachable, credentials accepted, configured model ids offered) and each CLI connector (installed, starts and, for Claude Code, signed in). Every failure names the setting to change. Exit code 1 when anything failed. |
+| `semantic-router models [connector]` | Asks every connector (or the one named) which models it offers, and prints them with their load state, context length and size, the catalog model that already uses each, and a suggested name, tier and capabilities for the rest (see [Model lineups](providers.md#model-lineups-several-models-per-provider)). LM Studio and Ollama also say whether they load models on demand. Changes nothing; add models on the dashboard. |
 | `semantic-router --version`, `--help` | |
 
 Options: `--config-dir <dir>`, `--urls <urls>`, and any setting as `--SemanticRouter:<key>=<value>` (the same keys as the `SemanticRouter__<key>` environment variables).
@@ -38,11 +40,11 @@ Options: `--config-dir <dir>`, `--urls <urls>`, and any setting as `--SemanticRo
 
 | Found | Added |
 |---|---|
-| LM Studio or Ollama with chat models | A connector; a tier-1 local model (the first non-coder chat model) and, when one is loaded, a tier-2 `-coder` model. |
+| LM Studio or Ollama with chat models | A connector and **every chat model it serves**, each on the tier its size suggests (≤ 9B: 1, ≤ 35B: 2, larger: 3), with `code`, `tools`, `vision` and `reasoning` from the server's report or the model family, and the context it is loaded with. Models that are not loaded get `Priority` 1, so loaded ones are preferred. The notes say whether the server loads models on demand. |
 | An embedding model on either server | `Embeddings` switched to it, with a starting similarity threshold for that model family. |
 | No embedding server | `Embeddings` set to `Onnx` with `all-MiniLM-L6-v2`: a 23 MB model that runs inside the router. It is downloaded on first start and checksum-verified. Threshold 0.40. |
 | A server that answers `401` | The connector, plus a note to set its `ApiKey` (for example `"${env:LM_API_TOKEN}"`). |
-| `claude` on PATH | `claude-cli` with prompted tool calling, `claude` (sonnet, tier 4) and `claude-opus` (tier 5). |
+| `claude` on PATH | `claude-cli` with prompted tool calling and Claude's lineup, one tier per family: `claude-haiku` (tier 2), `claude-sonnet` (3), `claude-opus` (4) and `claude-fable-5-1` (5, **disabled** until you enable it, because not every plan includes it). |
 | `codex` on PATH | `codex-cli` (concurrency 1) and a tier-4 `codex` model. |
 | `copilot` on PATH | `copilot-cli` and a tier-4 `copilot` model, **disabled**: it spends your plan's premium requests, so you turn it on. |
 
