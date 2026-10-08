@@ -1,0 +1,132 @@
+{
+  // The neutral starting configuration of `semantic-router`. `semantic-router init` writes it to your configuration
+  // directory with the models it found on this machine; the dashboard edits it from there.
+  // Tuned for the in-process Hashing embeddings. A real embedding model needs a higher threshold (see the README).
+  "DefaultSimilarityThreshold": 0.30,
+  "FallbackTier": 3,
+  "ComplexityShortCircuitThreshold": 0.9,
+  "AmbiguityMargin": 0.02,
+  "ComplexityTiers": [
+    { "MinScore": 0.45, "Tier": 2 },
+    { "MinScore": 0.65, "Tier": 3 },
+    { "MinScore": 0.85, "Tier": 4 }
+  ],
+
+  "Selection": {
+    "Strategy": "CheapestCapable",
+    "AllowBelowRequiredTier": true,
+    "MaxAttempts": 3,
+    "QuotaCooldown": "00:15:00",
+    "FailureCooldown": "00:00:30"
+  },
+
+  "Tiers": [
+    { "Level": 1, "Name": "Local small", "Description": "Small local models: chit-chat, rewrite, summarize, translate." },
+    { "Level": 2, "Name": "Local coder / mini", "Description": "Mid-size local coder models and mini API models: small code tasks, extraction." },
+    { "Level": 3, "Name": "Strong general", "Description": "Strong general models: everyday reasoning, unmatched prompts." },
+    { "Level": 4, "Name": "Frontier", "Description": "Frontier models: architecture, debugging, agentic coding." },
+    { "Level": 5, "Name": "Frontier + deep reasoning", "Description": "Extended reasoning for the hardest problems." }
+  ],
+
+  "Routes": [
+    {
+      "Name": "smalltalk",
+      "Description": "Greetings, thanks and chit-chat.",
+      "Tier": 1,
+      "Utterances": [
+        "hi there", "hello, how are you?", "good morning", "thanks a lot",
+        "thank you for your help", "who are you?", "tell me a joke", "what can you do?"
+      ]
+    },
+    {
+      "Name": "rewrite-summarize",
+      "Description": "Light text transformation that small models handle well.",
+      "Tier": 1,
+      "Utterances": [
+        "summarize this text", "summarize this article in three bullet points", "give me a short summary of this email",
+        "rewrite this paragraph to sound more professional", "fix the grammar and spelling in this sentence",
+        "translate this sentence to French", "make this message shorter", "rephrase this in simpler words"
+      ]
+    },
+    {
+      "Name": "simple-code",
+      "Description": "Small, self-contained coding tasks a local coder model can do.",
+      "Tier": 2,
+      "RequiredCapabilities": [ "code" ],
+      "Utterances": [
+        "write a regex that matches email addresses", "write a unit test for this function", "add a docstring to this method",
+        "convert this json to yaml", "write a commit message for this diff", "rename this variable everywhere",
+        "write a bash one-liner to count lines in all files"
+      ]
+    },
+    {
+      "Name": "deep-reasoning",
+      "Description": "Analysis, design and multi-step reasoning.",
+      "Tier": 4,
+      "Utterances": [
+        "design a scalable architecture for a multi-tenant SaaS platform",
+        "compare the trade-offs between event sourcing and CRUD", "analyze this contract for legal risks",
+        "prove that the square root of two is irrational", "explain step by step how to migrate a monolith to microservices",
+        "evaluate the security implications of this authentication flow"
+      ]
+    },
+    {
+      "Name": "complex-code",
+      "Description": "Debugging and non-trivial engineering work.",
+      "Tier": 4,
+      "RequiredCapabilities": [ "code" ],
+      "Utterances": [
+        "debug this race condition in my multithreaded code", "find the memory leak in this service",
+        "refactor this legacy class to use dependency injection", "why does this async code deadlock",
+        "optimize this SQL query that is timing out", "review this pull request for bugs"
+      ]
+    },
+    {
+      "Name": "agentic-coding",
+      "Description": "Multi-step coding work from an agent (Claude Code, Codex): implement, fix, migrate across files.",
+      "Tier": 4,
+      "RequiredCapabilities": [ "code" ],
+      "Utterances": [
+        "implement this feature across the codebase", "add a new endpoint and wire it into the service",
+        "fix the failing tests and make the build pass", "migrate this project to the new framework version",
+        "refactor the module and update every caller", "write the integration tests for this flow"
+      ]
+    },
+    {
+      "Name": "agent-housekeeping",
+      "Description": "Cheap side requests agents make: titles, summaries of their own transcript, command descriptions.",
+      "Tier": 1,
+      "Utterances": [
+        "write a short title for this conversation", "summarize the conversation so far",
+        "describe what this command does in a few words", "suggest a commit message for these changes",
+        "is this a question or a command", "extract the file paths mentioned above"
+      ]
+    }
+  ],
+
+  "Models": [],
+  "Connectors": {},
+
+  "Embeddings": {
+    "Provider": "Hashing",
+    "Dimensions": 512,
+    "WarmUpOnStartup": true
+  },
+
+  "Middleware": {
+    "Mode": "Dispatch",
+    "PathPrefixes": [ "/v1/chat/completions" ],
+    "ModelAliases": {
+      "*haiku*": "auto:cheapest",
+      "*sonnet*": "auto",
+      "*opus*": "auto:best",
+      "claude-*": "auto",
+      "gpt-*": "auto"
+    },
+    "PinToolCallingTurns": true,
+    "StripSystemReminders": true,
+    "MaxRequestBodyBytes": 8388608,
+    "EmitResponseHeaders": true,
+    "FailOpen": true
+  }
+}
