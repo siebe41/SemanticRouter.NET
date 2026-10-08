@@ -21,6 +21,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private DesktopRouter _router = null!;
     private WindowIcon _icon = null!;
     private DashboardWindow? _window;
+    private AboutWindow? _about;
     private bool _openWhenReady;
     private bool _quitting;
 
@@ -98,6 +99,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         logs.Click += (_, _) => Shell.Open(Path.GetDirectoryName(RouterLog.FileIn(_directory))!);
         var configuration = new NativeMenuItem("Show the configuration folder");
         configuration.Click += (_, _) => Shell.Open(_directory);
+        var about = new NativeMenuItem("About SemanticRouter");
+        about.Click += (_, _) => ShowAbout();
         var quit = new NativeMenuItem("Quit SemanticRouter");
         quit.Click += (_, _) => _ = QuitAsync();
 
@@ -105,7 +108,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         {
             Icon = _icon,
             ToolTipText = "SemanticRouter",
-            Menu = [open, new NativeMenuItemSeparator(), _status, _restart, new NativeMenuItemSeparator(), openIn, _atSignIn, logs, configuration, new NativeMenuItemSeparator(), quit],
+            Menu = [open, new NativeMenuItemSeparator(), _status, _restart, new NativeMenuItemSeparator(), openIn, _atSignIn, logs, configuration, new NativeMenuItemSeparator(), about, quit],
         };
         tray.Clicked += (_, _) => OpenDashboard();
         UpdateMenu();
@@ -161,8 +164,25 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             return;
         }
 
-        _window ??= new DashboardWindow(dashboard, Path.Combine(_directory, "webview"), _icon);
+        _window ??= new DashboardWindow(dashboard, Path.Combine(_directory, "webview"), _icon, _preferences.Window, placement =>
+        {
+            _preferences = _preferences with { Window = placement };
+            _preferences.Save(_directory);
+        });
         _window.ShowAt(dashboard);
+    }
+
+    private void ShowAbout()
+    {
+        if (_about is null)
+        {
+            using Stream png = AssetLoader.Open(new Uri("avares://SemanticRouter/Assets/icon.png"));
+            _about = new AboutWindow(_icon, new Avalonia.Media.Imaging.Bitmap(png));
+            _about.Closed += (_, _) => _about = null;
+        }
+
+        _about.Show();
+        _about.Activate();
     }
 
     private void SetSurface(DashboardSurface surface)
@@ -211,6 +231,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         }
 
         _quitting = true;
+        _about?.Close();
         _window?.CloseForGood();
         await _router.DisposeAsync();
         instance.Dispose();

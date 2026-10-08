@@ -20,6 +20,9 @@ internal sealed record DesktopPreferences
 
     public DashboardSurface OpenDashboardIn { get; init; } = DashboardSurface.Window;
 
+    /// <summary>Where the dashboard window was when it was last hidden.</summary>
+    public WindowPlacement? Window { get; init; }
+
     public static DesktopPreferences Load(string configurationDirectory)
     {
         try

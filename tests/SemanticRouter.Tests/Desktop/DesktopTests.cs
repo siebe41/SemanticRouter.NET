@@ -44,6 +44,60 @@ public sealed class DesktopTests : IDisposable
     }
 
     [Fact]
+    public void The_window_fits_the_screen_it_opens_on_title_bar_included()
+    {
+        // 1920x1080 at 150% with a 48 px taskbar: 1280x688 units of room, less than the preferred 1280x860.
+        var scaled = new ScreenArea(0, 0, 1920, 1032, 1.5);
+        WindowPlacement fitted = WindowPlacement.Choose(null, [scaled], scaled);
+        fitted.Width.Should().BeApproximately(1152, 0.5);
+        fitted.Height.Should().BeApproximately(619.2, 0.5);
+        fitted.Y.Should().BeGreaterThanOrEqualTo(0, "the title bar, with minimize and maximize, stays on the screen");
+        (fitted.Y + (fitted.Height * 1.5)).Should().BeLessThanOrEqualTo(1032);
+        (fitted.X + (fitted.Width * 1.5)).Should().BeLessThanOrEqualTo(1920);
+
+        // A large screen gets the preferred size, centred.
+        var large = new ScreenArea(0, 0, 2560, 1400, 1);
+        WindowPlacement roomy = WindowPlacement.Choose(null, [large], large);
+        roomy.Should().Be(new WindowPlacement(640, 270, 1280, 860));
+
+        // A tiny screen: the window shrinks below its usual minimum rather than overflow.
+        var tiny = new ScreenArea(0, 0, 400, 400, 1);
+        WindowPlacement squeezed = WindowPlacement.Choose(null, [tiny], tiny);
+        squeezed.Width.Should().BeLessThanOrEqualTo(400);
+        squeezed.Height.Should().BeLessThanOrEqualTo(400);
+    }
+
+    [Fact]
+    public void A_saved_window_comes_back_where_it_was_unless_its_screen_is_gone()
+    {
+        var left = new ScreenArea(0, 0, 1920, 1040, 1);
+        var right = new ScreenArea(1920, 0, 2560, 1400, 1);
+        var saved = new WindowPlacement(2100, 100, 1400, 900, Maximized: true);
+
+        WindowPlacement.Choose(saved, [left, right], left).Should().Be(saved);
+
+        // The second monitor was unplugged: back to a fresh size on the primary screen, still maximized.
+        WindowPlacement moved = WindowPlacement.Choose(saved, [left], left);
+        moved.X.Should().BeLessThan(1920);
+        moved.Maximized.Should().BeTrue();
+
+        // Saved partly off the bottom right: pulled back so all of it shows.
+        WindowPlacement pulled = WindowPlacement.Choose(new WindowPlacement(1500, 800, 1000, 700), [left], left);
+        pulled.Should().Be(new WindowPlacement(920, 340, 1000, 700));
+
+        // Saved larger than the screen (a smaller monitor now, or higher scaling): shrunk to fit.
+        WindowPlacement.Choose(new WindowPlacement(0, 0, 3000, 2000), [left], left).Should().Be(new WindowPlacement(0, 0, 1920, 1040));
+    }
+
+    [Fact]
+    public void The_window_placement_is_remembered_with_the_preferences()
+    {
+        new DesktopPreferences { Window = new WindowPlacement(10, 20, 900, 700, Maximized: true) }.Save(_directory);
+
+        DesktopPreferences.Load(_directory).Window.Should().Be(new WindowPlacement(10, 20, 900, 700, Maximized: true));
+    }
+
+    [Fact]
     public void The_linux_autostart_entry_quotes_its_command_and_is_removed_again()
     {
         XdgAutostartFile.Quote("/opt/Semantic Router/SemanticRouter").Should().Be("\"/opt/Semantic Router/SemanticRouter\"");
