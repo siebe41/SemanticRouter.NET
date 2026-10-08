@@ -40,6 +40,8 @@
     history: { versions: null, diff: null },
     trends: { window: '24h', data: null, loading: false },
     usage: { window: '7d', by: 'model', data: null, loading: false },
+    evaluation: { text: null, location: null, count: 0, report: null, busy: false, health: null, compare: null, addFor: null, add: {}, form: { provider: 'OpenAICompatible', endpoint: '', model: '', apiKey: '', dimensions: 512 } },
+    label: null,         // the Activity "label this prompt" form
   };
 
   /* ---------------------------------------------------------------------------------------------
@@ -179,7 +181,7 @@
       renderChrome();
       if (state.view === 'overview') { state.trends.data = null; }
       if (state.view === 'usage') { loadUsage(); }
-      if (state.view === 'overview' || state.view === 'activity') render();
+      if (state.view === 'overview' || (state.view === 'activity' && !state.label)) render();
     } catch (e) { /* keep the last known state */ }
   }
 
@@ -382,10 +384,10 @@
       </div>`;
   }
 
-  function renderActivityTable(entries) {
+  function renderActivityTable(entries, labels) {
     if (!entries.length) return '<div class="muted small">No requests routed yet. Point a client at the gateway or use “Try a prompt”.</div>';
     return `<div class="table-wrap"><table>
-      <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th></tr>
+      <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th>${labels ? '<th></th>' : ''}</tr>
       ${entries.map((e) => `<tr title="${h(e.detail || '')}">
         <td class="nowrap small">${h(when(e.timestamp))}</td>
         <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}</div></td>
@@ -394,6 +396,7 @@
         <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
         <td class="small">${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.servedBy ? `<b>${h(e.servedBy)}</b>${e.attempt > 1 ? ` <span class="badge warn">try ${e.attempt}</span>` : ''}${e.degraded ? ' <span class="badge warn">degraded</span>' : ''}` : `<span class="muted">${h(e.plannedModel || '—')}</span> <span class="faint">planned</span>`}</td>
         <td class="num small">${e.totalMilliseconds != null ? num(e.totalMilliseconds, 0) : num(e.classificationMilliseconds, 1)}</td>
+        ${labels ? `<td>${e.toolContinuation ? '' : `<button class="btn ghost small" data-action="label-open" data-id="${e.id}" title="Say which tier this prompt should have had">Label</button>`}</td>` : ''}
       </tr>`).join('')}
     </table></div>`;
   }
@@ -406,8 +409,27 @@
         <select id="activity-filter" style="width:150px">${['all', 'failed', 'degraded', 'tools'].map((x) => `<option value="${x}" ${x === f ? 'selected' : ''}>${x}</option>`).join('')}</select>
         <label class="check"><input type="checkbox" id="auto-refresh" ${state.autoRefresh ? 'checked' : ''}> auto-refresh</label>
         <button class="btn small" data-action="refresh">Refresh</button></div>
-      ${renderActivityTable(entries)}`;
+      ${state.label ? labelForm() : ''}
+      ${renderActivityTable(entries, !readOnly())}`;
   };
+
+  /* Label an activity entry: add it to the evaluation set and, optionally, as an utterance to a route. */
+  function labelForm() {
+    const l = state.label;
+    const routes = state.config.Routes || [];
+    const routeOptions = (value, blank) => (blank ? `<option value="">${blank}</option>` : '') + routes.map((r) => `<option value="${h(r.Name)}" ${r.Name === value ? 'selected' : ''}>${h(r.Name)} (T${r.Tier})</option>`).join('');
+    return `<div class="card section" id="label-form"><div class="card-head"><h2>Label this prompt</h2><span class="muted small">Routed to tier ${l.routedTier}${l.routedRoute ? ' via ' + h(l.routedRoute) : ''}.${l.truncated ? ' The activity log keeps the first 160 characters of a prompt: complete or shorten it below.' : ''}</span></div>
+      <div class="form-grid">
+        <label class="field wide"><span class="name">Prompt</span><textarea rows="2" data-state="label.prompt">${h(l.prompt)}</textarea></label>
+        <label class="field"><span class="name">Should have been tier</span><select data-state="label.tier" data-kind="number">${tierOptions(l.tier)}</select></label>
+        <label class="field"><span class="name">Expected route (optional)</span><select data-state="label.route">${routeOptions(l.route, '(any)')}</select></label>
+        <label class="check wide"><input type="checkbox" data-state="label.toSet" data-kind="bool" ${l.toSet ? 'checked' : ''}> Add to the evaluation set${l.localOnly ? ' (marked local-only: left out of exports)' : ''}</label>
+        <label class="check wide"><input type="checkbox" data-state="label.toRoute" data-kind="bool" ${l.toRoute ? 'checked' : ''}> Also add it as an utterance, so prompts like it get this tier from now on</label>
+        ${l.toRoute ? `<label class="field"><span class="name">Route</span><select data-state="label.utteranceRoute">${routeOptions(l.utteranceRoute, '(new route…)')}</select></label>
+          ${l.utteranceRoute ? '' : `<label class="field"><span class="name">New route name</span><input type="text" data-state="label.newRoute" value="${h(l.newRoute || '')}" placeholder="e.g. cooking"><span class="hint">Created with tier ${l.tier}.</span></label>`}` : ''}
+      </div>
+      <div class="inline" style="margin-top:10px"><button class="btn primary small" data-action="label-save">Save</button><button class="btn ghost small" data-action="label-cancel">Cancel</button></div></div>`;
+  }
 
   views.tiers = () => {
     const c = state.config;
@@ -786,6 +808,126 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       </div>`;
   };
 
+  /* Evaluate: run labelled prompts through the configuration, calibrate thresholds, check routes, compare embeddings. */
+  const pct = (v) => (v * 100).toFixed(v === 1 || v === 0 ? 0 : 1) + '%';
+  async function loadEvaluationSet() {
+    try {
+      const r = await api('GET', '/evaluation/set');
+      state.evaluation.location = r.location; state.evaluation.count = r.count;
+      state.evaluation.text = r.cases.map((c) => JSON.stringify(Object.fromEntries(Object.entries({ prompt: c.prompt, tier: c.tier, route: c.route, localOnly: c.localOnly || undefined, note: c.note }).filter(([, v]) => v != null)))).join('\n');
+    } catch (e) { state.evaluation.text = ''; toast(e.message, 'danger'); }
+    if (state.view === 'evaluate') render();
+  }
+
+  function sweepChart(c, total) {
+    const pts = c.sweep;
+    const iw = W - PAD.l - PAD.r; const ih = H - PAD.t - PAD.b;
+    const max = niceMax(Math.max(1, ...pts.map((p) => Math.max(p.tooLow, p.tooHigh))));
+    const x = (t) => PAD.l + t * iw; const y = (v) => PAD.t + ih - v / max * ih;
+    const path = (key) => pts.filter((p) => p.threshold >= 0).map((p, i) => (i ? 'L' : 'M') + x(p.threshold).toFixed(1) + ' ' + y(p[key]).toFixed(1)).join('');
+    let g = '';
+    [0, 0.5, 1].forEach((f) => { const yy = PAD.t + ih - f * ih; g += `<line class="grid-line" x1="${PAD.l}" x2="${W - PAD.r}" y1="${yy}" y2="${yy}"/><text class="axis" x="${PAD.l - 6}" y="${yy + 3}" text-anchor="end">${Math.round(max * f)}</text>`; });
+    [0, 0.25, 0.5, 0.75, 1].forEach((t) => { g += `<text class="axis" x="${x(t)}" y="${H - 6}" text-anchor="middle">${t}</text>`; });
+    const marker = (t, label, dy) => `<line class="marker" x1="${x(t)}" x2="${x(t)}" y1="${PAD.t}" y2="${PAD.t + ih}"/><text class="end-label" x="${x(t) + 4}" y="${PAD.t + 10 + dy}">${h(label)} ${t.toFixed(2)}</text>`;
+    const last = pts[pts.length - 1];
+    const hits = pts.filter((p) => p.threshold >= 0).map((p) => `<rect class="hit" x="${x(p.threshold) - iw / 200}" y="${PAD.t}" width="${iw / 100}" height="${ih}" data-tip="${h(`threshold ${p.threshold.toFixed(2)}\n${p.correct} of ${total} right · ${p.tooLow} too low · ${p.tooHigh} too high`)}"/>`).join('');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Misroutes by default similarity threshold">${g}
+      <path class="line-2" d="${path('tooLow')}"/><path class="line-1" d="${path('tooHigh')}"/>
+      <circle class="dot-2" cx="${x(last.threshold)}" cy="${y(last.tooLow)}" r="4"/><text class="end-label" x="${x(last.threshold) + 8}" y="${y(last.tooLow) + 4}">too low</text>
+      <circle class="dot-1" cx="${x(last.threshold)}" cy="${y(last.tooHigh)}" r="4"/><text class="end-label" x="${x(last.threshold) + 8}" y="${y(last.tooHigh) - 6}">too high</text>
+      ${marker(c.current.threshold, 'current', 0)}${c.recommended.threshold !== c.current.threshold ? marker(c.recommended.threshold, 'recommended', 14) : ''}${hits}</svg>`;
+  }
+
+  function evaluationResults(r) {
+    const ev = state.evaluation;
+    const tiersAxis = r.tiers;
+    const maxCell = Math.max(1, ...r.confusion.flat());
+    const confusion = `<table class="matrix confusion"><tr><th>expected ↓ / routed →</th>${tiersAxis.map((t) => `<th class="num">T${t}</th>`).join('')}</tr>
+      ${r.confusion.map((row, i) => `<tr><th>T${tiersAxis[i]}</th>${row.map((n, j) => `<td class="cell ${n ? (i === j ? 'hit-ok' : j < i ? 'hit-low' : 'hit-high') : ''}" style="--share:${(n / maxCell).toFixed(2)}" title="${n} prompt(s) labelled T${tiersAxis[i]} routed to T${tiersAxis[j]}">${n || '<span class="faint">·</span>'}</td>`).join('')}</tr>`).join('')}</table>`;
+    const routes = state.config.Routes || [];
+    const misroutes = r.misroutes.map((m, i) => {
+      const open = ev.addFor === i;
+      return `<tr><td class="small">${h(m.prompt)}${m.localOnly && !m.keptLocal ? ' <span class="badge danger">left local-only</span>' : ''}</td>
+        <td><span class="tier">T${m.expectedTier}</span>${m.expectedRoute ? ` <span class="small muted">${h(m.expectedRoute)}</span>` : ''}</td>
+        <td><span class="tier">T${m.actualTier}</span> ${m.actualTier < m.expectedTier ? '<span class="badge warn">too low</span>' : m.actualTier > m.expectedTier ? '<span class="badge info">too high</span>' : ''}<div class="small muted">${h(m.reason)}${m.actualRoute ? ' · ' + h(m.actualRoute) : ''}</div></td>
+        <td class="small">${m.topScores.map((x) => `${h(x.route)} <span class="faint">${num(x.similarity, 3)}</span>`).join('<br>') || '<span class="faint">no embedding (complexity)</span>'}</td>
+        <td>${readOnly() ? '' : open
+          ? `<div class="inline"><select id="add-route">${routes.map((x) => `<option value="${h(x.Name)}" ${x.Tier === m.expectedTier ? 'selected' : ''}>${h(x.Name)} (T${x.Tier})</option>`).join('')}</select><button class="btn primary small" data-action="eval-add-save" data-index="${i}">Add</button><button class="btn ghost small" data-action="eval-add-cancel">×</button></div>`
+          : `<button class="btn ghost small" data-action="eval-add-open" data-index="${i}" title="Add this prompt as an utterance to a route">Add to route…</button>`}</td></tr>`;
+    }).join('');
+    const c = r.calibration;
+    return `<div class="grid cols-4 section">
+        <div class="card stat"><span class="value">${pct(r.accuracy)}</span><span class="label">${r.correct} of ${r.total} prompts routed to their tier</span></div>
+        <div class="card stat"><span class="value">${r.tooLow}</span><span class="label">too low: a weaker model than the prompt needs (costs quality)</span></div>
+        <div class="card stat"><span class="value">${r.tooHigh}</span><span class="label">too high: a stronger model than needed (costs money)</span></div>
+        <div class="card stat"><span class="value">${r.routeLabelled ? pct(r.routeCorrect / r.routeLabelled) : '–'}</span><span class="label">${r.routeLabelled ? `of ${r.routeLabelled} prompts with an expected route matched it` : 'no prompt names an expected route'}${r.localOnlyMissed ? ` · <b>${r.localOnlyMissed} local-only prompt(s) could leave the machine</b>` : ''}</span></div>
+      </div>
+      <div class="grid cols-2 section">
+        <div class="card"><div class="card-head"><h2>By expected tier</h2></div><table><tr><th>Tier</th><th class="num">Prompts</th><th class="num">Right</th><th style="width:40%"></th></tr>
+          ${r.perTier.map((t) => `<tr><td>${h(tierName(t.tier))}</td><td class="num">${t.total}</td><td class="num">${pct(t.accuracy)}</td><td><div class="meter ${t.accuracy < 0.5 ? 'danger' : t.accuracy < 0.8 ? 'warn' : ''}" role="meter" aria-valuenow="${Math.round(t.accuracy * 100)}" aria-valuemin="0" aria-valuemax="100" aria-label="tier ${t.tier} accuracy"><i style="width:${Math.round(t.accuracy * 100)}%"></i></div></td></tr>`).join('')}</table></div>
+        <div class="card"><div class="card-head"><h2>Confusion</h2><span class="muted small">Below the diagonal: routed too low. Above: too high.</span></div>${confusion}</div>
+      </div>
+      ${c ? `<div class="card section"><div class="card-head"><h2>Threshold calibration</h2><span class="muted small">Every default threshold from 0 to 1, on this set.</span><span class="spacer"></span>
+          ${readOnly() ? '' : `<button class="btn small" data-action="eval-use-calibration" ${c.recommended.threshold === c.current.threshold && !c.routes.length ? 'disabled' : ''}>Use recommended values</button>`}</div>
+        <div class="grid cols-2">
+          <div><div class="legend"><span><i class="key" style="background:var(--series-2)"></i>too low</span><span><i class="key" style="background:var(--series-1)"></i>too high</span></div>${sweepChart(c, r.total)}</div>
+          <div><table><tr><th></th><th class="num">Threshold</th><th class="num">Right</th><th class="num">Too low</th><th class="num">Too high</th></tr>
+            <tr><td>Current</td><td class="num">${c.current.threshold.toFixed(2)}</td><td class="num">${c.current.correct}</td><td class="num">${c.current.tooLow}</td><td class="num">${c.current.tooHigh}</td></tr>
+            <tr><td><b>Recommended</b></td><td class="num"><b>${c.recommended.threshold.toFixed(2)}</b></td><td class="num">${c.recommended.correct}</td><td class="num">${c.recommended.tooLow}</td><td class="num">${c.recommended.tooHigh}</td></tr></table>
+            ${c.routes.length ? `<h3 style="margin-top:12px">Route thresholds</h3><table><tr><th>Route</th><th class="num">Now</th><th class="num">Suggested</th><th class="num">Right</th></tr>${c.routes.map((x) => `<tr><td>${h(x.route)}</td><td class="num">${x.current == null ? 'default' : x.current.toFixed(2)}</td><td class="num">${x.recommended == null ? 'default' : x.recommended.toFixed(2)}</td><td class="num">${x.correctBefore} → ${x.correctAfter}</td></tr>`).join('')}</table><p class="small muted">With these: ${c.correctWithRoutes} of ${r.total} right.</p>` : '<p class="small muted" style="margin-top:8px">No per-route threshold does better than the default on this set.</p>'}
+            <p class="small muted">Ties go to fewer prompts routed too low, then to the value closest to the current one. A small set overfits: add prompts before trusting a large change.</p></div>
+        </div>
+        <details style="margin-top:8px"><summary class="small muted">Show the sweep as a table</summary><table><tr><th class="num">Threshold</th><th class="num">Right</th><th class="num">Too low</th><th class="num">Too high</th></tr>${c.sweep.filter((p, i) => i % 5 === 0 || p.threshold === c.current.threshold || p.threshold === c.recommended.threshold).map((p) => `<tr><td class="num">${p.threshold.toFixed(2)}</td><td class="num">${p.correct}</td><td class="num">${p.tooLow}</td><td class="num">${p.tooHigh}</td></tr>`).join('')}</table></details>
+      </div>` : ''}
+      <div class="card section"><div class="card-head"><h2>Misrouted prompts</h2><span class="muted small">${r.misroutes.length} of ${r.total} · embedded in ${num(r.embeddingMilliseconds, 0)} ms with ${h(r.embeddings)}</span></div>
+        ${r.misroutes.length ? `<div class="table-wrap"><table><tr><th>Prompt</th><th>Expected</th><th>Routed</th><th>Best routes</th><th></th></tr>${misroutes}</table></div>` : '<div class="muted small">Every prompt was routed to its tier.</div>'}</div>`;
+  }
+
+  function healthCard() {
+    const hr = state.evaluation.health;
+    const kinds = { FewUtterances: ['info', 'few utterances'], DuplicateUtterances: ['warn', 'duplicate'], ConflictingUtterances: ['danger', 'conflict'], Overlap: ['warn', 'overlap'] };
+    return `<div class="card section"><div class="card-head"><h2>Route health</h2><span class="muted small">Duplicates, utterances shared between routes, routes so close that ambiguity escalation fires constantly, thin routes.</span><span class="spacer"></span><button class="btn small" data-action="eval-health">${hr ? 'Check again' : 'Check routes'}</button></div>
+      ${!hr ? '' : `${hr.findings.length ? `<ul class="findings">${hr.findings.map((f) => `<li><span class="badge ${kinds[f.kind][0]}">${kinds[f.kind][1]}</span> ${h(f.message)}</li>`).join('')}</ul>` : `<div class="small"><span class="badge ok">ok</span> No problems in ${hr.utteranceCount} utterances.</div>`}
+        ${hr.overlaps.length ? `<details style="margin-top:8px"><summary class="small muted">Closest route pairs</summary><table><tr><th>Routes</th><th class="num">Centroid similarity</th><th class="num">Ambiguous utterances</th></tr>${hr.overlaps.slice(0, 8).map((o) => `<tr><td>${h(o.route)} · ${h(o.otherRoute)}</td><td class="num">${num(o.centroidSimilarity, 3)}</td><td class="num">${pct(o.ambiguousFraction)}</td></tr>`).join('')}</table></details>` : ''}`}
+    </div>`;
+  }
+
+  function compareCard() {
+    const f = state.evaluation.form; const cmp = state.evaluation.compare;
+    const side = (s) => s.error ? `<span class="badge danger">failed</span> <span class="small">${h(s.error)}</span>` : `${pct(s.report.accuracy)} <span class="small muted">at the current threshold · ${pct(s.report.calibration.recommended.accuracy)} at ${s.report.calibration.recommended.threshold.toFixed(2)} · ${num(s.report.embeddingMilliseconds, 0)} ms</span>`;
+    return `<div class="card section"><div class="card-head"><h2>Compare embedding models</h2><span class="muted small">Run the set with another embedding provider, each at its own best threshold. Nothing is changed.</span></div>
+      <div class="form-grid">
+        <label class="field"><span class="name">Provider</span><select data-state="evaluation.form.provider">${['OpenAICompatible', 'Hashing'].map((p) => `<option ${p === f.provider ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
+        ${f.provider === 'Hashing' ? `<label class="field"><span class="name">Dimensions</span><input type="number" min="16" data-state="evaluation.form.dimensions" data-kind="number" value="${f.dimensions}"></label>` : `
+        <label class="field"><span class="name">Endpoint</span><input type="text" data-state="evaluation.form.endpoint" value="${h(f.endpoint)}" placeholder="http://localhost:11434"></label>
+        <label class="field"><span class="name">Model</span><input type="text" data-state="evaluation.form.model" value="${h(f.model)}" placeholder="nomic-embed-text"></label>
+        <label class="field"><span class="name">API key</span><input type="text" data-state="evaluation.form.apiKey" value="${h(f.apiKey)}" placeholder="optional, or \${env:…}"></label>`}
+      </div>
+      <div class="inline" style="margin-top:10px"><button class="btn small" data-action="eval-compare" ${readOnly() ? 'disabled title="Needs the admin token"' : ''}>Compare</button></div>
+      ${cmp ? `<table style="margin-top:10px"><tr><th></th><th>Embeddings</th><th>Accuracy</th></tr><tr><td>Current</td><td class="small">${h(cmp.current.embeddings)}</td><td>${side(cmp.current)}</td></tr><tr><td>Candidate</td><td class="small">${h(cmp.candidate.embeddings)}</td><td>${side(cmp.candidate)}</td></tr></table>${(cmp.warnings || []).map((w) => `<div class="small muted">${h(w)}</div>`).join('')}` : ''}
+    </div>`;
+  }
+
+  views.evaluate = () => {
+    const ev = state.evaluation;
+    if (ev.text == null) { loadEvaluationSet(); return '<div class="section-head"><h1>Evaluate routing</h1></div><div class="muted">Loading…</div>'; }
+    return `
+      <div class="section-head"><h1>Evaluate routing</h1><span class="muted">Run labelled prompts through the running configuration. No model is called, only the embedding provider.</span></div>
+      <div class="card section"><div class="card-head"><h2>Evaluation set</h2><span class="muted small">${ev.count} prompt(s) · ${ev.location ? 'kept in <code>' + h(ev.location) + '</code>' : 'kept in memory (lost on restart)'}</span><span class="spacer"></span>
+          <a class="btn ghost small" href="${API}/evaluation/set/export" download>Download</a></div>
+        <textarea id="evaluation-text" rows="8" spellcheck="false" data-state="evaluation.text" placeholder='{"prompt":"summarize this email","tier":1,"route":"rewrite-summarize"}'>${h(ev.text)}</textarea>
+        <div class="hint small muted">One JSON object per line: <code>prompt</code>, the <code>tier</code> it should get, and optionally the <code>route</code> it should match and <code>localOnly</code>. Label prompts from the Activity page too. Local-only prompts are left out of the download.</div>
+        <div class="inline" style="margin-top:10px">
+          <button class="btn primary small" data-action="eval-run" data-calibrate="1" ${ev.busy ? 'disabled' : ''}>${ev.busy ? 'Running…' : 'Run and calibrate'}</button>
+          <button class="btn small" data-action="eval-run" ${ev.busy ? 'disabled' : ''}>Run</button>
+          ${readOnly() ? '' : '<button class="btn small" data-action="eval-save">Save set</button>'}
+          <span class="muted small">Threshold ${state.config.DefaultSimilarityThreshold} · ${(state.config.Routes || []).length} routes · ${h((state.config.Embeddings || {}).Provider || '')}</span></div>
+      </div>
+      ${ev.report ? evaluationResults(ev.report) : ''}
+      ${healthCard()}
+      ${compareCard()}`;
+  };
+
   views.json = () => `
       <div class="section-head"><h1>JSON</h1><span class="muted">The whole document, the same shape as the <code>SemanticRouter</code> section of appsettings.json.</span><span class="spacer"></span>
         <button class="btn small" data-action="json-load">Load into editor</button><button class="btn small" data-action="json-download">Download</button><button class="btn ghost small" data-action="json-baseline" title="Show what the application's own configuration says">Show baseline</button></div>
@@ -912,6 +1054,77 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
     async 'json-baseline'() { const b = await api('GET', '/config/baseline'); $('#json-editor').value = JSON.stringify(b.config, null, 2); toast('Showing the application baseline (not the draft).'); },
     copy(el) { const code = el.parentElement.querySelector('code').textContent; navigator.clipboard.writeText(code).then(() => toast('Copied.', 'ok')); },
 
+    async 'eval-run'(el) {
+      const ev = state.evaluation; ev.busy = true; ev.addFor = null; render();
+      try { ev.report = await api('POST', '/evaluate' + (el.dataset.calibrate ? '?calibrate=true' : ''), { text: ev.text || '' }); }
+      catch (e) { toast(e.message, 'danger'); }
+      ev.busy = false; render();
+    },
+    async 'eval-save'() {
+      const r = await api('PUT', '/evaluation/set', { text: state.evaluation.text || '' });
+      state.evaluation.count = r.count; state.evaluation.location = r.location; render();
+      toast(`Saved ${r.count} prompt(s)${r.location ? ' to ' + r.location : ''}.`, 'ok');
+    },
+    'eval-add-open'(el) { state.evaluation.addFor = +el.dataset.index; render(); },
+    'eval-add-cancel'() { state.evaluation.addFor = null; render(); },
+    async 'eval-add-save'(el) {
+      const m = state.evaluation.report.misroutes[+el.dataset.index];
+      const routeName = $('#add-route').value;
+      const r = await api('POST', `/routes/${encodeURIComponent(routeName)}/utterances`, { utterance: m.prompt });
+      setConfig(await api('GET', '/config'));
+      state.evaluation.addFor = null;
+      toast(`Added to ${r.route}: it now classifies as tier ${r.tier}${r.matchedRoute ? ' via ' + r.matchedRoute : ''}. Re-running…`, 'ok');
+      await actions['eval-run']({ dataset: { calibrate: state.evaluation.report && state.evaluation.report.calibration ? '1' : '' } });
+    },
+    'eval-use-calibration'() {
+      const c = state.evaluation.report.calibration;
+      state.config.DefaultSimilarityThreshold = c.recommended.threshold;
+      c.routes.forEach((x) => { const r = (state.config.Routes || []).find((y) => y.Name.toLowerCase() === x.route.toLowerCase()); if (r) r.SimilarityThreshold = x.recommended; });
+      render();
+      toast('The recommended thresholds are in the draft: Apply to use them.', 'ok');
+    },
+    async 'eval-health'() {
+      try { state.evaluation.health = await api('GET', '/routes/health'); } catch (e) { toast(e.message, 'danger'); }
+      render();
+    },
+    async 'eval-compare'() {
+      const f = state.evaluation.form;
+      const embeddings = f.provider === 'Hashing'
+        ? { Provider: 'Hashing', Dimensions: f.dimensions || 512 }
+        : { Provider: 'OpenAICompatible', Endpoint: f.endpoint || null, Model: f.model || null, ApiKey: f.apiKey || null };
+      state.evaluation.compare = null; toast('Comparing…');
+      try { state.evaluation.compare = await api('POST', '/evaluate/compare', { embeddings, text: state.evaluation.text || '' }); } catch (e) { toast(e.message, 'danger'); }
+      render();
+    },
+    'label-open'(el) {
+      const e = state.activity.find((x) => String(x.id) === el.dataset.id);
+      if (!e) return;
+      const truncated = e.promptPreview.endsWith('…');
+      const routes = state.config.Routes || [];
+      const sameTier = routes.find((r) => r.Tier === e.tier);
+      state.label = { id: e.id, prompt: truncated ? e.promptPreview.slice(0, -1) : e.promptPreview, truncated, tier: e.tier, route: '', routedTier: e.tier, routedRoute: e.route, localOnly: e.localOnly, toSet: true, toRoute: false, utteranceRoute: sameTier ? sameTier.Name : '', newRoute: '' };
+      render(); const form = $('#label-form'); if (form) form.scrollIntoView({ block: 'nearest' });
+    },
+    'label-cancel'() { state.label = null; render(); },
+    async 'label-save'() {
+      const l = state.label;
+      if (!l.prompt.trim()) { toast('The prompt is empty.', 'danger'); return; }
+      const done = [];
+      if (l.toSet) {
+        const r = await api('POST', '/evaluation/cases', { prompt: l.prompt, tier: l.tier, route: l.route || null, localOnly: !!l.localOnly, note: 'labelled from activity #' + l.id });
+        state.evaluation.text = null; done.push(`evaluation set (${r.count})`);
+      }
+      if (l.toRoute) {
+        const name = l.utteranceRoute || l.newRoute.trim();
+        if (!name) { toast('Pick a route or name a new one.', 'danger'); return; }
+        const r = await api('POST', `/routes/${encodeURIComponent(name)}/utterances`, { utterance: l.prompt, tier: l.utteranceRoute ? null : l.tier });
+        setConfig(await api('GET', '/config'));
+        done.push(`route ${r.route}: now tier ${r.tier}${r.matchedRoute ? ' via ' + r.matchedRoute : ''}`);
+      }
+      state.label = null; render();
+      toast(done.length ? 'Saved to ' + done.join('; ') + '.' : 'Nothing to save.', 'ok');
+    },
+
     async 'tester-classify'() {
       readTester();
       state.tester.busy = true; state.tester.reply = null; render();
@@ -970,8 +1183,10 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
     Promise.resolve(action(el)).catch((e) => toast(e.message, 'danger'));
   });
 
+  const bindState = (el) => { setPath(state, el.dataset.state, readInput(el)); };
   document.addEventListener('input', (ev) => {
     const el = ev.target;
+    if (el.dataset.state && el.tagName !== 'SELECT' && el.type !== 'checkbox') { bindState(el); return; }
     if (el.dataset.bind) {
       setPath(state.config, el.dataset.bind, readInput(el));
       if (el.dataset.kind === 'lines' && el.dataset.nullable && !el.value.trim()) setPath(state.config, el.dataset.bind, null);
@@ -990,6 +1205,7 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
 
   document.addEventListener('change', (ev) => {
     const el = ev.target;
+    if (el.dataset.state) { bindState(el); if (el.tagName === 'SELECT' || el.type === 'checkbox') render(); return; }
     if (el.dataset.bind) {
       setPath(state.config, el.dataset.bind, readInput(el));
       // Structural selects (connector type, preset, embeddings provider, enabled) change what is shown.

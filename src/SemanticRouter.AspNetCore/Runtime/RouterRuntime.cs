@@ -408,7 +408,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         return service is null or IRuntimeFacade ? null : service;
     }
 
-    private IEmbeddingProvider CreateEmbeddingProvider(EmbeddingProviderOptions options) => options.Provider switch
+    internal IEmbeddingProvider CreateEmbeddingProvider(EmbeddingProviderOptions options) => options.Provider switch
     {
         EmbeddingProviderKind.Hashing => new HashingEmbeddingProvider(options.Dimensions),
         EmbeddingProviderKind.OpenAICompatible => new OpenAICompatibleEmbeddingProvider(

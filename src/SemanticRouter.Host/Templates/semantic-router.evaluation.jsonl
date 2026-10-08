@@ -1,0 +1,32 @@
+# Labelled prompts for the starting routes: run them on the dashboard's Evaluate page or POST /router/api/evaluate.
+# One JSON object per line: prompt, the tier it should get, and optionally the route it should match.
+{"prompt":"hey, how is it going?","tier":1,"route":"smalltalk"}
+{"prompt":"thank you so much, that helped","tier":1,"route":"smalltalk"}
+{"prompt":"good evening!","tier":1,"route":"smalltalk"}
+{"prompt":"what are you able to help me with?","tier":1,"route":"smalltalk"}
+{"prompt":"summarize this report in two sentences","tier":1,"route":"rewrite-summarize"}
+{"prompt":"translate this paragraph to German","tier":1,"route":"rewrite-summarize"}
+{"prompt":"rewrite this email so it sounds friendlier","tier":1,"route":"rewrite-summarize"}
+{"prompt":"fix the spelling mistakes in this text","tier":1,"route":"rewrite-summarize"}
+{"prompt":"write a regex that matches phone numbers","tier":2,"route":"simple-code"}
+{"prompt":"write unit tests for this helper function","tier":2,"route":"simple-code"}
+{"prompt":"convert this yaml file to json","tier":2,"route":"simple-code"}
+{"prompt":"write a bash one-liner that finds the largest files","tier":2,"route":"simple-code"}
+{"prompt":"design the architecture for a multi-region payment platform","tier":4,"route":"deep-reasoning"}
+{"prompt":"compare the trade-offs between microservices and a modular monolith","tier":4,"route":"deep-reasoning"}
+{"prompt":"evaluate the security risks of this login flow","tier":4,"route":"deep-reasoning"}
+{"prompt":"explain step by step how to shard this database","tier":4,"route":"deep-reasoning"}
+{"prompt":"debug this deadlock in my async code","tier":4,"route":"complex-code"}
+{"prompt":"find the memory leak in this background worker","tier":4,"route":"complex-code"}
+{"prompt":"review this pull request for concurrency bugs","tier":4,"route":"complex-code"}
+{"prompt":"optimize this slow SQL query","tier":4,"route":"complex-code"}
+{"prompt":"implement this feature and update every caller","tier":4,"route":"agentic-coding"}
+{"prompt":"fix the failing tests so the build passes","tier":4,"route":"agentic-coding"}
+{"prompt":"migrate the project to the new framework version","tier":4,"route":"agentic-coding"}
+{"prompt":"add an endpoint and wire it into the service layer","tier":4,"route":"agentic-coding"}
+{"prompt":"write a short title for this chat","tier":1,"route":"agent-housekeeping"}
+{"prompt":"summarize our conversation so far","tier":1,"route":"agent-housekeeping"}
+{"prompt":"describe what this shell command does","tier":1,"route":"agent-housekeeping"}
+{"prompt":"what is the capital of Australia?","tier":3}
+{"prompt":"recommend a good book about the history of Rome","tier":3}
+{"prompt":"how do vaccines train the immune system?","tier":3}

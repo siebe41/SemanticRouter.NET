@@ -38,4 +38,10 @@ public enum RoutingReason
     /// pinned to the model that issued those tool calls instead of being classified again.
     /// </summary>
     ConversationAffinity = 8,
+
+    /// <summary>
+    /// The client sent the same prompt again shortly after it was answered (a common sign of a poor answer), so the
+    /// required tier was raised above the one that answered it (<see cref="PromptRoutingRequest.MinimumTier"/>).
+    /// </summary>
+    RetryEscalation = 9,
 }

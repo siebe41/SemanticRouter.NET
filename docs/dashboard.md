@@ -19,9 +19,10 @@ builder.Services
 | **Overview** | Counters, every model with its tier and health (ready, cooling down, disabled), the runtime (configuration version and source, store, embeddings state, gateway paths), served-by and required-tier charts, and **Try a prompt**: classify without calling a model, or send it through the gateway for real. |
 | **Overview → Trends** | Requests per interval and p50/p95 latency over 1 hour, 24 hours, 7 or 30 days, with a table view. |
 | **Usage** | Tokens and cost by model, connector, route, client or day; "saved by routing" against a reference model; budgets with their state; the usage settings and budget editor. |
-| **Activity** | The last 500 routed requests: prompt preview, protocol, tier, reason, route and similarity, the model that answered, attempt number, degraded flag, timing. Filter by failed, degraded or tool-bearing. |
+| **Activity** | The last 500 routed requests: prompt preview, protocol, tier, reason, route and similarity, the model that answered, attempt number, degraded flag, timing. Filter by failed, degraded or tool-bearing. **Label** says which tier a prompt should have had: it adds the prompt to the evaluation set and, optionally, as an utterance to a route. |
 | **Tiers** | The capability ladder with names and descriptions, and a matrix of which routes require each tier and which models provide it. Shows at a glance when a tier has nothing that can serve it. |
 | **Routes** | Intent clusters: name, tier, required capabilities, threshold, local-only, utterances. |
+| **Evaluate** | Runs the evaluation set through the configuration: accuracy, too-low and too-high counts, accuracy per tier, a confusion matrix, the misrouted prompts with their scores, a threshold sweep with recommended values, route health, and a comparison with another embedding model. See [routing-quality.md](routing-quality.md). |
 | **Models** | The catalog: connector, provider model id (with **Discover**, which asks the connector's `/v1/models`), tier, capabilities, context window, costs, priority, local flag, enabled. |
 | **Connectors** | HTTP (OpenAI-compatible or Anthropic): base address, path, API key, headers, forwarded headers, timeout. CLI: preset, executable, extra arguments, tool calling, quota patterns, environment, concurrency. **List models** probes the connector. |
 | **Routing rules** | Similarity threshold, fallback tier, ambiguity margin, scoring strategy, complexity short-circuit, complexity → tier rules, selection strategy and failover, cooldowns, complexity heuristic weights and keywords. |
@@ -82,13 +83,16 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `GET api/usage?window=day\|week\|month\|7d\|30d&by=model\|connector\|route\|client\|day` | Usage totals and groups, the reference model and every budget's state. |
 | `POST api/classify` | `{ "prompt": "...", "model": "auto" }` → the routing plan, without calling a model. |
 | `POST api/health/reset` | Clear every cooldown. |
+| `GET/PUT api/evaluation/set`, `POST api/evaluation/cases`, `GET api/evaluation/set/export` | The evaluation set. See [routing-quality.md](routing-quality.md#api). |
+| `POST api/evaluate?calibrate=true`, `POST api/evaluate/compare`, `GET api/routes/health` | Evaluate, calibrate, compare embedding models, check routes. |
+| `POST api/routes/{name}/utterances` | Add an utterance (or create the route) and apply. |
 | `POST api/embeddings/test` | Embed a sentence with the applied provider. |
 | `POST api/connectors/{name}/discover` | Ask an HTTP connector for its model list (a `401` is reported as "requires authentication", naming the key to set). |
 | `GET api/session` | `{ role, tokenRequired, tokensConfigured }` for the caller. |
 | `POST api/session` | `{ "token": "..." }` → sets the session cookie. |
 | `DELETE api/session` | Signs out. |
 
-`PUT api/config`, `POST api/config/reset`, rollback and `POST api/health/reset` change the router and need the admin role; everything else is open to the read-only role.
+`PUT api/config`, `POST api/config/reset`, rollback, `POST api/health/reset`, changes to the evaluation set, adding utterances and `POST api/evaluate/compare` (which calls an endpoint you name) need the admin role; everything else is open to the read-only role.
 
 The same document works with `PUT` from scripts, e.g. to promote a tested configuration:
 

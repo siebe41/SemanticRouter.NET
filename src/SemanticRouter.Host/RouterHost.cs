@@ -14,10 +14,15 @@ internal static class RouterHost
     private const string TemplateResource = "semantic-router.template.json";
 
     /// <summary>The embedded neutral configuration (the <c>SemanticRouter</c> section's content).</summary>
-    public static string Template()
+    public static string Template() => Resource(TemplateResource);
+
+    /// <summary>Labelled prompts for the template's routes, written next to the configuration by <c>init</c>.</summary>
+    public static string EvaluationTemplate() => Resource("semantic-router.evaluation.jsonl");
+
+    private static string Resource(string name)
     {
-        using Stream stream = typeof(RouterHost).Assembly.GetManifestResourceStream(TemplateResource)
-            ?? throw new InvalidOperationException($"The embedded {TemplateResource} is missing.");
+        using Stream stream = typeof(RouterHost).Assembly.GetManifestResourceStream(name)
+            ?? throw new InvalidOperationException($"The embedded {name} is missing.");
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }

@@ -73,6 +73,24 @@ public sealed class HostTests : IDisposable
     }
 
     [Fact]
+    public async Task The_sample_evaluation_set_runs_against_the_template()
+    {
+        RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
+        IReadOnlyList<EvaluationCase> cases = EvaluationSet.Parse(RouterHost.EvaluationTemplate());
+        var evaluator = new RoutingEvaluator(new HashingEmbeddingProvider(template.Embeddings.Dimensions), template);
+        PreparedEvaluation prepared = await evaluator.PrepareAsync(cases);
+
+        EvaluationReport report = evaluator.Evaluate(prepared);
+        CalibrationReport calibration = evaluator.Calibrate(prepared);
+
+        cases.Should().HaveCountGreaterThan(20);
+        cases.Where(c => c.ExpectedRoute is not null).Select(c => c.ExpectedRoute).Should().OnlyContain(r => template.Routes.Any(t => t.Name == r));
+        report.PerTier.Select(t => t.Tier).Should().Equal(1, 2, 3, 4);
+        report.Accuracy.Should().BeGreaterThan(0.5, "the template is tuned for these embeddings");
+        calibration.Recommended.Correct.Should().BeGreaterThanOrEqualTo(report.Correct);
+    }
+
+    [Fact]
     public async Task Init_finds_local_servers_embeddings_and_clis()
     {
         string bin = Directory.CreateDirectory(Path.Combine(_directory, "bin")).FullName;
@@ -108,6 +126,7 @@ public sealed class HostTests : IDisposable
         written.Embeddings.Model.Should().Be("text-embedding-nomic-embed-text-v1.5");
         written.DefaultSimilarityThreshold.Should().BeApproximately(0.62f, 0.001f);
         output.ToString().Should().Contain("lmstudio: http://localhost:1234/").And.Contain("copilot").And.Contain("disabled");
+        EvaluationSet.Parse(File.ReadAllText(Path.Combine(_directory, "semantic-router.evaluation.jsonl"))).Should().NotBeEmpty("init writes the sample set next to the configuration");
     }
 
     [Fact]
