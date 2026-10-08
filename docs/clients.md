@@ -4,8 +4,10 @@ The router has two front doors, so almost any tool can use it without changing h
 
 | Front door | Path | Who speaks it |
 |---|---|---|
-| OpenAI chat completions | `POST /v1/chat/completions`, `GET /v1/models` | OpenAI SDKs, Codex CLI, Aider, Continue, Cline, Open WebWebUI, LibreChat, LM Studio clients, … |
+| OpenAI chat completions | `POST /v1/chat/completions`, `GET /v1/models` | OpenAI SDKs, Codex CLI, Aider, Continue, Cline, Open WebUI, LibreChat, LM Studio clients, … |
 | Anthropic Messages | `POST /v1/messages`, `POST /v1/messages/count_tokens` | **Claude Code**, the Anthropic SDKs, anything built on them |
+
+> **What has been tested.** Claude Code 2.1.293 (a streaming, tool-using session through a stub OpenAI-compatible backend, and through the real `claude` CLI as a prompted-tools backend) and curl. The other tools below speak standard OpenAI chat completions and should work, but have not been exercised individually. [docs/roadmap.md](roadmap.md) tracks the gaps.
 
 Whatever the client speaks, every backend can answer: the router translates requests and replies between the two protocols, including streaming, images and tool calls, and passes bodies through untouched when the backend speaks the client's protocol.
 
@@ -68,7 +70,9 @@ Model names: `auto` (configured strategy), `auto:cheapest`, `auto:best`, `auto:p
 
 ## OpenAI Codex CLI
 
-Codex treats the router as an OpenAI-compatible provider:
+> **Untested.** This section describes the chat-completions setup. Depending on its version, Codex may speak only the OpenAI Responses API, which the router does not accept yet ([#10](https://github.com/siebe41/SemanticRouter.NET/issues/10)). If Codex fails with a "not found" or wire-format error, that is the cause. Check your version's provider options (`wire_api`) in Codex's own documentation.
+
+Codex can use an OpenAI-compatible provider:
 
 ```toml
 # ~/.codex/config.toml

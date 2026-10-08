@@ -47,8 +47,9 @@ Two front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/models
 - [Production guidance](#production-guidance)
 - [Extensibility](#extensibility)
 - [Building and testing](#building-and-testing)
+- [Roadmap](#roadmap)
 
-Also see [docs/clients.md](docs/clients.md) (pointing Claude Code, Codex and SDKs at the router), [docs/dashboard.md](docs/dashboard.md) (the UI and admin API), [docs/providers.md](docs/providers.md) (connector setup per provider) and [docs/TERMS.md](docs/TERMS.md) (why the subscription CLI connectors are designed the way they are, and where the lines are).
+Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md) (pointing Claude Code, Codex and SDKs at the router), [dashboard.md](docs/dashboard.md) (the UI and admin API), [providers.md](docs/providers.md) (connector setup per provider), [architecture.md](docs/architecture.md) (how a request flows, hot reload, extension points), [roadmap.md](docs/roadmap.md) (where the project is going) and [TERMS.md](docs/TERMS.md) (why the subscription CLI connectors are designed the way they are, and where the lines are).
 
 ---
 
@@ -70,8 +71,9 @@ Also see [docs/clients.md](docs/clients.md) (pointing Claude Code, Codex and SDK
 
 ```mermaid
 flowchart LR
-    A[POST /v1/chat/completions] --> B[UsePromptRouter]
-    B --> C[IPromptExtractor<br/>latest user message]
+    A1[POST /v1/messages<br/>Claude Code · Anthropic SDKs] --> B
+    A2[POST /v1/chat/completions<br/>OpenAI SDKs · Codex · chat UIs] --> B
+    B[UsePromptRouter<br/>parse · map model name · pin tool turns] --> C[IPromptExtractor<br/>latest human message]
     subgraph Core [SemanticRouter.Core]
         C --> D[IComplexityAnalyzer<br/>length · code · structure · reasoning]
         D --> E[IEmbeddingProvider +<br/>SemanticRouteIndex<br/>SIMD cosine vs. utterances]
@@ -79,11 +81,15 @@ flowchart LR
         F --> G[IModelSelector<br/>rank catalog by strategy<br/>skip cooled-down models]
     end
     G --> H{Mode}
-    H -- Annotate --> I[your endpoint<br/>context.GetPromptRouting]
-    H -- Dispatch --> J[PromptDispatcher<br/>try candidates in order]
-    J --> K[OpenAI-compatible HTTP<br/>LM Studio · Ollama · OpenAI · Anthropic · Gemini …]
+    H -- "Annotate" --> I[your endpoint<br/>context.GetPromptRouting]
+    H -- "Dispatch" --> J[PromptDispatcher<br/>try candidates in order]
+    J --> K[HTTP: OpenAI-compatible or Anthropic<br/>LM Studio · Ollama · OpenAI · Anthropic · Gemini …]
     J --> L[CLI<br/>Claude Code · Copilot CLI · Codex CLI · custom]
+    K --> M[Reply in the client's protocol<br/>JSON or SSE · tool calls]
+    L --> M
 ```
+
+The classifier, router, connectors and extractor are rebuilt as one unit when configuration changes, so edits from the dashboard apply without a restart. [docs/architecture.md](docs/architecture.md) walks through a request step by step.
 
 ### Step 1: requirements from the prompt
 
@@ -476,6 +482,10 @@ The tests cover:
 - both protocols: parsing, translation in each direction (JSON and SSE), the Anthropic front door end to end, tool-turn affinity, model aliases, prompted tool calling, and the dashboard's admin API, configuration store and hot reload.
 
 No network, model or vendor CLI is needed. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
+
+## Roadmap
+
+Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: a ready-to-run host (`dotnet tool` and a container), authentication for remote access, durable state, usage and budget tracking, routing evaluation and calibration, a Responses API front door for Codex, and in-process embeddings.
 
 ## License
 
