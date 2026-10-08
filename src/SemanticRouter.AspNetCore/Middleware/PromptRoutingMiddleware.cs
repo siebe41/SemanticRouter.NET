@@ -24,6 +24,7 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly PromptRouterMetrics _metrics;
     private readonly RoutingActivityLog _activity;
     private readonly IToolCallAffinity? _affinity;
+    private readonly RetryTracker? _retries;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -33,7 +34,8 @@ internal sealed partial class PromptRoutingMiddleware
         PromptRouterMetrics metrics,
         RoutingActivityLog activity,
         ILogger<PromptRoutingMiddleware> logger,
-        IToolCallAffinity? affinity = null)
+        IToolCallAffinity? affinity = null,
+        RetryTracker? retries = null)
     {
         _next = next;
         _runtime = runtime;
@@ -41,6 +43,7 @@ internal sealed partial class PromptRoutingMiddleware
         _metrics = metrics;
         _activity = activity;
         _affinity = affinity;
+        _retries = retries;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -135,8 +138,17 @@ internal sealed partial class PromptRoutingMiddleware
             ? _affinity?.Lookup(chat.AnsweredToolUseIds)
             : null;
 
+        // A prompt the same client repeats soon after it was answered goes one tier up (when enabled).
+        RetryEscalationOptions retry = options.RetryEscalation;
+        string retryClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
+        bool retryable = retry.Enabled && _retries is not null && requestedModel is null && !chat.IsToolResultContinuation;
+        int? minimumTier = retryable
+            ? _retries!.MinimumTier(retryClient, prompt, retry.Window, runtime.Router.Models.Where(m => m.Enabled).Select(m => m.Tier).DefaultIfEmpty(0).Max())
+            : null;
+
         var routingRequest = new PromptRoutingRequest
         {
+            MinimumTier = minimumTier,
             Prompt = prompt,
             EstimatedInputTokens = chat.EstimatedInputTokens,
             AdditionalCapabilities = ImpliedCapabilities(chat),
@@ -212,6 +224,12 @@ internal sealed partial class PromptRoutingMiddleware
         if (entry.Outcome == "failed")
         {
             routeSpan?.SetStatus(ActivityStatusCode.Error, "no model available");
+        }
+
+        if (retryable && (entry.ServedBy ?? (options.Mode == PromptRouterMode.Annotate ? entry.PlannedModel : null)) is { } answeredBy
+            && runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, answeredBy, StringComparison.OrdinalIgnoreCase)) is { } answering)
+        {
+            _retries!.Answered(retryClient, prompt, answering.Tier, retry.Window);
         }
 
         _activity.Complete(entry);

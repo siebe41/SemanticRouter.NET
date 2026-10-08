@@ -307,6 +307,7 @@ public static class RouterDashboardEndpoints
             return Results.Json(new DiscoverResponse(probe.Models, probe.Ok ? null : provider.Current.Redactor.Redact(probe.Message)), ApiJson);
         });
 
+        EvaluationApi.Map(api, ApiJson, Actor);
         return group;
     }
 

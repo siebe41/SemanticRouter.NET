@@ -27,6 +27,12 @@ public sealed record PromptRoutingRequest
     /// (<see cref="RoutingReason.ConversationAffinity"/>); otherwise the request is routed normally.
     /// </summary>
     public string? AffinityModel { get; init; }
+
+    /// <summary>
+    /// A floor for the classified tier (e.g. a retry of a prompt that a lower tier answered). When it raises the tier,
+    /// the reason becomes <see cref="RoutingReason.RetryEscalation"/>.
+    /// </summary>
+    public int? MinimumTier { get; init; }
 }
 
 /// <summary>The routing outcome: requirements, and the models to try in order.</summary>
@@ -113,6 +119,11 @@ public sealed class PromptRouter : IPromptRouter
         using (System.Diagnostics.Activity? classify = RouterTelemetry.Source.StartActivity("semantic_router.classify"))
         {
             classification = await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false);
+            if (request.MinimumTier is { } floor && floor > classification.RequiredTier)
+            {
+                classification = classification with { RequiredTier = floor, Reason = RoutingReason.RetryEscalation };
+            }
+
             classify?.SetTag("semantic_router.tier", classification.RequiredTier);
             classify?.SetTag("semantic_router.reason", classification.Reason.ToString());
             classify?.SetTag("semantic_router.route", classification.RouteName);

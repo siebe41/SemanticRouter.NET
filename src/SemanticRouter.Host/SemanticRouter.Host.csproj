@@ -24,6 +24,7 @@
   <ItemGroup>
     <!-- The neutral starting configuration: tiers, generic routes, no models until `init` or the dashboard adds them. -->
     <EmbeddedResource Include="Templates\semantic-router.template.json" LogicalName="semantic-router.template.json" />
+    <EmbeddedResource Include="Templates\semantic-router.evaluation.jsonl" LogicalName="semantic-router.evaluation.jsonl" />
     <Content Remove="Templates\**" />
   </ItemGroup>
 

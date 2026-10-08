@@ -148,6 +148,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             errors.Add("Middleware:MaxRequestBodyBytes must be positive.");
         }
 
+        if (Middleware.RetryEscalation.Enabled && Middleware.RetryEscalation.Window <= TimeSpan.Zero)
+        {
+            errors.Add("Middleware:RetryEscalation:Window must be positive.");
+        }
+
         foreach ((string client, string key) in Middleware.GatewayKeys)
         {
             if (string.IsNullOrWhiteSpace(client))

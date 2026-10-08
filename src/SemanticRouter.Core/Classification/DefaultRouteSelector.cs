@@ -16,12 +16,21 @@ namespace SemanticRouter;
 public sealed class DefaultRouteSelector : IRouteSelector
 {
     private readonly SemanticRouterOptions _options;
+    private readonly Func<RouteDefinition, float> _threshold;
 
     /// <summary>Creates a selector using the thresholds in <paramref name="options"/>.</summary>
     public DefaultRouteSelector(SemanticRouterOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
+        _threshold = options.GetThreshold;
+    }
+
+    /// <summary>Creates a selector whose similarity thresholds come from <paramref name="threshold"/> (calibration sweeps).</summary>
+    internal DefaultRouteSelector(SemanticRouterOptions options, Func<RouteDefinition, float> threshold)
+    {
+        _options = options;
+        _threshold = threshold;
     }
 
     /// <inheritdoc />
@@ -32,7 +41,7 @@ public sealed class DefaultRouteSelector : IRouteSelector
 
         int complexityTier = _options.TierForComplexity(complexity.Score);
 
-        if (rankedScores.Count == 0 || rankedScores[0].Similarity < _options.GetThreshold(rankedScores[0].Route))
+        if (rankedScores.Count == 0 || rankedScores[0].Similarity < _threshold(rankedScores[0].Route))
         {
             float? bestSimilarity = rankedScores.Count > 0 ? rankedScores[0].Similarity : null;
             return complexityTier > _options.FallbackTier
@@ -55,7 +64,7 @@ public sealed class DefaultRouteSelector : IRouteSelector
                     break;
                 }
 
-                if (candidate.Similarity >= _options.GetThreshold(candidate.Route))
+                if (candidate.Similarity >= _threshold(candidate.Route))
                 {
                     tier = Math.Max(tier, candidate.Route.Tier);
                     localOnly |= candidate.Route.LocalOnly;

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
 
 namespace SemanticRouter.Host;
@@ -45,6 +46,14 @@ internal static class InitCommand
         new JsonFileRouterConfigurationStore(settings.ConfigurationFile).Save(document);
 
         await output.WriteLineAsync($"Wrote {settings.ConfigurationFile}").ConfigureAwait(false);
+        string evaluation = SemanticRouterServiceCollectionExtensions.EvaluationSetFileNextTo(settings.ConfigurationFile);
+        if (!File.Exists(evaluation))
+        {
+            // Labelled prompts for the starting routes: the dashboard's Evaluate page runs them.
+            await File.WriteAllTextAsync(evaluation, RouterHost.EvaluationTemplate(), cancellationToken).ConfigureAwait(false);
+            await output.WriteLineAsync($"Wrote {evaluation}").ConfigureAwait(false);
+        }
+
         foreach (string note in notes)
         {
             await output.WriteLineAsync("  " + note).ConfigureAwait(false);

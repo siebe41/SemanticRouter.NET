@@ -96,6 +96,12 @@ public sealed class PromptRouterMiddlewareOptions
     public bool PinToolCallingTurns { get; set; } = true;
 
     /// <summary>
+    /// Raise the tier when a client sends the same prompt again shortly after it was answered (a common sign of a
+    /// poor answer). Off by default.
+    /// </summary>
+    public RetryEscalationOptions RetryEscalation { get; set; } = new();
+
+    /// <summary>
     /// Ignore <c>&lt;system-reminder&gt;</c> blocks that agentic clients inject into user messages when classifying,
     /// so routing reflects what the person asked. Default true.
     /// </summary>
@@ -134,4 +140,18 @@ public sealed class PromptRouterMiddlewareOptions
     /// forwards remote traffic, since such requests arrive from loopback.
     /// </summary>
     public bool RequireGatewayKeyForLocalClients { get; set; }
+}
+
+/// <summary>
+/// Retry escalation: a prompt repeated by the same client within <see cref="Window"/> of being answered goes to a model
+/// at least one tier above the one that answered it. Only the prompt's hash is kept, in memory. Requests that carry tool
+/// results and requests for a specific catalog model are never escalated.
+/// </summary>
+public sealed class RetryEscalationOptions
+{
+    /// <summary>Turns retry escalation on. Default <see langword="false"/>.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>How soon after an answer a repeat counts as a retry. Default 2 minutes.</summary>
+    public TimeSpan Window { get; set; } = TimeSpan.FromMinutes(2);
 }

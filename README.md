@@ -119,6 +119,7 @@ These combine with a noisy-OR, `1 − Π(1 − weightᵢ·signalᵢ)`, so a sing
 | Complexity ≥ `ComplexityShortCircuitThreshold` *(skipped while any route is local-only)* | tier from complexity alone, **no embedding call** | `ComplexityShortCircuit` |
 | Request names a catalog model | that model only | `ModelOverride` |
 | Classifier failed and `FailOpen` is on | `FallbackTier` | `ClassifierFailure` |
+| The same client repeats a prompt soon after it was answered (`Middleware:RetryEscalation`, off by default) | one tier above the model that answered | `RetryEscalation` |
 
 The request itself adds requirements. If it defines `tools`, the model must declare `tools`. If it contains images, the model must declare `vision`. The size of the whole conversation, including tool definitions, is checked against each model's `ContextWindow`.
 
@@ -427,6 +428,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:ResponsesPathPrefixes[]` | `/v1/responses` | Paths carrying OpenAI Responses bodies (Codex CLI). Only the path itself is routed; `/v1/responses/{id}` is not. |
 | `Middleware:ModelAliases` | `{}` | Glob → alias/model map for client model names: `"*haiku*": "auto:cheapest"`. Catalog names and `auto:*` are never remapped; unmatched names route as `auto`. |
 | `Middleware:PinToolCallingTurns` | `true` | Requests carrying tool results go to the model that issued the tool calls. |
+| `Middleware:RetryEscalation:Enabled` / `Window` | `false` / `00:02:00` | A prompt repeated by the same client within the window goes one tier up. See [docs/routing-quality.md](docs/routing-quality.md#retry-escalation). |
 | `Middleware:StripSystemReminders` | `true` | Ignore `<system-reminder>` blocks when classifying. |
 | `Middleware:MaxRequestBodyBytes` | `8388608` | Larger bodies get 413. Agentic clients send 100 KB+ requests. |
 | `Middleware:EmitResponseHeaders` / `HeaderPrefix` | `true` / `X-Prompt-Route` | `X-Prompt-Route`, `-Tier`, `-Reason`, `-Similarity`, `-Complexity`, `-Model`, `-Connector`, `-Attempt`, `-Degraded`, `-Budget`, `-Dropped`. |
@@ -441,7 +443,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 
 ### Thresholds by embedding model
 
-Similarity scales differ between embedding models. These are starting points; calibrate with `/semantic-router/classify`.
+Similarity scales differ between embedding models. These are starting points. Calibrate on your own prompts with the dashboard's **Evaluate** page, which sweeps the threshold over a labelled set and recommends a value ([docs/routing-quality.md](docs/routing-quality.md)).
 
 | Embedding model | Starting `DefaultSimilarityThreshold` |
 |---|---|
@@ -507,7 +509,7 @@ No network, model or vendor CLI is needed. CI runs the suite on Linux, Windows a
 
 ## Roadmap
 
-Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: routing evaluation and calibration, in-process embeddings and routing profiles.
+Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: in-process embeddings and a classification cache, and routing profiles.
 
 ## License
 

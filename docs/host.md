@@ -55,6 +55,7 @@ On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not
 | `semantic-router.json` | The configuration. The dashboard's **Apply & save** writes it. |
 | `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [dashboard.md](dashboard.md#keeping-secrets-out-of-the-file). |
+| `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [routing-quality.md](routing-quality.md). |
 | `appsettings.json` (optional) | Host settings: logging, Kestrel, `SemanticRouter:Dashboard`, overrides. |
 
 Precedence, lowest first: the built-in template, `appsettings.json` in the configuration directory, `SemanticRouter__…` environment variables, command-line settings. A saved `semantic-router.json` then replaces the routing document as a whole. Secrets it leaves empty are still inherited from the layers below, so `SemanticRouter__Connectors__openai__ApiKey` keeps working.
