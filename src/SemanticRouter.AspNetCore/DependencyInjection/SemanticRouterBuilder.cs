@@ -148,6 +148,34 @@ public sealed class SemanticRouterBuilder
         return this;
     }
 
+    /// <summary>
+    /// Adds a memory source to <c>Memory:Sources</c> (applied after configuration binding), e.g. an Obsidian vault
+    /// (<see cref="MemorySourceType.Markdown"/>), Claude Code's memory (<see cref="MemorySourceType.ClaudeCode"/>) or the
+    /// MCP memory server's graph (<see cref="MemorySourceType.KnowledgeGraph"/>).
+    /// </summary>
+    public SemanticRouterBuilder AddMemorySource(string name, MemorySourceType type, string? path = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        Services.Configure<MemoryOptions>(o => o.Sources.Add(new MemorySourceOptions { Name = name, Type = type, Path = path }));
+        return this;
+    }
+
+    /// <summary>Registers a custom <see cref="IMemorySource"/> (singleton), mapped next to the configured sources.</summary>
+    public SemanticRouterBuilder AddMemorySource<TSource>()
+        where TSource : class, IMemorySource
+    {
+        Services.AddSingleton<IMemorySource, TSource>();
+        return this;
+    }
+
+    /// <summary>Registers a custom <see cref="IMemorySource"/> instance, mapped next to the configured sources.</summary>
+    public SemanticRouterBuilder AddMemorySource(IMemorySource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        Services.AddSingleton(source);
+        return this;
+    }
+
     /// <summary>Adds a model to the catalog (applied after configuration binding).</summary>
     public SemanticRouterBuilder AddModel(ModelDefinition model)
     {
