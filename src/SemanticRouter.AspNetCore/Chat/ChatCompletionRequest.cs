@@ -13,7 +13,7 @@ public sealed record ChatMessage(string Role, string Content);
 /// re-express it for a backend that speaks another protocol. The original bytes are kept separately and forwarded
 /// untouched when the backend speaks the client's protocol.
 /// </summary>
-public sealed class ChatCompletionRequest
+public sealed partial class ChatCompletionRequest
 {
     /// <summary>The wire format the client used.</summary>
     public ChatProtocol Protocol { get; init; }
@@ -66,9 +66,34 @@ public sealed class ChatCompletionRequest
     /// <summary>The <c>metadata.user_id</c> (Anthropic) or <c>user</c> (OpenAI) field, when given.</summary>
     public string? UserId { get; init; }
 
+    /// <summary>Extended thinking / reasoning effort the client asked for.</summary>
+    public ReasoningRequest? Reasoning { get; init; }
+
+    /// <summary>Structured output the client asked for.</summary>
+    public ResponseFormat? ResponseFormat { get; init; }
+
+    /// <summary><see langword="false"/> when the client allows at most one tool call per reply.</summary>
+    public bool? ParallelToolCalls { get; init; }
+
+    /// <summary>
+    /// Provider-hosted tools the request offers (Responses <c>web_search</c>, <c>file_search</c>, …). Only a backend
+    /// that speaks the client's protocol can run them; elsewhere they are left out and reported as dropped.
+    /// </summary>
+    public IReadOnlyList<string> HostedTools { get; init; } = [];
+
+    /// <summary>
+    /// Request features that no other protocol can carry (<c>cache_control</c>, documents, files, <c>logprobs</c>, …).
+    /// They survive pass-through and are reported as dropped when the request is translated.
+    /// </summary>
+    public IReadOnlyList<string> ProtocolOnlyFeatures { get; init; } = [];
+
     /// <summary>Parses a body in <paramref name="protocol"/>.</summary>
-    public static ChatCompletionRequest Parse(JsonElement root, ChatProtocol protocol) =>
-        protocol == ChatProtocol.Anthropic ? ParseAnthropic(root) : Parse(root);
+    public static ChatCompletionRequest Parse(JsonElement root, ChatProtocol protocol) => protocol switch
+    {
+        ChatProtocol.Anthropic => ParseAnthropic(root),
+        ChatProtocol.Responses => ParseResponses(root),
+        _ => Parse(root),
+    };
 
     /// <summary>Parses an OpenAI chat-completions body. Also accepts <c>{"prompt": "..."}</c> as a single user message.</summary>
     public static ChatCompletionRequest Parse(JsonElement root)
@@ -179,9 +204,29 @@ public sealed class ChatCompletionRequest
             ReadStrings(stop, stops);
         }
 
+        var protocolOnly = new List<string>();
+        if (root.GetBool("logprobs"))
+        {
+            protocolOnly.Add("logprobs");
+        }
+
+        if (root.GetInt("n") is > 1)
+        {
+            protocolOnly.Add("n");
+        }
+
+        if (root.TryGetObject("audio", out _))
+        {
+            protocolOnly.Add("audio");
+        }
+
         return Finish(new ChatCompletionRequest
         {
             Protocol = ChatProtocol.OpenAI,
+            Reasoning = root.GetString("reasoning_effort") is { } effort ? new ReasoningRequest(effort, null) : null,
+            ResponseFormat = root.TryGetObject("response_format", out JsonElement format) ? ReadResponseFormat(format, nested: true) : null,
+            ParallelToolCalls = root.TryGetProperty("parallel_tool_calls", out JsonElement parallel) && parallel.ValueKind == JsonValueKind.False ? false : null,
+            ProtocolOnlyFeatures = protocolOnly,
             Model = root.GetString("model"),
             Stream = root.GetBool("stream"),
             Turns = turns,
@@ -252,8 +297,10 @@ public sealed class ChatCompletionRequest
         }
 
         ToolChoice toolChoice = default;
+        bool? parallelToolCalls = null;
         if (root.TryGetObject("tool_choice", out JsonElement choice))
         {
+            parallelToolCalls = choice.GetBool("disable_parallel_tool_use") ? false : null;
             toolChoice = choice.GetString("type") switch
             {
                 "none" => new ToolChoice(ToolChoiceMode.None),
@@ -270,10 +317,33 @@ public sealed class ChatCompletionRequest
         }
 
         root.TryGetObject("metadata", out JsonElement metadata);
+        var protocolOnly = new List<string>();
+        string raw = root.GetRawText();
+        if (raw.Contains("\"cache_control\"", StringComparison.Ordinal))
+        {
+            protocolOnly.Add("cache_control");
+        }
+
+        if (raw.Contains("\"type\":\"document\"", StringComparison.Ordinal) || raw.Contains("\"type\": \"document\"", StringComparison.Ordinal))
+        {
+            protocolOnly.Add("documents");
+        }
+
+        if (root.TryGetArray("mcp_servers", out _))
+        {
+            protocolOnly.Add("mcp_servers");
+        }
+
+        ReasoningRequest? reasoning = root.TryGetObject("thinking", out JsonElement thinking) && thinking.GetString("type") is "enabled" or "adaptive"
+            ? new ReasoningRequest(null, thinking.GetInt("budget_tokens"))
+            : null;
 
         return Finish(new ChatCompletionRequest
         {
             Protocol = ChatProtocol.Anthropic,
+            Reasoning = reasoning,
+            ParallelToolCalls = parallelToolCalls,
+            ProtocolOnlyFeatures = protocolOnly,
             Model = root.GetString("model"),
             Stream = root.GetBool("stream"),
             Turns = turns,
@@ -304,6 +374,7 @@ public sealed class ChatCompletionRequest
                     ToolUseBlock u => TokenEstimator.Estimate(u.Name) + TokenEstimator.Estimate(u.InputJson) + 8,
                     ToolResultBlock r => TokenEstimator.Estimate(r.Content) + 8,
                     ImageBlock => 1000,
+                    ThinkingBlock k => TokenEstimator.Estimate(k.Text),
                     _ => 0,
                 };
             }
@@ -341,7 +412,31 @@ public sealed class ChatCompletionRequest
             TopP = request.TopP,
             StopSequences = request.StopSequences,
             UserId = request.UserId,
+            Reasoning = request.Reasoning,
+            ResponseFormat = request.ResponseFormat,
+            ParallelToolCalls = request.ParallelToolCalls,
+            HostedTools = request.HostedTools,
+            ProtocolOnlyFeatures = request.ProtocolOnlyFeatures,
         };
+    }
+
+    /// <summary>Reads OpenAI <c>response_format</c> (<paramref name="nested"/>: schema under <c>json_schema</c>) or Responses <c>text.format</c>.</summary>
+    private static ResponseFormat? ReadResponseFormat(JsonElement format, bool nested)
+    {
+        switch (format.GetString("type"))
+        {
+            case "json_object":
+                return new ResponseFormat(ResponseFormatKind.JsonObject);
+            case "json_schema":
+                JsonElement holder = nested && format.TryGetObject("json_schema", out JsonElement inner) ? inner : format;
+                return new ResponseFormat(
+                    ResponseFormatKind.JsonSchema,
+                    holder.GetString("name"),
+                    holder.TryGetObject("schema", out JsonElement schema) ? schema.GetRawText() : """{"type":"object"}""",
+                    holder.GetBool("strict"));
+            default:
+                return null;
+        }
     }
 
     private static void ReadStrings(JsonElement value, List<string> into)
@@ -514,8 +609,16 @@ public sealed class ChatCompletionRequest
                     blocks.Add(new ToolResultBlock(part.GetString("tool_use_id") ?? string.Empty, result, part.GetBool("is_error")));
                     break;
 
+                case "thinking":
+                    blocks.Add(new ThinkingBlock(part.GetString("thinking") ?? string.Empty, part.GetString("signature")));
+                    break;
+
+                case "redacted_thinking":
+                    blocks.Add(new ThinkingBlock(string.Empty, null, part.GetString("data")));
+                    break;
+
                 default:
-                    // thinking, redacted_thinking, document, …: not needed for routing or for other backends.
+                    // document, search_result, server tool results, …: kept on pass-through only (see ProtocolOnlyFeatures).
                     break;
             }
         }

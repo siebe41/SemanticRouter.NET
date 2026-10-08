@@ -17,7 +17,7 @@
   const CAPABILITY_HINTS = ['chat', 'code', 'tools', 'vision', 'reasoning'];
   const STRATEGIES = ['CheapestCapable', 'MostCapable', 'Priority'];
   const SCORING = ['MaxSimilarity', 'Centroid'];
-  const CONNECTOR_TYPES = ['OpenAICompatible', 'Anthropic', 'Cli'];
+  const CONNECTOR_TYPES = ['OpenAICompatible', 'Anthropic', 'Responses', 'Cli'];
   const PRESETS = ['ClaudeCode', 'GitHubCopilot', 'Codex', 'Custom'];
   const MESSAGE_SELECTION = ['LastUserMessage', 'AllUserMessages', 'AllMessages'];
 
@@ -331,7 +331,7 @@
             <tr><th>Store</th><td class="mono small">${s.store ? h(s.store) : '<span class="muted">none (changes apply in memory only)</span>'}</td></tr>
             <tr><th>Embeddings</th><td>${h(s.embeddings.provider)} ${s.embeddings.model ? '· <span class="mono">' + h(s.embeddings.model) + '</span>' : ''} ${s.embeddings.endpoint ? '<span class="faint small">' + h(s.embeddings.endpoint) + '</span>' : ''}
               ${s.warmedUp ? '<span class="badge ok">index ready</span>' : (s.warmUpError ? `<span class="badge danger" title="${h(s.warmUpError)}">warm-up failed</span>` : '<span class="badge info">warming up</span>')}</td></tr>
-            <tr><th>Gateway</th><td>${h(s.gateway.mode)} · OpenAI on <span class="mono">${h(s.gateway.pathPrefixes.join(', ') || '(all JSON POSTs)')}</span> · Anthropic on <span class="mono">${h(s.gateway.anthropicPathPrefixes.join(', '))}</span></td></tr>
+            <tr><th>Gateway</th><td>${h(s.gateway.mode)} · OpenAI on <span class="mono">${h(s.gateway.pathPrefixes.join(', ') || '(all JSON POSTs)')}</span> · Anthropic on <span class="mono">${h(s.gateway.anthropicPathPrefixes.join(', '))}</span> · Responses on <span class="mono">${h(s.gateway.responsesPathPrefixes.join(', '))}</span></td></tr>
             <tr><th>Strategy</th><td>${h(s.gateway.strategy)}</td></tr>
             <tr><th>Connectors</th><td>${s.connectors.map((c) => `<span class="badge" title="${h(c.target || '')}">${h(c.name)} <span class="faint">${h(c.type)}${c.preset ? '/' + h(c.preset) : ''}</span></span>`).join(' ')}</td></tr>
           </table>
@@ -388,7 +388,7 @@
       <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th></tr>
       ${entries.map((e) => `<tr title="${h(e.detail || '')}">
         <td class="nowrap small">${h(when(e.timestamp))}</td>
-        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}</div></td>
+        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}</div></td>
         <td><span class="tier">T${e.tier}</span></td>
         <td class="small">${h(e.reason)}</td>
         <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
@@ -533,7 +533,7 @@
           </div>
           <div class="item-body"><div class="form-grid">
             <label class="field"><span class="name">Name</span><input type="text" data-action-input="connector-rename" data-name="${h(name)}" value="${h(name)}"><span class="hint">Models refer to it by this name; renaming updates them.</span></label>
-            <label class="field"><span class="name">Type</span><select data-bind="${p}.Type">${CONNECTOR_TYPES.map((t) => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('')}</select><span class="hint">OpenAICompatible: LM Studio, Ollama, vLLM, OpenAI, Gemini, OpenRouter… · Anthropic: Messages API with a key · Cli: a vendor CLI on your own login.</span></label>
+            <label class="field"><span class="name">Type</span><select data-bind="${p}.Type">${CONNECTOR_TYPES.map((t) => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('')}</select><span class="hint">OpenAICompatible: LM Studio, Ollama, vLLM, OpenAI, Gemini, OpenRouter… · Anthropic: Messages API with a key · Responses: OpenAI Responses API (/v1/responses) · Cli: a vendor CLI on your own login.</span></label>
             ${type === 'Cli' ? `
               <label class="field"><span class="name">Preset</span><select data-bind="${p}.Preset">${PRESETS.map((x) => `<option ${x === (c.Preset || 'Custom') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
               <label class="field"><span class="name">Executable</span><input type="text" data-bind="${p}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="preset default (claude / copilot / codex)"><span class="hint">Started directly, never through a shell. On Windows use the .exe.</span></label>
@@ -632,6 +632,7 @@
         <label class="field"><span class="name">Message selection</span><select data-bind="Middleware.MessageSelection">${MESSAGE_SELECTION.map((x) => `<option ${x === (m.MessageSelection || 'LastUserMessage') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Which messages are classified.</span></label>
         <label class="field"><span class="name">OpenAI paths (one per line)</span><textarea data-bind="Middleware.PathPrefixes" data-kind="lines" rows="3">${h(lines(m.PathPrefixes))}</textarea><span class="hint">Chat-completions bodies. Required in Dispatch mode.</span></label>
         <label class="field"><span class="name">Anthropic paths (one per line)</span><textarea data-bind="Middleware.AnthropicPathPrefixes" data-kind="lines" rows="3" placeholder="/v1/messages">${h(lines(m.AnthropicPathPrefixes))}</textarea><span class="hint">Messages API bodies (Claude Code, Anthropic SDKs). Empty = <code>/v1/messages</code>.</span></label>
+        <label class="field"><span class="name">Responses paths (one per line)</span><textarea data-bind="Middleware.ResponsesPathPrefixes" data-kind="lines" rows="3" placeholder="/v1/responses">${h(lines(m.ResponsesPathPrefixes))}</textarea><span class="hint">OpenAI Responses API bodies (Codex CLI, the Agents SDK). Empty = <code>/v1/responses</code>.</span></label>
         <label class="field"><span class="name">Max request body (bytes)</span><input type="number" min="1024" data-bind="Middleware.MaxRequestBodyBytes" data-kind="number" value="${m.MaxRequestBodyBytes || 8388608}"><span class="hint">Agentic clients send large system prompts and tool lists; 8 MiB is a safe default.</span></label>
         <label class="field"><span class="name">Header prefix</span><input type="text" data-bind="Middleware.HeaderPrefix" value="${h(m.HeaderPrefix || 'X-Prompt-Route')}"></label>
         <label class="check"><input type="checkbox" data-bind="Middleware.EmitResponseHeaders" data-kind="bool" ${m.EmitResponseHeaders !== false ? 'checked' : ''}> Emit routing headers</label>
@@ -683,7 +684,8 @@ model = "auto"
 [model_providers.semantic-router]
 name = "Semantic Router"
 base_url = "${origin}/v1"
-env_key = "OPENAI_API_KEY"   # export OPENAI_API_KEY=semantic-router`, 'Codex treats the router as an OpenAI-compatible provider.')}
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"   # export OPENAI_API_KEY=semantic-router`, `Codex speaks the Responses API to <code>${h(s.gateway.responsesPathPrefixes[0] || '/v1/responses')}</code>; any backend can answer it. Hosted tools (web search) need a Responses backend.`)}
       ${snippet('curl', `curl -N ${origin}/v1/chat/completions -H 'Content-Type: application/json' \\
   -d '{"model":"auto","stream":true,"messages":[{"role":"user","content":"Compare event sourcing and CRUD"}]}'
 
@@ -691,7 +693,7 @@ curl ${origin}${anth} -H 'Content-Type: application/json' -H 'anthropic-version:
   -d '{"model":"auto","max_tokens":256,"messages":[{"role":"user","content":"hello"}]}'
 
 curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -d '{"prompt":"why does this deadlock?"}'`)}
-      <div class="card section"><div class="card-head"><h2>Routing headers</h2></div><p class="muted small">Every response carries <code>${h(s.gateway && state.config.Middleware.HeaderPrefix || 'X-Prompt-Route')}</code>, <code>-Tier</code>, <code>-Reason</code>, <code>-Similarity</code>, <code>-Complexity</code>, <code>-Model</code>, <code>-Connector</code>, <code>-Attempt</code> and <code>-Degraded</code> headers, so you can see what happened without reading logs.</p></div>`;
+      <div class="card section"><div class="card-head"><h2>Routing headers</h2></div><p class="muted small">Every response carries <code>${h(s.gateway && state.config.Middleware.HeaderPrefix || 'X-Prompt-Route')}</code>, <code>-Tier</code>, <code>-Reason</code>, <code>-Similarity</code>, <code>-Complexity</code>, <code>-Model</code>, <code>-Connector</code>, <code>-Attempt</code> and <code>-Degraded</code> headers (plus <code>-Dropped</code> when the serving backend could not carry a request feature), so you can see what happened without reading logs.</p></div>`;
   };
 
   /* Line diff (longest common subsequence), with unchanged runs folded to three lines of context. */

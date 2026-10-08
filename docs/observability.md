@@ -15,6 +15,7 @@ Every served request records the tokens the backend reported (input, output, pro
 | OpenAI-compatible, translated or passed through as JSON | `usage.prompt_tokens` (cached tokens split out of it), `completion_tokens` |
 | OpenAI-compatible, streamed pass-through | The final chunk's `usage`, which servers send only when the client asks with `stream_options.include_usage` |
 | Anthropic, JSON or SSE | `usage` on the message, or on `message_start` plus `message_delta` |
+| OpenAI Responses, JSON or SSE | `usage` on the response, or on `response.completed` (`input_tokens_details.cached_tokens` split out) |
 | Claude Code CLI | The `result` event's `usage` |
 
 Prices come from the catalog: `InputCostPerMillionTokens` and `OutputCostPerMillionTokens`, plus optional `CacheReadCostPerMillionTokens` and `CacheWriteCostPerMillionTokens` (default: the input price). Local models and flat-rate subscriptions are priced at 0.
@@ -78,7 +79,7 @@ semantic_router.route              protocol, client, request_id, tier, reason, r
 ├─ semantic_router.classify        tier, reason, route, similarity, complexity   (the embedding call is its child)
 ├─ semantic_router.select          candidates, planned_model, local_only
 ├─ semantic_router.attempt         model, connector, attempt=1, outcome=Failed, failure.kind, failure.detail (redacted)
-└─ semantic_router.attempt         model, connector, attempt=2, outcome=Completed
+└─ semantic_router.attempt         model, connector, attempt=2, outcome=Completed, dropped
    └─ HTTP POST (backend)          traceparent is sent to the backend
 ```
 
@@ -115,6 +116,7 @@ Without OpenTelemetry: `dotnet-counters monitor -n semantic-router --counters Se
 
 ## Request ids, logs and export
 
+- **Dropped features.** When the serving backend could not carry part of the request (a hosted tool, a reasoning request, `logprobs`, …), the response has `X-Prompt-Route-Dropped`, the activity entry has `dropped`, and the attempt span has `semantic_router.dropped`. The list is in [providers.md](providers.md#what-survives-translation).
 - **Request ids.** Every routed response carries `X-Prompt-Route-Id`, the id of its activity entry. The entry also stores the W3C `traceId`, so a request a user reports can be found in the dashboard, the export and the tracing backend.
 - **Log scope.** Log lines written while a request is routed carry the scope `RouteRequestId`. Turn on scopes in your logging provider (e.g. `"Console": { "IncludeScopes": true }`).
 - **Export.** `GET {dashboard}/api/activity/export?format=csv|jsonl&since=…&until=…` downloads activity (default: the last 7 days), with tokens, cost, timings and trace ids. Prompt previews are left out unless you add `prompts=true`.

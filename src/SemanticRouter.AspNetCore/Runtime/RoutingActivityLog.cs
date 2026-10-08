@@ -99,6 +99,9 @@ public sealed class RoutingActivityEntry
     /// <summary>Budgets that kept a model from being tried, if any.</summary>
     public string? Budget { get; set; }
 
+    /// <summary>Request features the serving backend could not carry (e.g. <c>reasoning</c>, <c>logprobs</c>), if any.</summary>
+    public string? Dropped { get; set; }
+
     /// <summary>The W3C trace id of the request, for finding it in a tracing backend.</summary>
     public string? TraceId { get; set; }
 }

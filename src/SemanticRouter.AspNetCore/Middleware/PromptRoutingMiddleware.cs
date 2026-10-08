@@ -107,9 +107,12 @@ internal sealed partial class PromptRoutingMiddleware
                     context, protocol,
                     StatusCodes.Status400BadRequest,
                     "No prompt found",
-                    protocol == ChatProtocol.Anthropic
-                        ? "Expected an Anthropic Messages JSON body with 'messages'."
-                        : "Expected an OpenAI chat-completions JSON body with 'messages'.",
+                    protocol switch
+                    {
+                        ChatProtocol.Anthropic => "Expected an Anthropic Messages JSON body with 'messages'.",
+                        ChatProtocol.Responses => "Expected an OpenAI Responses JSON body with 'input'.",
+                        _ => "Expected an OpenAI chat-completions JSON body with 'messages'.",
+                    },
                     context.RequestAborted).ConfigureAwait(false);
                 return;
             }
@@ -335,6 +338,15 @@ internal sealed partial class PromptRoutingMiddleware
                 }
 
                 protocol = ChatProtocol.Anthropic;
+                return true;
+            }
+        }
+
+        foreach (PathString prefix in runtime.ResponsesPrefixes)
+        {
+            if (request.Path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase, out PathString rest) && (!rest.HasValue || rest.Value == "/"))
+            {
+                protocol = ChatProtocol.Responses;
                 return true;
             }
         }
