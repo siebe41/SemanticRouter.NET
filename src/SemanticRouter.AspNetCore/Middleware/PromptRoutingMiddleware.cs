@@ -187,6 +187,7 @@ internal sealed partial class PromptRoutingMiddleware
             Route = result.RouteName,
             Similarity = result.Similarity,
             Complexity = Math.Round(result.Complexity.Score, 3),
+            Cached = result.Cached,
             HasTools = chat.HasTools,
             ToolContinuation = chat.IsToolResultContinuation,
             LocalOnly = plan.Requirements.LocalOnly,

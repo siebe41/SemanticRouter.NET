@@ -65,7 +65,9 @@ public class SemanticPromptClassifierTests
     public async Task Route_utterances_are_embedded_once_and_cached()
     {
         Mock<IEmbeddingProvider> provider = FromTable(Table);
-        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), Complexity(0.1).Object);
+        SemanticRouterOptions options = CreateOptions();
+        options.ClassificationCache.Enabled = false; // every request embeds its prompt; only the index is shared
+        var classifier = new SemanticPromptClassifier(provider.Object, options, Complexity(0.1).Object);
 
         await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => classifier.ClassifyAsync("hi friend").AsTask()));
 

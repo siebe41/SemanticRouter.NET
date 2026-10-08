@@ -108,6 +108,12 @@ public class SemanticRouterOptions
     /// <summary>How many of the best route scores to include in <see cref="PromptClassificationResult.TopScores"/>. Default 3.</summary>
     public int MaxReportedScores { get; set; } = 3;
 
+    /// <summary>
+    /// Reuse the decision for a prompt classified recently (agents send the same side requests over and over), so it is
+    /// not embedded again. In memory only; a new configuration starts with an empty cache. On by default.
+    /// </summary>
+    public ClassificationCacheOptions ClassificationCache { get; set; } = new();
+
     /// <summary>Complexity heuristic tuning.</summary>
     public ComplexityHeuristicsOptions Complexity { get; set; } = new();
 
@@ -161,6 +167,11 @@ public class SemanticRouterOptions
         if (MaxReportedScores < 0)
         {
             errors.Add($"{nameof(MaxReportedScores)} must not be negative.");
+        }
+
+        if (ClassificationCache.Enabled && (ClassificationCache.MaxEntries < 1 || ClassificationCache.MaxAge <= TimeSpan.Zero))
+        {
+            errors.Add($"{nameof(ClassificationCache)} needs MaxEntries of at least 1 and a positive MaxAge.");
         }
 
         foreach (ComplexityTierRule rule in ComplexityTiers ?? [])

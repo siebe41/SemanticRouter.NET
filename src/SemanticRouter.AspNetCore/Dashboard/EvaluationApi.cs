@@ -263,9 +263,12 @@ internal static class EvaluationApi
         return false;
     }
 
-    private static string Describe(EmbeddingProviderOptions settings) => settings.Provider == EmbeddingProviderKind.Hashing
-        ? $"Hashing ({settings.Dimensions} dimensions)"
-        : $"{settings.Model} at {settings.Endpoint}";
+    private static string Describe(EmbeddingProviderOptions settings) => settings.Provider switch
+    {
+        EmbeddingProviderKind.Hashing => $"Hashing ({settings.Dimensions} dimensions)",
+        EmbeddingProviderKind.Onnx => $"ONNX {settings.ModelPath ?? settings.Model ?? "all-MiniLM-L6-v2"} (in-process)",
+        _ => $"{settings.Model} at {settings.Endpoint}",
+    };
 
     public sealed record CaseDto(string Prompt, int Tier, string? Route = null, bool LocalOnly = false, string? Note = null)
     {
