@@ -119,6 +119,16 @@ public sealed class RoutingActivityEntry
 
     /// <summary>The W3C trace id of the request, for finding it in a tracing backend.</summary>
     public string? TraceId { get; set; }
+
+    /// <summary>
+    /// The models the request was sent to, in order (Dispatch mode). Failed attempts are included: the backend may have
+    /// received the request before it failed.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonObjectCreationHandling(System.Text.Json.Serialization.JsonObjectCreationHandling.Populate)]
+    public IList<string> SentTo { get; } = new List<string>();
+
+    /// <summary>The memory notes found in the request (titles and ids, never their text), when memory sources are configured.</summary>
+    public IReadOnlyList<MemoryReference> Memory { get; init; } = [];
 }
 
 /// <summary>
@@ -182,13 +192,6 @@ public sealed class RoutingActivityLog
         return Recent(_entries.Length).Where(e => e.Timestamp >= since && e.Timestamp < until).OrderBy(e => e.Id).Take(limit).ToArray();
     }
 
-    /// <summary>Hands a finished entry (outcome and timing known) to the store, when there is one.</summary>
-    public void Complete(RoutingActivityEntry entry)
-    {
-        ArgumentNullException.ThrowIfNull(entry);
-        _store?.Append(entry);
-    }
-
     /// <summary>The next sequence number.</summary>
     public long NextId
     {
@@ -201,6 +204,12 @@ public sealed class RoutingActivityLog
         }
     }
 
+    /// <summary>
+    /// Raised when an entry is added and again when its request finishes, for live views. Handlers run on the request's
+    /// thread and must return quickly.
+    /// </summary>
+    public event Action<RoutingActivityEntry>? Updated;
+
     /// <summary>Adds an entry; its <see cref="RoutingActivityEntry.Id"/> must be unset.</summary>
     public RoutingActivityEntry Add(RoutingActivityEntry entry)
     {
@@ -209,8 +218,21 @@ public sealed class RoutingActivityLog
         {
             _entries[_next % _entries.Length] = entry;
             _next++;
-            return entry;
         }
+
+        Updated?.Invoke(entry);
+        return entry;
+    }
+
+    /// <summary>
+    /// Hands a finished entry (outcome and timing known) to the store, when there is one, and raises
+    /// <see cref="Updated"/> for live views.
+    /// </summary>
+    public void Complete(RoutingActivityEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        _store?.Append(entry);
+        Updated?.Invoke(entry);
     }
 
     /// <summary>Reserves the next id.</summary>

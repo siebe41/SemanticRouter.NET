@@ -37,6 +37,12 @@
     activityFilter: 'all',
     autoRefresh: true,
     session: { role: null, tokenRequired: false, tokensConfigured: false },
+    stream: null,          // the EventSource for api/events
+    streamState: 'off',    // live | reconnecting | off
+    live: { flash: null }, // the model that just answered, for the router graph
+    memory: null,          // GET api/memory
+    memoryLoading: false,
+    memoryUi: { search: '', filter: 'all', colorBy: 'sharing', showMissing: true, selected: null },
     history: { versions: null, diff: null },
     trends: { window: '24h', data: null, loading: false },
     usage: { window: '7d', by: 'model', data: null, loading: false },
@@ -183,6 +189,7 @@
       if (state.view === 'overview') { state.trends.data = null; }
       if (state.view === 'usage') { loadUsage(); }
       if (state.view === 'overview' || (state.view === 'activity' && !state.label)) render();
+      else if (state.view === 'live') scheduleLive();
     } catch (e) { /* keep the last known state */ }
   }
 
@@ -226,6 +233,7 @@
   function applyTheme(id) {
     document.documentElement.setAttribute('data-theme', id);
     try { localStorage.setItem(THEME_KEY, id); } catch { /* ignore */ }
+    if (typeof readPalette === 'function') { readPalette(); if (graph) graph.refreshColors(); }
   }
 
   /* ---------------------------------------------------------------------------------------------
@@ -397,7 +405,7 @@
       <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th>${labels ? '<th></th>' : ''}</tr>
       ${entries.map((e) => `<tr title="${h(e.detail || '')}">
         <td class="nowrap small">${h(when(e.timestamp))}</td>
-        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}${e.profile ? ' · <span class="badge accent" title="Routing profile">' + h(e.profile) + '</span>' : ''}${e.project ? ' · <span class="mono" title="Project">' + h(e.project) + '</span>' : ''}${e.signals ? ' · <span class="badge warn" title="Kept local because the conversation contains this">local: ' + h(e.signals) + '</span>' : ''}${e.notes ? ' · <span class="badge ' + (/malformed/.test(e.notes) ? 'warn' : 'info') + '" title="Noted by the connector">' + h(e.notes) + '</span>' : ''}</div></td>
+        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}${e.profile ? ' · <span class="badge accent" title="Routing profile">' + h(e.profile) + '</span>' : ''}${e.project ? ' · <span class="mono" title="Project">' + h(e.project) + '</span>' : ''}${e.signals ? ' · <span class="badge warn" title="Kept local because the conversation contains this">local: ' + h(e.signals) + '</span>' : ''}${e.notes ? ' · <span class="badge ' + (/malformed/.test(e.notes) ? 'warn' : 'info') + '" title="Noted by the connector">' + h(e.notes) + '</span>' : ''}${memoryBadge(e)}</div></td>
         <td><span class="tier">T${e.tier}</span></td>
         <td class="small">${h(e.reason)}${e.cached ? ' <span class="badge" title="Reused a recent decision: no embedding call">cached</span>' : ''}</td>
         <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
@@ -406,6 +414,15 @@
         ${labels ? `<td>${e.toolContinuation ? '' : `<button class="btn ghost small" data-action="label-open" data-id="${e.id}" title="Say which tier this prompt should have had">Label</button>`}</td>` : ''}
       </tr>`).join('')}
     </table></div>`;
+  }
+
+  function memoryBadge(e) {
+    const notes = e.memory || [];
+    if (!notes.length) return '';
+    const cloud = (e.sentTo || []).some((n) => !isLocalModel(n));
+    const text = notes.filter((r) => r.kind === 'Content').length;
+    const title = notes.map((r) => `${r.title} (${r.kind === 'Content' ? 'text' : 'mentioned'})`).join(', ');
+    return ` <a href="#/memory" class="badge ${cloud && text ? 'signal' : 'info'}" title="${h(title)}">${notes.length} note${notes.length === 1 ? '' : 's'}${cloud ? ' → cloud' : ''}</a>`;
   }
 
   views.activity = () => {
@@ -1049,12 +1066,15 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
     const staleTip = $('.chart-tip'); if (staleTip) staleTip.classList.add('hidden');
     const view = views[state.view] || views.overview;
     const root = $('#view');
+    unmount();
     if (!state.config || !state.status) { root.innerHTML = '<div class="muted">Loading…</div>'; return; }
     try {
       root.innerHTML = (state.errors ? `<div class="card section" style="border-color:var(--danger)"><h3>Configuration problems</h3><ul class="errors">${state.errors.map((e) => `<li>${h(e)}</li>`).join('')}</ul></div>` : '') + view();
+      if (mounts[state.view]) mounts[state.view]();
     } catch (e) {
       root.innerHTML = `<div class="card"><h3>Could not render</h3><pre>${h(e.stack || e)}</pre></div>`;
     }
+    root.classList.toggle('wide', state.view === 'memory' || state.view === 'live');
     renderChrome();
   }
 
@@ -1064,6 +1084,454 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
     render();
     window.scrollTo(0, 0);
   }
+
+  /* ---------------------------------------------------------------------------------------------
+     Live stream: server-sent events from api/events keep the activity list current between polls.
+     --------------------------------------------------------------------------------------------- */
+  const appliedExposure = new Set();   // entry ids whose memory notes were already counted locally
+  let liveFrame = 0;
+  let activityRenderTimer = null;
+
+  const modelByName = (name) => (state.status && name ? state.status.models.find((m) => m.name.toLowerCase() === String(name).toLowerCase()) : null);
+  const isLocalModel = (name) => { const m = modelByName(name); return !!(m && m.isLocal); };
+  const clientLabel = (e) => e.client || (e.protocol === 'Anthropic' ? 'Anthropic clients' : 'OpenAI clients');
+  const compact = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n));
+  const money = (v) => (v === 0 ? '$0' : v < 0.01 ? '<$0.01' : '$' + v.toFixed(2));
+
+  function connectStream() {
+    if (!window.EventSource || state.stream) return;
+    const source = new EventSource(API + '/events');
+    state.stream = source;
+    source.onopen = () => { state.streamState = 'live'; scheduleLive(); };
+    source.onerror = () => { state.streamState = source.readyState === EventSource.CLOSED ? 'off' : 'reconnecting'; scheduleLive(); };
+    source.addEventListener('activity', (ev) => {
+      let entry;
+      try { entry = JSON.parse(ev.data); } catch { return; }
+      upsertActivity(entry);
+      if (entry.totalMilliseconds != null) {
+        applyExposure(entry);
+        if (entry.servedBy || entry.plannedModel) state.live.flash = { model: entry.servedBy || entry.plannedModel, client: clientLabel(entry), until: Date.now() + 1600 };
+      }
+      if (state.view === 'live') scheduleLive();
+      else if (state.view === 'activity' && !activityRenderTimer) activityRenderTimer = setTimeout(() => { activityRenderTimer = null; if (state.view === 'activity') render(); }, 800);
+    });
+  }
+
+  function upsertActivity(entry) {
+    const i = state.activity.findIndex((x) => x.id === entry.id);
+    if (i >= 0) { state.activity[i] = entry; return; }
+    state.activity.unshift(entry);
+    state.activity.sort((a, b) => b.id - a.id);
+    if (state.activity.length > 500) state.activity.length = 500;
+  }
+
+  /* Counts a finished request's notes against the models it reached, as the server does, so the map updates live. */
+  function applyExposure(entry) {
+    if (!entry.memory || !entry.memory.length || !entry.sentTo || !entry.sentTo.length || appliedExposure.has(entry.id)) return;
+    appliedExposure.add(entry.id);
+    const m = state.memory;
+    for (const ref of entry.memory) {
+      let cloud = false;
+      for (const model of new Set(entry.sentTo)) {
+        const local = isLocalModel(model);
+        cloud = cloud || !local;
+        if (!m) continue;
+        const x = m.exposure[ref.id] || (m.exposure[ref.id] = { localContent: 0, localReference: 0, cloudContent: 0, cloudReference: 0, firstShared: entry.timestamp, lastShared: entry.timestamp, models: {} });
+        const key = (local ? 'local' : 'cloud') + (ref.kind === 'Content' ? 'Content' : 'Reference');
+        x[key]++;
+        x.lastShared = entry.timestamp;
+        x.models[model] = (x.models[model] || 0) + 1;
+      }
+      if (graph) graph.pulse(ref.id, cloud ? palette.signal : palette.accent);
+    }
+    if (state.view === 'memory') { if (graph) graph.redraw(); updateMemorySide(); updateMemorySummary(); }
+  }
+
+  /* ---------------------------------------------------------------------------------------------
+     Live view: who is asking, which model answers, and which memory crosses to the cloud.
+     --------------------------------------------------------------------------------------------- */
+  function scheduleLive() {
+    if (liveFrame) return;
+    liveFrame = requestAnimationFrame(() => { liveFrame = 0; updateLive(); });
+  }
+
+  function liveStats() {
+    let served = 0; let local = 0; let failed = 0; let tokLocal = 0; let tokCloud = 0; let cost = 0;
+    const cloudContent = new Set(); const cloudRefs = new Set(); const localNotes = new Set();
+    for (const e of state.activity) {
+      if (e.outcome === 'failed') failed++;
+      const m = modelByName(e.servedBy);
+      if (m) {
+        served++;
+        // Reported usage when the backend sent it, otherwise the router's own estimate.
+        const t = e.inputTokens != null ? e.inputTokens + (e.cacheReadTokens || 0) + (e.cacheCreationTokens || 0) : (e.estimatedInputTokens || 0);
+        if (m.isLocal) { local++; tokLocal += t; } else { tokCloud += t; cost += e.costUsd != null ? e.costUsd : t * (m.inputCostPerMillionTokens || 0) / 1e6; }
+      }
+      const sent = e.sentTo || [];
+      const toCloud = sent.some((n) => !isLocalModel(n));
+      for (const r of e.memory || []) {
+        if (toCloud) (r.kind === 'Content' ? cloudContent : cloudRefs).add(r.id);
+        else if (sent.length) localNotes.add(r.id);
+      }
+    }
+    for (const id of cloudContent) cloudRefs.delete(id);
+    return { total: state.activity.length, served, local, failed, tokLocal, tokCloud, cost, cloudContent: cloudContent.size, cloudRefs: cloudRefs.size, localNotes: localNotes.size };
+  }
+
+  views.live = () => `
+    <div class="section-head"><h1>Live</h1><span class="muted">What the router is doing, as it happens.</span><span class="spacer"></span><span id="live-stream"></span></div>
+    <div class="grid cols-4 section" id="live-tiles"></div>
+    <div class="live-grid section">
+      <div class="card"><div class="card-head"><h2>Model router</h2><span class="spacer"></span><span class="share-legend"><i class="sw accent"></i>local <i class="sw signal"></i>cloud</span></div><div id="live-graph"></div></div>
+      <div class="card"><div class="card-head"><h2>Decisions</h2><span class="muted small">newest first</span><span class="spacer"></span><a href="#/activity" class="small">table →</a></div><div class="feed" id="live-feed"></div></div>
+    </div>
+    <div class="card section"><div class="card-head"><h2>Memory in requests</h2><span class="muted small">Notes from your memory sources found in what was sent, and where it went.</span><span class="spacer"></span><a href="#/memory" class="small">memory map →</a></div><div id="live-memory"></div></div>`;
+
+  function updateLive() {
+    if (state.view !== 'live' || !$('#live-tiles') || !state.status) return;
+    const st = liveStats();
+    const stream = state.streamState === 'live' ? '<span class="pill"><span class="dot ok"></span> streaming</span>'
+      : state.streamState === 'reconnecting' ? '<span class="pill"><span class="dot warn"></span> reconnecting</span>'
+        : '<span class="pill"><span class="dot"></span> polling every 5 s</span>';
+    $('#live-stream').innerHTML = stream;
+    const localShare = st.served ? Math.round(st.local / st.served * 100) : 0;
+    $('#live-tiles').innerHTML = `
+      <div class="card stat"><span class="value">${st.total}</span><span class="label">requests in view · ${st.failed} failed</span></div>
+      <div class="card stat"><span class="value">${st.served ? localShare + '%' : '—'}</span><span class="label">answered locally (${st.local} of ${st.served})</span></div>
+      <div class="card stat"><span class="value">${compact(st.tokCloud)}<span class="muted" style="font-size:14px"> / ${compact(st.tokLocal)}</span></span><span class="label">input tokens to cloud / local · ${money(st.cost)}</span></div>
+      <div class="card stat"><span class="value ${st.cloudContent ? 'signal-text' : ''}">${st.cloudContent}</span><span class="label">notes whose text went to the cloud${st.cloudRefs ? ` · ${st.cloudRefs} mentioned` : ''}</span></div>`;
+    $('#live-graph').innerHTML = routerGraph();
+    $('#live-feed').innerHTML = liveFeed();
+    $('#live-memory').innerHTML = liveMemory();
+  }
+
+  function routerGraph() {
+    const s = state.status;
+    const clientCounts = new Map(); const modelCounts = new Map(); const failures = new Map();
+    for (const e of state.activity) {
+      const c = clientLabel(e);
+      clientCounts.set(c, (clientCounts.get(c) || 0) + 1);
+      const m = e.servedBy || (e.outcome === 'planned' ? e.plannedModel : null);
+      if (m) modelCounts.set(m, (modelCounts.get(m) || 0) + 1);
+      for (const t of e.sentTo || []) if (t !== e.servedBy) failures.set(t, (failures.get(t) || 0) + 1);
+    }
+    const models = s.models.filter((m) => m.enabled).map((m) => m.name);
+    for (const m of modelCounts.keys()) if (!models.some((x) => x.toLowerCase() === m.toLowerCase())) models.push(m);
+    const clients = clientCounts.size ? [...clientCounts.keys()] : ['waiting for clients'];
+    const rows = Math.max(clients.length, models.length, 3);
+    const W = 680; const H = Math.max(230, rows * 60 + 24); const mid = H / 2;
+    const y = (i, n) => mid + (i - (n - 1) / 2) * 60;
+    const maxC = Math.max(1, ...clientCounts.values()); const maxM = Math.max(1, ...modelCounts.values());
+    const flash = state.live.flash && Date.now() < state.live.flash.until ? state.live.flash : null;
+    const trunc = (t, n) => (t.length > n ? t.slice(0, n - 1) + '…' : t);
+    let out = `<svg class="router-graph" viewBox="0 0 ${W} ${H}" role="img" aria-label="Clients, the router and the models it sends to">`;
+    clients.forEach((c, i) => {
+      const cy = y(i, clients.length); const count = clientCounts.get(c) || 0;
+      const hot = flash && flash.client === c;
+      out += `<path class="edge ${count ? '' : 'idle'} ${hot ? 'flow' : ''}" d="M170 ${cy} C 220 ${cy}, 220 ${mid}, 270 ${mid}" stroke-width="${1.2 + 5 * count / maxC}"/>`;
+      out += `<g class="gnode client"><rect x="10" y="${cy - 22}" width="160" height="44" rx="8"/><text x="22" y="${cy - 3}" class="t1">${h(trunc(c, 20))}</text><text x="22" y="${cy + 13}" class="t2">${count ? count + ' request' + (count === 1 ? '' : 's') : 'none yet'}</text></g>`;
+    });
+    models.forEach((name, i) => {
+      const cy = y(i, models.length); const m = modelByName(name); const count = modelCounts.get(name) || 0;
+      const local = m && m.isLocal; const cooling = m && m.coolingDownUntil;
+      const hot = flash && flash.model.toLowerCase() === name.toLowerCase();
+      out += `<path class="edge ${local ? 'local' : 'cloud'} ${count ? '' : 'idle'} ${hot ? 'flow' : ''}" d="M410 ${mid} C 455 ${mid}, 455 ${cy}, 500 ${cy}" stroke-width="${1.2 + 5 * count / maxM}"/>`;
+      out += `<g class="gnode model ${local ? 'local' : 'cloud'} ${cooling ? 'cooling' : ''} ${hot ? 'hot' : ''}"><title>${h(name)}${m ? ` · ${h(m.connector)} · ${h(m.model || '')}` : ''}</title><rect x="500" y="${cy - 25}" width="170" height="50" rx="8"/>
+        <text x="512" y="${cy - 5}" class="t1">${h(trunc(name, 19))}</text>
+        <text x="512" y="${cy + 12}" class="t2">${m ? 'T' + m.tier + ' · ' : ''}${local ? 'local' : 'cloud'} · ×${count}${failures.get(name) ? ' · ' + failures.get(name) + ' failed' : ''}${cooling ? ' · cooling' : ''}</text></g>`;
+    });
+    out += `<g class="gnode router"><rect x="270" y="${mid - 34}" width="140" height="68" rx="10"/><text x="340" y="${mid - 6}" text-anchor="middle" class="t1">Semantic Router</text><text x="340" y="${mid + 12}" text-anchor="middle" class="t2">${h(s.gateway.strategy)}</text></g>`;
+    return out + '</svg>';
+  }
+
+  function liveFeed() {
+    const rows = state.activity.slice(0, 80);
+    if (!rows.length) return '<div class="muted small">Nothing routed yet. Point a client at the gateway (see <a href="#/clients">Connect clients</a>) and requests appear here as they arrive.</div>';
+    return rows.map((e) => {
+      const model = e.servedBy || e.plannedModel;
+      const local = isLocalModel(model);
+      const pending = e.totalMilliseconds == null;
+      const sent = e.sentTo || [];
+      const toCloud = sent.some((n) => !isLocalModel(n));
+      const notes = (e.memory || []);
+      return `<div class="feed-row ${e.outcome === 'failed' ? 'failed' : ''} ${pending ? 'pending' : ''}">
+        <span class="t">${h(when(e.timestamp))}</span>
+        <span class="who">${h(clientLabel(e))}</span>
+        <span class="arrow">→</span>
+        ${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : `<span class="model ${local ? 'local' : 'cloud'}">${h(model || '—')}</span>`}
+        <span class="tier">T${e.tier}</span>
+        <span class="why">${h(e.reason)}${e.route ? ' · ' + h(e.route) + (e.similarity != null ? ' ' + num(e.similarity, 2) : '') : ''}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.attempt > 1 ? ' · try ' + e.attempt : ''}${e.degraded ? ' · degraded' : ''}</span>
+        <span class="ms">${pending ? '…' : num(e.totalMilliseconds, 0) + ' ms'}</span>
+        <div class="prompt">${h(e.promptPreview)}</div>
+        ${notes.length ? `<div class="mem">${notes.slice(0, 6).map((r) => `<a href="#/memory" data-action="memory-open" data-id="${h(r.id)}" class="note-chip ${r.kind === 'Content' ? (toCloud ? 'cloud' : 'local') : 'ref'}" title="${h(r.source)} · ${r.kind === 'Content' ? r.lines + ' of ' + r.totalLines + ' lines' : 'mentioned'}">${h(r.title)}</a>`).join('')}${notes.length > 6 ? ` <span class="faint">+${notes.length - 6}</span>` : ''}</div>` : ''}
+      </div>`;
+    }).join('');
+  }
+
+  function liveMemory() {
+    const cards = [];
+    for (const e of state.activity) {
+      if (!e.memory || !e.memory.length || !(e.sentTo || []).length) continue;
+      for (const r of e.memory) {
+        cards.push({ e, r });
+        if (cards.length >= 16) break;
+      }
+      if (cards.length >= 16) break;
+    }
+    if (!cards.length) {
+      return (state.memory && state.memory.nodes.length) || ((state.config.Memory || {}).Sources || []).length
+        ? '<div class="muted small">No notes from your memory sources have been sent yet. When a request carries one (Claude Code reading a memory file, a note pasted into a prompt, a <code>[[link]]</code>), it shows up here with the model it went to.</div>'
+        : '<div class="muted small">No memory sources configured. Add an Obsidian vault, Claude Code\'s memory or an MCP memory graph on the <a href="#/memory">Memory</a> page to see which notes reach which models.</div>';
+    }
+    return `<div class="mem-strip">${cards.map(({ e, r }) => {
+      const targets = [...new Set(e.sentTo)];
+      const cloud = targets.some((n) => !isLocalModel(n));
+      return `<a href="#/memory" class="mem-card ${cloud ? 'cloud' : 'local'}" data-action="memory-open" data-id="${h(r.id)}">
+        <span class="small faint">${h(when(e.timestamp))} · ${h(r.source)}</span>
+        <b>${h(r.title)}</b>
+        <span class="small">${r.kind === 'Content' ? `text (${r.lines}/${r.totalLines} lines)` : 'mentioned'} → ${targets.map((n) => `<span class="${isLocalModel(n) ? 'local' : 'cloud'}-text">${h(n)}</span>`).join(', ')}</span>
+      </a>`;
+    }).join('')}</div>`;
+  }
+
+  /* ---------------------------------------------------------------------------------------------
+     Memory view: the notes of every memory source as a graph, coloured by where they have been sent.
+     --------------------------------------------------------------------------------------------- */
+  let graph = null;
+  const palette = { accent: '#228fa7', signal: '#d08c34', faint: '#66757e', muted: '#94a3ac' };
+  const CATEGORY_COLORS = ['#228fa7', '#d08c34', '#8a7fd1', '#4fae7a', '#c75b7a', '#6f9fd8', '#b0a03a', '#9a6b4f', '#5bb0a6', '#c48ad6'];
+  const MEMORY_TYPES = ['Markdown', 'ClaudeCode', 'KnowledgeGraph'];
+  const MEMORY_PATH_HINTS = {
+    Markdown: 'C:\\Users\\me\\Documents\\Obsidian\\Vault  or  ~/notes',
+    ClaudeCode: '~/.claude (default)',
+    KnowledgeGraph: '~/memory.jsonl  (the MCP memory server\'s MEMORY_FILE_PATH)',
+  };
+
+  function readPalette() {
+    const css = getComputedStyle(document.documentElement);
+    for (const [k, v] of [['accent', '--accent'], ['signal', '--signal'], ['faint', '--text-faint'], ['muted', '--text-muted']]) {
+      palette[k] = (css.getPropertyValue(v) || '').trim() || palette[k];
+    }
+  }
+
+  const exposureOf = (id) => (state.memory && state.memory.exposure[id]) || null;
+  function shareClass(n) {
+    if (n.missing) return 'missing';
+    const e = exposureOf(n.id);
+    if (!e) return 'none';
+    if (e.cloudContent) return 'cloud';
+    if (e.cloudReference) return 'cloud-ref';
+    if (e.localContent || e.localReference) return 'local';
+    return 'none';
+  }
+  const hashColor = (text) => { let x = 0; for (const c of text || '') x = (x * 31 + c.charCodeAt(0)) | 0; return CATEGORY_COLORS[Math.abs(x) % CATEGORY_COLORS.length]; };
+
+  function nodeStyle(n) {
+    if (n.missing) return { fill: null, stroke: palette.faint, strokeWidth: 1.2 };
+    const color = state.memoryUi.colorBy;
+    if (color === 'source') return { fill: hashColor(n.source) };
+    if (color === 'folder') return { fill: hashColor(n.source + '/' + (n.folder || '').split('/')[0]) };
+    switch (shareClass(n)) {
+      case 'cloud': return { fill: palette.signal };
+      case 'cloud-ref': return { fill: palette.faint, stroke: palette.signal, strokeWidth: 2.2 };
+      case 'local': return { fill: palette.accent };
+      default: return { fill: palette.faint };
+    }
+  }
+
+  function nodeVisible(n) {
+    const ui = state.memoryUi;
+    if (n.missing && !ui.showMissing) return false;
+    const share = shareClass(n);
+    if (ui.filter === 'shared' && (share === 'none' || share === 'missing')) return false;
+    if (ui.filter === 'cloud' && share !== 'cloud' && share !== 'cloud-ref') return false;
+    if (ui.filter === 'local' && share !== 'local') return false;
+    if (ui.filter === 'never' && share !== 'none') return false;
+    const q = ui.search.trim().toLowerCase();
+    if (!q) return true;
+    return n.title.toLowerCase().includes(q) || n.path.toLowerCase().includes(q)
+      || (n.tags || []).some((t) => t.toLowerCase().includes(q)) || (n.aliases || []).some((a) => a.toLowerCase().includes(q));
+  }
+
+  async function loadMemory(refresh) {
+    if (state.memoryLoading) return;
+    state.memoryLoading = true;
+    try {
+      const data = await api(refresh ? 'POST' : 'GET', refresh ? '/memory/refresh' : '/memory');
+      const old = new Map(((state.memory && state.memory.nodes) || []).map((n) => [n.id, n]));
+      for (const n of data.nodes) { const o = old.get(n.id); if (o && typeof o.x === 'number') { n.x = o.x; n.y = o.y; n.fx = o.fx; n.fy = o.fy; } }
+      state.memory = data;
+      // The server's counts already include every request finished so far; only later ones are added from the stream.
+      for (const e of state.activity) if (e.totalMilliseconds != null) appliedExposure.add(e.id);
+      if (refresh) toast(`Scanned ${data.sources.length} source(s): ${data.nodes.filter((n) => !n.missing).length} notes.`, 'ok');
+    } catch (e) {
+      toast('Could not load the memory map: ' + e.message, 'danger');
+      state.memory = state.memory || { nodes: [], links: [], sources: [], exposure: {}, trackSharing: true, mode: '' };
+    } finally {
+      state.memoryLoading = false;
+    }
+    if (state.view === 'memory') render();
+  }
+
+  function memorySummaryText() {
+    const m = state.memory;
+    const notes = m.nodes.filter((n) => !n.missing);
+    const counts = { cloud: 0, 'cloud-ref': 0, local: 0 };
+    for (const n of notes) { const c = shareClass(n); if (c in counts) counts[c]++; }
+    return `${notes.length} notes · ${m.links.length} links from ${m.sources.length} source${m.sources.length === 1 ? '' : 's'}${m.loadedAt ? ' · scanned ' + h(when(m.loadedAt)) : ''}
+      · <span class="signal-text">${counts.cloud} sent to cloud</span>${counts['cloud-ref'] ? ` · ${counts['cloud-ref']} mentioned to cloud` : ''} · <span class="local-text">${counts.local} local only</span>`;
+  }
+  function updateMemorySummary() { const el = $('#memory-summary'); if (el && state.memory) el.innerHTML = memorySummaryText(); }
+
+  views.memory = () => {
+    if (!state.memory) {
+      loadMemory(false);
+      return '<div class="section-head"><h1>Memory</h1><span class="muted">Scanning memory sources…</span></div>';
+    }
+    const m = state.memory;
+    const ui = state.memoryUi;
+    const hasNotes = m.nodes.some((n) => !n.missing);
+    const admin = !readOnly();
+    return `
+      <div class="section-head"><h1>Memory</h1><span class="muted small" id="memory-summary">${memorySummaryText()}</span><span class="spacer"></span>
+        <button class="btn small" data-action="memory-fit">Fit</button>
+        <button class="btn small" data-action="memory-refresh">Rescan</button>
+        ${admin ? '<button class="btn small" data-action="memory-reset" title="Forget which notes were sent where">Clear sharing</button>' : ''}</div>
+      ${m.mode && m.mode !== 'Dispatch' ? '<div class="card section small" style="border-color:var(--warn)">The gateway is in <b>Annotate</b> mode: your own endpoint calls the model, so the router can show which notes were in a request but not where they went.</div>' : ''}
+      ${m.trackSharing === false ? '<div class="card section small" style="border-color:var(--warn)">Sharing is not tracked (<code>Memory:TrackSharing</code> is off): the map shows your notes, but requests are not checked for them.</div>' : ''}
+      ${hasNotes ? `
+      <div class="memory-toolbar section">
+        <input type="text" id="memory-search" placeholder="Search notes, paths, tags…" value="${h(ui.search)}" style="max-width:280px">
+        <select id="memory-filter" style="width:170px">${[['all', 'All notes'], ['shared', 'Sent anywhere'], ['cloud', 'Sent to the cloud'], ['local', 'Local only'], ['never', 'Never sent']].map(([v, t]) => `<option value="${v}" ${ui.filter === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <select id="memory-color" style="width:170px">${[['sharing', 'Colour by sharing'], ['source', 'Colour by source'], ['folder', 'Colour by folder']].map(([v, t]) => `<option value="${v}" ${ui.colorBy === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <label class="check small"><input type="checkbox" id="memory-missing" ${ui.showMissing ? 'checked' : ''}> unresolved links</label>
+        <span class="spacer"></span>
+        ${ui.colorBy === 'sharing' ? `<span class="share-legend"><i class="sw signal"></i>text sent to cloud <i class="sw ring"></i>mentioned to cloud <i class="sw accent"></i>local only <i class="sw faint"></i>not sent <i class="sw hollow"></i>unresolved</span>` : ''}
+      </div>
+      <div class="memory-layout section">
+        <div class="card graph-card"><canvas id="memory-canvas" aria-label="Memory map"></canvas><div id="graph-tip" class="graph-tip hidden"></div>
+          <div class="graph-hint small faint">drag to pan · scroll to zoom · drag a note to pin it · double-click to fit</div></div>
+        <div class="card memory-side" id="memory-side">${memorySide()}</div>
+      </div>` : memoryEmpty()}
+      ${memorySourcesCard()}`;
+  };
+
+  function memoryEmpty() {
+    return `<div class="card section empty-state">
+      <h2>Map your memory</h2>
+      <p class="muted">Point the router at the notes you and your AI tools keep. It draws them as a graph and, for every routed request, checks which notes were in it and which model received them: local, or the cloud. Note text never leaves the router; the dashboard only gets titles, paths, tags and links.</p>
+      ${readOnly() ? '' : `<div class="inline">
+        <button class="btn primary small" data-action="memory-add" data-type="Markdown">Add an Obsidian vault or notes folder</button>
+        <button class="btn small" data-action="memory-add" data-type="ClaudeCode">Add Claude Code's memory</button>
+        <button class="btn small" data-action="memory-add" data-type="KnowledgeGraph">Add an MCP memory graph</button></div>`}
+    </div>`;
+  }
+
+  function memorySide() {
+    const m = state.memory;
+    const id = state.memoryUi.selected;
+    const n = id && m.nodes.find((x) => x.id === id);
+    if (!n) {
+      const top = m.nodes.filter((x) => exposureOf(x.id))
+        .sort((a, b) => { const ea = exposureOf(a.id); const eb = exposureOf(b.id); return (eb.cloudContent * 4 + eb.cloudReference) - (ea.cloudContent * 4 + ea.cloudReference) || new Date(eb.lastShared) - new Date(ea.lastShared); })
+        .slice(0, 12);
+      return `<h3>Most shared</h3>
+        ${top.length ? `<ul class="note-list">${top.map((x) => { const e = exposureOf(x.id); const twin = m.nodes.some((y) => y !== x && !y.missing && y.title.toLowerCase() === x.title.toLowerCase()); return `<li><a href="#/memory" data-action="memory-select" data-id="${h(x.id)}" class="${shareClass(x)}-text" title="${h(x.source + ' · ' + x.path)}">${h(x.title)}${twin ? ` <span class="faint small">${h(x.source)}</span>` : ''}</a><span class="small faint">${e.cloudContent + e.cloudReference ? `cloud ×${e.cloudContent + e.cloudReference}` : ''}${e.localContent + e.localReference ? ` local ×${e.localContent + e.localReference}` : ''}</span></li>`; }).join('')}</ul>`
+        : '<p class="muted small">Nothing sent yet. Notes light up here, and pulse on the map, as requests carry them.</p>'}
+        <h3 style="margin-top:14px">How notes are spotted</h3>
+        <p class="small muted"><b>Text</b>: distinctive lines of a note (${h(String((state.config.Memory || {}).MinimumLineLength || 24))}+ characters) appear in the request, e.g. Claude Code read the file or you pasted it. <b>Mentioned</b>: its path (<code>notes/team.md</code>) or <code>[[title]]</code> appears, without the text. Counts start when the router starts.</p>
+        <p class="small faint">Click a note for details.</p>`;
+    }
+    const e = exposureOf(n.id);
+    const idx = m.nodes.indexOf(n);
+    const out = m.links.filter((l) => l[0] === idx).map((l) => m.nodes[l[1]]);
+    const inn = m.links.filter((l) => l[1] === idx).map((l) => m.nodes[l[0]]);
+    const linkList = (list) => list.length ? list.slice(0, 30).map((x) => `<a href="#/memory" data-action="memory-select" data-id="${h(x.id)}" class="note-chip ${shareClass(x) === 'cloud' ? 'cloud' : shareClass(x) === 'local' ? 'local' : 'ref'}">${h(x.title)}</a>`).join('') + (list.length > 30 ? ` <span class="faint small">+${list.length - 30}</span>` : '') : '<span class="faint small">none</span>';
+    return `<div class="inline" style="justify-content:space-between"><h3 style="margin:0">${h(n.title)}</h3><button class="btn ghost small" data-action="memory-select" data-id="">✕</button></div>
+      ${n.missing ? '<p class="small muted">Linked to, but no note has this title.</p>' : `<div class="small faint mono" style="word-break:break-all">${h(n.source)} · ${h(n.path)}</div>`}
+      ${(n.tags || []).length ? `<div class="inline" style="margin-top:6px">${n.tags.map((t) => `<span class="badge">#${h(t)}</span>`).join('')}</div>` : ''}
+      ${(n.aliases || []).length ? `<div class="small muted" style="margin-top:4px">also: ${n.aliases.map(h).join(', ')}</div>` : ''}
+      ${n.missing ? '' : `<h3 style="margin-top:12px">Where it went</h3>
+      ${e ? `<table class="compact"><tr><th></th><th class="num">text</th><th class="num">mentioned</th></tr>
+        <tr><td><span class="signal-text">cloud</span></td><td class="num">${e.cloudContent}</td><td class="num">${e.cloudReference}</td></tr>
+        <tr><td><span class="local-text">local</span></td><td class="num">${e.localContent}</td><td class="num">${e.localReference}</td></tr></table>
+        <div class="small" style="margin-top:6px">${Object.entries(e.models).sort((a, b) => b[1] - a[1]).map(([name, c]) => `<span class="badge ${isLocalModel(name) ? 'accent' : 'signal'}">${h(name)} ×${c}</span>`).join(' ')}</div>
+        <div class="small faint" style="margin-top:4px">first ${h(when(e.firstShared))} · last ${h(when(e.lastShared))}</div>`
+        : '<p class="small muted">Not sent to any model since the router started.</p>'}
+      <p class="small faint" style="margin-top:6px">${n.fingerprints ? `${n.fingerprints} distinctive line${n.fingerprints === 1 ? '' : 's'} identify its text in a request.` : 'Too short to recognise by its text; only mentions of it are detected.'} ${n.size ? compact(n.size) + ' characters.' : ''}</p>`}
+      <h3 style="margin-top:12px">Links to</h3><div class="chips">${linkList(out)}</div>
+      <h3 style="margin-top:10px">Linked from</h3><div class="chips">${linkList(inn)}</div>`;
+  }
+  function updateMemorySide() { const el = $('#memory-side'); if (el && state.memory) el.innerHTML = memorySide(); }
+
+  function memorySourcesCard() {
+    const m = state.memory;
+    const cfg = state.config.Memory || { Sources: [] };
+    const status = new Map((m.sources || []).map((s) => [s.name.toLowerCase(), s]));
+    const sources = cfg.Sources || [];
+    const ro = readOnly();
+    const custom = (m.sources || []).filter((s) => !sources.some((c) => (c.Name || '').toLowerCase() === s.name.toLowerCase()));
+    return `<div class="card section">
+      <div class="card-head"><h2>Memory sources</h2><span class="muted small">Changes apply with the save bar, like any setting.</span><span class="spacer"></span>
+        ${ro ? '' : `<button class="btn small" data-action="memory-add" data-type="Markdown">Add folder</button><button class="btn small" data-action="memory-add" data-type="ClaudeCode">Add Claude Code</button><button class="btn small" data-action="memory-add" data-type="KnowledgeGraph">Add MCP graph</button>`}</div>
+      ${sources.map((src, i) => {
+        const key = 'mem:' + i;
+        const st = status.get((src.Name || '').toLowerCase());
+        const type = src.Type || 'Markdown';
+        return `<div class="item ${state.open.has(key) ? 'open' : ''} ${src.Enabled === false ? 'disabled' : ''}" data-key="${key}">
+          <div class="item-head" data-action="toggle" data-key="${key}"><span class="chev">▶</span><span class="title">${h(src.Name || '(unnamed)')}</span>
+            <span class="meta"><span class="badge">${h(type)}</span><span class="mono">${h(src.Path || (type === 'ClaudeCode' ? '~/.claude' : ''))}</span>
+            ${st ? (st.error ? `<span class="badge danger" title="${h(st.error)}">error</span>` : `<span class="badge ok">${st.notes} notes</span>${st.skipped ? `<span class="badge warn">${st.skipped} over the limit</span>` : ''}`) : '<span class="badge info">not scanned</span>'}</span>
+            ${st && st.error ? `<span class="spacer"></span><span class="small" style="color:var(--danger)">${h(st.error)}</span>` : ''}</div>
+          <div class="item-body"><div class="form-grid">
+            <label class="field"><span class="name">Name</span><input type="text" data-bind="Memory.Sources.${i}.Name" value="${h(src.Name)}"></label>
+            <label class="field"><span class="name">Type</span><select data-bind="Memory.Sources.${i}.Type">${MEMORY_TYPES.map((t) => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+            <label class="field wide"><span class="name">Path</span><input type="text" data-bind="Memory.Sources.${i}.Path" data-kind="nulltext" value="${h(src.Path || '')}" placeholder="${h(MEMORY_PATH_HINTS[type] || '')}">
+              <span class="hint">${type === 'Markdown' ? 'A folder of notes, read recursively; dot-folders (.obsidian, .git, .trash) are skipped.' : type === 'ClaudeCode' ? 'Reads CLAUDE.md and every project\'s auto-memory folder (projects/*/memory). Add a repository\'s CLAUDE.md files as a Markdown folder.' : 'The JSONL file of @modelcontextprotocol/server-memory, or the folder holding memory.jsonl.'} <code>~</code> and <code>%VARIABLES%</code> are expanded.</span></label>
+            ${type === 'Markdown' ? `<label class="field"><span class="name">Exclude</span><input type="text" data-bind="Memory.Sources.${i}.Exclude" data-kind="csv" value="${h(csv(src.Exclude))}" placeholder="Templates/*, *.excalidraw.md"></label>
+            <label class="field"><span class="name">Extensions</span><input type="text" data-bind="Memory.Sources.${i}.Extensions" data-kind="csv" value="${h(csv(src.Extensions))}" placeholder=".md"></label>` : ''}
+            <label class="check wide"><input type="checkbox" data-bind="Memory.Sources.${i}.Enabled" data-kind="bool" ${src.Enabled !== false ? 'checked' : ''}> Enabled</label>
+          </div>${ro ? '' : `<div class="row-actions" style="margin-top:10px"><button class="btn danger small" data-action="memory-remove" data-index="${i}">Remove</button></div>`}</div></div>`;
+      }).join('') || '<p class="muted small">No sources configured.</p>'}
+      ${custom.length ? `<p class="small muted">Registered in code: ${custom.map((s) => `<span class="badge">${h(s.name)} · ${h(s.kind)} · ${s.error ? 'error' : s.notes + ' notes'}</span>`).join(' ')}</p>` : ''}
+      <div class="form-grid" style="margin-top:10px">
+        <label class="check"><input type="checkbox" data-bind="Memory.TrackSharing" data-kind="bool" ${cfg.TrackSharing !== false ? 'checked' : ''}> Check requests for notes</label>
+        <label class="field"><span class="name">Shortest matching line</span><input type="number" min="8" data-bind="Memory.MinimumLineLength" data-kind="number" value="${cfg.MinimumLineLength || 24}"><span class="hint">Characters; shorter lines are too common to identify a note.</span></label>
+        <label class="field"><span class="name">Rescan every</span><input type="text" data-bind="Memory.RefreshInterval" value="${h(cfg.RefreshInterval || '00:01:00')}"><span class="hint">hh:mm:ss, checked when requests arrive.</span></label>
+      </div>
+    </div>`;
+  }
+
+  function showTip(node, x, y) {
+    const tip = $('#graph-tip');
+    if (!tip) return;
+    if (!node) { tip.classList.add('hidden'); return; }
+    const e = exposureOf(node.id);
+    tip.innerHTML = `<b>${h(node.title)}</b><div class="faint">${node.missing ? 'unresolved link' : h(node.source + ' · ' + node.path)}</div>
+      <div>${e ? `${e.cloudContent + e.cloudReference ? `<span class="signal-text">cloud ×${e.cloudContent + e.cloudReference}</span> ` : ''}${e.localContent + e.localReference ? `<span class="local-text">local ×${e.localContent + e.localReference}</span>` : ''}` : (node.missing ? '' : '<span class="faint">not sent</span>')}</div>`;
+    tip.style.left = Math.min(x + 14, tip.parentElement.clientWidth - 240) + 'px';
+    tip.style.top = (y + 14) + 'px';
+    tip.classList.remove('hidden');
+  }
+
+  const mounts = {
+    live() { updateLive(); },
+    memory() {
+      const canvas = $('#memory-canvas');
+      if (!canvas || !state.memory || !window.MemoryGraph) return;
+      readPalette();
+      graph = window.MemoryGraph.create(canvas, {
+        onSelect(n) { state.memoryUi.selected = n ? n.id : null; updateMemorySide(); },
+        onHover: showTip,
+      });
+      graph.setStyle(nodeStyle);
+      graph.setVisible(nodeVisible);
+      graph.setData(state.memory.nodes, state.memory.links);
+      if (state.memoryUi.selected) { graph.select(state.memoryUi.selected); graph.centerOn(state.memoryUi.selected); }
+    },
+  };
+
+  function unmount() { if (graph) { graph.destroy(); graph = null; } }
 
   /* ---------------------------------------------------------------------------------------------
      Actions
@@ -1088,6 +1556,38 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       render();
       toast('Reset to baseline.', 'ok');
     },
+    async 'memory-refresh'() { await loadMemory(true); },
+    async 'memory-reset'() {
+      if (!confirm('Forget which notes were sent to which models? The notes themselves are not touched.')) return;
+      await api('POST', '/memory/exposure/reset');
+      if (state.memory) state.memory.exposure = {};
+      render();
+      toast('Sharing history cleared.', 'ok');
+    },
+    'memory-fit'() { if (graph) graph.fit(); },
+    'memory-select'(el) {
+      state.memoryUi.selected = el.dataset.id || null;
+      if (graph) { graph.select(state.memoryUi.selected); if (state.memoryUi.selected) graph.centerOn(state.memoryUi.selected); }
+      updateMemorySide();
+    },
+    'memory-open'(el) {
+      state.memoryUi.selected = el.dataset.id || null;
+      state.memoryUi.filter = 'all'; state.memoryUi.search = '';
+      if (state.view === 'memory') { render(); } else { location.hash = '#/memory'; }
+    },
+    'memory-add'(el) {
+      const type = el.dataset.type || 'Markdown';
+      const memory = state.config.Memory = state.config.Memory || { Sources: [], TrackSharing: true, MinimumLineLength: 24, RefreshInterval: '00:01:00' };
+      memory.Sources = memory.Sources || [];
+      const base = { Markdown: 'vault', ClaudeCode: 'claude-code', KnowledgeGraph: 'memory-graph' }[type];
+      let name = base; let n = 1;
+      while (memory.Sources.some((x) => (x.Name || '').toLowerCase() === name)) name = base + '-' + (++n);
+      memory.Sources.push({ Name: name, Type: type, Path: type === 'ClaudeCode' ? null : '', Exclude: [], Extensions: [], Enabled: true });
+      state.open.add('mem:' + (memory.Sources.length - 1));
+      render();
+      toast(type === 'ClaudeCode' ? 'Added; apply to scan ~/.claude.' : 'Fill in the path, then apply.', 'ok');
+    },
+    'memory-remove'(el) { state.config.Memory.Sources.splice(+el.dataset.index, 1); render(); },
     'trends-window'(el) { state.trends.window = el.dataset.window; state.trends.data = null; render(); },
     'usage-set'(el) { state.usage[el.dataset.key] = el.dataset.value; state.usage.data = null; render(); },
     'budget-add'() { state.config.Usage = state.config.Usage || {}; (state.config.Usage.Budgets = state.config.Usage.Budgets || []).push({ Name: 'budget-' + (state.config.Usage.Budgets.length + 1), Model: null, Connector: null, Period: 'Day', MaxTokens: null, MaxCostUsd: 5 }); render(); },
@@ -1291,6 +1791,8 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       await refreshStatus();
       render();
       toast(persist ? (r.store ? `Applied and saved to ${r.store}.` : 'Applied (no store registered: not saved).') : 'Applied to the running router (not saved).', 'ok');
+      if (state.view === 'memory') loadMemory(true);
+      else state.memory = null;
     } catch (e) {
       state.errors = (e.data && e.data.errors) || [e.message];
       render();
@@ -1329,6 +1831,7 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       $('#save-bar').classList.toggle('hidden', !isDirty());
     }
     if (el.id === 'tester-prompt') state.tester.prompt = el.value;
+    if (el.id === 'memory-search') { state.memoryUi.search = el.value; if (graph) graph.redraw(); }
   });
 
   document.addEventListener('change', (ev) => {
@@ -1366,6 +1869,9 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
     } else if (el.id === 'activity-filter') { state.activityFilter = el.value; render(); }
     else if (el.id === 'auto-refresh') { state.autoRefresh = el.checked; }
     else if (el.id === 'tester-model') { state.tester.model = el.value; }
+    else if (el.id === 'memory-filter') { state.memoryUi.filter = el.value; if (graph) graph.redraw(); }
+    else if (el.id === 'memory-color') { state.memoryUi.colorBy = el.value; render(); }
+    else if (el.id === 'memory-missing') { state.memoryUi.showMissing = el.checked; if (graph) graph.redraw(); }
   });
 
   // Chart tooltips: any element with data-tip.
@@ -1385,7 +1891,7 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
   initTheme();
   const signOutBtn = $('#sign-out');
   if (signOutBtn) signOutBtn.addEventListener('click', async () => { await api('DELETE', '/session').catch(() => {}); location.reload(); });
-  loadAll().then(route).catch((e) => {
+  loadAll().then(() => { route(); connectStream(); }).catch((e) => {
     if (e.status === 401) { showSignIn(); return; }
     $('#view').innerHTML = `<div class="card"><h3>Could not reach the router API</h3><pre>${h(e.message)}</pre><p class="muted small">Is the dashboard mapped (<code>app.MapRouterDashboard()</code>) and are you browsing from the same machine?</p></div>`; });
   setInterval(() => { if (state.autoRefresh && document.visibilityState === 'visible' && !isDirty()) refreshStatus(); else if (state.autoRefresh && document.visibilityState === 'visible') { api('GET', '/status').then((s) => { state.status = s; renderChrome(); }).catch(() => {}); } }, 5000);

@@ -162,6 +162,11 @@ internal sealed partial class PromptDispatcher
             }
 
             _metrics.RecordAttempt(model.Name, result.Outcome);
+            if (result.Outcome != ConnectorOutcome.Skipped)
+            {
+                activity?.SentTo.Add(model.Name);
+            }
+
             switch (result.Outcome)
             {
                 case ConnectorOutcome.Completed:

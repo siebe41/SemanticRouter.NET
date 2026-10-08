@@ -10,7 +10,7 @@ A lightweight **semantic prompt router** for .NET 9 and ASP.NET Core. It sends e
 
 When a subscription hits its usage limit, the router cools that model down and moves on to the next-best one automatically.
 
-It speaks **the OpenAI chat-completions, OpenAI Responses and Anthropic protocols**, so you can point **Claude Code**, **Codex CLI**, the OpenAI SDKs or any chat tool at it and keep working exactly as before: the tool keeps its own model names and its agentic loop, and the router decides which backend answers each turn. A built-in **dashboard** shows live activity and lets you edit every setting, with hot reload.
+It speaks **the OpenAI chat-completions, OpenAI Responses and Anthropic protocols**, so you can point **Claude Code**, **Codex CLI**, the OpenAI SDKs or any chat tool at it and keep working exactly as before: the tool keeps its own model names and its agentic loop, and the router decides which backend answers each turn. A built-in **dashboard** shows live activity and lets you edit every setting, with hot reload, and its **memory map** shows which of your notes (an Obsidian vault, Claude Code's memory, an MCP memory graph) reach local models and which reach the cloud.
 
 ![The dashboard](docs/images/dashboard.png)
 
@@ -50,7 +50,7 @@ Three front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/mode
 - [Building and testing](#building-and-testing)
 - [Roadmap](#roadmap)
 
-Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md) (pointing Claude Code, Codex and SDKs at the router), [dashboard.md](docs/dashboard.md) (the UI and admin API), [routing-profiles.md](docs/routing-profiles.md) (policy per project, client or content), [providers.md](docs/providers.md) (connector setup per provider), [architecture.md](docs/architecture.md) (how a request flows, hot reload, extension points), [roadmap.md](docs/roadmap.md) (where the project is going) and [TERMS.md](docs/TERMS.md) (why the subscription CLI connectors are designed the way they are, and where the lines are).
+Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md) (pointing Claude Code, Codex and SDKs at the router), [dashboard.md](docs/dashboard.md) (the UI and admin API), [memory.md](docs/memory.md) (the memory map and what you share with which model), [routing-quality.md](docs/routing-quality.md) (evaluation sets, threshold calibration, route health and retry escalation), [routing-profiles.md](docs/routing-profiles.md) (policy per project, client or content), [providers.md](docs/providers.md) (connector setup per provider), [architecture.md](docs/architecture.md) (how a request flows, hot reload, extension points), [roadmap.md](docs/roadmap.md) (where the project is going) and [TERMS.md](docs/TERMS.md) (why the subscription CLI connectors are designed the way they are, and where the lines are).
 
 ---
 
@@ -58,6 +58,7 @@ Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md
 
 - **Two protocols in, every backend out.** OpenAI chat completions and the Anthropic Messages API are both accepted; requests and replies are translated between them, including streaming, images and tool calls, and passed through untouched when client and backend speak the same protocol.
 - **Built for agentic clients.** Point Claude Code or Codex at the router: their model names map through aliases, their tool-bearing turns go to tool-capable backends, the follow-up requests of a tool-calling turn stay on the model that started it, injected `<system-reminder>` blocks are ignored when classifying, and `count_tokens` is served locally. A CLI connector can even carry tools for them (*prompted tool calling*), so your Claude subscription can answer agentic turns.
+- **See what you share.** Point the router at an Obsidian vault, Claude Code's own memory (`~/.claude`) or the MCP memory server's graph. The dashboard draws them as a graph and, for every request, shows which notes were in it and which model received them, local or cloud, live. Note text never leaves the router. See [docs/memory.md](docs/memory.md).
 - **A dashboard with hot reload.** Live status, cooldowns, an activity log with every decision, a prompt tester, and an editor for routes, models, connectors, tiers, routing rules, embeddings and gateway settings. Apply changes to the running router, save them to a file, or revert. Themeable (Machine Dark by default).
 - **Named tiers.** The capability ladder is explicit configuration (`Tiers`), shown everywhere a tier appears, with a matrix of which routes need each rung and which models provide it.
 - **Capability-aware, cost-aware routing.** Routes declare the tier and capabilities an intent needs. Models declare their tier, capabilities, context window, cost and priority. The selector picks the cheapest model that qualifies, the most capable one, or follows your priority order, and clients can choose per request (`auto:cheapest`, `auto:best`, `auto:priority`).
@@ -277,7 +278,7 @@ app.MapRouterDashboard("/router");   // UI at /router, admin API under /router/a
 builder.Services.AddSemanticPromptRouting(config).UseConfigurationFile("semantic-router.json");   // optional: persist changes
 ```
 
-Overview (models and cooldowns, served-by and required-tier charts, a prompt tester), Activity (every routed request with its decision and outcome), and editors for Tiers, Routes, Models, Connectors, Routing rules, Embeddings and Gateway. **Validate** → **Apply** swaps a new runtime in atomically; **Apply & save** also writes the configuration file, which replaces the `SemanticRouter` section on the next start (secrets left empty are inherited from it). The admin API behind it takes the same JSON document, so a tested configuration can be promoted with one `PUT`. Themes are CSS token blocks; adding one is a block in `app.css` plus an entry in `app.js`. See [docs/dashboard.md](docs/dashboard.md).
+Overview (models and cooldowns, served-by and required-tier charts, a prompt tester), Live (a streaming view of clients, the router and models, with every decision as it happens), Activity (every routed request with its decision and outcome), Memory (your notes as a graph, coloured by which models they reached; see [docs/memory.md](docs/memory.md)), and editors for Tiers, Routes, Models, Connectors, Routing rules, Embeddings and Gateway. **Validate** → **Apply** swaps a new runtime in atomically; **Apply & save** also writes the configuration file, which replaces the `SemanticRouter` section on the next start (secrets left empty are inherited from it). The admin API behind it takes the same JSON document, so a tested configuration can be promoted with one `PUT`. Themes are CSS token blocks; adding one is a block in `app.css` plus an entry in `app.js`. See [docs/dashboard.md](docs/dashboard.md).
 
 ## Using it in your application
 
@@ -458,6 +459,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:LocalOnlyWhen:Secrets` / `FilePaths` | `false` / `false` | Keep a conversation local when it contains a credential or an absolute file path. |
 | `Dashboard:AdminToken`, `Dashboard:ReadOnlyToken` | | Tokens for remote dashboard access (16+ characters). See [docs/dashboard.md](docs/dashboard.md#access-and-security). |
 | `Dashboard:RequireLocalClient` | `true` | Loopback only. Turn off together with a token to reach the dashboard from other machines. |
+| `Memory:Sources[]` | none | `{ Name, Type, Path }`: an Obsidian vault or notes folder (`Markdown`), Claude Code's memory (`ClaudeCode`, default `~/.claude`) or the MCP memory server's graph (`KnowledgeGraph`). See [docs/memory.md](docs/memory.md) for the rest of the `Memory` keys. |
 
 ### Thresholds by embedding model
 
@@ -498,7 +500,7 @@ An embedding server adds a network round trip and its own inference time to ever
 
 ### Known limitations
 
-- **State is per process unless you persist it.** Cooldowns, tool-call affinity, activity, usage and configuration history live in memory unless `UseSqliteState` is used (the `semantic-router` tool does). Configuration applied through the dashboard is persisted only when a configuration file is registered.
+- **State is per process unless you persist it.** Cooldowns, tool-call affinity, activity, usage and configuration history live in memory unless `UseSqliteState` is used (the `semantic-router` tool does). The memory map's sharing counts always start at zero on a restart. Configuration applied through the dashboard is persisted only when a configuration file is registered.
 - **CLI connectors are text in, text out.** Without `ToolCalling: Prompted`, requests with `tools` skip them. With it, tool calls depend on the model following the format, every turn re-sends the whole context, and images are never supported. Multi-turn chats are flattened into a labelled transcript. Each request starts a new process, which adds start-up latency compared with an HTTP call.
 - **Cross-protocol translation keeps what has an equivalent.** Tools, tool results, images, system prompts, sampling parameters, stop sequences, reasoning requests and replies, structured output and serial tool calls are translated. Prompt-cache hints, documents, `logprobs`, hosted tools and server-side conversation state only survive on pass-through to a backend that speaks the client's protocol. Whatever is left out is named in `X-Prompt-Route-Dropped`; see the [compatibility table](docs/providers.md#what-survives-translation).
 - **Token counts are estimates.** Leave headroom in `ContextWindow`.
