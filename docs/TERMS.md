@@ -75,7 +75,18 @@ Each mechanism below exists because of a specific line in a vendor's terms. Thos
 - It never calls Copilot's internal APIs and never shares a token (rules 1 and 2).
 - Loopback-only, cooldowns and concurrency limits keep it personal and away from "bulk activity" or resale (rules 4–6).
 
-**Alternative:** GitHub's official **Copilot SDK** (NuGet `GitHub.Copilot.SDK`, generally available June 2026) is the supported way for an application to use a user's Copilot subscription. A connector built on it would fit the `IChatConnector` interface; it is not included yet.
+## GitHub Copilot SDK
+
+GitHub's official **Copilot SDK** (NuGet `GitHub.Copilot.SDK`, generally available June 2026) is the supported way for an application to use a person's Copilot subscription. The `Copilot` connector type is built on it (package `SemanticRouter.Connectors.Copilot`, included in the tool).
+
+**What it does better than the CLI preset:**
+- It uses the vendor's programmatic interface, not a CLI's text output. Rule 1 holds by construction: the SDK starts the official runtime and speaks its documented protocol.
+- Sign-in is the runtime's own (the CLI's stored login, `gh auth`, or a token in the runtime's environment). The router passes no credentials and reads none (rule 2).
+- Least privilege is enforced by the SDK rather than by flags: in `Empty` mode Copilot has no built-in tools at all. The client's tools are declared without handlers, so nothing runs inside Copilot (rule 7).
+- Limits come back as structured errors (`quota`, `rate_limit`, with a retry-after time). The router turns them into cooldowns and declines the SDK's automatic model switch (rule 5).
+- Sessions are deleted after each turn, so no conversation is kept by the runtime.
+
+**What still applies:** the same personal-use rules. `AllowRemoteClients` defaults to false for this connector too, `MaxConcurrency` and `MaxQueue` limit volume, and GitHub's Acceptable Use Policies quoted above apply unchanged: a Copilot seat must not become a service for other people (rules 4 and 6). For anything shared, use API-key connectors.
 
 ## OpenAI: Codex CLI
 

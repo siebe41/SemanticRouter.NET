@@ -135,6 +135,30 @@ The preset runs `copilot --prompt=<prompt> -s --no-color --stream off --no-ask-u
 - Copilot's valid model IDs change often; check `/model` in an interactive session. Copilot Free and Student plans can only use automatic model selection, so omit `Model` there.
 - Copilot is billed per token in AI credits. Cost `0` treats your monthly allowance as free; give it a higher `Priority` than other free models if you want to save credits.
 
+## GitHub Copilot SDK
+
+Uses your Copilot plan through GitHub's official [Copilot SDK](https://github.com/github/copilot-sdk) (`GitHub.Copilot.SDK`), the supported way for an application to use a person's Copilot subscription. Prefer it to the CLI preset above: replies stream, the client's tools are real tool calls instead of text in a prompt, usage is reported, and **Discover** lists the models your account can use. See [TERMS.md](TERMS.md#github-copilot-sdk).
+
+1. Install the Copilot CLI (`npm install -g @github/copilot`). The SDK runs it as its runtime.
+2. Sign in once with `copilot` and `/login`, or with `gh auth login`.
+3. Run `semantic-router doctor`. It starts the runtime and lists your models, or says what is missing.
+
+```jsonc
+"Connectors": { "copilot": { "Type": "Copilot", "MaxConcurrency": 2 } },
+"Models": [
+  { "Name": "copilot-sonnet", "Connector": "copilot", "Model": "claude-sonnet-4.5", "Tier": 4,
+    "Capabilities": [ "chat", "code", "tools" ], "Priority": 2 }
+]
+```
+
+- **Package.** `SemanticRouter.Connectors.Copilot` (`.AddCopilotConnector()`), so the core libraries keep their dependencies. The `semantic-router` tool includes it. Without the package, a `Copilot` connector skips every request and says why.
+- **Runtime.** `Executable` is the `copilot` CLI (default: `copilot` on `PATH`). `HomeDirectory` is its `COPILOT_HOME` (default `~/.copilot`, so the CLI's login is reused). One runtime process serves every request and starts on first use. Applying a new configuration keeps it.
+- **What Copilot is allowed to do.** The SDK runs in its `Empty` mode, so none of Copilot's own tools exist (no shell, file edits or web access). Only the client's tools are declared, without handlers. When the model calls one, the call goes back to the client, which runs it and sends the result with its next request.
+- **History.** The SDK cannot be given earlier assistant turns. Each request runs in a fresh session with the conversation rendered as a transcript, the same way the CLI connectors do it. The session is deleted when the turn ends.
+- **Failures.** Quota and rate limits (`session.error` of type `quota` or `rate_limit`, HTTP 402/429) cool the model down. The runtime's retry-after time is honoured. An exhausted premium-request allowance cools only that model, because Copilot's included models keep working. Weekly and global rate limits cool every model on the connector. A missing sign-in fails over with a hint. The SDK's automatic model switching is declined, so the router's own failover decides.
+- **Not carried.** Images, and features the [translation table](#what-survives-translation) lists for CLIs. Reasoning is streamed when the client asks for it.
+- The CLI preset above keeps working and remains the fallback (for example on a machine where only the native `copilot` binary is installed and the SDK's protocol does not match its version).
+
 ## OpenAI Codex CLI
 
 Uses your ChatGPT plan. See [TERMS.md](TERMS.md#openai-codex-cli).
@@ -264,6 +288,7 @@ Agentic clients (Claude Code, Codex CLI, agent frameworks) send every turn with 
 | `OpenAICompatible` | Passed through (OpenAI clients) or translated from the Anthropic format: tool definitions, `tool_use`/`tool_calls` and tool results map 1:1, streaming included. Declare `tools` on models whose server supports function calling (LM Studio and Ollama with `qwen3-coder` or similar, vLLM, OpenRouter, OpenAI, Gemini). |
 | `Anthropic` | Passed through (Anthropic clients) or translated from the OpenAI and Responses formats. |
 | `Responses` | Passed through (Responses clients) or translated from the chat-completions and Anthropic formats. |
+| `Copilot` | Native: the tools are declared to the Copilot SDK without handlers, and each call the model makes is returned to the client as a structured tool call. Declare `tools` on the model. |
 | `Cli` with `ToolCalling: None` (default) | Skipped; the request falls through to the next candidate. |
 | `Cli` with `ToolCalling: Prompted` | The tools are described in the system prompt with a fixed call format; the CLI's reply is parsed for fenced `tool_call` blocks, which become structured tool calls for the client. Earlier tool calls and results are rendered into the transcript of the next run. Declare `tools` on the model to make it a candidate. |
 

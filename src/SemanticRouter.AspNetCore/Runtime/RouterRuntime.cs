@@ -365,7 +365,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             _services.GetService<IToolCallAffinity>(),
             _services.GetRequiredService<ILoggerFactory>(),
             redactor,
-            _services.GetService<PromptRouterMetrics>());
+            _services.GetService<PromptRouterMetrics>(),
+            _services.GetServices<IChatConnectorFactory>());
 
         return new RouterRuntime
         {

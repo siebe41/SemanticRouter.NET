@@ -299,6 +299,19 @@ public static class RouterDashboardEndpoints
                 return Results.Problem($"Connector '{name}' is not configured.", statusCode: StatusCodes.Status404NotFound);
             }
 
+            if (provider.Current.Connectors.TryGet(name, out IChatConnector? live) && live is IModelDiscovery discovery)
+            {
+                try
+                {
+                    IReadOnlyList<string> found = await discovery.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+                    return Results.Json(new DiscoverResponse(found, found.Count == 0 ? "The provider listed no models." : null), ApiJson);
+                }
+                catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException or TimeoutException)
+                {
+                    return Results.Json(new DiscoverResponse([], provider.Current.Redactor.Redact(ex.Message)), ApiJson);
+                }
+            }
+
             if (connector.Type == ConnectorType.Cli)
             {
                 return Results.Json(new DiscoverResponse(CliModelHints(connector.Preset), "CLI presets accept the vendor's model aliases; these are common values."), ApiJson);
@@ -488,7 +501,7 @@ public static class RouterDashboardEndpoints
                 config.Connectors.TryGetValue(m.Connector, out ConnectorOptions? c) ? c.Type.ToString() : null)).ToArray(),
             config.Connectors.Select(kv => new ConnectorStatus(
                 kv.Key, kv.Value.Type.ToString(), kv.Value.Type == ConnectorType.Cli ? kv.Value.Preset.ToString() : null,
-                kv.Value.Type == ConnectorType.Cli ? kv.Value.Executable : kv.Value.BaseAddress?.ToString(),
+                kv.Value.Type is ConnectorType.Cli or ConnectorType.Copilot ? kv.Value.Executable : kv.Value.BaseAddress?.ToString(),
                 kv.Value.Type == ConnectorType.Cli ? kv.Value.ToolCalling.ToString() : "Native",
                 !string.IsNullOrEmpty(runtime.Resolved.Connectors.TryGetValue(kv.Key, out ConnectorOptions? resolved) ? resolved.ApiKey : null),
                 config.Models.Count(m => string.Equals(m.Connector, kv.Key, StringComparison.OrdinalIgnoreCase)))).ToArray(),

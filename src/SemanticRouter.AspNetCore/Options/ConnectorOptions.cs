@@ -26,6 +26,13 @@ public enum ConnectorType
     /// as Codex CLI pass through untouched (hosted tools and reasoning items included); other clients are translated.
     /// </summary>
     Responses = 3,
+
+    /// <summary>
+    /// GitHub Copilot through GitHub's official Copilot SDK, on your own Copilot sign-in: native streaming, tool calls
+    /// and model discovery. Needs the <c>SemanticRouter.Connectors.Copilot</c> package (<c>.AddCopilotConnector()</c>;
+    /// the <c>semantic-router</c> tool includes it) and the <c>copilot</c> CLI, which the SDK runs as its runtime.
+    /// </summary>
+    Copilot = 4,
 }
 
 /// <summary>How a CLI connector handles requests that offer tools (agentic clients such as Claude Code).</summary>
@@ -176,6 +183,12 @@ public sealed class ConnectorOptions
     public int? MaxQueue { get; set; }
 
     /// <summary>
+    /// Copilot only: the Copilot runtime's home directory (<c>COPILOT_HOME</c>): where its own sign-in lives when it is not
+    /// in the system keychain. Default <c>~/.copilot</c>, the same as the <c>copilot</c> CLI, so its login is reused.
+    /// </summary>
+    public string? HomeDirectory { get; set; }
+
+    /// <summary>
     /// CLI: serve requests from other machines. Default <see langword="false"/>: a CLI connector signed in with your
     /// personal subscription only answers requests that originate on this machine, and remote callers fall through to
     /// the next model. See <c>docs/TERMS.md</c> before changing this.
@@ -191,7 +204,7 @@ public sealed class ConnectorOptions
     public TimeSpan Timeout { get; set; }
 
     internal TimeSpan EffectiveTimeout =>
-        Timeout > TimeSpan.Zero ? Timeout : Type == ConnectorType.Cli ? TimeSpan.FromMinutes(5) : TimeSpan.FromSeconds(100);
+        Timeout > TimeSpan.Zero ? Timeout : Type is ConnectorType.Cli or ConnectorType.Copilot ? TimeSpan.FromMinutes(5) : TimeSpan.FromSeconds(100);
 
     /// <summary>The wire protocol an HTTP connector speaks.</summary>
     internal ChatProtocol Protocol => Type switch

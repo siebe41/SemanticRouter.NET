@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>SemanticRouter.Connectors.Copilot</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>GitHub Copilot connector for SemanticRouter, built on GitHub's official Copilot SDK: routes prompts to your Copilot subscription with native streaming, tool calls and model discovery.</Description>
+    <PackageTags>$(PackageTags);copilot;github-copilot</PackageTags>
+    <!-- The SDK's pending-tool and permission APIs are marked experimental (GHCP001). -->
+    <NoWarn>$(NoWarn);GHCP001</NoWarn>
+    <!--
+      The SDK's build targets download a Copilot runtime for the build machine's platform only. A package (and the
+      RID-agnostic dotnet tool) must not carry one platform's binary, so the connector runs the user's installed
+      `copilot` CLI instead (ConnectorOptions.Executable, or COPILOT_CLI_PATH).
+    -->
+    <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="GitHub.Copilot.SDK" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SemanticRouter.AspNetCore\SemanticRouter.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SemanticRouter.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -46,7 +46,9 @@ internal static class ChatTranscript
     /// Renders structured turns, including tool calls and results in the <see cref="PromptedToolCalls"/> format, and
     /// appends the tool instructions to the system prompt when the request offers tools.
     /// </summary>
-    public static (string? System, string Prompt) Render(ChatCompletionRequest request)
+    /// <param name="request">The parsed request.</param>
+    /// <param name="describeTools">Append the prompted tool-calling instructions (off for backends with native tools).</param>
+    public static (string? System, string Prompt) Render(ChatCompletionRequest request, bool describeTools = true)
     {
         if (request.Tools.Count == 0 && !request.Turns.Any(t => t.Blocks.Any(b => b is ToolUseBlock or ToolResultBlock)))
         {
@@ -93,7 +95,7 @@ internal static class ChatTranscript
             }
         }
 
-        if (request.Tools.Count > 0)
+        if (describeTools && request.Tools.Count > 0)
         {
             AppendSystem(system, PromptedToolCalls.RenderInstructions(request.Tools, request.ToolChoice));
         }

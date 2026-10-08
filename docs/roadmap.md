@@ -23,7 +23,9 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - It knows who is asking: routing profiles per client, project or tool set narrow the models a request may use, and a conversation that contains a credential can be kept on this machine.
 
-What it is not yet: fast on subscription CLIs for agentic turns, or connected through the vendors' own SDKs. Those are next.
+- Prompted CLI turns stream their text and survive near-miss and broken tool calls, and Copilot is reachable through GitHub's official SDK with native tool calls.
+
+What it is not yet: tested end to end in the browser on every change, or themeable without editing its files. The dashboard work in #15 is next.
 
 ## What done looks like
 
