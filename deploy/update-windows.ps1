@@ -45,7 +45,8 @@ param(
     # Do not start the desktop app at the end.
     [switch] $NoLaunch,
 
-    # Where the desktop app is installed. Start at sign-in points here, so keep it the same between updates.
+    # Where the desktop app is installed. Start at sign-in points here, so keep it the same between updates. The folder
+    # is replaced on every run, so it must hold only the app: the script refuses a folder with anything else in it.
     [string] $DesktopDir = (Join-Path $env:LOCALAPPDATA 'Programs\SemanticRouter')
 )
 
@@ -152,9 +153,16 @@ try {
         Invoke-Checked 'dotnet pack' {
             dotnet pack src/SemanticRouter.Host -c Release -o $artifacts "-p:Version=$version" --nologo
         }
-        $verb = if (Test-ToolInstalled) { 'update' } else { 'install' }
-        Invoke-Checked "dotnet tool $verb" {
-            dotnet tool $verb --global SemanticRouter.Host --add-source $artifacts --version $version
+        # --allow-downgrade: always take this build, even over a higher version installed earlier (say, by hand).
+        if (Test-ToolInstalled) {
+            Invoke-Checked 'dotnet tool update' {
+                dotnet tool update --global SemanticRouter.Host --add-source $artifacts --version $version --allow-downgrade
+            }
+        }
+        else {
+            Invoke-Checked 'dotnet tool install' {
+                dotnet tool install --global SemanticRouter.Host --add-source $artifacts --version $version
+            }
         }
         $router = Get-SemanticRouter
         if (-not $router) {
@@ -178,7 +186,15 @@ try {
     if (-not $SkipDesktop) {
         Write-Step "Publishing the desktop app to $DesktopDir"
         # Replace the whole folder so files from older builds do not linger. Settings live in %APPDATA%, not here.
-        if (Test-Path $DesktopDir) { Remove-Item $DesktopDir -Recurse -Force }
+        # Only a folder that holds the app (or nothing) is replaced, so a mistyped -DesktopDir cannot delete anything else.
+        if (Test-Path $DesktopDir) {
+            $isApp = Test-Path (Join-Path $DesktopDir 'SemanticRouter.exe')
+            $isEmpty = -not (Get-ChildItem -LiteralPath $DesktopDir -Force | Select-Object -First 1)
+            if (-not ($isApp -or $isEmpty)) {
+                throw "$DesktopDir is not a SemanticRouter install (no SemanticRouter.exe) and is not empty; not replacing it. Pick another -DesktopDir."
+            }
+            Remove-Item -LiteralPath $DesktopDir -Recurse -Force
+        }
         Invoke-Checked 'dotnet publish' {
             dotnet publish src/SemanticRouter.Desktop -c Release -r $runtime --self-contained `
                 "-p:Version=$version" -p:DebugType=none -o $DesktopDir --nologo
