@@ -38,6 +38,9 @@ public sealed record PromptClassificationResult
     /// <summary>Wall-clock time spent classifying, including the embedding call.</summary>
     public TimeSpan Elapsed { get; init; }
 
+    /// <summary>The decision was reused from the classification cache: no embedding call was made.</summary>
+    public bool Cached { get; init; }
+
     /// <summary><see langword="true"/> when the result is attributed to a configured route.</summary>
     public bool IsRouteMatch => RouteName is not null;
 

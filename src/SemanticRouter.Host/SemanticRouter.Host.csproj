@@ -19,6 +19,7 @@
   <ItemGroup>
     <ProjectReference Include="..\SemanticRouter.AspNetCore\SemanticRouter.AspNetCore.csproj" />
     <ProjectReference Include="..\SemanticRouter.Storage.Sqlite\SemanticRouter.Storage.Sqlite.csproj" />
+    <ProjectReference Include="..\SemanticRouter.Embeddings.Onnx\SemanticRouter.Embeddings.Onnx.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,5 +32,13 @@
   <ItemGroup>
     <InternalsVisibleTo Include="SemanticRouter.Tests" />
   </ItemGroup>
+
+  <!-- ONNX Runtime ships Android and iOS archives (110 MB) that a desktop or server tool never loads. -->
+  <Target Name="DropMobileOnnxRuntimeAssets" AfterTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+                                    Condition="'%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'android' Or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'ios'" />
+    </ItemGroup>
+  </Target>
 
 </Project>

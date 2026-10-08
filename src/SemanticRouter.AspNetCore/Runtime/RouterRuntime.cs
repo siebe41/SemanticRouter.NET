@@ -414,7 +414,10 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         EmbeddingProviderKind.OpenAICompatible => new OpenAICompatibleEmbeddingProvider(
             () => _services.GetRequiredService<IHttpClientFactory>().CreateClient(SemanticRouterServiceCollectionExtensions.EmbeddingsClientName),
             options),
-        _ => throw new InvalidOperationException($"Unknown embedding provider '{options.Provider}'."),
+        _ => _services.GetServices<IEmbeddingProviderFactory>().FirstOrDefault(f => f.Kind == options.Provider)?.Create(options)
+             ?? new UnavailableEmbeddingProvider(options.Provider == EmbeddingProviderKind.Onnx
+                 ? "The Onnx embedding provider needs the SemanticRouter.Embeddings.Onnx package: add it and call builder.UseOnnxEmbeddings() (the semantic-router tool includes it)."
+                 : $"No embedding provider is registered for '{options.Provider}'."),
     };
 
     private void ScheduleWarmUp(RouterRuntime runtime)
@@ -506,4 +509,14 @@ internal sealed class RuntimeEmbeddingProviderFacade(RouterRuntimeProvider runti
 internal sealed class RuntimeExtractorFacade(RouterRuntimeProvider runtime) : IPromptExtractor, IRuntimeFacade
 {
     public string? ExtractPrompt(HttpContext context, System.Text.Json.JsonElement body) => runtime.Current.Extractor.ExtractPrompt(context, body);
+}
+
+/// <summary>Stands in for a provider that cannot be built, so the configuration still applies and the reason shows up on the first use (the warm-up).</summary>
+internal sealed class UnavailableEmbeddingProvider(string reason) : IEmbeddingProvider
+{
+    public ValueTask<ReadOnlyMemory<float>> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(reason);
+
+    public ValueTask<IReadOnlyList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException(reason);
 }

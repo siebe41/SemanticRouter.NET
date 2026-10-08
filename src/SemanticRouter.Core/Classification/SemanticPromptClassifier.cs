@@ -20,19 +20,23 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
     private readonly RouteDefinition[] _routes;
     private readonly bool _hasLocalOnlyRoutes;
     private readonly Lock _indexGate = new();
+    private readonly ClassificationCache? _cache;
     private Task<SemanticRouteIndex>? _indexTask;
+    private RouteIndexStatistics? _indexStatistics;
 
     /// <summary>Creates a classifier.</summary>
     /// <param name="embeddingProvider">Embeds utterances and prompts.</param>
     /// <param name="options">Routes and thresholds. Validated eagerly.</param>
     /// <param name="complexityAnalyzer">Defaults to <see cref="HeuristicComplexityAnalyzer"/>.</param>
     /// <param name="routeSelector">Defaults to <see cref="DefaultRouteSelector"/>.</param>
+    /// <param name="time">Clock for the classification cache. Defaults to the system clock.</param>
     /// <exception cref="InvalidOperationException"><paramref name="options"/> is invalid.</exception>
     public SemanticPromptClassifier(
         IEmbeddingProvider embeddingProvider,
         SemanticRouterOptions options,
         IComplexityAnalyzer? complexityAnalyzer = null,
-        IRouteSelector? routeSelector = null)
+        IRouteSelector? routeSelector = null,
+        TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(embeddingProvider);
         ArgumentNullException.ThrowIfNull(options);
@@ -44,7 +48,14 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
         _routeSelector = routeSelector ?? new DefaultRouteSelector(options);
         _routes = options.Routes.ToArray();
         _hasLocalOnlyRoutes = _routes.Any(r => r.LocalOnly);
+        _cache = options.ClassificationCache.Enabled ? new ClassificationCache(options.ClassificationCache, time ?? TimeProvider.System) : null;
     }
+
+    /// <summary>Hits and misses of the classification cache, or <see langword="null"/> when it is off.</summary>
+    public ClassificationCacheStatistics? CacheStatistics => _cache?.Statistics;
+
+    /// <summary>The route index once built: utterances embedded and how long it took. <see langword="null"/> before.</summary>
+    public RouteIndexStatistics? IndexStatistics => Volatile.Read(ref _indexStatistics);
 
     /// <inheritdoc />
     public async ValueTask WarmUpAsync(CancellationToken cancellationToken = default) =>
@@ -62,13 +73,26 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
             return PromptClassificationResult.Bypass(_options.FallbackTier, RoutingReason.EmptyPrompt);
         }
 
+        // Decisions depend only on the prompt and this configuration, so a recent one can be reused as it is.
+        string? key = _cache is null ? null : ClassificationCache.KeyOf(prompt);
+        if (key is not null && _cache!.TryGet(key, out PromptClassificationResult cached))
+        {
+            return cached with { Cached = true, Elapsed = Stopwatch.GetElapsedTime(started) };
+        }
+
         ComplexityAnalysis complexity = _complexityAnalyzer.Analyze(prompt);
 
         if (!_hasLocalOnlyRoutes && complexity.Score >= _options.ComplexityShortCircuitThreshold)
         {
             int tier = _options.TierForComplexity(complexity.Score) is > 0 and var t ? t : _options.FallbackTier;
-            return PromptClassificationResult.Bypass(
+            PromptClassificationResult shortCircuit = PromptClassificationResult.Bypass(
                 tier, RoutingReason.ComplexityShortCircuit, complexity, Stopwatch.GetElapsedTime(started));
+            if (key is not null)
+            {
+                _cache!.Add(key, shortCircuit);
+            }
+
+            return shortCircuit;
         }
 
         RouteScore[] ranked = [];
@@ -82,7 +106,7 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
 
         RouteDecision decision = _routeSelector.SelectRoute(ranked, complexity);
 
-        return new PromptClassificationResult
+        var result = new PromptClassificationResult
         {
             RequiredTier = decision.RequiredTier,
             Reason = decision.Reason,
@@ -94,6 +118,12 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
             TopScores = ranked.Length <= _options.MaxReportedScores ? ranked : ranked[.._options.MaxReportedScores],
             Elapsed = Stopwatch.GetElapsedTime(started),
         };
+        if (key is not null)
+        {
+            _cache!.Add(key, result);
+        }
+
+        return result;
     }
 
     private Task<SemanticRouteIndex> GetIndexAsync(CancellationToken cancellationToken)
@@ -106,8 +136,7 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
                 if (_indexTask is null || _indexTask.IsFaulted || _indexTask.IsCanceled)
                 {
                     // Build without the caller's token: one aborted request must not poison the shared index.
-                    _indexTask = SemanticRouteIndex.BuildAsync(
-                        _routes, _embeddingProvider, _options.ScoringStrategy, CancellationToken.None);
+                    _indexTask = BuildIndexAsync();
                 }
 
                 task = _indexTask;
@@ -116,4 +145,20 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
 
         return task.IsCompletedSuccessfully ? task : task.WaitAsync(cancellationToken);
     }
+
+    private async Task<SemanticRouteIndex> BuildIndexAsync()
+    {
+        long started = Stopwatch.GetTimestamp();
+        SemanticRouteIndex index = await SemanticRouteIndex.BuildAsync(
+            _routes, _embeddingProvider, _options.ScoringStrategy, CancellationToken.None).ConfigureAwait(false);
+        Volatile.Write(ref _indexStatistics, new RouteIndexStatistics(
+            _routes.Sum(r => r.Utterances.Count(u => !string.IsNullOrWhiteSpace(u))), index.Dimensions, Stopwatch.GetElapsedTime(started)));
+        return index;
+    }
 }
+
+/// <summary>The route index of a <see cref="SemanticPromptClassifier"/>.</summary>
+/// <param name="Utterances">Utterances embedded.</param>
+/// <param name="Dimensions">Size of the vectors.</param>
+/// <param name="BuildTime">How long embedding the utterances took.</param>
+public sealed record RouteIndexStatistics(int Utterances, int Dimensions, TimeSpan BuildTime);

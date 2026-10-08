@@ -115,8 +115,8 @@ public static class RouterDashboardEndpoints
             })
             .WithMetadata(DashboardAnonymousMetadata.Instance);
 
-        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets) =>
-            Results.Json(BuildStatus(provider, health, activity, budgets), ApiJson));
+        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories) =>
+            Results.Json(BuildStatus(provider, health, activity, budgets, factories), ApiJson));
 
         api.MapGet("/config", (RouterRuntimeProvider provider) =>
         {
@@ -447,7 +447,8 @@ public static class RouterDashboardEndpoints
         return Results.Content(envelope.ToJsonString(), "application/json");
     }
 
-    private static StatusResponse BuildStatus(RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets)
+    private static StatusResponse BuildStatus(
+        RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories)
     {
         RouterRuntime runtime = provider.Current;
         RouterConfiguration config = runtime.Configuration;
@@ -464,7 +465,14 @@ public static class RouterDashboardEndpoints
             provider.Secrets?.Location,
             runtime.Warnings,
             (typeof(RouterDashboardEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "dev").Split('+')[0],
-            new EmbeddingsStatus(config.Embeddings.Provider.ToString(), config.Embeddings.Model, config.Embeddings.Endpoint?.ToString(), config.Embeddings.Dimensions),
+            new EmbeddingsStatus(
+                config.Embeddings.Provider.ToString(), config.Embeddings.Model, config.Embeddings.Endpoint?.ToString(), config.Embeddings.Dimensions,
+                [nameof(EmbeddingProviderKind.Hashing), nameof(EmbeddingProviderKind.OpenAICompatible), .. factories.Select(f => f.Kind.ToString()).Distinct()],
+                factories.SelectMany(f => f.Models.Select(m => new EmbeddingModelStatus(f.Kind.ToString(), m.Name, m.Description, m.SuggestedThreshold, m.DownloadBytes))).ToArray(),
+                (runtime.Classifier as SemanticPromptClassifier)?.IndexStatistics is { } index
+                    ? new IndexStatus(index.Utterances, index.Dimensions, Math.Round(index.BuildTime.TotalMilliseconds, 1))
+                    : null,
+                (runtime.Classifier as SemanticPromptClassifier)?.CacheStatistics),
             config.EffectiveTiers.Select(t => new TierStatus(t.Level, t.Name, t.Description)).ToArray(),
             config.Models.Select(m => new ModelStatus(
                 m.Name, m.Connector, m.Model, m.Tier, m.Capabilities.ToArray(), m.IsLocal, m.Enabled, m.Priority, m.ContextWindow,
@@ -562,7 +570,15 @@ public static class RouterDashboardEndpoints
         IReadOnlyList<BudgetStatus> Budgets);
 
     /// <summary>Embedding provider in use.</summary>
-    public sealed record EmbeddingsStatus(string Provider, string? Model, string? Endpoint, int Dimensions);
+    public sealed record EmbeddingsStatus(
+        string Provider, string? Model, string? Endpoint, int Dimensions, IReadOnlyList<string> Available, IReadOnlyList<EmbeddingModelStatus> Models,
+        IndexStatus? Index, ClassificationCacheStatistics? Cache);
+
+    /// <summary>The route index of the running configuration: utterances embedded and how long the warm-up took.</summary>
+    public sealed record IndexStatus(int Utterances, int Dimensions, double BuildMilliseconds);
+
+    /// <summary>A model a provider kind offers by name.</summary>
+    public sealed record EmbeddingModelStatus(string Provider, string Name, string Description, float SuggestedThreshold, long DownloadBytes);
 
     /// <summary>A tier on the ladder.</summary>
     public sealed record TierStatus(int Level, string Name, string? Description);

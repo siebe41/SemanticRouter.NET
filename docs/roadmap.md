@@ -19,7 +19,9 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - Routing can be measured and tuned on your own prompts: evaluation sets, threshold calibration, route health, labelling activity entries, and optional retry escalation.
 
-What it is not yet: a router that needs no embedding server. That gap drives the plan.
+- It routes with a real embedding model and no server: an ONNX model runs in-process and is downloaded on first use, and recent decisions are cached.
+
+What it is not yet: a router that knows who is asking. Routing profiles are next.
 
 ## What done looks like
 

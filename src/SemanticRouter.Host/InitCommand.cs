@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Embeddings.Onnx;
 
 namespace SemanticRouter.Host;
 
@@ -132,7 +133,17 @@ internal static class InitCommand
             document.Embeddings.Endpoint = embeddingEndpoint;
             document.Embeddings.Model = embeddingModel;
             document.DefaultSimilarityThreshold = embeddingModel.Contains("mxbai", StringComparison.OrdinalIgnoreCase) ? 0.68f : 0.62f;
-            notes.Add($"embeddings: '{embeddingModel}' on {embeddingEndpoint}; similarity threshold {document.DefaultSimilarityThreshold:0.00} (calibrate with the dashboard's prompt tester).");
+            notes.Add($"embeddings: '{embeddingModel}' on {embeddingEndpoint}; similarity threshold {document.DefaultSimilarityThreshold:0.00} (calibrate on the dashboard's Evaluate page).");
+        }
+        else
+        {
+            // No embedding server: a small model in this process beats lexical hashing.
+            OnnxModelInfo model = OnnxEmbeddingModels.Find(OnnxEmbeddingModels.DefaultModel)!;
+            document.Embeddings.Provider = EmbeddingProviderKind.Onnx;
+            document.Embeddings.Model = model.Name;
+            document.DefaultSimilarityThreshold = model.SuggestedThreshold;
+            notes.Add($"embeddings: no embedding server found, so '{model.Name}' runs in this process ({Math.Round(model.ModelBytes / 1e6):0} MB, downloaded on first start); " +
+                      $"similarity threshold {model.SuggestedThreshold:0.00} (calibrate on the dashboard's Evaluate page).");
         }
 
         AddCli(document, probes, notes, "claude", "claude-cli", CliPreset.ClaudeCode, maxConcurrency: 2, enabled: true,

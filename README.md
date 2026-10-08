@@ -177,7 +177,7 @@ The fastest way to use the router is the `semantic-router` .NET tool. It needs n
 
 ```bash
 dotnet tool install -g SemanticRouter.Host
-semantic-router init      # finds LM Studio / Ollama models and the claude, codex and copilot CLIs
+semantic-router init      # finds LM Studio / Ollama models and the claude, codex and copilot CLIs; no server needed for embeddings
 semantic-router doctor    # checks every connector without calling a model
 semantic-router           # http://localhost:5080, dashboard at /router
 ```
@@ -361,6 +361,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `ComplexityShortCircuitThreshold` | `0.9` | Skip embedding for obviously hard prompts. Set above 1 to disable. |
 | `AmbiguityMargin` | `0.02` | Near-tied routes contribute their tier. `0` disables. |
 | `ScoringStrategy` | `MaxSimilarity` | `MaxSimilarity` or `Centroid`. |
+| `ClassificationCache:Enabled` / `MaxEntries` / `MaxAge` | `true` / `2048` / `00:10:00` | Reuse a recent decision for the same prompt (whitespace-normalised) instead of embedding it again. In memory, per configuration version. |
 | `Complexity:*` | | `TokenSaturation`, `{Length,Code,Structure,Reasoning}Weight`, `ReasoningKeywords`, … |
 | `Selection:Strategy` | `CheapestCapable` | `CheapestCapable`, `MostCapable` or `Priority`. |
 | `Selection:AllowBelowRequiredTier` | `true` | Degrade to the best available model instead of failing. |
@@ -420,7 +421,8 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 
 | Key | Default | Description |
 |---|---|---|
-| `Embeddings:Provider` | `Hashing` | `Hashing` (dev only) or `OpenAICompatible` (`Endpoint`, `Model`, `ApiKey`, `RequestPath`, `MaxBatchSize`, `Timeout`). |
+| `Embeddings:Provider` | `Hashing` | `Hashing` (dev only), `Onnx` (in-process model, see below) or `OpenAICompatible` (`Endpoint`, `Model`, `ApiKey`, `RequestPath`, `MaxBatchSize`, `Timeout`). |
+| `Embeddings:Model` / `ModelPath` / `Pooling` | | For `Onnx`: `all-MiniLM-L6-v2` (default) or `bge-small-en-v1.5`, downloaded on first use; or `ModelPath`, a directory with your own `model.onnx` and `vocab.txt`, with `Pooling` `Mean` or `Cls`. Needs the `SemanticRouter.Embeddings.Onnx` package (`.AddOnnxEmbeddings()` / `.UseOnnxEmbeddings()`); the tool includes it. |
 | `Embeddings:WarmUpOnStartup` | `true` | Embed utterances in the background at startup. |
 | `Middleware:Mode` | `Annotate` | `Annotate` or `Dispatch`. |
 | `Middleware:PathPrefixes[]` | `[]` (all JSON POSTs) | Paths carrying OpenAI chat-completions bodies. Required in Dispatch mode. |
@@ -448,13 +450,27 @@ Similarity scales differ between embedding models. These are starting points. Ca
 | Embedding model | Starting `DefaultSimilarityThreshold` |
 |---|---|
 | `HashingEmbeddingProvider` (lexical, dev only) | 0.25–0.35 (sample: 0.30) |
+| ONNX `all-MiniLM-L6-v2` (in-process) | 0.40 (best on the sample set: 0.22–0.45) |
+| ONNX `bge-small-en-v1.5` (in-process) | 0.60 (best on the sample set: 0.54–0.65) |
 | `nomic-embed-text` | 0.60–0.70 |
 | `mxbai-embed-large` | 0.65–0.75 |
 | OpenAI `text-embedding-3-*` | 0.40–0.55 |
 
+### Classification latency
+
+Classifying a prompt is one embedding plus a dot product per utterance. Measured on the starting routes (47 utterances) and the 30-prompt sample set, with the classification cache off so every prompt is embedded. The machine had 4 logical CPUs and ran Linux. Reproduce with `dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks`; add `-- --remote http://localhost:11434 nomic-embed-text` to measure an embedding server.
+
+| Embeddings | Index warm-up | Classify p50 | Classify p95 | Right on the sample set |
+|---|---|---|---|---|
+| Hashing (lexical) | 9 ms | 0.04 ms | 0.10 ms | 28/30 at 0.30 |
+| ONNX `all-MiniLM-L6-v2` | 107 ms | 1.6 ms | 2.1 ms | 29/30 at 0.40 |
+| ONNX `bge-small-en-v1.5` | 167 ms | 3.0 ms | 4.0 ms | 29/30 at 0.60 |
+
+An embedding server adds a network round trip and its own inference time to every prompt. A prompt the cache has seen recently costs no embedding at all.
+
 ## Production guidance
 
-- **Use a real embedding model.** The hashing provider only captures shared words.
+- **Use a real embedding model.** The hashing provider only captures shared words. `Onnx` runs one inside the router with no server; an OpenAI-compatible server (LM Studio, Ollama) works too.
 - **Secrets.** Keep API keys in user-secrets, environment variables (`SemanticRouter__Connectors__openai__ApiKey`) or a vault, never in `appsettings.json`. Any key, header or gateway key can be a reference instead of a value: `"${env:OPENAI_API_KEY}"`. With `.UseSecretFile()`, keys typed into the dashboard are encrypted into a separate file and the configuration keeps a `${secret:…}` reference. Keys are redacted from error details, relayed upstream errors, activity entries and logs.
 - **Bind to localhost** when the router fronts your personal subscriptions (the sample does). CLI connectors refuse non-loopback clients anyway, unless `AllowRemoteClients` is set. Behind a reverse proxy, every request appears to come from the proxy, so keep the proxy local too.
 - **Pipeline placement.** Call `UsePromptRouter()` after authentication and rate limiting.
@@ -478,7 +494,7 @@ Similarity scales differ between embedding models. These are starting points. Ca
 |---|---|
 | Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. |
 | Keep configuration somewhere other than a file | Implement `IRouterConfigurationStore` and call `.UseConfigurationStore<T>()`. |
-| Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. |
+| Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. For an in-process model: `.UseOnnxEmbeddings()` from `SemanticRouter.Embeddings.Onnx`. To make a new kind selectable in configuration, register an `IEmbeddingProviderFactory`. |
 | Change how requirements are derived | Implement `IRouteSelector` or `IComplexityAnalyzer`. |
 | Change how models are ranked (budgets, time of day) | Implement `IModelSelector`. |
 | Persist cooldowns, affinity, activity and history | `.UseSqliteState("semantic-router.db")` from `SemanticRouter.Storage.Sqlite`, or implement `ICooldownStore`, `IToolCallAffinity`, `IRoutingActivityStore`, `IRouterConfigurationHistory`. See [docs/architecture.md](docs/architecture.md#durable-state). |

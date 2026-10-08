@@ -332,7 +332,9 @@
             <tr><th>Configuration</th><td>v${s.version} from <b>${h(s.source)}</b> · ${h(when(s.createdAt))}</td></tr>
             <tr><th>Store</th><td class="mono small">${s.store ? h(s.store) : '<span class="muted">none (changes apply in memory only)</span>'}</td></tr>
             <tr><th>Embeddings</th><td>${h(s.embeddings.provider)} ${s.embeddings.model ? '· <span class="mono">' + h(s.embeddings.model) + '</span>' : ''} ${s.embeddings.endpoint ? '<span class="faint small">' + h(s.embeddings.endpoint) + '</span>' : ''}
-              ${s.warmedUp ? '<span class="badge ok">index ready</span>' : (s.warmUpError ? `<span class="badge danger" title="${h(s.warmUpError)}">warm-up failed</span>` : '<span class="badge info">warming up</span>')}</td></tr>
+              ${s.warmedUp ? '<span class="badge ok">index ready</span>' : (s.warmUpError ? `<span class="badge danger" title="${h(s.warmUpError)}">warm-up failed</span>` : '<span class="badge info">warming up</span>')}
+              ${s.embeddings.index ? `<div class="faint small">${s.embeddings.index.utterances} utterances embedded in ${fmtMs(s.embeddings.index.buildMilliseconds)} · ${s.embeddings.index.dimensions} dimensions</div>` : ''}</td></tr>
+            ${s.embeddings.cache ? `<tr><th>Classification cache</th><td>${s.embeddings.cache.hits + s.embeddings.cache.misses ? `<b>${Math.round(s.embeddings.cache.hitRate * 100)}%</b> of prompts reused a recent decision (${int(s.embeddings.cache.hits)} of ${int(s.embeddings.cache.hits + s.embeddings.cache.misses)})` : '<span class="muted">no prompts yet</span>'} <span class="faint small">· ${s.embeddings.cache.entries} of ${s.embeddings.cache.capacity} kept</span></td></tr>` : ''}
             <tr><th>Gateway</th><td>${h(s.gateway.mode)} · OpenAI on <span class="mono">${h(s.gateway.pathPrefixes.join(', ') || '(all JSON POSTs)')}</span> · Anthropic on <span class="mono">${h(s.gateway.anthropicPathPrefixes.join(', '))}</span> · Responses on <span class="mono">${h(s.gateway.responsesPathPrefixes.join(', '))}</span></td></tr>
             <tr><th>Strategy</th><td>${h(s.gateway.strategy)}</td></tr>
             <tr><th>Connectors</th><td>${s.connectors.map((c) => `<span class="badge" title="${h(c.target || '')}">${h(c.name)} <span class="faint">${h(c.type)}${c.preset ? '/' + h(c.preset) : ''}</span></span>`).join(' ')}</td></tr>
@@ -392,7 +394,7 @@
         <td class="nowrap small">${h(when(e.timestamp))}</td>
         <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}</div></td>
         <td><span class="tier">T${e.tier}</span></td>
-        <td class="small">${h(e.reason)}</td>
+        <td class="small">${h(e.reason)}${e.cached ? ' <span class="badge" title="Reused a recent decision: no embedding call">cached</span>' : ''}</td>
         <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
         <td class="small">${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.servedBy ? `<b>${h(e.servedBy)}</b>${e.attempt > 1 ? ` <span class="badge warn">try ${e.attempt}</span>` : ''}${e.degraded ? ' <span class="badge warn">degraded</span>' : ''}` : `<span class="muted">${h(e.plannedModel || '—')}</span> <span class="faint">planned</span>`}</td>
         <td class="num small">${e.totalMilliseconds != null ? num(e.totalMilliseconds, 0) : num(e.classificationMilliseconds, 1)}</td>
@@ -627,11 +629,21 @@
   views.embeddings = () => {
     const e = state.config.Embeddings || {};
     const provider = e.Provider || 'Hashing';
+    const st = state.status.embeddings || {};
+    const available = st.available || ['Hashing', 'OpenAICompatible'];
+    const onnxModels = (st.models || []).filter((m) => m.provider === 'Onnx');
+    const chosen = onnxModels.find((m) => m.name.toLowerCase() === (e.Model || 'all-MiniLM-L6-v2').toLowerCase());
+    const mb = (b) => Math.round(b / 1e6) + ' MB';
+    const onnxFields = () => `
+          <label class="field"><span class="name">Model</span><select data-bind="Embeddings.Model" data-kind="nulltext">${onnxModels.map((m) => `<option value="${h(m.name)}" ${m === chosen ? 'selected' : ''}>${h(m.name)} (${mb(m.downloadBytes)})</option>`).join('')}</select><span class="hint">${chosen ? h(chosen.description) + ' Downloaded and checksum-verified on first use.' : ''}</span></label>
+          <label class="field"><span class="name">Or a model on disk</span><input type="text" data-bind="Embeddings.ModelPath" data-kind="nulltext" value="${h(e.ModelPath || '')}" placeholder="a directory with model.onnx and vocab.txt"><span class="hint">Overrides the model above.</span></label>
+          ${e.ModelPath ? `<label class="field"><span class="name">Pooling</span><select data-bind="Embeddings.Pooling" data-kind="nulltext">${['Mean', 'Cls'].map((x) => `<option ${x === (e.Pooling || 'Mean') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>` : ''}
+          ${chosen && !e.ModelPath ? `<div class="field wide"><span class="name">Similarity threshold</span><div class="inline"><span class="small">This model's suggested starting threshold is <b>${chosen.suggestedThreshold}</b>; the configuration has ${state.config.DefaultSimilarityThreshold}.</span>${chosen.suggestedThreshold !== state.config.DefaultSimilarityThreshold ? `<button class="btn small" data-action="embeddings-threshold" data-value="${chosen.suggestedThreshold}">Use ${chosen.suggestedThreshold}</button>` : ''}<a class="small" href="#/evaluate">Calibrate on your prompts →</a></div></div>` : ''}`;
     return `
       <div class="section-head"><h1>Embeddings</h1><span class="muted">How prompts and utterances are turned into vectors.</span></div>
       <div class="card section"><div class="form-grid">
-        <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${['Hashing', 'OpenAICompatible'].map((x) => `<option ${x === provider ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only); use a real embedding model in production.</span></label>
-        ${provider === 'Hashing' ? `<label class="field"><span class="name">Dimensions</span><input type="number" min="16" data-bind="Embeddings.Dimensions" data-kind="number" value="${e.Dimensions || 512}"></label>` : `
+        <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${available.map((x) => `<option ${x === provider ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only). Onnx runs a real embedding model in this process; OpenAICompatible calls a server (LM Studio, Ollama, OpenAI).</span></label>
+        ${provider === 'Onnx' ? onnxFields() : provider === 'Hashing' ? `<label class="field"><span class="name">Dimensions</span><input type="number" min="16" data-bind="Embeddings.Dimensions" data-kind="number" value="${e.Dimensions || 512}"></label>` : `
           <label class="field"><span class="name">Endpoint</span><input type="url" data-bind="Embeddings.Endpoint" data-kind="nulltext" value="${h(e.Endpoint || '')}" placeholder="http://localhost:1234"></label>
           <label class="field"><span class="name">Model</span><input type="text" data-bind="Embeddings.Model" data-kind="nulltext" value="${h(e.Model || '')}" placeholder="text-embedding-nomic-embed-text-v1.5"></label>
           <label class="field"><span class="name">Request path</span><input type="text" data-bind="Embeddings.RequestPath" value="${h(e.RequestPath || '/v1/embeddings')}"></label>
@@ -1048,6 +1060,7 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       try { const r = await api('POST', '/embeddings/test', { text: 'The quick brown fox' }); out.innerHTML = r.ok ? `<span class="badge ok">ok</span> ${r.dimensions} dimensions in ${r.milliseconds} ms` : `<span class="badge danger">failed</span> ${h(r.error)}`; }
       catch (e) { out.textContent = e.message; }
     },
+    'embeddings-threshold'(el) { state.config.DefaultSimilarityThreshold = parseFloat(el.dataset.value); render(); toast('Threshold set in the draft: Apply to use it.', 'ok'); },
     'json-load'() { $('#json-editor').value = JSON.stringify(state.config, null, 2); },
     'json-use'() { try { state.config = JSON.parse($('#json-editor').value); state.errors = null; render(); toast('Draft replaced from JSON. Apply to use it.', 'ok'); } catch (e) { toast('Invalid JSON: ' + e.message, 'danger'); } },
     'json-download'() { const blob = new Blob([JSON.stringify(state.config, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'semantic-router.json'; a.click(); },

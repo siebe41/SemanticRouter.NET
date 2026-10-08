@@ -96,6 +96,9 @@ public sealed class RoutingActivityEntry
     /// <summary>Cost at the serving model's configured prices, when usage was reported.</summary>
     public decimal? CostUsd { get; set; }
 
+    /// <summary>The decision was reused from the classification cache (no embedding call).</summary>
+    public bool Cached { get; set; }
+
     /// <summary>Budgets that kept a model from being tried, if any.</summary>
     public string? Budget { get; set; }
 
