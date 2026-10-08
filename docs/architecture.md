@@ -9,9 +9,10 @@ How a request moves through the router, how configuration reloads without droppi
 | `SemanticRouter.Core` | nothing | Vector math, token estimator, complexity heuristics, the route index, `DefaultRouteSelector`, `DefaultModelSelector`, `ModelHealthTracker`, `PromptRouter`, and the option types (`SemanticRouterOptions`, `RouteDefinition`, `ModelDefinition`, `TierDefinition`). Zero package references, AOT-compatible. |
 | `SemanticRouter.AspNetCore` | Core, ASP.NET Core | Everything that touches HTTP and processes: the middleware and dispatcher, both wire protocols, connectors, the runtime and configuration store, the dashboard and its embedded assets. |
 | `SemanticRouter.Host` | AspNetCore | The `semantic-router` .NET tool and container: `run`, `init` (detects local servers and CLIs), `doctor` (`RouterDoctor`), the embedded neutral template and per-OS configuration directory. See [host.md](host.md). |
+| `SemanticRouter.Storage.Sqlite` | AspNetCore, `Microsoft.Data.Sqlite` | Durable state in one SQLite file: cooldowns, tool-call affinity, activity, configuration history (`UseSqliteState`). |
 | `samples/RoutingApiSample` | AspNetCore | A host with an annotated `appsettings.json`: Annotate and Dispatch modes, dashboard, Anthropic endpoints. |
 | `samples/LmStudioClaudePoc` | AspNetCore | The LM Studio plus Claude Code personal setup, with a preflight and a self-test. |
-| `tests/SemanticRouter.Tests` | all | 296 tests; no network, model or vendor CLI needed. Run on Linux, Windows and macOS in CI. |
+| `tests/SemanticRouter.Tests` | all | 307 tests; no network, model or vendor CLI needed. Run on Linux, Windows and macOS in CI. |
 | `tests/SemanticRouter.FakeCli` | nothing | A stand-in CLI (`fake-cli`) the process tests start, so they run on every OS. |
 
 ## One request, end to end
@@ -82,12 +83,40 @@ flowchart LR
 - **`RouterConfiguration`** is one document: the whole `SemanticRouter` section (routing rules, tiers, models, connectors, embeddings, middleware). Its JSON shape equals the `appsettings.json` section, so documents move between the two.
 - **`RouterRuntime`** is an immutable snapshot built from a document: classifier, router, extractor, embedding provider, connector catalog, parsed path prefixes and alias list. `RouterRuntimeProvider.Apply` validates, builds a new runtime, swaps it in with one reference write, starts the route-index warm-up in the background, then disposes the old runtime. In-flight requests keep the runtime they started with.
 - **DI facades** (`RuntimeRouterFacade` and friends) forward every call to the current runtime, so a service that injected `IPromptRouter` at start-up never holds a stale instance. Registering your own implementation of one of these interfaces replaces the facade and is used as-is across reloads.
-- **State that survives a reload** is registered once: `IModelHealth` (cooldowns), `IToolCallAffinity`, `RoutingActivityLog`, the metrics meter and the CLI process runner. All of it is in memory today; see the durable-state item in the [roadmap](roadmap.md).
+- **State that survives a reload** is registered once: `IModelHealth` (cooldowns), `IToolCallAffinity`, `RoutingActivityLog`, `IRouterConfigurationHistory`, the metrics meter and the CLI process runner. See [Durable state](#durable-state) for what survives a restart.
 - **Secrets** are masked as `***` on the way to the browser; sending the mask back keeps the stored value, and empty secrets in a stored document are filled from the baseline. Values may be references (`${env:…}`, `${secret:…}`): the runtime keeps the document as written (`Configuration`) and builds connectors and the embedding provider from a resolved copy (`Resolved`), never sent to the browser. A `SecretRedactor` built from the resolved values scrubs them from errors, relayed upstream bodies, activity and logs.
 
 ## The dashboard
 
 `MapRouterDashboard` serves three embedded files (`index.html`, `app.css`, `app.js`) and the admin API under `{prefix}/api`. There is no build step and no dependency. The UI keeps one draft of the configuration in the browser, edits it through path-based bindings (`data-bind="Models.2.Tier"`), and talks to the same validation the router uses at start-up. Themes are token blocks keyed by `data-theme`; see [dashboard.md](dashboard.md#themes). The admin API answers loopback clients only unless that guard is turned off.
+
+## Durable state
+
+Out of the box everything is in memory. `SemanticRouter.Storage.Sqlite` keeps it in one SQLite file instead. The `semantic-router` tool uses it by default (`semantic-router.db` next to the configuration).
+
+```csharp
+builder.Services.AddSemanticPromptRouting(builder.Configuration.GetSection("SemanticRouter"))
+    .UseConfigurationFile("semantic-router.json")
+    .UseSqliteState("semantic-router.db", o => o.AffinityWindow = TimeSpan.FromHours(24));
+```
+
+| State | Stored as | Kept |
+|---|---|---|
+| Model cooldowns | model name plus absolute expiry, through `ICooldownStore` | Until they expire. A restart during a weekly limit keeps the model cooling down until the original time. |
+| Tool-call affinity | tool-use id → model, with an in-memory cache in front | `AffinityWindow` (24 h), so a tool turn that spans a restart still goes back to the model that issued the call. |
+| Activity | each entry once its request has finished; the log seeds itself on start | `ActivityMaxEntries` (10,000) and `ActivityMaxAge` (30 days). |
+| Configuration history | every applied document, with source, actor and note | `HistoryMaxEntries` (200). The dashboard's JSON page diffs and rolls back; see `api/config/history`. |
+
+History documents are stored as applied. They keep `${…}` references where the configuration uses them, and literal keys where the configuration file holds them too. With a secret store registered, typed keys never reach either.
+
+**Failures never stop routing.** A file that cannot be opened (corrupt, wrong schema, no permission) leaves everything in memory, with one warning at start-up. An operation that fails later, for example a database locked longer than `BusyTimeout` by another process, is logged at most once a minute and the in-memory state carries on.
+
+**Several instances.** Instances on one machine can share the file: SQLite in WAL mode serialises writers.
+- Cooldowns are re-read every `ModelHealthTracker.RefreshInterval` (5 s), so an account limit one instance hits is honoured by the others within seconds.
+- Affinity lookups fall through to the file, so a tool turn can continue on another instance.
+- Activity ids are per instance, so a shared file mixes their entries; give each instance its own file if you want separate logs.
+
+Do not put the file on a network share: SQLite's locking is unreliable there. For instances on different machines, implement `ICooldownStore` and `IToolCallAffinity` over a shared cache such as Redis.
 
 ## Extension points
 
@@ -97,8 +126,10 @@ flowchart LR
 | Use another embedding backend | `IEmbeddingProvider`, then `.UseEmbeddingProvider<T>()` |
 | Change how requirements are derived | `IRouteSelector`, `IComplexityAnalyzer`, or `IPromptClassifier` |
 | Change how models are ranked | `IModelSelector` |
-| Share or persist cooldowns | `IModelHealth` |
-| Share or persist tool-call affinity | `IToolCallAffinity` |
+| Persist or share cooldowns | `ICooldownStore` (Core; `ModelHealthTracker` writes through to it), or replace `IModelHealth` |
+| Persist or share tool-call affinity | `IToolCallAffinity` |
+| Keep activity beyond the in-memory window | `IRoutingActivityStore` |
+| Keep configuration history somewhere else | `IRouterConfigurationHistory` |
 | Support another payload shape | `IPromptExtractor` |
 | Keep configuration somewhere other than a file | `IRouterConfigurationStore`, then `.UseConfigurationStore<T>()` |
 | Keep secrets in a vault or the OS keychain | `IRouterSecretStore`, then `.UseSecretStore<T>()` |

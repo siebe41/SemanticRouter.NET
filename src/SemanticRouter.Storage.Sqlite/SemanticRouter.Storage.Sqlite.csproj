@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>SemanticRouter.Storage.Sqlite</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Durable state for SemanticRouter in one SQLite file: model cooldowns, tool-call affinity, the routing activity log and the configuration history survive restarts and can be shared by instances on one machine.</Description>
+    <PackageTags>$(PackageTags);sqlite</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SemanticRouter.AspNetCore\SemanticRouter.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SemanticRouter.Tests" />
+  </ItemGroup>
+
+</Project>

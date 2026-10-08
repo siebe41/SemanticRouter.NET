@@ -15,7 +15,12 @@ public sealed class HostTests : IDisposable
 
     private readonly string _directory = Directory.CreateTempSubdirectory("router-host").FullName;
 
-    public void Dispose() => Directory.Delete(_directory, recursive: true);
+    public void Dispose()
+    {
+        // The host keeps its state database open in the connection pool; Windows cannot delete an open file.
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        Directory.Delete(_directory, recursive: true);
+    }
 
     private HostSettings Settings(params string[] args) => HostSettings.Parse(["--config-dir", _directory, .. args]);
 

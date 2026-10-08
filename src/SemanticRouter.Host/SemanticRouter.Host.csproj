@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SemanticRouter.AspNetCore\SemanticRouter.AspNetCore.csproj" />
+    <ProjectReference Include="..\SemanticRouter.Storage.Sqlite\SemanticRouter.Storage.Sqlite.csproj" />
   </ItemGroup>
 
   <ItemGroup>
