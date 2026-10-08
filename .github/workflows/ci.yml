@@ -59,6 +59,49 @@ jobs:
           name: packages
           path: artifacts/*.nupkg
 
+  dashboard-e2e:
+    name: dashboard end-to-end
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/dashboard-e2e/package-lock.json
+
+      - name: Build the host
+        run: dotnet build src/SemanticRouter.Host --configuration Release
+
+      - name: Install Playwright and the screenshot fonts
+        working-directory: tests/dashboard-e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends fonts-dejavu-core
+
+      # Fails when a page throws or logs an error, a control loses its label, a flow breaks, a built-in theme drops
+      # below WCAG AA, or a screenshot of a built-in theme changes.
+      - name: Test
+        working-directory: tests/dashboard-e2e
+        run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: dashboard-e2e-report
+          path: |
+            tests/dashboard-e2e/playwright-report
+            tests/dashboard-e2e/test-results
+
   container:
     name: container image
     runs-on: ubuntu-latest

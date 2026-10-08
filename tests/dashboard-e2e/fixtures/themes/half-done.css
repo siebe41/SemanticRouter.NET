@@ -1,0 +1,6 @@
+/* An incomplete theme: the dashboard fills the gaps from Machine Dark and lists what is missing. */
+:root[data-theme="half-done"] {
+  color-scheme: dark;
+  --bg: #1a1a1a;
+  --text: #f0f0f0;
+}

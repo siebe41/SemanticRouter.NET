@@ -25,7 +25,7 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - Prompted CLI turns stream their text and survive near-miss and broken tool calls, and Copilot is reachable through GitHub's official SDK with native tool calls.
 
-What it is not yet: tested end to end in the browser on every change, or themeable without editing its files. The dashboard work in #15 is next.
+- The dashboard is tested end to end in the browser on every change, meets WCAG AA in every theme, works with a keyboard and on a phone, and takes drop-in theme files.
 
 ## What done looks like
 

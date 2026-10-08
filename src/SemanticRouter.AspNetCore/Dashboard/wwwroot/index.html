@@ -11,8 +11,9 @@
   <script>window.ROUTER_PREFIX = "__ROUTER_PREFIX__";</script>
 </head>
 <body>
+  <a class="skip-link" href="#view">Skip to content</a>
   <div class="app">
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar" aria-label="Router">
       <div class="brand">
         <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="6" fill="var(--brand-mark-bg)"/><path d="M6 16h8l4-8 4 16 4-8h0" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/><circle cx="26" cy="16" r="2.8" fill="var(--signal)"/></svg>
         <div>
@@ -20,7 +21,7 @@
           <div class="brand-sub" id="brand-sub">loading…</div>
         </div>
       </div>
-      <nav id="nav">
+      <nav id="nav" aria-label="Pages">
         <a href="#/overview" data-view="overview">Overview</a>
         <a href="#/live" data-view="live">Live</a>
         <a href="#/activity" data-view="activity">Activity</a>
@@ -51,7 +52,8 @@
     </aside>
     <div class="content">
       <header class="topbar">
-        <div id="status-pill" class="pill">…</div>
+        <button id="nav-toggle" class="btn ghost nav-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Show navigation"><span aria-hidden="true">☰</span></button>
+        <div id="status-pill" class="pill" role="status">…</div>
         <div class="spacer"></div>
         <div id="save-bar" class="save-bar hidden">
           <span class="dirty-note">Unapplied changes</span>
@@ -61,12 +63,12 @@
           <button class="btn ghost" data-action="discard">Discard</button>
         </div>
       </header>
-      <div id="banner" class="banner hidden"></div>
-      <main id="view" class="view"></main>
+      <div id="banner" class="banner hidden" role="alert"></div>
+      <main id="view" class="view" tabindex="-1"></main>
     </div>
   </div>
-  <div id="toast" class="toast hidden"></div>
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <script src="__ROUTER_PREFIX__/graph.js"></script>
-  <script src="__ROUTER_PREFIX__/app.js"></script>
+  <script type="module" src="__ROUTER_PREFIX__/js/app.js"></script>
 </body>
 </html>

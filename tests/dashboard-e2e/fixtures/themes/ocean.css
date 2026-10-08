@@ -1,0 +1,33 @@
+/* A complete theme file, as a user would drop it into the themes directory. */
+:root[data-theme="ocean"] {
+  color-scheme: dark;
+  --bg: #0b1726;
+  --bg-elevated: #10213a;
+  --bg-sunken: #081120;
+  --bg-hover: #15294a;
+  --border: #1d3557;
+  --border-strong: #2a4a75;
+  --text: #e6f0fa;
+  --text-muted: #9fb6cc;
+  --text-faint: #8299b0;
+  --accent: #4cc9f0;
+  --accent-ink: #4cc9f0;
+  --accent-contrast: #04121c;
+  --accent-soft: rgba(76, 201, 240, 0.18);
+  --signal: #f4a261;
+  --signal-ink: #f4a261;
+  --signal-soft: rgba(244, 162, 97, 0.18);
+  --signal-contrast: #1c1006;
+  --ok: #8bd450;
+  --ok-soft: rgba(139, 212, 80, 0.16);
+  --series-1: #4cc9f0;
+  --series-2: #f4a261;
+  --warn: #f4a261;
+  --warn-soft: rgba(244, 162, 97, 0.18);
+  --danger: #ff7b7b;
+  --danger-soft: rgba(255, 123, 123, 0.16);
+  --info: #9fb6cc;
+  --info-soft: rgba(159, 182, 204, 0.18);
+  --brand-mark-bg: #081120;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.25);
+}

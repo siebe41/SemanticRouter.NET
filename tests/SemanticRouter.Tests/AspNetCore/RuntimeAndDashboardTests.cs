@@ -123,7 +123,9 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         HttpClient client = await StartDispatchAsync();
 
         HttpResponseMessage page = await client.GetAsync("/router");
-        HttpResponseMessage script = await client.GetAsync("/router/app.js");
+        HttpResponseMessage script = await client.GetAsync("/router/js/app.js");
+        HttpResponseMessage module = await client.GetAsync("/router/js/core.js");
+        HttpResponseMessage outside = await client.GetAsync("/router/js/..%2Fapp.css");
         HttpResponseMessage css = await client.GetAsync("/router/app.css");
         HttpResponseMessage graph = await client.GetAsync("/router/graph.js");
 
@@ -132,6 +134,10 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         string html = await page.Content.ReadAsStringAsync();
         html.Should().Contain("window.ROUTER_PREFIX = \"/router\"").And.Contain("data-theme=\"machine-dark\"").And.NotContain("__ROUTER_PREFIX__");
         script.Content.Headers.ContentType!.MediaType.Should().Be("text/javascript");
+        (await script.Content.ReadAsStringAsync()).Should().Contain("import './overview.js';");
+        (await module.Content.ReadAsStringAsync()).Should().Contain("export const state");
+        outside.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        html.Should().Contain("<script type=\"module\" src=\"/router/js/app.js\">");
         (await graph.Content.ReadAsStringAsync()).Should().Contain("window.MemoryGraph");
         html.Should().Contain("/router/graph.js");
         (await css.Content.ReadAsStringAsync()).Should().Contain("[data-theme=\"machine-light\"]");
