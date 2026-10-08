@@ -84,6 +84,18 @@ public sealed class SemanticRouterBuilder
         return this;
     }
 
+    /// <summary>
+    /// Keeps the dashboard's evaluation set (labelled prompts) in a JSON Lines file. Without this, the set sits next to
+    /// the configuration file as <c>{name}.evaluation.jsonl</c> when <see cref="UseConfigurationFile"/> is used, and in
+    /// memory otherwise.
+    /// </summary>
+    public SemanticRouterBuilder UseEvaluationSetFile(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Services.Replace(ServiceDescriptor.Singleton<IEvaluationSetStore>(new JsonLinesEvaluationSetStore(path)));
+        return this;
+    }
+
     /// <summary>Uses a custom <see cref="IRouterSecretStore"/> (a vault, the OS keychain) for <c>${secret:…}</c> references.</summary>
     public SemanticRouterBuilder UseSecretStore<TStore>()
         where TStore : class, IRouterSecretStore

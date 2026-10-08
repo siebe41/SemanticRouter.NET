@@ -67,6 +67,11 @@ public static class SemanticRouterServiceCollectionExtensions
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BudgetGate>>()));
         services.TryAddSingleton<IToolCallAffinity, ToolCallAffinity>();
         services.TryAddSingleton<RoutingActivityLog>();
+        services.TryAddSingleton<IEvaluationSetStore>(sp =>
+            sp.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store
+                ? new JsonLinesEvaluationSetStore(EvaluationSetFileNextTo(store.Location))
+                : new InMemoryEvaluationSetStore());
+        services.TryAddSingleton<RetryTracker>();
         services.TryAddSingleton<MemoryExposureLog>();
         services.TryAddSingleton<MemoryIndex>();
         services.TryAddSingleton<PromptRouterMetrics>();
@@ -90,6 +95,14 @@ public static class SemanticRouterServiceCollectionExtensions
                 client.Timeout = sp.GetRequiredService<RouterRuntimeProvider>().Current.Configuration.Embeddings.Timeout);
 
         return new SemanticRouterBuilder(services);
+    }
+
+    /// <summary>The evaluation set's file next to a configuration file: <c>{name}.evaluation.jsonl</c>.</summary>
+    public static string EvaluationSetFileNextTo(string configurationFile)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(configurationFile);
+        string full = Path.GetFullPath(configurationFile);
+        return Path.Combine(Path.GetDirectoryName(full)!, Path.GetFileNameWithoutExtension(full) + ".evaluation.jsonl");
     }
 
     private sealed class ConnectorHttpClientOptions : IConfigureNamedOptions<HttpClientFactoryOptions>

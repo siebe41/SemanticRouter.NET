@@ -85,7 +85,7 @@ internal sealed partial class PromptDispatcher
                 continue;
             }
 
-            if (usage.Budgets.Count > 0 && _budgets?.Blocking(model, usage) is { } spent)
+            if (usage.Budgets.Count > 0 && _budgets?.Blocking(model, usage, plan.Requirements.Profile) is { } spent)
             {
                 attempts.Add($"{model.Name}: budget '{spent.Name}' is spent ({spent.Describe()})");
                 budgetsHit.Add(spent.Name);
@@ -165,7 +165,7 @@ internal sealed partial class PromptDispatcher
                 case ConnectorOutcome.Completed:
                     _health.ReportSuccess(model);
                     LogServed(_logger, model.Name, connector.Name, tried);
-                    RecordUsage(runtime, model, connector.Name, capture.Usage, activity);
+                    RecordUsage(runtime, model, connector.Name, capture.Usage, activity, plan.Requirements.Profile);
                     _metrics.RecordRequest(model.Name, connector.Name, "served", Stopwatch.GetElapsedTime(started));
                     if (activity is not null)
                     {
@@ -232,7 +232,7 @@ internal sealed partial class PromptDispatcher
         _metrics.RecordCooldown(model.Name, result.FailureKind);
     }
 
-    private void RecordUsage(RouterRuntime runtime, ModelDefinition model, string connector, ChatUsage? reported, RoutingActivityEntry? activity)
+    private void RecordUsage(RouterRuntime runtime, ModelDefinition model, string connector, ChatUsage? reported, RoutingActivityEntry? activity, string? profile)
     {
         if (reported is not { } usage)
         {
@@ -259,7 +259,7 @@ internal sealed partial class PromptDispatcher
 
         _ledger?.Record(new UsageRecord(
             _time.GetUtcNow(), model.Name, connector, activity?.Route, activity?.Client, model.IsLocal,
-            input, output, cacheRead, cacheWrite, cost, referenceCost));
+            input, output, cacheRead, cacheWrite, cost, referenceCost, profile));
     }
 
     /// <summary>The model being tried, for the response-started callback.</summary>

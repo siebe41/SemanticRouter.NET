@@ -37,6 +37,38 @@ public sealed class SqliteStateTests : IDisposable
     private static readonly ModelSelectionOptions Selection = new() { QuotaCooldown = TimeSpan.FromMinutes(15), FailureCooldown = TimeSpan.FromSeconds(30) };
 
     [Fact]
+    public void A_version_1_state_file_is_migrated_and_keeps_its_usage()
+    {
+        using (var connection = new SqliteConnection($"Data Source={DbPath}"))
+        {
+            connection.Open();
+            using SqliteCommand create = connection.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                INSERT INTO meta (key, value) VALUES ('schema_version', '1');
+                CREATE TABLE usage (
+                    timestamp_ticks INTEGER NOT NULL, model TEXT NOT NULL, connector TEXT NOT NULL, route TEXT, client TEXT,
+                    is_local INTEGER NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL, cache_read INTEGER NOT NULL,
+                    cache_write INTEGER NOT NULL, cost TEXT NOT NULL, reference_cost TEXT NOT NULL);
+                """;
+            create.ExecuteNonQuery();
+            using SqliteCommand insert = connection.CreateCommand();
+            insert.CommandText = "INSERT INTO usage VALUES ($ts, 'old', 'c', NULL, NULL, 0, 10, 5, 0, 0, '0.1', '0.1');";
+            insert.Parameters.AddWithValue("$ts", _time.GetUtcNow().UtcTicks);
+            insert.ExecuteNonQuery();
+        }
+
+        var ledger = new SqliteUsageLedger(Open());
+        ledger.Record(new UsageRecord(_time.GetUtcNow(), "new", "c", null, null, false, 20, 10, 0, 0, 0.2m, 0.2m, "work"));
+
+        DateTimeOffset since = _time.GetUtcNow().AddHours(-1), until = _time.GetUtcNow().AddHours(1);
+        ledger.Total(since, until).Requests.Should().Be(2, "the old row survives the migration");
+        ledger.Total(since, until, profile: "work").InputTokens.Should().Be(20);
+        ledger.Summarize(since, until, UsageGrouping.Profile).Select(g => g.Key).Should().BeEquivalentTo("work", "(no profile)");
+        _logs.Messages.Should().NotContain(m => m.Contains("cannot be used", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void A_restart_during_a_quota_cooldown_keeps_the_original_expiry()
     {
         ModelDefinition claude = Model("claude", 4);

@@ -16,18 +16,20 @@ builder.Services
 
 | Page | What it does |
 |---|---|
-| **Overview** | Counters, every model with its tier and health (ready, cooling down, disabled), the runtime (configuration version and source, store, embeddings state, gateway paths), served-by and required-tier charts, and **Try a prompt**: classify without calling a model, or send it through the gateway for real. |
+| **Overview** | Counters, every model with its tier and health (ready, cooling down, disabled), the runtime (configuration version and source, store, embeddings state with the route index's size and warm-up time, classification-cache hit rate, gateway paths), served-by and required-tier charts, and **Try a prompt**: classify without calling a model, or send it through the gateway for real. |
 | **Live** | What is happening now, pushed over server-sent events: tiles for requests, the share answered locally, input tokens (reported by the backend, or estimated) to cloud and local models, and notes whose text went to the cloud; a **model router** graph from clients (named by gateway key, or by protocol) through the router to every model, with the edge that just carried a request animated; a feed of decisions with the notes each request carried; and a strip of the latest memory crossings. |
 | **Overview → Trends** | Requests per interval and p50/p95 latency over 1 hour, 24 hours, 7 or 30 days, with a table view. |
-| **Usage** | Tokens and cost by model, connector, route, client or day; "saved by routing" against a reference model; budgets with their state; the usage settings and budget editor. |
-| **Activity** | The last 500 routed requests: prompt preview, protocol, tier, reason, route and similarity, the model that answered, attempt number, degraded flag, timing. Filter by failed, degraded or tool-bearing. |
+| **Usage** | Tokens and cost by model, connector, route, client, profile or day; "saved by routing" against a reference model; budgets with their state; the usage settings and budget editor. |
+| **Activity** | The last 500 routed requests: prompt preview, protocol, tier, reason, route and similarity, the model that answered, attempt number, degraded flag, timing. Each entry shows its routing profile, project and the signals that kept it local. Filter by failed, degraded, tool-bearing or profile. **Label** says which tier a prompt should have had: it adds the prompt to the evaluation set and, optionally, as an utterance to a route. |
 | **Memory** | The [memory map](memory.md): notes from an Obsidian vault, Claude Code's memory or the MCP memory server as a force-directed graph, coloured by where they have been sent (text to the cloud, mentioned to the cloud, local only, not sent) or by source or folder. Search, filter, select a note for its links and per-model counts; notes pulse as requests carry them. The memory sources are edited here too. |
 | **Tiers** | The capability ladder with names and descriptions, and a matrix of which routes require each tier and which models provide it. Shows at a glance when a tier has nothing that can serve it. |
 | **Routes** | Intent clusters: name, tier, required capabilities, threshold, local-only, utterances. |
-| **Models** | The catalog: connector, provider model id (with **Discover**, which asks the connector's `/v1/models`), tier, capabilities, context window, costs, priority, local flag, enabled. |
-| **Connectors** | HTTP (OpenAI-compatible or Anthropic): base address, path, API key, headers, forwarded headers, timeout. CLI: preset, executable, extra arguments, tool calling, quota patterns, environment, concurrency. **List models** probes the connector. |
-| **Routing rules** | Similarity threshold, fallback tier, ambiguity margin, scoring strategy, complexity short-circuit, complexity → tier rules, selection strategy and failover, cooldowns, complexity heuristic weights and keywords. |
-| **Embeddings** | Provider, endpoint, model, batch size, timeout, warm-up, and a probe that embeds a sentence with the applied provider. |
+| **Evaluate** | Runs the evaluation set through the configuration: accuracy, too-low and too-high counts, accuracy per tier, a confusion matrix, the misrouted prompts with their scores, a threshold sweep with recommended values, route health, and a comparison with another embedding model. See [routing-quality.md](routing-quality.md). |
+| **Models** | The catalog: connector, provider model id (with **Discover**, which asks the connector's `/v1/models`), tier, capabilities, context window, costs, priority, active hours, local flag, enabled. |
+| **Connectors** | HTTP (OpenAI-compatible or Anthropic): base address, path, API key, headers, forwarded headers, timeout. CLI: preset, executable, extra arguments, tool calling, quota patterns, environment, concurrency and queue limit. **List models** probes the connector. |
+| **Routing rules** | Similarity threshold, fallback tier, ambiguity margin, scoring strategy, complexity short-circuit, complexity → tier rules, selection strategy and failover, cooldowns, the time zone for model active hours, complexity heuristic weights and keywords. |
+| **Profiles** | Routing profiles (allowed and denied models and connectors, tier floor and cap, strategy, local-only), how a request picks one (headers, client mappings, rules), virtual models, and the content signals that keep a conversation local. **What would each profile do?** routes one prompt under every profile side by side. See [routing-profiles.md](routing-profiles.md). |
+| **Embeddings** | Provider (Hashing, Onnx in-process, or an OpenAI-compatible server), model, endpoint, batch size, timeout, warm-up, and a probe that embeds a sentence with the applied provider. For ONNX models it shows the suggested threshold and can apply it. |
 | **Gateway** | Mode (Dispatch or Annotate), OpenAI and Anthropic path prefixes, model aliases, tool-turn pinning, system-reminder stripping, body limit, response headers, fail-open, message selection. |
 | **Connect clients** | Ready-to-paste snippets for Claude Code, OpenAI SDKs, Codex CLI and curl, filled in with the router's address. |
 | **JSON** | The whole document as text (the same shape as the `SemanticRouter` section of `appsettings.json`): edit, download, compare with the application baseline, reset. **History** lists every applied version (when, what applied it, who), diffs any of them against the draft and rolls back to it. |
@@ -90,13 +92,16 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `POST api/memory/exposure/reset` | Forget which notes were sent where. |
 | `POST api/classify` | `{ "prompt": "...", "model": "auto" }` → the routing plan, without calling a model. |
 | `POST api/health/reset` | Clear every cooldown. |
+| `GET/PUT api/evaluation/set`, `POST api/evaluation/cases`, `GET api/evaluation/set/export` | The evaluation set. See [routing-quality.md](routing-quality.md#api). |
+| `POST api/evaluate?calibrate=true`, `POST api/evaluate/compare`, `GET api/routes/health` | Evaluate, calibrate, compare embedding models, check routes. |
+| `POST api/routes/{name}/utterances` | Add an utterance (or create the route) and apply. |
 | `POST api/embeddings/test` | Embed a sentence with the applied provider. |
 | `POST api/connectors/{name}/discover` | Ask an HTTP connector for its model list (a `401` is reported as "requires authentication", naming the key to set). |
 | `GET api/session` | `{ role, tokenRequired, tokensConfigured }` for the caller. |
 | `POST api/session` | `{ "token": "..." }` → sets the session cookie. |
 | `DELETE api/session` | Signs out. |
 
-`PUT api/config`, `POST api/config/reset`, rollback, `POST api/health/reset` and `POST api/memory/exposure/reset` change the router and need the admin role; everything else is open to the read-only role.
+`PUT api/config`, `POST api/config/reset`, rollback, `POST api/health/reset`, `POST api/memory/exposure/reset`, changes to the evaluation set, adding utterances and `POST api/evaluate/compare` (which calls an endpoint you name) need the admin role; everything else is open to the read-only role.
 
 The same document works with `PUT` from scripts, e.g. to promote a tested configuration:
 

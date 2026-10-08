@@ -40,6 +40,7 @@ Options: `--config-dir <dir>`, `--urls <urls>`, and any setting as `--SemanticRo
 |---|---|
 | LM Studio or Ollama with chat models | A connector; a tier-1 local model (the first non-coder chat model) and, when one is loaded, a tier-2 `-coder` model. |
 | An embedding model on either server | `Embeddings` switched to it, with a starting similarity threshold for that model family. |
+| No embedding server | `Embeddings` set to `Onnx` with `all-MiniLM-L6-v2`: a 23 MB model that runs inside the router. It is downloaded on first start and checksum-verified. Threshold 0.40. |
 | A server that answers `401` | The connector, plus a note to set its `ApiKey` (for example `"${env:LM_API_TOKEN}"`). |
 | `claude` on PATH | `claude-cli` with prompted tool calling, `claude` (sonnet, tier 4) and `claude-opus` (tier 5). |
 | `codex` on PATH | `codex-cli` (concurrency 1) and a tier-4 `codex` model. |
@@ -55,6 +56,8 @@ On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not
 | `semantic-router.json` | The configuration. The dashboard's **Apply & save** writes it. |
 | `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [dashboard.md](dashboard.md#keeping-secrets-out-of-the-file). |
+| `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [routing-quality.md](routing-quality.md). |
+| `models/` | Downloaded ONNX embedding models, one directory per model. Copy a `models/{name}` directory here to run without internet access. |
 | `appsettings.json` (optional) | Host settings: logging, Kestrel, `SemanticRouter:Dashboard`, overrides. |
 
 Precedence, lowest first: the built-in template, `appsettings.json` in the configuration directory, `SemanticRouter__…` environment variables, command-line settings. A saved `semantic-router.json` then replaces the routing document as a whole. Secrets it leaves empty are still inherited from the layers below, so `SemanticRouter__Connectors__openai__ApiKey` keeps working.

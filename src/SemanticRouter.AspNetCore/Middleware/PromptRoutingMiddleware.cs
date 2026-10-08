@@ -26,6 +26,7 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly MemoryIndex _memory;
     private readonly MemoryExposureLog _exposure;
     private readonly IToolCallAffinity? _affinity;
+    private readonly RetryTracker? _retries;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -37,7 +38,8 @@ internal sealed partial class PromptRoutingMiddleware
         MemoryIndex memory,
         MemoryExposureLog exposure,
         ILogger<PromptRoutingMiddleware> logger,
-        IToolCallAffinity? affinity = null)
+        IToolCallAffinity? affinity = null,
+        RetryTracker? retries = null)
     {
         _next = next;
         _runtime = runtime;
@@ -47,6 +49,7 @@ internal sealed partial class PromptRoutingMiddleware
         _memory = memory;
         _exposure = exposure;
         _affinity = affinity;
+        _retries = retries;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -129,8 +132,17 @@ internal sealed partial class PromptRoutingMiddleware
         }
 
         long started = Stopwatch.GetTimestamp();
-        string? mapped = MapModel(runtime, chat.Model);
-        (SelectionStrategy? strategy, string? requestedModel) = ModelAliases.Resolve(mapped);
+        ProfileSelection.ModelChoice modelChoice = ProfileSelection.ResolveModel(runtime, chat.Model);
+        SelectionStrategy? strategy = modelChoice.Strategy;
+        string? requestedModel = modelChoice.RequestedModel;
+        ProfileSelection.Choice profile = ProfileSelection.Choose(context.Request, runtime, chat, client, modelChoice.Profile);
+        if (profile.Error is { } profileError)
+        {
+            await ProtocolErrors.WriteAsync(context, protocol, StatusCodes.Status400BadRequest, "Unknown routing profile", profileError, context.RequestAborted)
+                .ConfigureAwait(false);
+            return;
+        }
+
         if (requestedModel is not null
             && !runtime.Router.Models.Any(m => m.Enabled && string.Equals(m.Name, requestedModel, StringComparison.OrdinalIgnoreCase)))
         {
@@ -142,8 +154,19 @@ internal sealed partial class PromptRoutingMiddleware
             ? _affinity?.Lookup(chat.AnsweredToolUseIds)
             : null;
 
+        // A prompt the same client repeats soon after it was answered goes one tier up (when enabled).
+        RetryEscalationOptions retry = options.RetryEscalation;
+        string retryClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
+        bool retryable = retry.Enabled && _retries is not null && requestedModel is null && !chat.IsToolResultContinuation;
+        int? minimumTier = retryable
+            ? _retries!.MinimumTier(retryClient, prompt, retry.Window, runtime.Router.Models.Where(m => m.Enabled).Select(m => m.Tier).DefaultIfEmpty(0).Max())
+            : null;
+
         var routingRequest = new PromptRoutingRequest
         {
+            MinimumTier = minimumTier,
+            Profile = profile.Profile,
+            LocalOnly = profile.LocalOnly,
             Prompt = prompt,
             EstimatedInputTokens = chat.EstimatedInputTokens,
             AdditionalCapabilities = ImpliedCapabilities(chat),
@@ -182,6 +205,10 @@ internal sealed partial class PromptRoutingMiddleware
             Route = result.RouteName,
             Similarity = result.Similarity,
             Complexity = Math.Round(result.Complexity.Score, 3),
+            Cached = result.Cached,
+            Profile = profile.Profile,
+            Project = profile.Project is { Length: > 0 } project ? project[..Math.Min(project.Length, 120)] : null,
+            Signals = profile.Signals.Count > 0 ? string.Join(", ", profile.Signals) : null,
             HasTools = chat.HasTools,
             ToolContinuation = chat.IsToolResultContinuation,
             LocalOnly = plan.Requirements.LocalOnly,
@@ -220,6 +247,12 @@ internal sealed partial class PromptRoutingMiddleware
         if (entry.Outcome == "failed")
         {
             routeSpan?.SetStatus(ActivityStatusCode.Error, "no model available");
+        }
+
+        if (retryable && (entry.ServedBy ?? (options.Mode == PromptRouterMode.Annotate ? entry.PlannedModel : null)) is { } answeredBy
+            && runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, answeredBy, StringComparison.OrdinalIgnoreCase)) is { } answering)
+        {
+            _retries!.Answered(retryClient, prompt, answering.Tier, retry.Window);
         }
 
         RecordMemoryExposure(runtime, entry);
@@ -475,6 +508,16 @@ internal sealed partial class PromptRoutingMiddleware
         if (result.Similarity is { } similarity)
         {
             headers[prefix + "-Similarity"] = similarity.ToString("0.0000", CultureInfo.InvariantCulture);
+        }
+
+        if (plan.Requirements.Profile is { } profile)
+        {
+            headers[prefix + "-Profile"] = profile;
+        }
+
+        if (plan.Requirements.LocalOnly)
+        {
+            headers[prefix + "-Local-Only"] = "true";
         }
     }
 

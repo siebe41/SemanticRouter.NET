@@ -1,4 +1,6 @@
+using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Embeddings.Onnx;
 
 namespace SemanticRouter.Host;
 
@@ -45,6 +47,14 @@ internal static class InitCommand
         new JsonFileRouterConfigurationStore(settings.ConfigurationFile).Save(document);
 
         await output.WriteLineAsync($"Wrote {settings.ConfigurationFile}").ConfigureAwait(false);
+        string evaluation = SemanticRouterServiceCollectionExtensions.EvaluationSetFileNextTo(settings.ConfigurationFile);
+        if (!File.Exists(evaluation))
+        {
+            // Labelled prompts for the starting routes: the dashboard's Evaluate page runs them.
+            await File.WriteAllTextAsync(evaluation, RouterHost.EvaluationTemplate(), cancellationToken).ConfigureAwait(false);
+            await output.WriteLineAsync($"Wrote {evaluation}").ConfigureAwait(false);
+        }
+
         foreach (string note in notes)
         {
             await output.WriteLineAsync("  " + note).ConfigureAwait(false);
@@ -123,7 +133,17 @@ internal static class InitCommand
             document.Embeddings.Endpoint = embeddingEndpoint;
             document.Embeddings.Model = embeddingModel;
             document.DefaultSimilarityThreshold = embeddingModel.Contains("mxbai", StringComparison.OrdinalIgnoreCase) ? 0.68f : 0.62f;
-            notes.Add($"embeddings: '{embeddingModel}' on {embeddingEndpoint}; similarity threshold {document.DefaultSimilarityThreshold:0.00} (calibrate with the dashboard's prompt tester).");
+            notes.Add($"embeddings: '{embeddingModel}' on {embeddingEndpoint}; similarity threshold {document.DefaultSimilarityThreshold:0.00} (calibrate on the dashboard's Evaluate page).");
+        }
+        else
+        {
+            // No embedding server: a small model in this process beats lexical hashing.
+            OnnxModelInfo model = OnnxEmbeddingModels.Find(OnnxEmbeddingModels.DefaultModel)!;
+            document.Embeddings.Provider = EmbeddingProviderKind.Onnx;
+            document.Embeddings.Model = model.Name;
+            document.DefaultSimilarityThreshold = model.SuggestedThreshold;
+            notes.Add($"embeddings: no embedding server found, so '{model.Name}' runs in this process ({Math.Round(model.ModelBytes / 1e6):0} MB, downloaded on first start); " +
+                      $"similarity threshold {model.SuggestedThreshold:0.00} (calibrate on the dashboard's Evaluate page).");
         }
 
         AddCli(document, probes, notes, "claude", "claude-cli", CliPreset.ClaudeCode, maxConcurrency: 2, enabled: true,

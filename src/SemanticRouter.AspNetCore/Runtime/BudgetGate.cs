@@ -68,12 +68,12 @@ internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time,
     public IReadOnlyList<BudgetStatus> Status(UsageOptions usage) =>
         usage.Budgets.Select(b => StatusOf(b, usage)).ToArray();
 
-    /// <summary>The first budget covering <paramref name="model"/> that is spent, or <see langword="null"/>.</summary>
-    public BudgetStatus? Blocking(ModelDefinition model, UsageOptions usage)
+    /// <summary>The first budget covering <paramref name="model"/> (or the request's <paramref name="profile"/>) that is spent, or <see langword="null"/>.</summary>
+    public BudgetStatus? Blocking(ModelDefinition model, UsageOptions usage, string? profile = null)
     {
         foreach (BudgetDefinition budget in usage.Budgets)
         {
-            if (Covers(budget, model) && StatusOf(budget, usage) is { Exceeded: true } spent)
+            if (Covers(budget, model, profile) && StatusOf(budget, usage) is { Exceeded: true } spent)
             {
                 return spent;
             }
@@ -82,21 +82,25 @@ internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time,
         return null;
     }
 
-    public static bool Covers(BudgetDefinition budget, ModelDefinition model) =>
+    public static bool Covers(BudgetDefinition budget, ModelDefinition model, string? profile = null) =>
         (budget.Model is { Length: > 0 } name && string.Equals(name, model.Name, StringComparison.OrdinalIgnoreCase))
-        || (budget.Connector is { Length: > 0 } connector && string.Equals(connector, model.Connector, StringComparison.OrdinalIgnoreCase));
+        || (budget.Connector is { Length: > 0 } connector && string.Equals(connector, model.Connector, StringComparison.OrdinalIgnoreCase))
+
+        // A spent profile budget stops the models that cost money; free ones (local, subscriptions) keep serving it.
+        || (budget.Profile is { Length: > 0 } covered && string.Equals(covered, profile, StringComparison.OrdinalIgnoreCase)
+            && (model.InputCostPerMillionTokens > 0 || model.OutputCostPerMillionTokens > 0));
 
     private BudgetStatus StatusOf(BudgetDefinition budget, UsageOptions usage)
     {
         (DateTimeOffset start, DateTimeOffset end) = PeriodOf(budget.Period, time.GetUtcNow(), ZoneOf(usage));
-        UsageTotals spent = ledger.Total(start, end, string.IsNullOrEmpty(budget.Model) ? null : budget.Model, string.IsNullOrEmpty(budget.Model) ? budget.Connector : null);
+        UsageTotals spent = ledger.Total(start, end, NullIfEmpty(budget.Model), NullIfEmpty(budget.Connector), NullIfEmpty(budget.Profile));
         double tokenShare = budget.MaxTokens is > 0 and { } maxTokens ? (double)spent.TotalTokens / maxTokens : 0;
         double costShare = budget.MaxCostUsd is > 0 and { } maxCost ? (double)(spent.CostUsd / maxCost) : 0;
         bool exceeded = (budget.MaxTokens is { } t && spent.TotalTokens >= t) || (budget.MaxCostUsd is { } c && spent.CostUsd >= c);
         int percent = (int)Math.Floor(Math.Max(tokenShare, costShare) * 100);
         bool warning = !exceeded && percent >= usage.WarnAtPercent;
         var status = new BudgetStatus(
-            budget.Name, budget.Model is { Length: > 0 } m ? $"model {m}" : $"connector {budget.Connector}", budget.Period, start, end,
+            budget.Name, budget.Model is { Length: > 0 } m ? $"model {m}" : budget.Connector is { Length: > 0 } c2 ? $"connector {c2}" : $"profile {budget.Profile}", budget.Period, start, end,
             spent.TotalTokens, budget.MaxTokens, spent.CostUsd, budget.MaxCostUsd, percent, exceeded, warning);
 
         string key = budget.Name + (exceeded ? ":spent" : ":warn");
@@ -116,6 +120,8 @@ internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time,
 
         return status;
     }
+
+    private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
     private static DateTimeOffset ToOffset(DateTime local, TimeZoneInfo zone) =>
         new DateTimeOffset(local, zone.GetUtcOffset(local)).ToUniversalTime();

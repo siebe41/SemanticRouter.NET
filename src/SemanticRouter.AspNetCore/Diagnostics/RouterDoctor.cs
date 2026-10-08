@@ -89,23 +89,29 @@ public static class RouterDoctor
         if (embeddings.Provider == EmbeddingProviderKind.Hashing)
         {
             return new RouterCheck("embeddings", RouterCheckStatus.Warning,
-                "the Hashing provider only matches shared words. For meaning-based routing set SemanticRouter:Embeddings to an " +
-                "OpenAICompatible endpoint (LM Studio, Ollama, OpenAI) and raise DefaultSimilarityThreshold (see the README's calibration table).");
+                "the Hashing provider only matches shared words. For meaning-based routing set SemanticRouter:Embeddings:Provider to Onnx " +
+                "(in-process, no server) or to an OpenAICompatible endpoint (LM Studio, Ollama, OpenAI), and raise DefaultSimilarityThreshold " +
+                "(see the README's calibration table).");
         }
 
+        bool onnx = embeddings.Provider == EmbeddingProviderKind.Onnx;
+        string what = onnx ? $"ONNX model {embeddings.ModelPath ?? embeddings.Model ?? "all-MiniLM-L6-v2"}" : $"{embeddings.Model} at {embeddings.Endpoint}";
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(ProbeTimeout);
+
+            // The first ONNX call may download the model.
+            timeout.CancelAfter(onnx ? TimeSpan.FromMinutes(5) : ProbeTimeout);
             ReadOnlyMemory<float> vector = await runtime.EmbeddingProvider.GenerateEmbeddingAsync("hello", timeout.Token).ConfigureAwait(false);
-            return new RouterCheck("embeddings", RouterCheckStatus.Ok, $"{embeddings.Model} at {embeddings.Endpoint}: {vector.Length} dimensions.");
+            return new RouterCheck("embeddings", RouterCheckStatus.Ok, $"{what}: {vector.Length} dimensions.");
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or OperationCanceledException or JsonException
                                    && !cancellationToken.IsCancellationRequested)
         {
             string reason = ex is OperationCanceledException ? "timed out" : runtime.Redactor.Redact(ex.Message);
-            return new RouterCheck("embeddings", RouterCheckStatus.Failed,
-                $"{embeddings.Model} at {embeddings.Endpoint} failed: {reason} (SemanticRouter:Embeddings:Endpoint / Model / ApiKey).");
+            return new RouterCheck("embeddings", RouterCheckStatus.Failed, onnx
+                ? $"{what} failed: {reason} (SemanticRouter:Embeddings:Model / ModelPath)."
+                : $"{what} failed: {reason} (SemanticRouter:Embeddings:Endpoint / Model / ApiKey).");
         }
     }
 

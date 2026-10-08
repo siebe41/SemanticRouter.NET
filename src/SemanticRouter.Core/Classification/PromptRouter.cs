@@ -27,6 +27,22 @@ public sealed record PromptRoutingRequest
     /// (<see cref="RoutingReason.ConversationAffinity"/>); otherwise the request is routed normally.
     /// </summary>
     public string? AffinityModel { get; init; }
+
+    /// <summary>
+    /// A floor for the classified tier (e.g. a retry of a prompt that a lower tier answered). When it raises the tier,
+    /// the reason becomes <see cref="RoutingReason.RetryEscalation"/>.
+    /// </summary>
+    public int? MinimumTier { get; init; }
+
+    /// <summary>
+    /// The <see cref="SemanticRouterOptions.Profiles"/> entry to route under: it narrows the models, clamps the tier and can
+    /// keep the request local. An explicit model it does not allow is ignored (the request is routed as <c>auto</c>).
+    /// </summary>
+    /// <exception cref="ArgumentException">Thrown by <see cref="IPromptRouter.RouteAsync"/> when no such profile exists.</exception>
+    public string? Profile { get; init; }
+
+    /// <summary>Only local models may serve this request, whatever the classification says (e.g. it contains a secret).</summary>
+    public bool LocalOnly { get; init; }
 }
 
 /// <summary>The routing outcome: requirements, and the models to try in order.</summary>
@@ -43,6 +59,9 @@ public interface IPromptRouter
 {
     /// <summary>The configured model catalog.</summary>
     IReadOnlyList<ModelDefinition> Models { get; }
+
+    /// <summary>The configured routing profiles, by name (case-insensitive).</summary>
+    IReadOnlyDictionary<string, RoutingProfile> Profiles => new Dictionary<string, RoutingProfile>();
 
     /// <summary>Classifies the prompt and ranks the models that can serve it.</summary>
     ValueTask<RoutingPlan> RouteAsync(PromptRoutingRequest request, CancellationToken cancellationToken = default);
@@ -61,13 +80,17 @@ public sealed class PromptRouter : IPromptRouter
     private readonly IModelSelector _selector;
     private readonly IModelHealth _health;
     private readonly ModelDefinition[] _models;
+    private readonly Dictionary<string, RoutingProfile> _profiles;
+    private readonly TimeZoneInfo _zone;
+    private readonly TimeProvider _time;
 
     /// <summary>Creates a router.</summary>
     public PromptRouter(
         IPromptClassifier classifier,
         SemanticRouterOptions options,
         IModelSelector? selector = null,
-        IModelHealth? health = null)
+        IModelHealth? health = null,
+        TimeProvider? time = null)
     {
         ArgumentNullException.ThrowIfNull(classifier);
         ArgumentNullException.ThrowIfNull(options);
@@ -76,21 +99,30 @@ public sealed class PromptRouter : IPromptRouter
         _selector = selector ?? new DefaultModelSelector(options.Selection);
         _health = health ?? new ModelHealthTracker(options.Selection);
         _models = options.Models.ToArray();
+        _profiles = new Dictionary<string, RoutingProfile>(options.Profiles, StringComparer.OrdinalIgnoreCase);
+        _zone = options.Selection.EffectiveTimeZone;
+        _time = time ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
     public IReadOnlyList<ModelDefinition> Models => _models;
 
     /// <inheritdoc />
+    public IReadOnlyDictionary<string, RoutingProfile> Profiles => _profiles;
+
+    /// <inheritdoc />
     public async ValueTask<RoutingPlan> RouteAsync(PromptRoutingRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        RoutingProfile? profile = ProfileOf(request);
+        Func<ModelDefinition, bool> usable = Usable(request, profile);
 
         if (request.RequestedModel is { } requested
-            && _models.FirstOrDefault(m => m.Enabled && string.Equals(m.Name, requested, StringComparison.OrdinalIgnoreCase)) is { } forced)
+            && _models.FirstOrDefault(m => m.Enabled && string.Equals(m.Name, requested, StringComparison.OrdinalIgnoreCase)) is { } forced
+            && usable(forced))
         {
             int tokens = request.EstimatedInputTokens ?? TokenEstimator.Estimate(request.Prompt);
-            var requirements = new ModelRequirements { RequiredTier = forced.Tier, EstimatedInputTokens = tokens };
+            var requirements = new ModelRequirements { RequiredTier = forced.Tier, EstimatedInputTokens = tokens, Profile = request.Profile, LocalOnly = request.LocalOnly || profile?.LocalOnly == true };
             return new RoutingPlan(
                 PromptClassificationResult.Bypass(forced.Tier, RoutingReason.ModelOverride),
                 requirements,
@@ -99,7 +131,8 @@ public sealed class PromptRouter : IPromptRouter
 
         if (request.AffinityModel is { } affinity
             && _models.FirstOrDefault(m => m.Enabled && string.Equals(m.Name, affinity, StringComparison.OrdinalIgnoreCase)) is { } pinned
-            && _health.IsAvailable(pinned))
+            && _health.IsAvailable(pinned)
+            && usable(pinned))
         {
             // Continue the turn on the model that started it; the normally ranked models remain as fallbacks.
             var pinnedRequest = request with { EstimatedInputTokens = request.EstimatedInputTokens ?? TokenEstimator.Estimate(request.Prompt) };
@@ -113,6 +146,11 @@ public sealed class PromptRouter : IPromptRouter
         using (System.Diagnostics.Activity? classify = RouterTelemetry.Source.StartActivity("semantic_router.classify"))
         {
             classification = await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false);
+            if (request.MinimumTier is { } floor && floor > classification.RequiredTier)
+            {
+                classification = classification with { RequiredTier = floor, Reason = RoutingReason.RetryEscalation };
+            }
+
             classify?.SetTag("semantic_router.tier", classification.RequiredTier);
             classify?.SetTag("semantic_router.reason", classification.Reason.ToString());
             classify?.SetTag("semantic_router.route", classification.RouteName);
@@ -133,26 +171,43 @@ public sealed class PromptRouter : IPromptRouter
     {
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(request);
+        RoutingProfile? profile = ProfileOf(request);
 
         var requirements = new ModelRequirements
         {
-            RequiredTier = classification.RequiredTier,
+            RequiredTier = profile?.ClampTier(classification.RequiredTier) ?? classification.RequiredTier,
             RequiredCapabilities = classification.RequiredCapabilities
                 .Concat(request.AdditionalCapabilities)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
-            LocalOnly = classification.LocalOnly,
+            LocalOnly = classification.LocalOnly || request.LocalOnly || profile?.LocalOnly == true,
             EstimatedInputTokens = request.EstimatedInputTokens ?? classification.Complexity.EstimatedTokens,
-            Strategy = request.Strategy,
+            Strategy = request.Strategy ?? profile?.Strategy,
+            Profile = request.Profile,
         };
 
-        IReadOnlyList<ModelCandidate> candidates = _selector.RankCandidates(requirements, _models, _health.IsAvailable);
+        // The profile and active hours decide which models exist for this request; health only orders and skips them.
+        Func<ModelDefinition, bool> usable = Usable(request, profile);
+        ModelDefinition[] models = _models.Where(usable).ToArray();
+        IReadOnlyList<ModelCandidate> candidates = _selector.RankCandidates(requirements, models, _health.IsAvailable);
         if (candidates.Count == 0)
         {
             // Everything that qualifies is cooling down: trying a cooled-down model beats failing outright.
-            candidates = _selector.RankCandidates(requirements, _models);
+            candidates = _selector.RankCandidates(requirements, models);
         }
 
         return new RoutingPlan(classification, requirements, candidates);
+    }
+
+    private RoutingProfile? ProfileOf(PromptRoutingRequest request) =>
+        request.Profile is not { Length: > 0 } name ? null
+        : _profiles.TryGetValue(name, out RoutingProfile? profile) ? profile
+        : throw new ArgumentException($"Unknown routing profile '{name}'.", nameof(request));
+
+    /// <summary>Models the profile allows, within their active hours, and local when the request must stay local.</summary>
+    private Func<ModelDefinition, bool> Usable(PromptRoutingRequest request, RoutingProfile? profile)
+    {
+        DateTimeOffset now = _time.GetUtcNow();
+        return model => (profile is null || profile.Allows(model)) && (!request.LocalOnly || model.IsLocal) && model.IsActiveAt(now, _zone);
     }
 }

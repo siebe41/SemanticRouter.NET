@@ -36,7 +36,7 @@ Prices come from the catalog: `InputCostPerMillionTokens` and `OutputCostPerMill
 
 ## Budgets
 
-A budget covers one model or every model on one connector, per `Day`, `Week` (from Monday) or `Month`, in tokens, dollars or both.
+A budget covers one model, every model on one connector, or every request under one [routing profile](routing-profiles.md#budgets-per-profile), per `Day`, `Week` (from Monday) or `Month`, in tokens, dollars or both.
 
 - **At `WarnAtPercent`**, the dashboard shows a banner and the log gets one warning per budget and period.
 - **Once spent**, the model is not tried until the period ends:
@@ -91,6 +91,7 @@ Failed attempts are marked with error status. HTTP backends receive `traceparent
 |---|---|---|
 | `semantic_router.decisions` | {decision} | `tier`, `reason`, `route` |
 | `semantic_router.classification.duration` | s | `reason` |
+| `semantic_router.classification.cache_hits` | {decision} | `reason` (decisions reused from the classification cache, with no embedding call) |
 | `semantic_router.attempts` | {attempt} | `model`, `outcome` |
 | `semantic_router.request.duration` | s | `model`, `connector`, `outcome` (`served`, `failed`) |
 | `semantic_router.time_to_first_byte` | s | `model`, `connector` |

@@ -21,6 +21,9 @@ public static class SemanticRouterDiagnostics
     /// <summary>Histogram of classification latency in seconds, tagged with <c>reason</c>.</summary>
     public const string DurationInstrument = "semantic_router.classification.duration";
 
+    /// <summary>Counter of decisions reused from the classification cache (no embedding call), tagged with <c>reason</c>.</summary>
+    public const string CacheHitsInstrument = "semantic_router.classification.cache_hits";
+
     /// <summary>Counter of model attempts in Dispatch mode, tagged with <c>model</c> and <c>outcome</c> (Completed, Failed, Skipped).</summary>
     public const string AttemptsInstrument = "semantic_router.attempts";
 
@@ -56,6 +59,7 @@ internal sealed class PromptRouterMetrics
 {
     private readonly Counter<long> _decisions;
     private readonly Histogram<double> _duration;
+    private readonly Counter<long> _cacheHits;
     private readonly Counter<long> _attempts;
     private readonly Histogram<double> _requestDuration;
     private readonly Histogram<double> _timeToFirstByte;
@@ -74,6 +78,8 @@ internal sealed class PromptRouterMetrics
             SemanticRouterDiagnostics.DecisionsInstrument, "{decision}", "Prompt routing decisions.");
         _duration = meter.CreateHistogram<double>(
             SemanticRouterDiagnostics.DurationInstrument, "s", "Time spent classifying a prompt.");
+        _cacheHits = meter.CreateCounter<long>(
+            SemanticRouterDiagnostics.CacheHitsInstrument, "{decision}", "Decisions reused from the classification cache.");
         _attempts = meter.CreateCounter<long>(
             SemanticRouterDiagnostics.AttemptsInstrument, "{attempt}", "Model attempts made while dispatching requests.");
         _requestDuration = meter.CreateHistogram<double>(
@@ -99,6 +105,10 @@ internal sealed class PromptRouterMetrics
         };
         _decisions.Add(1, tags);
         _duration.Record(result.Elapsed.TotalSeconds, new KeyValuePair<string, object?>("reason", result.Reason.ToString()));
+        if (result.Cached)
+        {
+            _cacheHits.Add(1, new KeyValuePair<string, object?>("reason", result.Reason.ToString()));
+        }
     }
 
     public void RecordAttempt(string model, ConnectorOutcome outcome) =>

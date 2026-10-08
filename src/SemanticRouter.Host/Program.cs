@@ -59,6 +59,7 @@ static string Help() => $"""
     Files in the configuration directory:
       semantic-router.json           The configuration; the dashboard saves here.
       semantic-router.secrets.json   Keys typed into the dashboard, encrypted.
+      semantic-router.evaluation.jsonl  Labelled prompts for the dashboard's Evaluate page.
       semantic-router.db             Cooldowns, tool-call affinity, activity and configuration history.
       appsettings.json               Optional: host settings (logging, Kestrel, SemanticRouter overrides).
     """;

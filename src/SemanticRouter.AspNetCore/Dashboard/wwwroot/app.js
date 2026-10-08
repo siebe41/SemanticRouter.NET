@@ -46,6 +46,9 @@
     history: { versions: null, diff: null },
     trends: { window: '24h', data: null, loading: false },
     usage: { window: '7d', by: 'model', data: null, loading: false },
+    evaluation: { text: null, location: null, count: 0, report: null, busy: false, health: null, compare: null, addFor: null, add: {}, form: { provider: 'OpenAICompatible', endpoint: '', model: '', apiKey: '', dimensions: 512 } },
+    label: null,         // the Activity "label this prompt" form
+    profileTester: { prompt: '', results: null, busy: false },
   };
 
   /* ---------------------------------------------------------------------------------------------
@@ -185,7 +188,7 @@
       renderChrome();
       if (state.view === 'overview') { state.trends.data = null; }
       if (state.view === 'usage') { loadUsage(); }
-      if (state.view === 'overview' || state.view === 'activity') render();
+      if (state.view === 'overview' || (state.view === 'activity' && !state.label)) render();
       else if (state.view === 'live') scheduleLive();
     } catch (e) { /* keep the last known state */ }
   }
@@ -338,7 +341,9 @@
             <tr><th>Configuration</th><td>v${s.version} from <b>${h(s.source)}</b> · ${h(when(s.createdAt))}</td></tr>
             <tr><th>Store</th><td class="mono small">${s.store ? h(s.store) : '<span class="muted">none (changes apply in memory only)</span>'}</td></tr>
             <tr><th>Embeddings</th><td>${h(s.embeddings.provider)} ${s.embeddings.model ? '· <span class="mono">' + h(s.embeddings.model) + '</span>' : ''} ${s.embeddings.endpoint ? '<span class="faint small">' + h(s.embeddings.endpoint) + '</span>' : ''}
-              ${s.warmedUp ? '<span class="badge ok">index ready</span>' : (s.warmUpError ? `<span class="badge danger" title="${h(s.warmUpError)}">warm-up failed</span>` : '<span class="badge info">warming up</span>')}</td></tr>
+              ${s.warmedUp ? '<span class="badge ok">index ready</span>' : (s.warmUpError ? `<span class="badge danger" title="${h(s.warmUpError)}">warm-up failed</span>` : '<span class="badge info">warming up</span>')}
+              ${s.embeddings.index ? `<div class="faint small">${s.embeddings.index.utterances} utterances embedded in ${fmtMs(s.embeddings.index.buildMilliseconds)} · ${s.embeddings.index.dimensions} dimensions</div>` : ''}</td></tr>
+            ${s.embeddings.cache ? `<tr><th>Classification cache</th><td>${s.embeddings.cache.hits + s.embeddings.cache.misses ? `<b>${Math.round(s.embeddings.cache.hitRate * 100)}%</b> of prompts reused a recent decision (${int(s.embeddings.cache.hits)} of ${int(s.embeddings.cache.hits + s.embeddings.cache.misses)})` : '<span class="muted">no prompts yet</span>'} <span class="faint small">· ${s.embeddings.cache.entries} of ${s.embeddings.cache.capacity} kept</span></td></tr>` : ''}
             <tr><th>Gateway</th><td>${h(s.gateway.mode)} · OpenAI on <span class="mono">${h(s.gateway.pathPrefixes.join(', ') || '(all JSON POSTs)')}</span> · Anthropic on <span class="mono">${h(s.gateway.anthropicPathPrefixes.join(', '))}</span> · Responses on <span class="mono">${h(s.gateway.responsesPathPrefixes.join(', '))}</span></td></tr>
             <tr><th>Strategy</th><td>${h(s.gateway.strategy)}</td></tr>
             <tr><th>Connectors</th><td>${s.connectors.map((c) => `<span class="badge" title="${h(c.target || '')}">${h(c.name)} <span class="faint">${h(c.type)}${c.preset ? '/' + h(c.preset) : ''}</span></span>`).join(' ')}</td></tr>
@@ -390,18 +395,19 @@
       </div>`;
   }
 
-  function renderActivityTable(entries) {
+  function renderActivityTable(entries, labels) {
     if (!entries.length) return '<div class="muted small">No requests routed yet. Point a client at the gateway or use “Try a prompt”.</div>';
     return `<div class="table-wrap"><table>
-      <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th></tr>
+      <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th>${labels ? '<th></th>' : ''}</tr>
       ${entries.map((e) => `<tr title="${h(e.detail || '')}">
         <td class="nowrap small">${h(when(e.timestamp))}</td>
-        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}${memoryBadge(e)}</div></td>
+        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}${e.profile ? ' · <span class="badge accent" title="Routing profile">' + h(e.profile) + '</span>' : ''}${e.project ? ' · <span class="mono" title="Project">' + h(e.project) + '</span>' : ''}${e.signals ? ' · <span class="badge warn" title="Kept local because the conversation contains this">local: ' + h(e.signals) + '</span>' : ''}${memoryBadge(e)}</div></td>
         <td><span class="tier">T${e.tier}</span></td>
-        <td class="small">${h(e.reason)}</td>
+        <td class="small">${h(e.reason)}${e.cached ? ' <span class="badge" title="Reused a recent decision: no embedding call">cached</span>' : ''}</td>
         <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
         <td class="small">${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.servedBy ? `<b>${h(e.servedBy)}</b>${e.attempt > 1 ? ` <span class="badge warn">try ${e.attempt}</span>` : ''}${e.degraded ? ' <span class="badge warn">degraded</span>' : ''}` : `<span class="muted">${h(e.plannedModel || '—')}</span> <span class="faint">planned</span>`}</td>
         <td class="num small">${e.totalMilliseconds != null ? num(e.totalMilliseconds, 0) : num(e.classificationMilliseconds, 1)}</td>
+        ${labels ? `<td>${e.toolContinuation ? '' : `<button class="btn ghost small" data-action="label-open" data-id="${e.id}" title="Say which tier this prompt should have had">Label</button>`}</td>` : ''}
       </tr>`).join('')}
     </table></div>`;
   }
@@ -417,14 +423,34 @@
 
   views.activity = () => {
     const f = state.activityFilter;
-    const entries = state.activity.filter((e) => f === 'all' || (f === 'failed' ? e.outcome === 'failed' : f === 'degraded' ? e.degraded : f === 'tools' ? e.hasTools : true));
+    const entries = state.activity.filter((e) => f === 'all' || (f === 'failed' ? e.outcome === 'failed' : f === 'degraded' ? e.degraded : f === 'tools' ? e.hasTools : f.startsWith('profile:') ? e.profile === f.slice(8) : true));
+    const profiles = [...new Set(state.activity.map((e) => e.profile).filter(Boolean).concat(Object.keys((state.config && state.config.Profiles) || {})))];
     return `
       <div class="section-head"><h1>Activity</h1><span class="muted">The last ${state.activity.length} routed requests (newest first).</span><span class="spacer"></span>
-        <select id="activity-filter" style="width:150px">${['all', 'failed', 'degraded', 'tools'].map((x) => `<option value="${x}" ${x === f ? 'selected' : ''}>${x}</option>`).join('')}</select>
+        <select id="activity-filter" style="width:150px">${['all', 'failed', 'degraded', 'tools'].map((x) => `<option value="${x}" ${x === f ? 'selected' : ''}>${x}</option>`).join('')}${profiles.map((x) => `<option value="profile:${h(x)}" ${'profile:' + x === f ? 'selected' : ''}>profile ${h(x)}</option>`).join('')}</select>
         <label class="check"><input type="checkbox" id="auto-refresh" ${state.autoRefresh ? 'checked' : ''}> auto-refresh</label>
         <button class="btn small" data-action="refresh">Refresh</button></div>
-      ${renderActivityTable(entries)}`;
+      ${state.label ? labelForm() : ''}
+      ${renderActivityTable(entries, !readOnly())}`;
   };
+
+  /* Label an activity entry: add it to the evaluation set and, optionally, as an utterance to a route. */
+  function labelForm() {
+    const l = state.label;
+    const routes = state.config.Routes || [];
+    const routeOptions = (value, blank) => (blank ? `<option value="">${blank}</option>` : '') + routes.map((r) => `<option value="${h(r.Name)}" ${r.Name === value ? 'selected' : ''}>${h(r.Name)} (T${r.Tier})</option>`).join('');
+    return `<div class="card section" id="label-form"><div class="card-head"><h2>Label this prompt</h2><span class="muted small">Routed to tier ${l.routedTier}${l.routedRoute ? ' via ' + h(l.routedRoute) : ''}.${l.truncated ? ' The activity log keeps the first 160 characters of a prompt: complete or shorten it below.' : ''}</span></div>
+      <div class="form-grid">
+        <label class="field wide"><span class="name">Prompt</span><textarea rows="2" data-state="label.prompt">${h(l.prompt)}</textarea></label>
+        <label class="field"><span class="name">Should have been tier</span><select data-state="label.tier" data-kind="number">${tierOptions(l.tier)}</select></label>
+        <label class="field"><span class="name">Expected route (optional)</span><select data-state="label.route">${routeOptions(l.route, '(any)')}</select></label>
+        <label class="check wide"><input type="checkbox" data-state="label.toSet" data-kind="bool" ${l.toSet ? 'checked' : ''}> Add to the evaluation set${l.localOnly ? ' (marked local-only: left out of exports)' : ''}</label>
+        <label class="check wide"><input type="checkbox" data-state="label.toRoute" data-kind="bool" ${l.toRoute ? 'checked' : ''}> Also add it as an utterance, so prompts like it get this tier from now on</label>
+        ${l.toRoute ? `<label class="field"><span class="name">Route</span><select data-state="label.utteranceRoute">${routeOptions(l.utteranceRoute, '(new route…)')}</select></label>
+          ${l.utteranceRoute ? '' : `<label class="field"><span class="name">New route name</span><input type="text" data-state="label.newRoute" value="${h(l.newRoute || '')}" placeholder="e.g. cooking"><span class="hint">Created with tier ${l.tier}.</span></label>`}` : ''}
+      </div>
+      <div class="inline" style="margin-top:10px"><button class="btn primary small" data-action="label-save">Save</button><button class="btn ghost small" data-action="label-cancel">Cancel</button></div></div>`;
+  }
 
   views.tiers = () => {
     const c = state.config;
@@ -516,6 +542,7 @@
             <label class="field"><span class="name">Cache read cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheReadCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheReadCostPerMillionTokens ?? ''}" placeholder="input price"><span class="hint">Prompt-cache reads, if the provider prices them differently.</span></label>
             <label class="field"><span class="name">Cache write cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheWriteCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheWriteCostPerMillionTokens ?? ''}" placeholder="input price"></label>
             <label class="field"><span class="name">Priority</span><input type="number" data-bind="Models.${i}.Priority" data-kind="number" value="${m.Priority || 0}"><span class="hint">Lower is preferred; breaks ties.</span></label>
+            <label class="field"><span class="name">Active hours</span><input type="text" data-bind="Models.${i}.ActiveHours" data-kind="nulltext" value="${h(m.ActiveHours || '')}" placeholder="always (e.g. 08:00-18:00)"><span class="hint">Outside them the model is not tried. Time zone: Routing rules.</span></label>
             <label class="field wide"><span class="name">Description</span><input type="text" data-bind="Models.${i}.Description" data-kind="nulltext" value="${h(m.Description || '')}"></label>
             <label class="check wide"><input type="checkbox" data-bind="Models.${i}.IsLocal" data-kind="bool" ${m.IsLocal ? 'checked' : ''}> Local: prompts stay on this machine (required to serve local-only routes)</label>
           </div>
@@ -556,6 +583,7 @@
               <label class="field"><span class="name">Executable</span><input type="text" data-bind="${p}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="preset default (claude / copilot / codex)"><span class="hint">Started directly, never through a shell. On Windows use the .exe.</span></label>
               <label class="field"><span class="name">Tool calling</span><select data-bind="${p}.ToolCalling">${['None', 'Prompted'].map((x) => `<option ${x === (c.ToolCalling || 'None') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Prompted lets agentic clients (Claude Code) use this CLI: tools are described in the prompt and tool calls parsed from the reply.</span></label>
               <label class="field"><span class="name">Max concurrency</span><input type="number" min="1" data-bind="${p}.MaxConcurrency" data-kind="number" value="${c.MaxConcurrency || 2}"></label>
+              <label class="field"><span class="name">Max queue</span><input type="number" min="0" data-bind="${p}.MaxQueue" data-kind="number" data-nullable="1" value="${c.MaxQueue ?? ''}" placeholder="always wait"><span class="hint">When this many requests are already waiting, the next one goes to another model.</span></label>
               <label class="field"><span class="name">Max argument length</span><input type="number" min="100" data-bind="${p}.MaxArgumentLength" data-kind="number" value="${c.MaxArgumentLength || 24000}"><span class="hint">Longer prompts go on stdin.</span></label>
               <label class="field"><span class="name">Timeout (hh:mm:ss)</span><input type="text" data-bind="${p}.Timeout" value="${h(c.Timeout || '00:00:00')}" placeholder="00:05:00"><span class="hint">Time to first output; 00:00:00 = default (5 min).</span></label>
               ${(c.Preset || 'Custom') === 'Custom' ? `<label class="field"><span class="name">Prompt input</span><select data-bind="${p}.PromptInput">${['Stdin', 'Argument'].map((x) => `<option ${x === (c.PromptInput || 'Stdin') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>` : ''}
@@ -604,6 +632,7 @@
         <label class="field"><span class="name">Max attempts</span><input type="number" min="1" data-bind="Selection.MaxAttempts" data-kind="number" value="${sel.MaxAttempts || 3}"></label>
         <label class="field"><span class="name">Quota cooldown</span><input type="text" data-bind="Selection.QuotaCooldown" value="${h(sel.QuotaCooldown || '00:15:00')}"></label>
         <label class="field"><span class="name">Failure cooldown</span><input type="text" data-bind="Selection.FailureCooldown" value="${h(sel.FailureCooldown || '00:00:30')}"></label>
+        <label class="field"><span class="name">Time zone</span><input type="text" data-bind="Selection.TimeZone" data-kind="nulltext" value="${h(sel.TimeZone || '')}" placeholder="this machine's"><span class="hint">For model active hours (IANA id, e.g. Europe/Amsterdam).</span></label>
         <label class="field"><span class="name">Estimated output tokens</span><input type="number" min="0" data-bind="Selection.EstimatedOutputTokens" data-kind="number" value="${sel.EstimatedOutputTokens == null ? 512 : sel.EstimatedOutputTokens}"><span class="hint">For cost estimates and context-window checks.</span></label>
         <label class="check wide"><input type="checkbox" data-bind="Selection.AllowBelowRequiredTier" data-kind="bool" ${sel.AllowBelowRequiredTier !== false ? 'checked' : ''}> Allow below required tier: degrade to the best available model instead of failing</label>
       </div></div>
@@ -622,11 +651,21 @@
   views.embeddings = () => {
     const e = state.config.Embeddings || {};
     const provider = e.Provider || 'Hashing';
+    const st = state.status.embeddings || {};
+    const available = st.available || ['Hashing', 'OpenAICompatible'];
+    const onnxModels = (st.models || []).filter((m) => m.provider === 'Onnx');
+    const chosen = onnxModels.find((m) => m.name.toLowerCase() === (e.Model || 'all-MiniLM-L6-v2').toLowerCase());
+    const mb = (b) => Math.round(b / 1e6) + ' MB';
+    const onnxFields = () => `
+          <label class="field"><span class="name">Model</span><select data-bind="Embeddings.Model" data-kind="nulltext">${onnxModels.map((m) => `<option value="${h(m.name)}" ${m === chosen ? 'selected' : ''}>${h(m.name)} (${mb(m.downloadBytes)})</option>`).join('')}</select><span class="hint">${chosen ? h(chosen.description) + ' Downloaded and checksum-verified on first use.' : ''}</span></label>
+          <label class="field"><span class="name">Or a model on disk</span><input type="text" data-bind="Embeddings.ModelPath" data-kind="nulltext" value="${h(e.ModelPath || '')}" placeholder="a directory with model.onnx and vocab.txt"><span class="hint">Overrides the model above.</span></label>
+          ${e.ModelPath ? `<label class="field"><span class="name">Pooling</span><select data-bind="Embeddings.Pooling" data-kind="nulltext">${['Mean', 'Cls'].map((x) => `<option ${x === (e.Pooling || 'Mean') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>` : ''}
+          ${chosen && !e.ModelPath ? `<div class="field wide"><span class="name">Similarity threshold</span><div class="inline"><span class="small">This model's suggested starting threshold is <b>${chosen.suggestedThreshold}</b>; the configuration has ${state.config.DefaultSimilarityThreshold}.</span>${chosen.suggestedThreshold !== state.config.DefaultSimilarityThreshold ? `<button class="btn small" data-action="embeddings-threshold" data-value="${chosen.suggestedThreshold}">Use ${chosen.suggestedThreshold}</button>` : ''}<a class="small" href="#/evaluate">Calibrate on your prompts →</a></div></div>` : ''}`;
     return `
       <div class="section-head"><h1>Embeddings</h1><span class="muted">How prompts and utterances are turned into vectors.</span></div>
       <div class="card section"><div class="form-grid">
-        <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${['Hashing', 'OpenAICompatible'].map((x) => `<option ${x === provider ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only); use a real embedding model in production.</span></label>
-        ${provider === 'Hashing' ? `<label class="field"><span class="name">Dimensions</span><input type="number" min="16" data-bind="Embeddings.Dimensions" data-kind="number" value="${e.Dimensions || 512}"></label>` : `
+        <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${available.map((x) => `<option ${x === provider ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only). Onnx runs a real embedding model in this process; OpenAICompatible calls a server (LM Studio, Ollama, OpenAI).</span></label>
+        ${provider === 'Onnx' ? onnxFields() : provider === 'Hashing' ? `<label class="field"><span class="name">Dimensions</span><input type="number" min="16" data-bind="Embeddings.Dimensions" data-kind="number" value="${e.Dimensions || 512}"></label>` : `
           <label class="field"><span class="name">Endpoint</span><input type="url" data-bind="Embeddings.Endpoint" data-kind="nulltext" value="${h(e.Endpoint || '')}" placeholder="http://localhost:1234"></label>
           <label class="field"><span class="name">Model</span><input type="text" data-bind="Embeddings.Model" data-kind="nulltext" value="${h(e.Model || '')}" placeholder="text-embedding-nomic-embed-text-v1.5"></label>
           <label class="field"><span class="name">Request path</span><input type="text" data-bind="Embeddings.RequestPath" value="${h(e.RequestPath || '/v1/embeddings')}"></label>
@@ -779,7 +818,7 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
         <div class="card stat"><span class="value">${d.referenceModel ? usd(t.referenceCostUsd - t.costUsd) : '–'}</span><span class="label">${d.referenceModel ? 'saved compared with sending everything to ' + h(d.referenceModel) : 'set Usage → reference model to estimate savings'}</span></div>
       </div>
       ${d.budgets.length ? `<div class="card section"><div class="card-head"><h2>Budgets</h2><span class="muted small">A spent budget's models are not tried until it resets.</span></div><table>${d.budgets.map(budgetRow).join('')}</table></div>` : ''}
-      <div class="card section"><div class="card-head"><h2>By ${h(u.by)}</h2><span class="spacer"></span>${seg('by', [['model', 'Model'], ['connector', 'Connector'], ['route', 'Route'], ['client', 'Client'], ['day', 'Day']])}</div>
+      <div class="card section"><div class="card-head"><h2>By ${h(u.by)}</h2><span class="spacer"></span>${seg('by', [['model', 'Model'], ['connector', 'Connector'], ['route', 'Route'], ['client', 'Client'], ['profile', 'Profile'], ['day', 'Day']])}</div>
         <table><tr><th>${h(u.by)}</th><th>Requests</th><th>Input</th><th>Output</th><th>Cached</th><th>Cost</th><th style="width:30%"></th></tr>
         ${d.groups.map((g) => { const tk = g.totals.inputTokens + g.totals.outputTokens + g.totals.cacheReadTokens + g.totals.cacheWriteTokens; const share = byCost ? g.totals.costUsd / max : tk / maxTok; return `<tr><td>${h(g.key)}</td><td class="num">${int(g.totals.requests)}</td><td class="num">${int(g.totals.inputTokens)}</td><td class="num">${int(g.totals.outputTokens)}</td><td class="num">${int(g.totals.cacheReadTokens + g.totals.cacheWriteTokens)}</td><td class="num">${usd(g.totals.costUsd)}</td><td><div class="bar" title="${byCost ? 'share of cost' : 'share of tokens'}"><i style="width:${Math.round(share * 100)}%"></i></div></td></tr>`; }).join('') || '<tr><td colspan="7" class="muted small">Nothing recorded in this window. Usage appears once backends report tokens (streamed OpenAI pass-through replies only when the client asks for <code>stream_options.include_usage</code>).</td></tr>'}
         </table></div>
@@ -789,17 +828,211 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
         <label class="field"><span class="name">Time zone for periods</span><input type="text" data-bind="Usage.TimeZone" data-kind="nulltext" value="${h((state.config.Usage || {}).TimeZone || '')}" placeholder="this machine's"></label>
       </div>
       <h3 style="margin-top:14px">Budgets</h3>
-      <table><tr><th>Name</th><th>Model</th><th>or connector</th><th>Period</th><th>Max tokens</th><th>Max USD</th><th></th></tr>
+      <table><tr><th>Name</th><th>Model</th><th>or connector</th><th>or profile</th><th>Period</th><th>Max tokens</th><th>Max USD</th><th></th></tr>
         ${((state.config.Usage || {}).Budgets || []).map((b, i) => `<tr>
           <td><input type="text" data-bind="Usage.Budgets.${i}.Name" value="${h(b.Name || '')}"></td>
           <td><select data-bind="Usage.Budgets.${i}.Model" data-kind="nulltext"><option value=""></option>${(state.config.Models || []).map((m) => `<option ${m.Name === b.Model ? 'selected' : ''}>${h(m.Name)}</option>`).join('')}</select></td>
           <td><select data-bind="Usage.Budgets.${i}.Connector" data-kind="nulltext"><option value=""></option>${connectorNames().map((c) => `<option ${c === b.Connector ? 'selected' : ''}>${h(c)}</option>`).join('')}</select></td>
+          <td><select data-bind="Usage.Budgets.${i}.Profile" data-kind="nulltext"><option value=""></option>${Object.keys(state.config.Profiles || {}).map((x) => `<option ${x === b.Profile ? 'selected' : ''}>${h(x)}</option>`).join('')}</select></td>
           <td><select data-bind="Usage.Budgets.${i}.Period">${['Day', 'Week', 'Month'].map((p) => `<option ${p === (b.Period || 'Day') ? 'selected' : ''}>${p}</option>`).join('')}</select></td>
           <td><input type="number" min="0" data-bind="Usage.Budgets.${i}.MaxTokens" data-kind="number" data-nullable="1" value="${b.MaxTokens ?? ''}"></td>
           <td><input type="number" min="0" step="0.01" data-bind="Usage.Budgets.${i}.MaxCostUsd" data-kind="float" data-nullable="1" value="${b.MaxCostUsd ?? ''}"></td>
-          <td><button class="btn ghost small" data-action="budget-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted small">No budgets.</td></tr>'}
+          <td><button class="btn ghost small" data-action="budget-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted small">No budgets.</td></tr>'}
       </table>
       <div class="inline" style="margin-top:8px"><button class="btn small" data-action="budget-add">Add budget</button></div>
+      </div>`;
+  };
+
+  /* Evaluate: run labelled prompts through the configuration, calibrate thresholds, check routes, compare embeddings. */
+  const pct = (v) => (v * 100).toFixed(v === 1 || v === 0 ? 0 : 1) + '%';
+  async function loadEvaluationSet() {
+    try {
+      const r = await api('GET', '/evaluation/set');
+      state.evaluation.location = r.location; state.evaluation.count = r.count;
+      state.evaluation.text = r.cases.map((c) => JSON.stringify(Object.fromEntries(Object.entries({ prompt: c.prompt, tier: c.tier, route: c.route, localOnly: c.localOnly || undefined, note: c.note }).filter(([, v]) => v != null)))).join('\n');
+    } catch (e) { state.evaluation.text = ''; toast(e.message, 'danger'); }
+    if (state.view === 'evaluate') render();
+  }
+
+  function sweepChart(c, total) {
+    const pts = c.sweep;
+    const iw = W - PAD.l - PAD.r; const ih = H - PAD.t - PAD.b;
+    const max = niceMax(Math.max(1, ...pts.map((p) => Math.max(p.tooLow, p.tooHigh))));
+    const x = (t) => PAD.l + t * iw; const y = (v) => PAD.t + ih - v / max * ih;
+    const path = (key) => pts.filter((p) => p.threshold >= 0).map((p, i) => (i ? 'L' : 'M') + x(p.threshold).toFixed(1) + ' ' + y(p[key]).toFixed(1)).join('');
+    let g = '';
+    [0, 0.5, 1].forEach((f) => { const yy = PAD.t + ih - f * ih; g += `<line class="grid-line" x1="${PAD.l}" x2="${W - PAD.r}" y1="${yy}" y2="${yy}"/><text class="axis" x="${PAD.l - 6}" y="${yy + 3}" text-anchor="end">${Math.round(max * f)}</text>`; });
+    [0, 0.25, 0.5, 0.75, 1].forEach((t) => { g += `<text class="axis" x="${x(t)}" y="${H - 6}" text-anchor="middle">${t}</text>`; });
+    const marker = (t, label, dy) => `<line class="marker" x1="${x(t)}" x2="${x(t)}" y1="${PAD.t}" y2="${PAD.t + ih}"/><text class="end-label" x="${x(t) + 4}" y="${PAD.t + 10 + dy}">${h(label)} ${t.toFixed(2)}</text>`;
+    const last = pts[pts.length - 1];
+    const hits = pts.filter((p) => p.threshold >= 0).map((p) => `<rect class="hit" x="${x(p.threshold) - iw / 200}" y="${PAD.t}" width="${iw / 100}" height="${ih}" data-tip="${h(`threshold ${p.threshold.toFixed(2)}\n${p.correct} of ${total} right · ${p.tooLow} too low · ${p.tooHigh} too high`)}"/>`).join('');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Misroutes by default similarity threshold">${g}
+      <path class="line-2" d="${path('tooLow')}"/><path class="line-1" d="${path('tooHigh')}"/>
+      <circle class="dot-2" cx="${x(last.threshold)}" cy="${y(last.tooLow)}" r="4"/><text class="end-label" x="${x(last.threshold) + 8}" y="${y(last.tooLow) + 4}">too low</text>
+      <circle class="dot-1" cx="${x(last.threshold)}" cy="${y(last.tooHigh)}" r="4"/><text class="end-label" x="${x(last.threshold) + 8}" y="${y(last.tooHigh) - 6}">too high</text>
+      ${marker(c.current.threshold, 'current', 0)}${c.recommended.threshold !== c.current.threshold ? marker(c.recommended.threshold, 'recommended', 14) : ''}${hits}</svg>`;
+  }
+
+  function evaluationResults(r) {
+    const ev = state.evaluation;
+    const tiersAxis = r.tiers;
+    const maxCell = Math.max(1, ...r.confusion.flat());
+    const confusion = `<table class="matrix confusion"><tr><th>expected ↓ / routed →</th>${tiersAxis.map((t) => `<th class="num">T${t}</th>`).join('')}</tr>
+      ${r.confusion.map((row, i) => `<tr><th>T${tiersAxis[i]}</th>${row.map((n, j) => `<td class="cell ${n ? (i === j ? 'hit-ok' : j < i ? 'hit-low' : 'hit-high') : ''}" style="--share:${(n / maxCell).toFixed(2)}" title="${n} prompt(s) labelled T${tiersAxis[i]} routed to T${tiersAxis[j]}">${n || '<span class="faint">·</span>'}</td>`).join('')}</tr>`).join('')}</table>`;
+    const routes = state.config.Routes || [];
+    const misroutes = r.misroutes.map((m, i) => {
+      const open = ev.addFor === i;
+      return `<tr><td class="small">${h(m.prompt)}${m.localOnly && !m.keptLocal ? ' <span class="badge danger">left local-only</span>' : ''}</td>
+        <td><span class="tier">T${m.expectedTier}</span>${m.expectedRoute ? ` <span class="small muted">${h(m.expectedRoute)}</span>` : ''}</td>
+        <td><span class="tier">T${m.actualTier}</span> ${m.actualTier < m.expectedTier ? '<span class="badge warn">too low</span>' : m.actualTier > m.expectedTier ? '<span class="badge info">too high</span>' : ''}<div class="small muted">${h(m.reason)}${m.actualRoute ? ' · ' + h(m.actualRoute) : ''}</div></td>
+        <td class="small">${m.topScores.map((x) => `${h(x.route)} <span class="faint">${num(x.similarity, 3)}</span>`).join('<br>') || '<span class="faint">no embedding (complexity)</span>'}</td>
+        <td>${readOnly() ? '' : open
+          ? `<div class="inline"><select id="add-route">${routes.map((x) => `<option value="${h(x.Name)}" ${x.Tier === m.expectedTier ? 'selected' : ''}>${h(x.Name)} (T${x.Tier})</option>`).join('')}</select><button class="btn primary small" data-action="eval-add-save" data-index="${i}">Add</button><button class="btn ghost small" data-action="eval-add-cancel">×</button></div>`
+          : `<button class="btn ghost small" data-action="eval-add-open" data-index="${i}" title="Add this prompt as an utterance to a route">Add to route…</button>`}</td></tr>`;
+    }).join('');
+    const c = r.calibration;
+    return `<div class="grid cols-4 section">
+        <div class="card stat"><span class="value">${pct(r.accuracy)}</span><span class="label">${r.correct} of ${r.total} prompts routed to their tier</span></div>
+        <div class="card stat"><span class="value">${r.tooLow}</span><span class="label">too low: a weaker model than the prompt needs (costs quality)</span></div>
+        <div class="card stat"><span class="value">${r.tooHigh}</span><span class="label">too high: a stronger model than needed (costs money)</span></div>
+        <div class="card stat"><span class="value">${r.routeLabelled ? pct(r.routeCorrect / r.routeLabelled) : '–'}</span><span class="label">${r.routeLabelled ? `of ${r.routeLabelled} prompts with an expected route matched it` : 'no prompt names an expected route'}${r.localOnlyMissed ? ` · <b>${r.localOnlyMissed} local-only prompt(s) could leave the machine</b>` : ''}</span></div>
+      </div>
+      <div class="grid cols-2 section">
+        <div class="card"><div class="card-head"><h2>By expected tier</h2></div><table><tr><th>Tier</th><th class="num">Prompts</th><th class="num">Right</th><th style="width:40%"></th></tr>
+          ${r.perTier.map((t) => `<tr><td>${h(tierName(t.tier))}</td><td class="num">${t.total}</td><td class="num">${pct(t.accuracy)}</td><td><div class="meter ${t.accuracy < 0.5 ? 'danger' : t.accuracy < 0.8 ? 'warn' : ''}" role="meter" aria-valuenow="${Math.round(t.accuracy * 100)}" aria-valuemin="0" aria-valuemax="100" aria-label="tier ${t.tier} accuracy"><i style="width:${Math.round(t.accuracy * 100)}%"></i></div></td></tr>`).join('')}</table></div>
+        <div class="card"><div class="card-head"><h2>Confusion</h2><span class="muted small">Below the diagonal: routed too low. Above: too high.</span></div>${confusion}</div>
+      </div>
+      ${c ? `<div class="card section"><div class="card-head"><h2>Threshold calibration</h2><span class="muted small">Every default threshold from 0 to 1, on this set.</span><span class="spacer"></span>
+          ${readOnly() ? '' : `<button class="btn small" data-action="eval-use-calibration" ${c.recommended.threshold === c.current.threshold && !c.routes.length ? 'disabled' : ''}>Use recommended values</button>`}</div>
+        <div class="grid cols-2">
+          <div><div class="legend"><span><i class="key" style="background:var(--series-2)"></i>too low</span><span><i class="key" style="background:var(--series-1)"></i>too high</span></div>${sweepChart(c, r.total)}</div>
+          <div><table><tr><th></th><th class="num">Threshold</th><th class="num">Right</th><th class="num">Too low</th><th class="num">Too high</th></tr>
+            <tr><td>Current</td><td class="num">${c.current.threshold.toFixed(2)}</td><td class="num">${c.current.correct}</td><td class="num">${c.current.tooLow}</td><td class="num">${c.current.tooHigh}</td></tr>
+            <tr><td><b>Recommended</b></td><td class="num"><b>${c.recommended.threshold.toFixed(2)}</b></td><td class="num">${c.recommended.correct}</td><td class="num">${c.recommended.tooLow}</td><td class="num">${c.recommended.tooHigh}</td></tr></table>
+            ${c.routes.length ? `<h3 style="margin-top:12px">Route thresholds</h3><table><tr><th>Route</th><th class="num">Now</th><th class="num">Suggested</th><th class="num">Right</th></tr>${c.routes.map((x) => `<tr><td>${h(x.route)}</td><td class="num">${x.current == null ? 'default' : x.current.toFixed(2)}</td><td class="num">${x.recommended == null ? 'default' : x.recommended.toFixed(2)}</td><td class="num">${x.correctBefore} → ${x.correctAfter}</td></tr>`).join('')}</table><p class="small muted">With these: ${c.correctWithRoutes} of ${r.total} right.</p>` : '<p class="small muted" style="margin-top:8px">No per-route threshold does better than the default on this set.</p>'}
+            <p class="small muted">Ties go to fewer prompts routed too low, then to the value closest to the current one. A small set overfits: add prompts before trusting a large change.</p></div>
+        </div>
+        <details style="margin-top:8px"><summary class="small muted">Show the sweep as a table</summary><table><tr><th class="num">Threshold</th><th class="num">Right</th><th class="num">Too low</th><th class="num">Too high</th></tr>${c.sweep.filter((p, i) => i % 5 === 0 || p.threshold === c.current.threshold || p.threshold === c.recommended.threshold).map((p) => `<tr><td class="num">${p.threshold.toFixed(2)}</td><td class="num">${p.correct}</td><td class="num">${p.tooLow}</td><td class="num">${p.tooHigh}</td></tr>`).join('')}</table></details>
+      </div>` : ''}
+      <div class="card section"><div class="card-head"><h2>Misrouted prompts</h2><span class="muted small">${r.misroutes.length} of ${r.total} · embedded in ${num(r.embeddingMilliseconds, 0)} ms with ${h(r.embeddings)}</span></div>
+        ${r.misroutes.length ? `<div class="table-wrap"><table><tr><th>Prompt</th><th>Expected</th><th>Routed</th><th>Best routes</th><th></th></tr>${misroutes}</table></div>` : '<div class="muted small">Every prompt was routed to its tier.</div>'}</div>`;
+  }
+
+  function healthCard() {
+    const hr = state.evaluation.health;
+    const kinds = { FewUtterances: ['info', 'few utterances'], DuplicateUtterances: ['warn', 'duplicate'], ConflictingUtterances: ['danger', 'conflict'], Overlap: ['warn', 'overlap'] };
+    return `<div class="card section"><div class="card-head"><h2>Route health</h2><span class="muted small">Duplicates, utterances shared between routes, routes so close that ambiguity escalation fires constantly, thin routes.</span><span class="spacer"></span><button class="btn small" data-action="eval-health">${hr ? 'Check again' : 'Check routes'}</button></div>
+      ${!hr ? '' : `${hr.findings.length ? `<ul class="findings">${hr.findings.map((f) => `<li><span class="badge ${kinds[f.kind][0]}">${kinds[f.kind][1]}</span> ${h(f.message)}</li>`).join('')}</ul>` : `<div class="small"><span class="badge ok">ok</span> No problems in ${hr.utteranceCount} utterances.</div>`}
+        ${hr.overlaps.length ? `<details style="margin-top:8px"><summary class="small muted">Closest route pairs</summary><table><tr><th>Routes</th><th class="num">Centroid similarity</th><th class="num">Ambiguous utterances</th></tr>${hr.overlaps.slice(0, 8).map((o) => `<tr><td>${h(o.route)} · ${h(o.otherRoute)}</td><td class="num">${num(o.centroidSimilarity, 3)}</td><td class="num">${pct(o.ambiguousFraction)}</td></tr>`).join('')}</table></details>` : ''}`}
+    </div>`;
+  }
+
+  function compareCard() {
+    const f = state.evaluation.form; const cmp = state.evaluation.compare;
+    const side = (s) => s.error ? `<span class="badge danger">failed</span> <span class="small">${h(s.error)}</span>` : `${pct(s.report.accuracy)} <span class="small muted">at the current threshold · ${pct(s.report.calibration.recommended.accuracy)} at ${s.report.calibration.recommended.threshold.toFixed(2)} · ${num(s.report.embeddingMilliseconds, 0)} ms</span>`;
+    return `<div class="card section"><div class="card-head"><h2>Compare embedding models</h2><span class="muted small">Run the set with another embedding provider, each at its own best threshold. Nothing is changed.</span></div>
+      <div class="form-grid">
+        <label class="field"><span class="name">Provider</span><select data-state="evaluation.form.provider">${['OpenAICompatible', 'Hashing'].map((p) => `<option ${p === f.provider ? 'selected' : ''}>${p}</option>`).join('')}</select></label>
+        ${f.provider === 'Hashing' ? `<label class="field"><span class="name">Dimensions</span><input type="number" min="16" data-state="evaluation.form.dimensions" data-kind="number" value="${f.dimensions}"></label>` : `
+        <label class="field"><span class="name">Endpoint</span><input type="text" data-state="evaluation.form.endpoint" value="${h(f.endpoint)}" placeholder="http://localhost:11434"></label>
+        <label class="field"><span class="name">Model</span><input type="text" data-state="evaluation.form.model" value="${h(f.model)}" placeholder="nomic-embed-text"></label>
+        <label class="field"><span class="name">API key</span><input type="text" data-state="evaluation.form.apiKey" value="${h(f.apiKey)}" placeholder="optional, or \${env:…}"></label>`}
+      </div>
+      <div class="inline" style="margin-top:10px"><button class="btn small" data-action="eval-compare" ${readOnly() ? 'disabled title="Needs the admin token"' : ''}>Compare</button></div>
+      ${cmp ? `<table style="margin-top:10px"><tr><th></th><th>Embeddings</th><th>Accuracy</th></tr><tr><td>Current</td><td class="small">${h(cmp.current.embeddings)}</td><td>${side(cmp.current)}</td></tr><tr><td>Candidate</td><td class="small">${h(cmp.candidate.embeddings)}</td><td>${side(cmp.candidate)}</td></tr></table>${(cmp.warnings || []).map((w) => `<div class="small muted">${h(w)}</div>`).join('')}` : ''}
+    </div>`;
+  }
+
+  views.evaluate = () => {
+    const ev = state.evaluation;
+    if (ev.text == null) { loadEvaluationSet(); return '<div class="section-head"><h1>Evaluate routing</h1></div><div class="muted">Loading…</div>'; }
+    return `
+      <div class="section-head"><h1>Evaluate routing</h1><span class="muted">Run labelled prompts through the running configuration. No model is called, only the embedding provider.</span></div>
+      <div class="card section"><div class="card-head"><h2>Evaluation set</h2><span class="muted small">${ev.count} prompt(s) · ${ev.location ? 'kept in <code>' + h(ev.location) + '</code>' : 'kept in memory (lost on restart)'}</span><span class="spacer"></span>
+          <a class="btn ghost small" href="${API}/evaluation/set/export" download>Download</a></div>
+        <textarea id="evaluation-text" rows="8" spellcheck="false" data-state="evaluation.text" placeholder='{"prompt":"summarize this email","tier":1,"route":"rewrite-summarize"}'>${h(ev.text)}</textarea>
+        <div class="hint small muted">One JSON object per line: <code>prompt</code>, the <code>tier</code> it should get, and optionally the <code>route</code> it should match and <code>localOnly</code>. Label prompts from the Activity page too. Local-only prompts are left out of the download.</div>
+        <div class="inline" style="margin-top:10px">
+          <button class="btn primary small" data-action="eval-run" data-calibrate="1" ${ev.busy ? 'disabled' : ''}>${ev.busy ? 'Running…' : 'Run and calibrate'}</button>
+          <button class="btn small" data-action="eval-run" ${ev.busy ? 'disabled' : ''}>Run</button>
+          ${readOnly() ? '' : '<button class="btn small" data-action="eval-save">Save set</button>'}
+          <span class="muted small">Threshold ${state.config.DefaultSimilarityThreshold} · ${(state.config.Routes || []).length} routes · ${h((state.config.Embeddings || {}).Provider || '')}</span></div>
+      </div>
+      ${ev.report ? evaluationResults(ev.report) : ''}
+      ${healthCard()}
+      ${compareCard()}`;
+  };
+
+  /* Profiles: named routing policies, how requests pick one, and a tester that compares them for one prompt. */
+  const STRATEGY_OPTIONS = (value) => `<option value="" ${value ? '' : 'selected'}>(configured)</option>` + STRATEGIES.map((x) => `<option ${x === value ? 'selected' : ''}>${x}</option>`).join('');
+  const tierSelect = (bind, value, blank) => `<select data-bind="${bind}" data-kind="number" data-nullable="1"><option value="" ${value == null ? 'selected' : ''}>${blank}</option>${tiers().map((t) => `<option value="${t.Level}" ${t.Level === value ? 'selected' : ''}>${t.Level} · ${h(t.Name)}</option>`).join('')}</select>`;
+
+  function profileTesterCard() {
+    const t = state.profileTester;
+    const rows = (t.results || []).map((r) => `<tr><td>${r.profile ? `<span class="badge accent">${h(r.profile)}</span>` : '<span class="muted">none</span>'}</td>
+      ${r.error ? `<td colspan="3" class="small"><span class="badge danger">error</span> ${h(r.error)}</td>` : `<td><span class="tier">T${r.plan.requiredTier}</span>${r.plan.localOnly ? ' <span class="badge warn">local only</span>' : ''}</td><td class="small">${h(r.plan.reason)}</td>
+      <td class="small">${r.plan.models.map((m, i) => `${i ? ' → ' : ''}<b>${h(m.model)}</b>`).join('') || '<span class="badge danger">no model</span>'}</td>`}</tr>`).join('');
+    return `<div class="card section"><div class="card-head"><h2>What would each profile do?</h2><span class="muted small">Routes the prompt under every profile without calling a model.</span></div>
+      <div class="inline"><input type="text" id="profile-prompt" data-state="profileTester.prompt" value="${h(t.prompt)}" placeholder="design a multi-tenant billing system" style="flex:1"><button class="btn primary small" data-action="profiles-compare" ${t.busy ? 'disabled' : ''}>${t.busy ? 'Routing…' : 'Compare'}</button></div>
+      ${t.results ? `<table style="margin-top:10px"><tr><th>Profile</th><th>Tier</th><th>Reason</th><th>Models, in order</th></tr>${rows}</table>` : ''}</div>`;
+  }
+
+  views.profiles = () => {
+    const c = state.config; const m = c.Middleware || {};
+    const profiles = c.Profiles || {};
+    const names = Object.keys(profiles);
+    const profileOptions = (value, blank) => (blank ? `<option value="">${blank}</option>` : '') + names.map((x) => `<option ${x === value ? 'selected' : ''}>${h(x)}</option>`).join('');
+    const catalog = (c.Models || []).map((x) => x.Name).join(', ');
+    const rules = m.ProfileRules || [];
+    const virtuals = Object.entries(m.VirtualModels || {});
+    const when = m.LocalOnlyWhen || {};
+    return `
+      <div class="section-head"><h1>Profiles</h1><span class="muted">Policy beyond the prompt text: which models a context may use, how aggressive routing is, what must stay on this machine.</span><span class="spacer"></span><button class="btn primary small" data-action="profile-add">Add profile</button></div>
+      ${names.map((name) => {
+        const pr = profiles[name]; const key = 'profile:' + name; const p = `Profiles.${name}`;
+        return `<div class="item ${state.open.has(key) ? 'open' : ''}" data-key="${key}">
+          <div class="item-head" data-action="toggle" data-key="${key}"><span class="chev">▶</span><span class="title">${h(name)}</span>
+            <span class="meta">${pr.LocalOnly ? '<span class="badge warn">local only</span>' : ''}${pr.Strategy ? `<span class="badge">${h(pr.Strategy)}</span>` : ''}${pr.MinTier != null ? `<span>tier ≥ ${pr.MinTier}</span>` : ''}${pr.MaxTier != null ? `<span>tier ≤ ${pr.MaxTier}</span>` : ''}${(pr.AllowedModels || []).length ? `<span>${pr.AllowedModels.length} allowed</span>` : ''}${(pr.DeniedModels || []).length + (pr.DeniedConnectors || []).length ? `<span>${(pr.DeniedModels || []).length + (pr.DeniedConnectors || []).length} denied</span>` : ''}</span>
+            <span class="spacer"></span><span class="muted small">${h(pr.Description || '')}</span></div>
+          <div class="item-body"><div class="form-grid">
+            <label class="field"><span class="name">Name</span><input type="text" data-action-input="profile-rename" data-name="${h(name)}" value="${h(name)}"><span class="hint">Rules, virtual models, client mappings and budgets follow a rename.</span></label>
+            <label class="field wide"><span class="name">Description</span><input type="text" data-bind="${p}.Description" data-kind="nulltext" value="${h(pr.Description || '')}"></label>
+            <label class="field"><span class="name">Strategy</span><select data-bind="${p}.Strategy" data-kind="nulltext">${STRATEGY_OPTIONS(pr.Strategy)}</select></label>
+            <label class="field"><span class="name">Minimum tier</span>${tierSelect(p + '.MinTier', pr.MinTier, '(none)')}</label>
+            <label class="field"><span class="name">Maximum tier</span>${tierSelect(p + '.MaxTier', pr.MaxTier, '(none)')}<span class="hint">Caps the requirement, so cheaper models are acceptable.</span></label>
+            <label class="field"><span class="name">Allowed models</span><input type="text" data-bind="${p}.AllowedModels" data-kind="csv" value="${h(csv(pr.AllowedModels))}" placeholder="all"><span class="hint">Names or globs (api-*). Catalog: ${h(catalog)}</span></label>
+            <label class="field"><span class="name">Denied models</span><input type="text" data-bind="${p}.DeniedModels" data-kind="csv" value="${h(csv(pr.DeniedModels))}"></label>
+            <label class="field"><span class="name">Allowed connectors</span><input type="text" data-bind="${p}.AllowedConnectors" data-kind="csv" value="${h(csv(pr.AllowedConnectors))}" placeholder="all"></label>
+            <label class="field"><span class="name">Denied connectors</span><input type="text" data-bind="${p}.DeniedConnectors" data-kind="csv" value="${h(csv(pr.DeniedConnectors))}"></label>
+            <label class="check wide"><input type="checkbox" data-bind="${p}.LocalOnly" data-kind="bool" ${pr.LocalOnly ? 'checked' : ''}> Local only: only models marked <i>local</i> answer, even on failover</label>
+          </div><div class="row-actions" style="margin-top:10px"><button class="btn danger small" data-action="profile-remove" data-name="${h(name)}">Remove</button></div></div></div>`;
+      }).join('') || '<div class="card muted">No profiles. Every request is routed by the prompt alone.</div>'}
+      ${profileTesterCard()}
+      <div class="card section"><div class="card-head"><h2>How a request picks a profile</h2><span class="muted small">First match wins: the gateway key's profile (enforced), the header, the model name, the rules.</span></div><div class="form-grid">
+        <label class="field"><span class="name">Profile header</span><input type="text" data-bind="Middleware.ProfileHeader" value="${h(m.ProfileHeader || 'X-Router-Profile')}"></label>
+        <label class="field"><span class="name">Project header</span><input type="text" data-bind="Middleware.ProjectHeader" value="${h(m.ProjectHeader || 'X-Router-Project')}"><span class="hint">Without it: Anthropic <code>metadata.user_id</code> or OpenAI <code>user</code>.</span></label>
+        <label class="field wide"><span class="name">Gateway client → profile (client=profile, one per line)</span><textarea data-bind="Middleware.ClientProfiles" data-kind="kv" rows="2" placeholder="laptop=private">${h(kv(m.ClientProfiles))}</textarea><span class="hint">Clients are the names under Gateway keys. A client cannot leave its profile.</span></label>
+      </div>
+      <h3 style="margin-top:12px">Rules</h3>
+      <table><tr><th>Profile</th><th>Clients</th><th>Projects (globs)</th><th>Offers a tool</th><th>Offers none of</th><th></th></tr>
+        ${rules.map((r, i) => `<tr><td><select data-bind="Middleware.ProfileRules.${i}.Profile">${profileOptions(r.Profile)}</select></td>
+          <td><input type="text" data-bind="Middleware.ProfileRules.${i}.Clients" data-kind="csv" value="${h(csv(r.Clients))}" placeholder="any"></td>
+          <td><input type="text" data-bind="Middleware.ProfileRules.${i}.Projects" data-kind="csv" value="${h(csv(r.Projects))}" placeholder="any"></td>
+          <td><input type="text" data-bind="Middleware.ProfileRules.${i}.ToolsInclude" data-kind="csv" value="${h(csv(r.ToolsInclude))}" placeholder="any, e.g. Bash"></td>
+          <td><input type="text" data-bind="Middleware.ProfileRules.${i}.ToolsExclude" data-kind="csv" value="${h(csv(r.ToolsExclude))}"></td>
+          <td><button class="btn ghost small" data-action="rule-profile-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted small">No rules.</td></tr>'}
+      </table><div class="inline" style="margin-top:8px"><button class="btn small" data-action="rule-profile-add" ${names.length ? '' : 'disabled title="Add a profile first"'}>Add rule</button></div>
+      <h3 style="margin-top:12px">Virtual models</h3><p class="muted small">Model names clients can pick (listed by <code>/v1/models</code>). <code>auto@profile</code> works for every profile too.</p>
+      <table><tr><th>Name</th><th>Profile</th><th>Strategy</th><th>Description</th><th></th></tr>
+        ${virtuals.map(([n, v], i) => `<tr><td><input type="text" data-action-input="virtual-rename" data-name="${h(n)}" value="${h(n)}"></td>
+          <td><select data-bind="Middleware.VirtualModels.${n}.Profile" data-kind="nulltext">${profileOptions(v.Profile, '(none)')}</select></td>
+          <td><select data-bind="Middleware.VirtualModels.${n}.Strategy" data-kind="nulltext">${STRATEGY_OPTIONS(v.Strategy)}</select></td>
+          <td><input type="text" data-bind="Middleware.VirtualModels.${n}.Description" data-kind="nulltext" value="${h(v.Description || '')}"></td>
+          <td><button class="btn ghost small" data-action="virtual-remove" data-name="${h(n)}">remove</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted small">No virtual models.</td></tr>'}
+      </table><div class="inline" style="margin-top:8px"><button class="btn small" data-action="virtual-add">Add virtual model</button></div>
+      <h3 style="margin-top:12px">Keep local when the conversation contains…</h3>
+      <label class="check"><input type="checkbox" data-bind="Middleware.LocalOnlyWhen.Secrets" data-kind="bool" ${when.Secrets ? 'checked' : ''}> something that looks like a credential (API keys, private keys, JWTs)</label>
+      <label class="check"><input type="checkbox" data-bind="Middleware.LocalOnlyWhen.FilePaths" data-kind="bool" ${when.FilePaths ? 'checked' : ''}> an absolute file path <span class="muted small">(agents mention paths on almost every turn)</span></label>
       </div>`;
   };
 
@@ -1406,11 +1639,106 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       try { const r = await api('POST', '/embeddings/test', { text: 'The quick brown fox' }); out.innerHTML = r.ok ? `<span class="badge ok">ok</span> ${r.dimensions} dimensions in ${r.milliseconds} ms` : `<span class="badge danger">failed</span> ${h(r.error)}`; }
       catch (e) { out.textContent = e.message; }
     },
+    'embeddings-threshold'(el) { state.config.DefaultSimilarityThreshold = parseFloat(el.dataset.value); render(); toast('Threshold set in the draft: Apply to use it.', 'ok'); },
     'json-load'() { $('#json-editor').value = JSON.stringify(state.config, null, 2); },
     'json-use'() { try { state.config = JSON.parse($('#json-editor').value); state.errors = null; render(); toast('Draft replaced from JSON. Apply to use it.', 'ok'); } catch (e) { toast('Invalid JSON: ' + e.message, 'danger'); } },
     'json-download'() { const blob = new Blob([JSON.stringify(state.config, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'semantic-router.json'; a.click(); },
     async 'json-baseline'() { const b = await api('GET', '/config/baseline'); $('#json-editor').value = JSON.stringify(b.config, null, 2); toast('Showing the application baseline (not the draft).'); },
     copy(el) { const code = el.parentElement.querySelector('code').textContent; navigator.clipboard.writeText(code).then(() => toast('Copied.', 'ok')); },
+
+    async 'eval-run'(el) {
+      const ev = state.evaluation; ev.busy = true; ev.addFor = null; render();
+      try { ev.report = await api('POST', '/evaluate' + (el.dataset.calibrate ? '?calibrate=true' : ''), { text: ev.text || '' }); }
+      catch (e) { toast(e.message, 'danger'); }
+      ev.busy = false; render();
+    },
+    async 'eval-save'() {
+      const r = await api('PUT', '/evaluation/set', { text: state.evaluation.text || '' });
+      state.evaluation.count = r.count; state.evaluation.location = r.location; render();
+      toast(`Saved ${r.count} prompt(s)${r.location ? ' to ' + r.location : ''}.`, 'ok');
+    },
+    'eval-add-open'(el) { state.evaluation.addFor = +el.dataset.index; render(); },
+    'eval-add-cancel'() { state.evaluation.addFor = null; render(); },
+    async 'eval-add-save'(el) {
+      const m = state.evaluation.report.misroutes[+el.dataset.index];
+      const routeName = $('#add-route').value;
+      const r = await api('POST', `/routes/${encodeURIComponent(routeName)}/utterances`, { utterance: m.prompt });
+      setConfig(await api('GET', '/config'));
+      state.evaluation.addFor = null;
+      toast(`Added to ${r.route}: it now classifies as tier ${r.tier}${r.matchedRoute ? ' via ' + r.matchedRoute : ''}. Re-running…`, 'ok');
+      await actions['eval-run']({ dataset: { calibrate: state.evaluation.report && state.evaluation.report.calibration ? '1' : '' } });
+    },
+    'eval-use-calibration'() {
+      const c = state.evaluation.report.calibration;
+      state.config.DefaultSimilarityThreshold = c.recommended.threshold;
+      c.routes.forEach((x) => { const r = (state.config.Routes || []).find((y) => y.Name.toLowerCase() === x.route.toLowerCase()); if (r) r.SimilarityThreshold = x.recommended; });
+      render();
+      toast('The recommended thresholds are in the draft: Apply to use them.', 'ok');
+    },
+    async 'eval-health'() {
+      try { state.evaluation.health = await api('GET', '/routes/health'); } catch (e) { toast(e.message, 'danger'); }
+      render();
+    },
+    async 'eval-compare'() {
+      const f = state.evaluation.form;
+      const embeddings = f.provider === 'Hashing'
+        ? { Provider: 'Hashing', Dimensions: f.dimensions || 512 }
+        : { Provider: 'OpenAICompatible', Endpoint: f.endpoint || null, Model: f.model || null, ApiKey: f.apiKey || null };
+      state.evaluation.compare = null; toast('Comparing…');
+      try { state.evaluation.compare = await api('POST', '/evaluate/compare', { embeddings, text: state.evaluation.text || '' }); } catch (e) { toast(e.message, 'danger'); }
+      render();
+    },
+    'label-open'(el) {
+      const e = state.activity.find((x) => String(x.id) === el.dataset.id);
+      if (!e) return;
+      const truncated = e.promptPreview.endsWith('…');
+      const routes = state.config.Routes || [];
+      const sameTier = routes.find((r) => r.Tier === e.tier);
+      state.label = { id: e.id, prompt: truncated ? e.promptPreview.slice(0, -1) : e.promptPreview, truncated, tier: e.tier, route: '', routedTier: e.tier, routedRoute: e.route, localOnly: e.localOnly, toSet: true, toRoute: false, utteranceRoute: sameTier ? sameTier.Name : '', newRoute: '' };
+      render(); const form = $('#label-form'); if (form) form.scrollIntoView({ block: 'nearest' });
+    },
+    'label-cancel'() { state.label = null; render(); },
+    async 'label-save'() {
+      const l = state.label;
+      if (!l.prompt.trim()) { toast('The prompt is empty.', 'danger'); return; }
+      const done = [];
+      if (l.toSet) {
+        const r = await api('POST', '/evaluation/cases', { prompt: l.prompt, tier: l.tier, route: l.route || null, localOnly: !!l.localOnly, note: 'labelled from activity #' + l.id });
+        state.evaluation.text = null; done.push(`evaluation set (${r.count})`);
+      }
+      if (l.toRoute) {
+        const name = l.utteranceRoute || l.newRoute.trim();
+        if (!name) { toast('Pick a route or name a new one.', 'danger'); return; }
+        const r = await api('POST', `/routes/${encodeURIComponent(name)}/utterances`, { utterance: l.prompt, tier: l.utteranceRoute ? null : l.tier });
+        setConfig(await api('GET', '/config'));
+        done.push(`route ${r.route}: now tier ${r.tier}${r.matchedRoute ? ' via ' + r.matchedRoute : ''}`);
+      }
+      state.label = null; render();
+      toast(done.length ? 'Saved to ' + done.join('; ') + '.' : 'Nothing to save.', 'ok');
+    },
+
+    'profile-add'() {
+      state.config.Profiles = state.config.Profiles || {};
+      let name = 'profile'; let n = 1; while (state.config.Profiles[name]) name = 'profile-' + (++n);
+      state.config.Profiles[name] = { AllowedModels: [], DeniedModels: [], AllowedConnectors: [], DeniedConnectors: [], Strategy: null, MinTier: null, MaxTier: null, LocalOnly: false, Description: null };
+      state.open.add('profile:' + name); render();
+    },
+    'profile-remove'(el) { delete state.config.Profiles[el.dataset.name]; render(); },
+    'rule-profile-add'() { const m = state.config.Middleware; (m.ProfileRules = m.ProfileRules || []).push({ Profile: Object.keys(state.config.Profiles)[0], Clients: [], Projects: [], ToolsInclude: [], ToolsExclude: [] }); render(); },
+    'rule-profile-remove'(el) { state.config.Middleware.ProfileRules.splice(+el.dataset.index, 1); render(); },
+    'virtual-add'() { const m = state.config.Middleware; m.VirtualModels = m.VirtualModels || {}; let name = 'fast'; let n = 1; while (m.VirtualModels[name]) name = 'model-' + (++n); m.VirtualModels[name] = { Profile: null, Strategy: 'CheapestCapable', Description: null }; render(); },
+    'virtual-remove'(el) { delete state.config.Middleware.VirtualModels[el.dataset.name]; render(); },
+    async 'profiles-compare'() {
+      const t = state.profileTester; const prompt = (t.prompt || '').trim();
+      if (!prompt) { toast('Type a prompt first.', 'danger'); return; }
+      if (isDirty()) toast('The tester uses the applied configuration: apply your changes to test them.');
+      t.busy = true; render();
+      const profiles = [null, ...Object.keys((state.status && state.config.Profiles) || {})];
+      t.results = await Promise.all(profiles.map(async (profile) => {
+        try { return { profile, plan: await api('POST', '/classify', { prompt, profile }) }; } catch (e) { return { profile, error: e.message }; }
+      }));
+      t.busy = false; render();
+    },
 
     async 'tester-classify'() {
       readTester();
@@ -1472,8 +1800,10 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
     Promise.resolve(action(el)).catch((e) => toast(e.message, 'danger'));
   });
 
+  const bindState = (el) => { setPath(state, el.dataset.state, readInput(el)); };
   document.addEventListener('input', (ev) => {
     const el = ev.target;
+    if (el.dataset.state && el.tagName !== 'SELECT' && el.type !== 'checkbox') { bindState(el); return; }
     if (el.dataset.bind) {
       setPath(state.config, el.dataset.bind, readInput(el));
       if (el.dataset.kind === 'lines' && el.dataset.nullable && !el.value.trim()) setPath(state.config, el.dataset.bind, null);
@@ -1493,6 +1823,7 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
 
   document.addEventListener('change', (ev) => {
     const el = ev.target;
+    if (el.dataset.state) { bindState(el); if (el.tagName === 'SELECT' || el.type === 'checkbox') render(); return; }
     if (el.dataset.bind) {
       setPath(state.config, el.dataset.bind, readInput(el));
       // Structural selects (connector type, preset, embeddings provider, enabled) change what is shown.
@@ -1505,6 +1836,22 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       state.config.Connectors = Object.fromEntries(entries);
       (state.config.Models || []).forEach((m) => { if ((m.Connector || '').toLowerCase() === from.toLowerCase()) m.Connector = to; });
       if (state.open.has('conn:' + from)) { state.open.delete('conn:' + from); state.open.add('conn:' + to); }
+      render();
+    } else if (el.dataset.actionInput === 'profile-rename') {
+      const from = el.dataset.name; const to = el.value.trim();
+      if (!to || to === from || state.config.Profiles[to] || /[@.]/.test(to)) { el.value = from; return; }
+      state.config.Profiles = Object.fromEntries(Object.entries(state.config.Profiles).map(([k, v]) => [k === from ? to : k, v]));
+      const m = state.config.Middleware;
+      Object.keys(m.ClientProfiles || {}).forEach((k) => { if (m.ClientProfiles[k] === from) m.ClientProfiles[k] = to; });
+      (m.ProfileRules || []).forEach((r) => { if (r.Profile === from) r.Profile = to; });
+      Object.values(m.VirtualModels || {}).forEach((v) => { if (v.Profile === from) v.Profile = to; });
+      ((state.config.Usage || {}).Budgets || []).forEach((b) => { if (b.Profile === from) b.Profile = to; });
+      if (state.open.has('profile:' + from)) { state.open.delete('profile:' + from); state.open.add('profile:' + to); }
+      render();
+    } else if (el.dataset.actionInput === 'virtual-rename') {
+      const from = el.dataset.name; const to = el.value.trim(); const v = state.config.Middleware.VirtualModels;
+      if (!to || to === from || v[to] || /[@.]/.test(to)) { el.value = from; return; }
+      state.config.Middleware.VirtualModels = Object.fromEntries(Object.entries(v).map(([k, x]) => [k === from ? to : k, x]));
       render();
     } else if (el.id === 'activity-filter') { state.activityFilter = el.value; render(); }
     else if (el.id === 'auto-refresh') { state.autoRefresh = el.checked; }

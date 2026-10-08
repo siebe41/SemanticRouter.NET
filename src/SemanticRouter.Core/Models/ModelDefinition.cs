@@ -60,6 +60,21 @@ public sealed class ModelDefinition
     /// <summary>Optional free-form description.</summary>
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Hours the model may be used, e.g. <c>08:00-18:00</c> or <c>22:00-06:00</c>, in
+    /// <see cref="ModelSelectionOptions.TimeZone"/>. Outside them it is not tried (an office GPU that is off at night, a
+    /// subscription you keep for working hours). <see langword="null"/>: always.
+    /// </summary>
+    public string? ActiveHours { get; set; }
+
+    /// <summary>Whether <see cref="ActiveHours"/> allows the model at <paramref name="now"/> in <paramref name="zone"/>.</summary>
+    public bool IsActiveAt(DateTimeOffset now, TimeZoneInfo zone)
+    {
+        ArgumentNullException.ThrowIfNull(zone);
+        return !TimeWindow.TryParse(ActiveHours, out TimeWindow window)
+               || window.Contains(TimeOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, zone).DateTime));
+    }
+
     /// <summary>Whether the model declares every tag in <paramref name="required"/> (case-insensitive).</summary>
     public bool HasCapabilities(IEnumerable<string> required)
     {

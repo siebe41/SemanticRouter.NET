@@ -23,6 +23,7 @@
     <ProjectReference Include="..\SemanticRouter.FakeCli\SemanticRouter.FakeCli.csproj" />
     <ProjectReference Include="..\..\src\SemanticRouter.Host\SemanticRouter.Host.csproj" />
     <ProjectReference Include="..\..\src\SemanticRouter.Storage.Sqlite\SemanticRouter.Storage.Sqlite.csproj" />
+    <ProjectReference Include="..\..\src\SemanticRouter.Embeddings.Onnx\SemanticRouter.Embeddings.Onnx.csproj" />
   </ItemGroup>
 
   <ItemGroup>

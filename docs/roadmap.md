@@ -17,7 +17,13 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - It has a Responses API front door for Codex. Thinking, structured output and serial tool calls cross protocols, and what a backend cannot carry is reported in the `X-Prompt-Route-Dropped` header.
 
-What it is not yet: something that learns from your prompts. That gap drives the plan.
+- Routing can be measured and tuned on your own prompts: evaluation sets, threshold calibration, route health, labelling activity entries, and optional retry escalation.
+
+- It routes with a real embedding model and no server: an ONNX model runs in-process and is downloaded on first use, and recent decisions are cached.
+
+- It knows who is asking: routing profiles per client, project or tool set narrow the models a request may use, and a conversation that contains a credential can be kept on this machine.
+
+What it is not yet: fast on subscription CLIs for agentic turns, or connected through the vendors' own SDKs. Those are next.
 
 ## What done looks like
 

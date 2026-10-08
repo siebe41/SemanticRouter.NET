@@ -393,6 +393,16 @@ pre.diff .diff-del { color: var(--danger); }
 .seg button { border: 0; background: transparent; color: var(--text-muted); padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
 .seg button.on { background: var(--accent-soft); color: var(--text); }
 
+/* Evaluate page: confusion matrix shading (status tokens, scaled by the cell's share), sweep markers, findings. */
+.confusion td.cell { text-align: center; font-variant-numeric: tabular-nums; }
+.confusion td.hit-ok { background: color-mix(in srgb, var(--ok) calc(var(--share) * 30% + 8%), transparent); }
+.confusion td.hit-low { background: color-mix(in srgb, var(--warn) calc(var(--share) * 30% + 8%), transparent); }
+.confusion td.hit-high { background: color-mix(in srgb, var(--info, var(--accent)) calc(var(--share) * 30% + 8%), transparent); }
+.chart .marker { stroke: var(--text-faint); stroke-width: 1; stroke-dasharray: 3 3; }
+.findings { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 6px; }
+.findings li { font-size: 13px; }
+#evaluation-text { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; }
+
 /* ------------------------------------------------------------------------------------------------
    Live and Memory views. Blue (--accent) marks what stayed local, orange (--signal) what went to the cloud.
    ------------------------------------------------------------------------------------------------ */
