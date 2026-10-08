@@ -52,7 +52,11 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         JsonNode config = envelope["config"]!;
         config["Models"]!.AsArray().Add(new JsonObject
         {
-            ["Name"] = "cloud-2", ["Connector"] = "anthropic", ["Model"] = "claude-opus-5-5", ["Tier"] = 5, ["Capabilities"] = new JsonArray("chat"),
+            ["Name"] = "cloud-2",
+            ["Connector"] = "anthropic",
+            ["Model"] = "claude-opus-5-5",
+            ["Tier"] = 5,
+            ["Capabilities"] = new JsonArray("chat"),
         });
         config["Selection"]!["Strategy"] = "MostCapable";
 

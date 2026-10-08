@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # Versions are pinned centrally in Directory.Packages.props.
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      nuget-minor-and-patch:
+        patterns: [ "*" ]
+        update-types: [ minor, patch ]
+
+  # Workflow actions are pinned to commit SHAs; Dependabot bumps the SHA and the version comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: [ "*" ]
