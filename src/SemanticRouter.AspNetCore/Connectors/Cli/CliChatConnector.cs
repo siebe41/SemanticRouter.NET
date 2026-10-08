@@ -73,6 +73,14 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             return ConnectorResult.Skipped("CLI connectors cannot carry images");
         }
 
+        if (CliExecutableLocator.IsScript(_executable))
+        {
+            // CreateProcess runs .cmd/.bat through cmd.exe, which would re-parse prompt text passed as arguments.
+            string problem = CliExecutableLocator.Find(_executable).Problem(Name)!;
+            LogStartFailed(_logger, Name, _executable, problem);
+            return ConnectorResult.Failed(ModelFailureKind.Unavailable, $"'{_executable}' is a script: {problem}");
+        }
+
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         string workingDirectory = Path.Combine(Path.GetTempPath(), "semantic-router", Guid.NewGuid().ToString("N"));
         try
@@ -121,8 +129,9 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
         catch (FileNotFoundException ex)
         {
-            LogStartFailed(_logger, Name, _executable, ex.InnerException?.Message ?? ex.Message);
-            return ConnectorResult.Failed(ModelFailureKind.Unavailable, $"could not start '{_executable}'");
+            string hint = CliExecutableLocator.Find(_executable).Problem(Name) ?? (ex.InnerException?.Message ?? ex.Message);
+            LogStartFailed(_logger, Name, _executable, hint);
+            return ConnectorResult.Failed(ModelFailureKind.Unavailable, $"could not start '{_executable}': {hint}");
         }
 
         await using (process.ConfigureAwait(false))
@@ -153,7 +162,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         {
             if (parser is null)
             {
-                text.AppendLine(line);
+                text.Append(line).Append('\n'); // LF on every OS: the reply must not depend on where the router runs
                 continue;
             }
 
@@ -270,7 +279,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
     }
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: could not start '{Executable}' ({Error}). Is it installed and on PATH?")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: could not start '{Executable}': {Error}")]
     private static partial void LogStartFailed(ILogger logger, string connector, string executable, string error);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: no output within {Timeout}; trying the next model.")]

@@ -38,6 +38,7 @@ Two front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/models
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Providers](#providers)
+- [Install the tool](#install-the-tool)
 - [Quick start](#quick-start)
 - [Personal setup: LM Studio + your Claude subscription](#personal-setup-lm-studio--your-claude-subscription)
 - [Using Claude Code and other tools through the router](#using-claude-code-and-other-tools-through-the-router)
@@ -168,9 +169,22 @@ Not included, on purpose:
 
 [docs/providers.md](docs/providers.md) has setup steps for each provider.
 
+## Install the tool
+
+The fastest way to use the router is the `semantic-router` .NET tool. It needs nothing cloned:
+
+```bash
+dotnet tool install -g SemanticRouter.Host
+semantic-router init      # finds LM Studio / Ollama models and the claude, codex and copilot CLIs
+semantic-router doctor    # checks every connector without calling a model
+semantic-router           # http://localhost:5080, dashboard at /router
+```
+
+`init` writes `~/.config/semantic-router/semantic-router.json` (or `%APPDATA%\semantic-router` on Windows). Everything else is done on the dashboard. A container image covers API-key and local-model setups. See [docs/host.md](docs/host.md).
+
 ## Quick start
 
-Prerequisite: the [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0).
+To work on the library or try the samples, you need the [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0).
 
 ```bash
 git clone https://github.com/siebe41/SemanticRouter.NET.git
@@ -473,7 +487,7 @@ Registrations use `TryAdd`, so anything you register before `AddSemanticPromptRo
 
 ```bash
 dotnet build      # warnings are errors; .NET analyzers at latest-recommended
-dotnet test       # 285 tests
+dotnet test       # 296 tests
 dotnet pack -c Release -o artifacts
 ```
 
@@ -481,15 +495,16 @@ The tests cover:
 - vector math, heuristics, the route index and both selectors;
 - health cooldowns and the router;
 - the CLI adapters' arguments and output parsers;
-- real child processes that stand in for the CLIs (POSIX): environment scrubbing, stdin, timeouts and killing the process;
+- real child processes started from a small .NET stand-in CLI (`tests/SemanticRouter.FakeCli`): environment scrubbing, an empty working directory, UTF-8 on stdin, argument quoting (quotes, spaces, leading dashes, Unicode, empty arguments), timeouts and killing the process tree, and refusing `.cmd` shims;
+- the `semantic-router` tool: command line, configuration directory per OS, the template, `init` detection and `doctor`;
 - in-process `TestServer` runs of both middleware modes, including failover, quota cooldowns, local-only routing and the remote-client guard;
 - both protocols: parsing, translation in each direction (JSON and SSE), the Anthropic front door end to end, tool-turn affinity, model aliases, prompted tool calling, and the dashboard's admin API, configuration store and hot reload.
 
-No network, model or vendor CLI is needed. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
+No network, model or vendor CLI is needed. CI runs the suite on Linux, Windows and macOS, and builds and smoke-tests the container image. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
 
 ## Roadmap
 
-Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: a ready-to-run host (`dotnet tool` and a container), authentication for remote access, durable state, usage and budget tracking, routing evaluation and calibration, a Responses API front door for Codex, and in-process embeddings.
+Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: durable state, usage and budget tracking, routing evaluation and calibration, a Responses API front door for Codex, and in-process embeddings.
 
 ## License
 

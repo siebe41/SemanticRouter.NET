@@ -291,6 +291,12 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         }
 
         var warnings = new List<string>();
+        if (configuration.Middleware.Mode == PromptRouterMode.Dispatch && !configuration.Models.Any(m => m.Enabled))
+        {
+            // Allowed so a fresh install can start and be configured from the dashboard, but every request gets 503.
+            warnings.Add("No model is enabled, so every request gets 503: add one on the dashboard's Models page or run `semantic-router init`.");
+        }
+
         RouterConfiguration resolved = configuration.ResolveSecrets(_secrets, warnings);
         foreach (string warning in warnings)
         {

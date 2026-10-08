@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>SemanticRouter.Host</RootNamespace>
+    <AssemblyName>semantic-router</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>semantic-router</ToolCommandName>
+    <PackageId>SemanticRouter.Host</PackageId>
+    <Description>A ready-to-run semantic prompt router: point Claude Code, Codex or any OpenAI/Anthropic client at it and it picks local models, subscription CLIs or paid APIs per turn. Includes the dashboard. Install with `dotnet tool install -g SemanticRouter.Host`.</Description>
+    <PackageTags>$(PackageTags);dotnet-tool;claude-code;gateway</PackageTags>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Logs and the start-up banner use the invariant culture; no satellite resources are needed. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SemanticRouter.AspNetCore\SemanticRouter.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The neutral starting configuration: tiers, generic routes, no models until `init` or the dashboard adds them. -->
+    <EmbeddedResource Include="Templates\semantic-router.template.json" LogicalName="semantic-router.template.json" />
+    <Content Remove="Templates\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SemanticRouter.Tests" />
+  </ItemGroup>
+
+</Project>

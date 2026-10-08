@@ -22,6 +22,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
         WriteIndented = true,
+        NewLine = "\n", // the same file on every OS, so it diffs cleanly and survives a copy between machines
     };
 
     /// <summary>How to reach each provider, by connector name.</summary>
@@ -156,11 +157,6 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             if (!Middleware.PathPrefixes.Any(p => !string.IsNullOrWhiteSpace(p)))
             {
                 errors.Add("Middleware:PathPrefixes must list at least one path in Dispatch mode, otherwise every JSON POST in the application would be proxied.");
-            }
-
-            if (!Models.Any(m => m.Enabled))
-            {
-                errors.Add("Models must define at least one enabled model in Dispatch mode.");
             }
         }
 

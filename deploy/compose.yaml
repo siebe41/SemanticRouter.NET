@@ -1,0 +1,28 @@
+# The router with API-key and local-model connectors, in a container.
+#   ROUTER_ADMIN_TOKEN=$(openssl rand -hex 24) OPENAI_API_KEY=sk-... docker compose -f deploy/compose.yaml up
+# Then open http://localhost:5080/router and sign in with ROUTER_ADMIN_TOKEN.
+#
+# Subscription CLI connectors (claude, codex, copilot) do not work here: the container has neither the CLIs nor your
+# login, and must not be given your login files. Run `dotnet tool install -g SemanticRouter.Host` on the machine
+# itself for those (docs/TERMS.md).
+services:
+  router:
+    build:
+      context: ..
+      dockerfile: src/SemanticRouter.Host/Dockerfile
+    image: semantic-router:local
+    ports:
+      - "127.0.0.1:5080:8080"           # keep it on this machine; widen only with gateway keys set
+    volumes:
+      - router-data:/data
+    environment:
+      ROUTER_ADMIN_TOKEN: ${ROUTER_ADMIN_TOKEN:?set ROUTER_ADMIN_TOKEN to a random string of 16+ characters}
+      # Keys stay in the environment; the configuration refers to them, e.g. "ApiKey": "${env:OPENAI_API_KEY}".
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # A model server on the host machine (LM Studio, Ollama) is reached as host.docker.internal.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  router-data:
