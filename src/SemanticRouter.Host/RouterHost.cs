@@ -63,7 +63,8 @@ internal static class RouterHost
         builder.Services
             .AddSemanticPromptRouting(builder.Configuration.GetSection(SemanticRouterOptions.SectionName))
             .UseConfigurationFile(settings.ConfigurationFile)
-            .UseSecretFile();
+            .UseSecretFile()
+            .UseSqliteState(Path.Combine(settings.ConfigurationDirectory, HostSettings.StateFileName));
 
         configure?.Invoke(builder);
 

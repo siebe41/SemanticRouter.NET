@@ -138,7 +138,7 @@ public static class RouterDashboardEndpoints
             return Results.Json(new ValidationResult(RouterRuntimeProvider.Validate(candidate)), ApiJson);
         });
 
-        api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist) =>
+        api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist, string? note) =>
         {
             RouterConfiguration? candidate = await ReadConfigurationAsync(context, provider).ConfigureAwait(false);
             if (candidate is null)
@@ -153,7 +153,7 @@ public static class RouterDashboardEndpoints
             }
 
             bool shouldPersist = persist ?? true;
-            RouterRuntime runtime = provider.Apply(candidate, shouldPersist);
+            RouterRuntime runtime = provider.Apply(candidate, shouldPersist, "admin API", Actor(context), note);
             var warnings = new List<string>(runtime.ApplyNotes);
             if (shouldPersist && provider.Store is null)
             {
@@ -163,10 +163,45 @@ public static class RouterDashboardEndpoints
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), warnings.Count > 0 ? string.Join(" ", warnings) : null);
         }).WithMetadata(DashboardWriteMetadata.Instance);
 
-        api.MapPost("/config/reset", (RouterRuntimeProvider provider) =>
+        api.MapPost("/config/reset", (HttpContext context, RouterRuntimeProvider provider) =>
         {
-            RouterRuntime runtime = provider.ResetToBaseline();
+            RouterRuntime runtime = provider.ResetToBaseline(Actor(context));
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), "Reverted to the application's configuration (the stored document was left in place).");
+        }).WithMetadata(DashboardWriteMetadata.Instance);
+
+        api.MapGet("/config/history", (RouterRuntimeProvider provider, int? limit) =>
+            provider.History is { } history
+                ? Results.Json(new HistoryResponse(history.List(Math.Clamp(limit ?? 50, 1, 500))), ApiJson)
+                : Results.Json(new HistoryResponse([]), ApiJson));
+
+        api.MapGet("/config/history/{id:long}", (RouterRuntimeProvider provider, long id) =>
+        {
+            RouterConfiguration? document = provider.History?.GetVersion(id);
+            if (document is null)
+            {
+                return Results.Problem($"Version {id} is not in the history.", statusCode: StatusCodes.Status404NotFound);
+            }
+
+            var envelope = new JsonObject { ["id"] = id, ["config"] = JsonNode.Parse(document.Masked().ToJson()) };
+            return Results.Content(envelope.ToJsonString(), "application/json");
+        });
+
+        api.MapPost("/config/history/{id:long}/rollback", (HttpContext context, RouterRuntimeProvider provider, long id) =>
+        {
+            RouterConfiguration? document = provider.History?.GetVersion(id);
+            if (document is null)
+            {
+                return Results.Problem($"Version {id} is not in the history.", statusCode: StatusCodes.Status404NotFound);
+            }
+
+            IReadOnlyList<string> errors = RouterRuntimeProvider.Validate(document);
+            if (errors.Count > 0)
+            {
+                return Results.Json(new ValidationResult(errors), ApiJson, statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            RouterRuntime runtime = provider.Apply(document, persist: true, "rollback", Actor(context), $"to version {id}");
+            return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), $"Rolled back to version {id}.");
         }).WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapGet("/activity", (RoutingActivityLog activity, int? limit, long? after) =>
@@ -236,6 +271,15 @@ public static class RouterDashboardEndpoints
         });
 
         return group;
+    }
+
+    /// <summary>Who is making a change, for the configuration history. Never contains a token.</summary>
+    private static string Actor(HttpContext context)
+    {
+        string role = DashboardAccess.RoleOf(context) == RouterDashboardRole.ReadOnly ? "read-only" : "admin";
+        return DashboardAccess.IsLocal(context)
+            ? "this machine"
+            : $"{role} from {context.Connection.RemoteIpAddress}";
     }
 
     private static RouterDashboardOptions CopyOf(RouterDashboardOptions? source)
@@ -433,6 +477,9 @@ public static class RouterDashboardEndpoints
         /// <summary>Whether the document can be applied.</summary>
         public bool Valid => Errors.Count == 0;
     }
+
+    /// <summary>Applied configuration versions, newest first.</summary>
+    public sealed record HistoryResponse(IReadOnlyList<RouterConfigurationVersion> Versions);
 
     /// <summary>Recent routing activity.</summary>
     public sealed record ActivityResponse(IReadOnlyList<RoutingActivityEntry> Entries, long Latest);

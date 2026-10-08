@@ -86,6 +86,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     private readonly IServiceProvider _services;
     private readonly IRouterConfigurationStore? _store;
     private readonly IRouterSecretStore? _secrets;
+    private readonly IRouterConfigurationHistory? _history;
     private readonly ILogger _logger;
     private readonly Lock _gate = new();
     private RouterRuntime? _current;
@@ -93,11 +94,16 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     private int _version;
 
     public RouterRuntimeProvider(
-        IServiceProvider services, ILogger<RouterRuntimeProvider> logger, IRouterConfigurationStore? store = null, IRouterSecretStore? secrets = null)
+        IServiceProvider services,
+        ILogger<RouterRuntimeProvider> logger,
+        IRouterConfigurationStore? store = null,
+        IRouterSecretStore? secrets = null,
+        IRouterConfigurationHistory? history = null)
     {
         _services = services;
         _store = store;
         _secrets = secrets;
+        _history = history;
         _logger = logger;
     }
 
@@ -109,6 +115,9 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
     /// <summary>The secret store, when configured.</summary>
     public IRouterSecretStore? Secrets => _secrets;
+
+    /// <summary>The configuration history, when configured.</summary>
+    public IRouterConfigurationHistory? History => _history;
 
     /// <summary>The active runtime, built on first access.</summary>
     public RouterRuntime Current
@@ -127,6 +136,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                 {
                     (RouterConfiguration document, RouterConfigurationSource source) = LoadInitial();
                     _current = Build(document, source);
+                    RecordStartup(document, source);
                     ScheduleWarmUp(_current);
                 }
 
@@ -167,7 +177,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     /// Validates <paramref name="configuration"/>, builds a runtime from it, swaps it in and optionally saves it to the
     /// store. The previous runtime is disposed. Throws <see cref="InvalidOperationException"/> when invalid.
     /// </summary>
-    public RouterRuntime Apply(RouterConfiguration configuration, bool persist)
+    public RouterRuntime Apply(RouterConfiguration configuration, bool persist, string source = "admin API", string? actor = null, string? note = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         IReadOnlyList<string> errors = Validate(configuration);
@@ -181,7 +191,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         var notes = new List<string>();
         lock (_gate)
         {
-            RouterConfigurationSource source = persist && _store is not null ? RouterConfigurationSource.Store : RouterConfigurationSource.Memory;
+            RouterConfigurationSource runtimeSource = persist && _store is not null ? RouterConfigurationSource.Store : RouterConfigurationSource.Memory;
             RouterConfiguration document = configuration.Clone();
             if (persist && _store is not null)
             {
@@ -203,11 +213,13 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                 }
             }
 
-            runtime = Build(document, source, notes);
+            runtime = Build(document, runtimeSource, notes);
             if (persist && _store is not null)
             {
                 _store.Save(document);
             }
+
+            Record(document, source, actor, persist && _store is not null ? note : string.Join("; ", new[] { note, "not saved" }.Where(n => n is not null)));
 
             previous = _current;
             _current = runtime;
@@ -221,13 +233,14 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     }
 
     /// <summary>Discards the stored document and rebuilds from the application's configuration.</summary>
-    public RouterRuntime ResetToBaseline()
+    public RouterRuntime ResetToBaseline(string? actor = null)
     {
         RouterRuntime? previous;
         RouterRuntime runtime;
         lock (_gate)
         {
             runtime = Build(Baseline.Clone(), RouterConfigurationSource.Configuration);
+            Record(runtime.Configuration, "reset", actor, "the application's own configuration");
             previous = _current;
             _current = runtime;
         }
@@ -244,6 +257,34 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         {
             _current?.Dispose();
             _current = null;
+        }
+    }
+
+    private void Record(RouterConfiguration document, string source, string? actor, string? note)
+    {
+        try
+        {
+            _history?.Record(document, source, actor, string.IsNullOrEmpty(note) ? null : note);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            LogHistoryFailed(_logger, ex);
+        }
+    }
+
+    /// <summary>Records the start-up document unless the history already ends with it (a plain restart).</summary>
+    private void RecordStartup(RouterConfiguration document, RouterConfigurationSource source)
+    {
+        if (_history is null)
+        {
+            return;
+        }
+
+        IReadOnlyList<RouterConfigurationVersion> recent = _history.List(1);
+        RouterConfigurationVersion? latest = recent.Count > 0 ? recent[0] : null;
+        if (latest is null || _history.GetVersion(latest.Id)?.ToJson() != document.ToJson())
+        {
+            Record(document, "startup", null, source == RouterConfigurationSource.Store ? _store?.Location : "the application's configuration");
         }
     }
 
@@ -405,6 +446,9 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         Level = LogLevel.Warning,
         Message = "Saving secrets in plain text to {Location}: {Settings}. Prefer ${{env:VARIABLE}} references, user-secrets or environment variables, or register a secret store with UseSecretFile().")]
     private static partial void LogLiteralSecretsSaved(ILogger logger, string location, string settings);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Could not record the configuration in the history.")]
+    private static partial void LogHistoryFailed(ILogger logger, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Loaded router configuration from {Location}.")]
     private static partial void LogLoadedStore(ILogger logger, string location);

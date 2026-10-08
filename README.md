@@ -478,7 +478,7 @@ Similarity scales differ between embedding models. These are starting points; ca
 | Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. |
 | Change how requirements are derived | Implement `IRouteSelector` or `IComplexityAnalyzer`. |
 | Change how models are ranked (budgets, time of day) | Implement `IModelSelector`. |
-| Persist cooldowns or share them across instances | Implement `IModelHealth`. |
+| Persist cooldowns, affinity, activity and history | `.UseSqliteState("semantic-router.db")` from `SemanticRouter.Storage.Sqlite`, or implement `ICooldownStore`, `IToolCallAffinity`, `IRoutingActivityStore`, `IRouterConfigurationHistory`. See [docs/architecture.md](docs/architecture.md#durable-state). |
 | Support a custom payload shape | Implement `IPromptExtractor`. |
 
 Registrations use `TryAdd`, so anything you register before `AddSemanticPromptRouting()` wins. The router's own classifier, router, extractor and embedding provider are rebuilt on every configuration reload; a custom implementation you register is used as-is across reloads.
@@ -487,7 +487,7 @@ Registrations use `TryAdd`, so anything you register before `AddSemanticPromptRo
 
 ```bash
 dotnet build      # warnings are errors; .NET analyzers at latest-recommended
-dotnet test       # 296 tests
+dotnet test       # 307 tests
 dotnet pack -c Release -o artifacts
 ```
 
@@ -497,6 +497,7 @@ The tests cover:
 - the CLI adapters' arguments and output parsers;
 - real child processes started from a small .NET stand-in CLI (`tests/SemanticRouter.FakeCli`): environment scrubbing, an empty working directory, UTF-8 on stdin, argument quoting (quotes, spaces, leading dashes, Unicode, empty arguments), timeouts and killing the process tree, and refusing `.cmd` shims;
 - the `semantic-router` tool: command line, configuration directory per OS, the template, `init` detection and `doctor`;
+- durable state in SQLite: cooldowns across restarts and between instances, affinity expiry, activity seeding and caps, history and rollback, concurrent writers, and corrupt or locked databases falling back to memory;
 - in-process `TestServer` runs of both middleware modes, including failover, quota cooldowns, local-only routing and the remote-client guard;
 - both protocols: parsing, translation in each direction (JSON and SSE), the Anthropic front door end to end, tool-turn affinity, model aliases, prompted tool calling, and the dashboard's admin API, configuration store and hot reload.
 
@@ -504,7 +505,7 @@ No network, model or vendor CLI is needed. CI runs the suite on Linux, Windows a
 
 ## Roadmap
 
-Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: durable state, usage and budget tracking, routing evaluation and calibration, a Responses API front door for Codex, and in-process embeddings.
+Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: usage and budget tracking, routing evaluation and calibration, a Responses API front door for Codex, and in-process embeddings.
 
 ## License
 

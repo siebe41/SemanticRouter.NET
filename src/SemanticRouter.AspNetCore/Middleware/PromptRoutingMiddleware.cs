@@ -172,11 +172,13 @@ internal sealed partial class PromptRoutingMiddleware
         {
             await _dispatcher.DispatchAsync(context, runtime, plan, chat, bodyBytes, entry).ConfigureAwait(false);
             entry.TotalMilliseconds = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1);
+            _activity.Complete(entry);
             return;
         }
 
         await _next(context).ConfigureAwait(false);
         entry.TotalMilliseconds = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1);
+        _activity.Complete(entry);
     }
 
     /// <summary>

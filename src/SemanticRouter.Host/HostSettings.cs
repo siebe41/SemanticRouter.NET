@@ -6,6 +6,7 @@ internal sealed record HostSettings
     public const string HomeVariable = "SEMANTIC_ROUTER_HOME";
     public const string KeysVariable = "SEMANTIC_ROUTER_KEYS_DIR";
     public const string ConfigurationFileName = "semantic-router.json";
+    public const string StateFileName = "semantic-router.db";
     public const string DefaultUrl = "http://localhost:5080";
 
     /// <summary><c>run</c> (default), <c>init</c>, <c>doctor</c>, <c>help</c> or <c>version</c>.</summary>

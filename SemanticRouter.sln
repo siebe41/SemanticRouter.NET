@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SemanticRouter.FakeCli", "t
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SemanticRouter.Host", "src\SemanticRouter.Host\SemanticRouter.Host.csproj", "{67B4E8CD-7C7D-4803-A690-4CA741DF7B24}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SemanticRouter.Storage.Sqlite", "src\SemanticRouter.Storage.Sqlite\SemanticRouter.Storage.Sqlite.csproj", "{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -117,6 +119,18 @@ Global
 		{67B4E8CD-7C7D-4803-A690-4CA741DF7B24}.Release|x64.Build.0 = Release|Any CPU
 		{67B4E8CD-7C7D-4803-A690-4CA741DF7B24}.Release|x86.ActiveCfg = Release|Any CPU
 		{67B4E8CD-7C7D-4803-A690-4CA741DF7B24}.Release|x86.Build.0 = Release|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Debug|x64.Build.0 = Debug|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Debug|x86.Build.0 = Debug|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Release|x64.ActiveCfg = Release|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Release|x64.Build.0 = Release|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Release|x86.ActiveCfg = Release|Any CPU
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -129,5 +143,6 @@ Global
 		{4774B52E-5D0C-4D7E-96D6-7235079E2FFD} = {5D20AA90-6969-D8BD-9DCD-8634F4692FDA}
 		{A2E2BB0C-F87A-4E0B-AB41-8AB44C270E7D} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{67B4E8CD-7C7D-4803-A690-4CA741DF7B24} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{B7AFA0C9-0F1E-4B40-B8AA-8FB1695C29BA} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

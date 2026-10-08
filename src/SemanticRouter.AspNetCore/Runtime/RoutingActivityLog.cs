@@ -79,17 +79,55 @@ public sealed class RoutingActivityEntry
     public double? TotalMilliseconds { get; set; }
 }
 
-/// <summary>A bounded in-memory log of recent routing decisions.</summary>
+/// <summary>
+/// Keeps routing activity beyond the in-memory window and across restarts. <see cref="RoutingActivityLog"/> appends
+/// each entry once its request has finished and seeds itself from <see cref="Recent"/> on start.
+/// </summary>
+public interface IRoutingActivityStore
+{
+    /// <summary>Stores a finished entry. Must not throw for storage problems: log them and carry on.</summary>
+    void Append(RoutingActivityEntry entry);
+
+    /// <summary>The newest entries first, at most <paramref name="limit"/>.</summary>
+    IReadOnlyList<RoutingActivityEntry> Recent(int limit);
+}
+
+/// <summary>
+/// A bounded in-memory log of recent routing decisions, optionally backed by an <see cref="IRoutingActivityStore"/>
+/// so the dashboard still shows them after a restart.
+/// </summary>
 public sealed class RoutingActivityLog
 {
     private readonly RoutingActivityEntry?[] _entries;
+    private readonly IRoutingActivityStore? _store;
     private readonly Lock _gate = new();
     private long _next;
 
-    /// <summary>Creates a log keeping the latest <paramref name="capacity"/> entries.</summary>
-    public RoutingActivityLog(int capacity = 500)
+    /// <summary>Creates a log keeping the latest <paramref name="capacity"/> entries, seeded from <paramref name="store"/>.</summary>
+    public RoutingActivityLog(int capacity = 500, IRoutingActivityStore? store = null)
     {
         _entries = new RoutingActivityEntry?[Math.Max(10, capacity)];
+        _store = store;
+        if (store?.Recent(_entries.Length) is { Count: > 0 } stored)
+        {
+            // Newest first. Ids may have gaps (a request that never finished), so the entries take consecutive slots
+            // counting back from the newest id; new entries continue the sequence after it.
+            RoutingActivityEntry[] newestFirst = [.. stored.OrderByDescending(e => e.Id)];
+            long newest = newestFirst[0].Id;
+            for (int rank = 0; rank < newestFirst.Length && newest - rank >= 0; rank++)
+            {
+                _entries[(newest - rank) % _entries.Length] = newestFirst[rank];
+            }
+
+            _next = newest + 1;
+        }
+    }
+
+    /// <summary>Hands a finished entry (outcome and timing known) to the store, when there is one.</summary>
+    public void Complete(RoutingActivityEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        _store?.Append(entry);
     }
 
     /// <summary>The next sequence number.</summary>

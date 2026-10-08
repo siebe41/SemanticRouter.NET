@@ -37,6 +37,7 @@
     activityFilter: 'all',
     autoRefresh: true,
     session: { role: null, tokenRequired: false, tokensConfigured: false },
+    history: { versions: null, diff: null },
   };
 
   /* ---------------------------------------------------------------------------------------------
@@ -623,6 +624,37 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       <div class="card section"><div class="card-head"><h2>Routing headers</h2></div><p class="muted small">Every response carries <code>${h(s.gateway && state.config.Middleware.HeaderPrefix || 'X-Prompt-Route')}</code>, <code>-Tier</code>, <code>-Reason</code>, <code>-Similarity</code>, <code>-Complexity</code>, <code>-Model</code>, <code>-Connector</code>, <code>-Attempt</code> and <code>-Degraded</code> headers, so you can see what happened without reading logs.</p></div>`;
   };
 
+  /* Line diff (longest common subsequence), with unchanged runs folded to three lines of context. */
+  function lineDiff(before, after) {
+    const a = before.split('\n'); const b = after.split('\n');
+    const n = a.length; const m = b.length;
+    const lcs = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    const out = []; let i = 0; let j = 0;
+    while (i < n || j < m) {
+      if (i < n && j < m && a[i] === b[j]) { out.push([' ', a[i]]); i++; j++; }
+      else if (j < m && (i >= n || lcs[i][j + 1] > lcs[i + 1][j])) { out.push(['+', b[j]]); j++; }
+      else { out.push(['-', a[i]]); i++; }
+    }
+    const keep = out.map((l, k) => l[0] !== ' ' || out.slice(Math.max(0, k - 3), k + 4).some((x) => x[0] !== ' '));
+    const lines = []; let skipped = 0;
+    out.forEach((l, k) => { if (keep[k]) { if (skipped) { lines.push(`<span class="faint">… ${skipped} unchanged line${skipped === 1 ? '' : 's'}</span>`); skipped = 0; } lines.push(`<span class="${l[0] === '+' ? 'diff-add' : l[0] === '-' ? 'diff-del' : ''}">${h(l[0] + ' ' + l[1])}</span>`); } else skipped++; });
+    if (skipped) lines.push(`<span class="faint">… ${skipped} unchanged line${skipped === 1 ? '' : 's'}</span>`);
+    return out.some((l) => l[0] !== ' ') ? lines.join('\n') : '<span class="faint">No differences.</span>';
+  }
+
+  const historyCard = () => {
+    const hs = state.history;
+    if (!hs.versions) return `<div class="card section"><div class="card-head"><h2>History</h2><span class="spacer"></span><button class="btn small" data-action="history-load">Show applied versions</button></div></div>`;
+    return `<div class="card section"><div class="card-head"><h2>History</h2><span class="muted small">Every applied configuration. Compare one with the draft, or roll back to it (applied and saved).</span><span class="spacer"></span><button class="btn ghost small" data-action="history-load">Refresh</button></div>
+      <table><tr><th>Version</th><th>When</th><th>What</th><th>Who</th><th></th></tr>
+        ${hs.versions.map((v) => `<tr><td class="mono">${v.id}</td><td>${h(new Date(v.timestamp).toLocaleString())}</td><td>${h(v.source)}${v.note ? ' <span class="faint small">' + h(v.note) + '</span>' : ''}</td><td class="small">${h(v.actor || '')}</td>
+          <td class="row-actions"><button class="btn small" data-action="history-diff" data-id="${v.id}">Compare with draft</button>${readOnly() ? '' : `<button class="btn ghost small" data-action="history-rollback" data-id="${v.id}">Roll back</button>`}</td></tr>`).join('') || '<tr><td colspan="5" class="muted small">Nothing applied yet.</td></tr>'}
+      </table>
+      ${hs.diff ? `<h3 style="margin-top:14px">Version ${hs.diff.id} → draft</h3><pre class="diff">${hs.diff.html}</pre>` : ''}
+    </div>`;
+  };
+
   views.json = () => `
       <div class="section-head"><h1>JSON</h1><span class="muted">The whole document, the same shape as the <code>SemanticRouter</code> section of appsettings.json.</span><span class="spacer"></span>
         <button class="btn small" data-action="json-load">Load into editor</button><button class="btn small" data-action="json-download">Download</button><button class="btn ghost small" data-action="json-baseline" title="Show what the application's own configuration says">Show baseline</button></div>
@@ -630,7 +662,8 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
         <textarea id="json-editor" rows="30" spellcheck="false">${h(JSON.stringify(state.config, null, 2))}</textarea>
         <div class="inline" style="margin-top:10px"><button class="btn primary" data-action="json-use">Use this JSON as the draft</button><span class="muted small">Secrets show as <code>***</code>; that placeholder keeps the stored value.</span></div>
       </div>
-      <div class="card section flat"><details><summary>Where does the configuration come from?</summary><p class="small muted" style="margin-top:8px">The application's <code>SemanticRouter</code> section (appsettings.json, environment variables, user-secrets, code) is the baseline. When a configuration store is registered (<code>UseConfigurationFile</code>), a saved document replaces the baseline on start-up; secrets left empty in the document are inherited from the baseline. <b>Apply</b> changes the running router; <b>Apply &amp; save</b> also writes the store. <b>Reset</b> (in the JSON page) goes back to the baseline for this process.</p><button class="btn danger small" data-action="config-reset">Reset running configuration to baseline</button></details></div>`;
+      <div class="card section flat"><details><summary>Where does the configuration come from?</summary><p class="small muted" style="margin-top:8px">The application's <code>SemanticRouter</code> section (appsettings.json, environment variables, user-secrets, code) is the baseline. When a configuration store is registered (<code>UseConfigurationFile</code>), a saved document replaces the baseline on start-up; secrets left empty in the document are inherited from the baseline. <b>Apply</b> changes the running router; <b>Apply &amp; save</b> also writes the store. <b>Reset</b> (in the JSON page) goes back to the baseline for this process.</p><button class="btn danger small" data-action="config-reset">Reset running configuration to baseline</button></details></div>
+      ${historyCard()}`;
 
   /* ---------------------------------------------------------------------------------------------
      Rendering and routing
@@ -676,6 +709,19 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       await refreshStatus();
       render();
       toast('Reset to baseline.', 'ok');
+    },
+    async 'history-load'() { state.history.versions = (await api('GET', '/config/history?limit=100')).versions; render(); },
+    async 'history-diff'(el) {
+      const v = await api('GET', '/config/history/' + el.dataset.id);
+      state.history.diff = { id: el.dataset.id, html: lineDiff(JSON.stringify(v.config, null, 2), JSON.stringify(state.config, null, 2)) };
+      render();
+    },
+    async 'history-rollback'(el) {
+      if (!confirm(`Roll back to version ${el.dataset.id}? It is applied and saved; the current version stays in the history.`)) return;
+      setConfig(await api('POST', `/config/history/${el.dataset.id}/rollback`));
+      state.history.diff = null;
+      state.history.versions = (await api('GET', '/config/history?limit=100')).versions;
+      await refreshStatus(); render(); toast(`Rolled back to version ${el.dataset.id}.`, 'ok');
     },
     async 'reset-health'() { await api('POST', '/health/reset'); await refreshStatus(); toast('Cooldowns cleared.', 'ok'); },
 

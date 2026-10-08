@@ -11,7 +11,9 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 - A dashboard edits every setting with hot reload and shows live status and activity.
 - Keys can stay out of the configuration file (`${env:…}` references, an encrypted secret store), and the dashboard and gateway can be opened to other machines with tokens and gateway keys.
 
-What it is not yet: something that remembers anything across a restart, or something that tells you what it spent. Those gaps drive the plan.
+- Cooldowns, tool-call affinity, activity and every applied configuration can survive restarts (SQLite; on by default in the tool), with diff and rollback on the dashboard.
+
+What it is not yet: something that tells you what it spent, or something that learns from your prompts. Those gaps drive the plan.
 
 ## What done looks like
 

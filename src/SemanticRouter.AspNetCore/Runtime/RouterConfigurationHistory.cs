@@ -1,0 +1,84 @@
+namespace SemanticRouter.AspNetCore;
+
+/// <summary>One applied configuration document.</summary>
+/// <param name="Id">Increasing version id.</param>
+/// <param name="Timestamp">When it was applied.</param>
+/// <param name="Source">What applied it: <c>startup</c>, <c>admin API</c>, <c>reset</c>, <c>rollback</c>, …</param>
+/// <param name="Actor">Who applied it, when known (e.g. <c>local</c>, <c>admin token from 203.0.113.7</c>).</param>
+/// <param name="Note">Extra detail, e.g. <c>to version 12</c> or <c>not saved</c>.</param>
+public sealed record RouterConfigurationVersion(long Id, DateTimeOffset Timestamp, string Source, string? Actor, string? Note);
+
+/// <summary>
+/// Keeps every configuration document the router applied, so the dashboard can show what changed and roll back.
+/// Documents are stored as applied: with <c>${…}</c> references where the configuration uses them, and with
+/// literal keys where it does (as the configuration file itself would hold them).
+/// </summary>
+public interface IRouterConfigurationHistory
+{
+    /// <summary>Records <paramref name="document"/> and returns its version id.</summary>
+    long Record(RouterConfiguration document, string source, string? actor = null, string? note = null);
+
+    /// <summary>The newest versions first.</summary>
+    IReadOnlyList<RouterConfigurationVersion> List(int limit = 50);
+
+    /// <summary>The document of version <paramref name="id"/>, or <see langword="null"/> when it is not kept.</summary>
+    RouterConfiguration? GetVersion(long id);
+}
+
+/// <summary>The default <see cref="IRouterConfigurationHistory"/>: the latest documents of this process, in memory.</summary>
+public sealed class InMemoryRouterConfigurationHistory : IRouterConfigurationHistory
+{
+    private readonly LinkedList<(RouterConfigurationVersion Version, string Json)> _versions = new();
+    private readonly int _capacity;
+    private readonly Lock _gate = new();
+    private long _next = 1;
+
+    /// <summary>Keeps the latest <paramref name="capacity"/> documents.</summary>
+    public InMemoryRouterConfigurationHistory(int capacity = 50)
+    {
+        _capacity = Math.Max(2, capacity);
+    }
+
+    /// <inheritdoc />
+    public long Record(RouterConfiguration document, string source, string? actor = null, string? note = null)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        lock (_gate)
+        {
+            var version = new RouterConfigurationVersion(_next++, DateTimeOffset.UtcNow, source, actor, note);
+            _versions.AddFirst((version, document.ToJson()));
+            while (_versions.Count > _capacity)
+            {
+                _versions.RemoveLast();
+            }
+
+            return version.Id;
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<RouterConfigurationVersion> List(int limit = 50)
+    {
+        lock (_gate)
+        {
+            return _versions.Take(Math.Max(0, limit)).Select(v => v.Version).ToArray();
+        }
+    }
+
+    /// <inheritdoc />
+    public RouterConfiguration? GetVersion(long id)
+    {
+        lock (_gate)
+        {
+            foreach ((RouterConfigurationVersion version, string json) in _versions)
+            {
+                if (version.Id == id)
+                {
+                    return RouterConfiguration.FromJson(json);
+                }
+            }
+
+            return null;
+        }
+    }
+}

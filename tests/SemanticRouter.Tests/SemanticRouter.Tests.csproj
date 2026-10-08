@@ -22,6 +22,7 @@
     <!-- The stand-in CLI for process integration tests; its executable is copied next to the tests. -->
     <ProjectReference Include="..\SemanticRouter.FakeCli\SemanticRouter.FakeCli.csproj" />
     <ProjectReference Include="..\..\src\SemanticRouter.Host\SemanticRouter.Host.csproj" />
+    <ProjectReference Include="..\..\src\SemanticRouter.Storage.Sqlite\SemanticRouter.Storage.Sqlite.csproj" />
   </ItemGroup>
 
   <ItemGroup>
