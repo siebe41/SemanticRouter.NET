@@ -126,6 +126,8 @@ internal sealed partial class PromptDispatcher
             context.Features.Set(capture);
             var dropped = new DroppedFeatures();
             context.Features.Set(dropped);
+            var notes = new AttemptNotes();
+            context.Features.Set(notes);
             current.Model = model;
             current.Connector = connector.Name;
 
@@ -140,6 +142,11 @@ internal sealed partial class PromptDispatcher
                 if (dropped.Names.Count > 0)
                 {
                     span?.SetTag("semantic_router.dropped", string.Join(",", dropped.Names));
+                }
+
+                if (notes.Notes.Count > 0)
+                {
+                    span?.SetTag("semantic_router.notes", string.Join("; ", notes.Notes));
                 }
 
                 if (result.Outcome == ConnectorOutcome.Failed)
@@ -172,6 +179,7 @@ internal sealed partial class PromptDispatcher
                         activity.Detail = attempts.Count > 0 ? string.Join("; ", attempts) : null;
                         activity.Budget = budgetsHit.Count > 0 ? string.Join(", ", budgetsHit.Distinct(StringComparer.OrdinalIgnoreCase)) : null;
                         activity.Dropped = dropped.Names.Count > 0 ? string.Join(", ", dropped.Names) : null;
+                        activity.Notes = notes.Notes.Count > 0 ? string.Join("; ", notes.Notes) : null;
                     }
 
                     return;

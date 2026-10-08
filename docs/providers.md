@@ -269,6 +269,31 @@ Agentic clients (Claude Code, Codex CLI, agent frameworks) send every turn with 
 
 Prompted tool calling keeps the CLI text-in/text-out (the vendor CLI's own tools stay disabled; the **client** runs the tools), so it fits the design rules in [TERMS.md](TERMS.md). It costs more than native tool use: every turn re-sends the whole context, there is no prompt caching, and it depends on the model following the format, which frontier models do and small ones often do not.
 
+### Prompted tool calling in practice
+
+- **Text streams.** The reply's text goes to the client as the CLI writes it. Only a line that opens a fence or a JSON object is held back until the router can tell whether it is a tool call; ordinary code blocks (` ```python `) stream like text. Calls are sent as structured tool calls at the end of the reply, after any text. `StreamPromptedReplies: false` buffers the whole reply instead. The trade-off: once text has been streamed, a run that then fails cannot fail over to another model.
+- **Near misses count.** Besides the requested ` ```tool_call ` block, the router accepts:
+  - another tool-ish label (`tool_use`, `function_call`, …);
+  - a ` ```json ` or unlabelled block, or a bare JSON object, that names one of the request's tools;
+  - an array of calls, or a `{"tool_calls": […]}` wrapper;
+  - OpenAI-style `{"function": {"name", "arguments": "<json string>"}}`;
+  - trailing commas.
+
+  Tool names match case-insensitively. JSON that names no tool (an answer that happens to contain `{"name": "Bob"}`) stays text.
+- **Broken calls are repaired once.** When a block meant as a call cannot be read (invalid JSON, a tool that does not exist, missing arguments), the router runs the CLI once more with a short prompt. That prompt holds only the broken block, the problem and that tool's schema, not the conversation. The repaired call replaces the broken block. If the repair fails too, the block reaches the client as text. Either way the activity entry says so (`tool call repaired`, or `malformed tool call: …`), and the log has a line. `RepairToolCalls: false` turns the repair run off.
+- **Measured.** The dashboard's Overview shows time to first byte and total time per connector. `benchmarks/SemanticRouter.Benchmarks -- latency <router url> <model> …` runs a fixed three-turn agentic task (a Read tool, a scripted tool result, a follow-up) against any models and prints time to first output, total time and input tokens per turn.
+
+  On the simulated Claude Code agent from the tests (`fake-cli` in `claude-agent` mode: 1.5 s start-up, then a word every 30 ms), streaming moves the first output from the end of the reply to the start:
+
+  | Connector | Turn | First output p50 | Total p50 | Input tokens |
+  |---|---|---|---|---|
+  | buffered (`StreamPromptedReplies: false`, the previous behaviour) | 1 (text + tool call) | 2864 ms | 2868 ms | 261 |
+  | streaming (default) | 1 (text + tool call) | 1607 ms | 2875 ms | 261 |
+  | buffered | 2 (answer after the tool result) | 2936 ms | 2939 ms | 392 |
+  | streaming | 2 | 1594 ms | 2924 ms | 392 |
+
+  Total time and input tokens do not change: every turn still starts a CLI process and re-sends the transcript. [TERMS.md](TERMS.md#session-reuse-and-long-lived-processes) explains why session reuse and long-lived processes are not used. Real CLIs start more slowly and write longer replies than the simulation, so the gain in time to first output is larger. Run the benchmark against your own models to see it.
+
 Across a tool-calling turn the router pins follow-up requests (those carrying tool results) to the model that issued the calls (`Middleware:PinToolCallingTurns`), so a turn never changes models halfway.
 
 ## What survives translation

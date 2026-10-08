@@ -2,6 +2,7 @@
 //
 //   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks
 //   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks -- --remote http://localhost:11434 nomic-embed-text
+//   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks -- latency http://localhost:5000 <model> …   (see LatencyBenchmark.cs)
 //
 // Each provider classifies every prompt of the set (the classification cache is off, so every prompt is embedded)
 // for several rounds after a warm-up, and is calibrated on the set to find the range of thresholds that route it best.
@@ -12,6 +13,11 @@ using Microsoft.Extensions.Options;
 using SemanticRouter;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Embeddings.Onnx;
+
+if (args is ["latency", ..])
+{
+    return await SemanticRouter.Benchmarks.LatencyBenchmark.RunAsync(args);
+}
 
 string root = FindRepository();
 string template = File.ReadAllText(Path.Combine(root, "src", "SemanticRouter.Host", "Templates", "semantic-router.template.json"));
@@ -76,6 +82,8 @@ foreach ((string name, Func<IEmbeddingProvider> create) in providers)
         $"| {name} | {warmUp.TotalMilliseconds:0} ms ({options.Routes.Sum(r => r.Utterances.Count)} utterances) | {Percentile(timings, 0.50):0.00} ms | {Percentile(timings, 0.95):0.00} ms | {report.Correct}/{report.Total} at {suggested:0.00} | {best.Min():0.00}–{best.Max():0.00} ({calibration.Recommended.Correct}/{report.Total}) |"));
     (provider as IDisposable)?.Dispose();
 }
+
+return 0;
 
 static double Percentile(List<double> sorted, double p) => sorted[Math.Clamp((int)Math.Ceiling(p * sorted.Count) - 1, 0, sorted.Count - 1)];
 

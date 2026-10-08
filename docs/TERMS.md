@@ -106,6 +106,15 @@ Each mechanism below exists because of a specific line in a vendor's terms. Thos
 
 Use the **Gemini API** with a key through the `OpenAICompatible` connector instead (see [providers.md](providers.md#google-gemini-api)).
 
+## Session reuse and long-lived processes
+
+Every prompted turn starts a new CLI process and re-sends the whole transcript, which is the slowest and most quota-hungry part of using a subscription CLI for agentic work. Two ways to avoid that were evaluated against the rules above. Neither is enabled.
+
+- **Resuming a stored session** (Claude Code's `--resume`/`--continue`, and the equivalents in the other CLIs). The CLI keeps the conversation in its own session store under your home directory, keyed by working directory. A resumed turn would send only the new messages. That breaks rule 7: runs would need a persistent working directory instead of a fresh empty one, and every conversation that passed through the router would be stored on disk by the CLI, whatever profile or local-only policy the router applied. The router would also need to map each client conversation to a CLI session and to detect when a client rewrote its history (agents compact and edit their transcripts), or a resumed session would answer from a different context than the client sent. A wrong mapping fails silently.
+- **A long-lived process per connector** (`--input-format stream-json`). This removes start-up time, but the process holds one conversation. Turns from different conversations, clients or profiles would share context unless each gets its own process. Per-conversation processes need idle timeouts, memory limits and cleanup, and they make `MaxConcurrency` mean "conversations" instead of "requests".
+
+What the router does instead: it streams text as it arrives (most of the waiting a person notices), repairs a broken call with a short separate run rather than a retried turn, and measures time to first byte per connector. Either option above could be added later as an opt-in per connector. It would have to keep sessions inside a router-owned directory deleted on idle, never shared between profiles, and documented here first. For lower cost and latency with a Copilot subscription, the [Copilot SDK connector](providers.md#github-copilot-sdk) is the supported route.
+
 ## API-key connectors
 
 OpenAI, Anthropic, Gemini, Azure OpenAI, OpenRouter and similar APIs are used with your own API keys under each provider's normal API terms. These are the right choice for anything shared: team gateways, internal tools, products. `AllowRemoteClients` does not apply to them.

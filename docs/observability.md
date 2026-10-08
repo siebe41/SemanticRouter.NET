@@ -118,6 +118,7 @@ Without OpenTelemetry: `dotnet-counters monitor -n semantic-router --counters Se
 ## Request ids, logs and export
 
 - **Dropped features.** When the serving backend could not carry part of the request (a hosted tool, a reasoning request, `logprobs`, …), the response has `X-Prompt-Route-Dropped`, the activity entry has `dropped`, and the attempt span has `semantic_router.dropped`. The list is in [providers.md](providers.md#what-survives-translation).
+- **Connector notes.** What a connector wants on the record about the attempt it served, such as `tool call repaired` or `malformed tool call: …` for prompted tool calling, goes to the activity field `notes` and the attempt span tag `semantic_router.notes`.
 - **Request ids.** Every routed response carries `X-Prompt-Route-Id`, the id of its activity entry. The entry also stores the W3C `traceId`, so a request a user reports can be found in the dashboard, the export and the tracing backend.
 - **Log scope.** Log lines written while a request is routed carry the scope `RouteRequestId`. Turn on scopes in your logging provider (e.g. `"Console": { "IncludeScopes": true }`).
 - **Export.** `GET {dashboard}/api/activity/export?format=csv|jsonl&since=…&until=…` downloads activity (default: the last 7 days), with tokens, cost, timings and trace ids. Prompt previews are left out unless you add `prompts=true`.

@@ -114,6 +114,9 @@ public sealed class RoutingActivityEntry
     /// <summary>Request features the serving backend could not carry (e.g. <c>reasoning</c>, <c>logprobs</c>), if any.</summary>
     public string? Dropped { get; set; }
 
+    /// <summary>What the serving connector put on the record, e.g. <c>tool call repaired</c>, if anything.</summary>
+    public string? Notes { get; set; }
+
     /// <summary>The W3C trace id of the request, for finding it in a tracing backend.</summary>
     public string? TraceId { get; set; }
 }

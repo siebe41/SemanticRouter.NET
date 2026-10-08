@@ -129,6 +129,19 @@ public sealed class ConnectorOptions
     public CliToolCalling ToolCalling { get; set; } = CliToolCalling.None;
 
     /// <summary>
+    /// CLI, prompted tool calling: send the reply's text while the model is still writing, holding back only what may
+    /// be a tool call. Default <see langword="true"/>. Off: the whole reply is buffered, so a failed run can still fail
+    /// over to another model even after it produced text.
+    /// </summary>
+    public bool StreamPromptedReplies { get; set; } = true;
+
+    /// <summary>
+    /// CLI, prompted tool calling: when the model writes a tool call that cannot be read, ask it once, in a short
+    /// separate run, to rewrite just that call. Default <see langword="true"/>. Either way the activity entry says so.
+    /// </summary>
+    public bool RepairToolCalls { get; set; } = true;
+
+    /// <summary>
     /// CLI: output fragments (case-insensitive) that mean "quota or rate limit exhausted". They put the model in the
     /// longer quota cooldown. Presets supply sensible defaults; entries here are added to them.
     /// </summary>
