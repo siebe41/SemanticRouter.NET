@@ -14,7 +14,7 @@ Download the archive for your machine from the [releases](https://github.com/sie
 | macOS 12+ | `SemanticRouter-<version>-osx-arm64.zip` (Apple silicon) or `osx-x64` (Intel) | Move `SemanticRouter.app` to Applications. The app is not signed yet: the first time, right-click it and choose **Open**, or run `xattr -dr com.apple.quarantine /Applications/SemanticRouter.app`. |
 | Linux | `SemanticRouter-<version>-linux-x64.tar.gz` (or `linux-arm64`) | Unpack, for example to `~/.local/opt/SemanticRouter`, and run `SemanticRouter`. See [Linux](#linux) for the tray and the app window. |
 
-To build it yourself: `dotnet run --project src/SemanticRouter.Desktop`, or `deploy/package-desktop.sh <rid> <version> <dir>` for the same archives the release makes.
+To build it yourself: `dotnet run --project src/SemanticRouter.Desktop`, or `deploy/package-desktop.sh <rid> <version> <dir>` for the same archives the release makes. On Windows, `deploy\update-windows.ps1` pulls, rebuilds and reinstalls the tool, the background service and the app in one go (`-InstallService` the first time; `Get-Help .\deploy\update-windows.ps1` for the options).
 
 ## Using it
 

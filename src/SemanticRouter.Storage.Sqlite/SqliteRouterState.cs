@@ -162,6 +162,15 @@ internal sealed partial class SqliteRouterDatabase
     {
         var connection = new SqliteConnection(_connectionString);
         connection.Open();
+
+        // With WAL, NORMAL still never corrupts the file and loses nothing when the process crashes, but it does not
+        // flush to disk on every commit. FULL did, holding the write lock for each flush: on Windows, where flushes are
+        // slow, a burst of writes (two routers sharing the file) queued past the busy timeout and was dropped.
+        using (SqliteCommand synchronous = Command(connection, "PRAGMA synchronous=NORMAL;"))
+        {
+            synchronous.ExecuteNonQuery();
+        }
+
         return connection;
     }
 
