@@ -162,7 +162,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         {
             if (parser is null)
             {
-                text.AppendLine(line);
+                text.Append(line).Append('\n'); // LF on every OS: the reply must not depend on where the router runs
                 continue;
             }
 
