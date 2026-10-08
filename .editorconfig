@@ -28,8 +28,9 @@ dotnet_diagnostic.CA1861.severity = none
 dotnet_diagnostic.CA2007.severity = none
 dotnet_diagnostic.CA1861.severity = none
 
-[src/SemanticRouter.Host/**.cs]
-# An application, not a library: there is no synchronization context to avoid.
+[src/SemanticRouter.{Host,Hosting,Desktop}/**.cs]
+# Application code, not a library: there is no synchronization context to avoid (the desktop app's UI thread
+# continuations are wanted).
 dotnet_diagnostic.CA2007.severity = none
 
 [benchmarks/**.cs]

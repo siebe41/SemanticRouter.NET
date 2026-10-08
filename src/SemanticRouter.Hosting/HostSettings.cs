@@ -9,7 +9,10 @@ internal sealed record HostSettings
     public const string StateFileName = "semantic-router.db";
     public const string DefaultUrl = "http://localhost:5080";
 
-    /// <summary><c>run</c> (default), <c>init</c>, <c>doctor</c>, <c>models</c>, <c>help</c> or <c>version</c>.</summary>
+    /// <summary>What <c>semantic-router service</c> can do.</summary>
+    public static readonly IReadOnlyList<string> ServiceActions = ["install", "uninstall", "start", "stop", "restart", "status"];
+
+    /// <summary><c>run</c> (default), <c>init</c>, <c>doctor</c>, <c>models</c>, <c>service</c>, <c>help</c> or <c>version</c>.</summary>
     public string Command { get; init; } = "run";
 
     /// <summary>Where <c>semantic-router.json</c>, its secrets file and an optional <c>appsettings.json</c> live.</summary>
@@ -24,6 +27,15 @@ internal sealed record HostSettings
     /// <summary><c>models</c>: the one connector to list; <see langword="null"/> lists them all.</summary>
     public string? Connector { get; init; }
 
+    /// <summary><c>service</c>: one of <see cref="ServiceActions"/>.</summary>
+    public string? ServiceAction { get; init; }
+
+    /// <summary><c>service install</c>: print the service definition instead of installing it.</summary>
+    public bool DryRun { get; init; }
+
+    /// <summary><c>service start</c>: return as soon as the router is started, without waiting for it to listen.</summary>
+    public bool NoWait { get; init; }
+
     /// <summary>Arguments for the web host (<c>--urls</c>, <c>--SemanticRouter:…=…</c>).</summary>
     public IReadOnlyList<string> HostArguments { get; init; } = [];
 
@@ -37,8 +49,8 @@ internal sealed record HostSettings
     {
         environment ??= Environment.GetEnvironmentVariable;
         string command = "run";
-        string? directory = null, connector = null;
-        bool force = false, noDetect = false;
+        string? directory = null, connector = null, serviceAction = null;
+        bool force = false, noDetect = false, dryRun = false, noWait = false;
         var hostArguments = new List<string>();
         string? error = null;
 
@@ -47,7 +59,7 @@ internal sealed record HostSettings
             string arg = args[i];
             switch (arg)
             {
-                case "run" or "init" or "doctor" or "models" or "help" or "version" when i == 0:
+                case "run" or "init" or "doctor" or "models" or "service" or "help" or "version" when i == 0:
                     command = arg;
                     break;
                 case "-h" or "--help" or "-?":
@@ -61,6 +73,12 @@ internal sealed record HostSettings
                     break;
                 case "--no-detect":
                     noDetect = true;
+                    break;
+                case "--dry-run" when command == "service":
+                    dryRun = true;
+                    break;
+                case "--no-wait" when command == "service":
+                    noWait = true;
                     break;
                 case "--config-dir":
                     if (i + 1 >= args.Count)
@@ -86,6 +104,10 @@ internal sealed record HostSettings
                     {
                         connector = arg;
                     }
+                    else if (command == "service" && serviceAction is null && !arg.StartsWith('-'))
+                    {
+                        serviceAction = arg;
+                    }
                     else
                     {
                         hostArguments.Add(arg);
@@ -95,6 +117,13 @@ internal sealed record HostSettings
             }
         }
 
+        if (command == "service" && error is null && (serviceAction is null || !ServiceActions.Contains(serviceAction)))
+        {
+            error = serviceAction is null
+                ? $"service needs an action: {string.Join(", ", ServiceActions)}."
+                : $"Unknown service action '{serviceAction}'. Use {string.Join(", ", ServiceActions)}.";
+        }
+
         return new HostSettings
         {
             Command = command,
@@ -102,6 +131,9 @@ internal sealed record HostSettings
             Force = force,
             NoDetect = noDetect,
             Connector = connector,
+            ServiceAction = serviceAction,
+            DryRun = dryRun,
+            NoWait = noWait,
             HostArguments = hostArguments,
             Error = error,
         };

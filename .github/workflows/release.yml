@@ -1,7 +1,8 @@
 name: Release
 
 # Push a tag such as v0.2.0 to publish the NuGet packages (library, ASP.NET Core integration and the
-# `semantic-router` dotnet tool) and the container image (ghcr.io/<owner>/semantic-router).
+# `semantic-router` dotnet tool), the container image (ghcr.io/<owner>/semantic-router) and the desktop app
+# (self-contained downloads for Windows, macOS and Linux, attached to the GitHub release).
 on:
   push:
     tags: [ 'v*' ]
@@ -59,3 +60,36 @@ jobs:
           docker build -f src/SemanticRouter.Host/Dockerfile -t "$image:${GITHUB_REF_NAME#v}" -t "$image:latest" .
           docker push "$image:${GITHUB_REF_NAME#v}"
           docker push "$image:latest"
+
+  desktop:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      AVALONIA_TELEMETRY_OPTOUT: 1
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      # Every platform cross-publishes from Linux: the app is self-contained and its native parts come from NuGet.
+      - name: Package
+        run: |
+          for rid in win-x64 win-arm64 osx-arm64 osx-x64 linux-x64 linux-arm64; do
+            deploy/package-desktop.sh "$rid" "${GITHUB_REF_NAME#v}" artifacts
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop
+          path: artifacts/*
+
+      - name: Attach to the release
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Reflection;
 using System.Text;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration.Json;
 using SemanticRouter.AspNetCore;
@@ -40,7 +41,9 @@ internal static class RouterHost
         Directory.CreateDirectory(settings.ConfigurationDirectory);
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
-            Args = [.. settings.HostArguments],
+            // The router has no hosting-startup assemblies. Looking for one named after the application fails in the
+            // desktop app, whose assembly is not called semantic-router; it is read while the builder is created.
+            Args = [$"--{WebHostDefaults.PreventHostingStartupKey}=true", .. settings.HostArguments],
             ApplicationName = "semantic-router",
             ContentRootPath = settings.ConfigurationDirectory,
         });
@@ -84,7 +87,27 @@ internal static class RouterHost
         return app;
     }
 
-    public static async Task<int> RunAsync(HostSettings settings, TextWriter output)
+    /// <summary>The exit code when the listen address is taken; a service manager does not restart on it.</summary>
+    public const int AddressInUseExitCode = 3;
+
+    public static async Task<int> RunAsync(HostSettings settings, TextWriter output, Action<WebApplicationBuilder>? configure = null)
+    {
+        await using RunningRouter? router = await StartAsync(settings, output, configure).ConfigureAwait(false);
+        if (router is null)
+        {
+            return AddressInUseExitCode;
+        }
+
+        await WriteBannerAsync(router.App, settings, output).ConfigureAwait(false);
+        await router.App.WaitForShutdownAsync().ConfigureAwait(false);
+        return 0;
+    }
+
+    /// <summary>
+    /// Starts the router and records it in <c>semantic-router.instance.json</c>. Returns <see langword="null"/> after
+    /// explaining it on <paramref name="output"/> when the address is already taken. Disposing the result stops it.
+    /// </summary>
+    public static async Task<RunningRouter?> StartAsync(HostSettings settings, TextWriter output, Action<WebApplicationBuilder>? configure = null)
     {
         if (!File.Exists(settings.ConfigurationFile))
         {
@@ -93,11 +116,24 @@ internal static class RouterHost
             await output.WriteLineAsync($"Created {settings.ConfigurationFile} from the built-in template. Run `semantic-router init` to add the models on this machine.").ConfigureAwait(false);
         }
 
-        WebApplication app = Build(settings);
-        await app.StartAsync().ConfigureAwait(false);
-        await WriteBannerAsync(app, settings, output).ConfigureAwait(false);
-        await app.WaitForShutdownAsync().ConfigureAwait(false);
-        return 0;
+        WebApplication app = Build(settings, configure);
+        try
+        {
+            await app.StartAsync().ConfigureAwait(false);
+        }
+        catch (IOException ex) when (ex.InnerException is AddressInUseException)
+        {
+            await app.DisposeAsync().ConfigureAwait(false);
+            await output.WriteLineAsync(
+                $"{ex.Message} Another program is listening there, or the router already runs in the background " +
+                "(`semantic-router service status`). Pick another address with --urls.").ConfigureAwait(false);
+            return null;
+        }
+
+        var instance = new RouterInstance(Environment.ProcessId, [.. app.Urls], DateTimeOffset.UtcNow, Version);
+        instance.Write(settings.ConfigurationDirectory);
+        IDisposable? stopListener = OperatingSystem.IsWindows() ? RouterInstance.ListenForStop(app.Lifetime) : null;
+        return new RunningRouter(app, instance, settings.ConfigurationDirectory, stopListener);
     }
 
     private static async Task WriteBannerAsync(WebApplication app, HostSettings settings, TextWriter output)
@@ -149,5 +185,30 @@ internal static class RouterHost
         }
 
         return uri.IsLoopback || (IPAddress.TryParse(uri.Host.Trim('[', ']'), out IPAddress? address) && IPAddress.IsLoopback(address));
+    }
+}
+
+/// <summary>A started router: the web application and its instance record, removed when it is disposed.</summary>
+internal sealed class RunningRouter(WebApplication app, RouterInstance instance, string configurationDirectory, IDisposable? stopListener) : IAsyncDisposable
+{
+    public WebApplication App => app;
+
+    public RouterInstance Instance => instance;
+
+    /// <summary>The address to give clients and the dashboard on this machine.</summary>
+    public string LocalUrl => RouterHost.LocalAddress(instance.Urls.FirstOrDefault(u => u.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) ?? instance.Urls[0]);
+
+    public async ValueTask DisposeAsync()
+    {
+        stopListener?.Dispose();
+        try
+        {
+            await app.StopAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            RouterInstance.Remove(configurationDirectory, instance.ProcessId);
+            await app.DisposeAsync().ConfigureAwait(false);
+        }
     }
 }
