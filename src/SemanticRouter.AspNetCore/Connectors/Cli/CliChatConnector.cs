@@ -119,6 +119,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     private async Task<ConnectorResult> RunAsync(
         ConnectorRequest request, HttpContext context, string workingDirectory, CancellationToken cancellationToken)
     {
+        DroppedFeatures.Report(context, DroppedFeatures.ForCli(request.Chat));
         bool prompted = request.Chat.HasTools || request.Chat.Turns.Any(t => t.Blocks.Any(b => b is ToolUseBlock or ToolResultBlock));
         var cliRequest = new CliRequest(request.Model.Model, request.Chat.Messages, workingDirectory, _options, prompted ? request.Chat : null);
         (List<string> arguments, string? standardInput) = _adapter.Build(cliRequest);

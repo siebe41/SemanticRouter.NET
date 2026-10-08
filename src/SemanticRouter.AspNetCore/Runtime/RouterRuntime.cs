@@ -65,6 +65,8 @@ internal sealed class RouterRuntime : IDisposable
 
     public required PathString[] AnthropicPrefixes { get; init; }
 
+    public required PathString[] ResponsesPrefixes { get; init; }
+
     public required IReadOnlyList<(string Pattern, string Target)> ModelAliases { get; init; }
 
     /// <summary>Whether the route index has been embedded (set by the warm-up).</summary>
@@ -386,6 +388,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             Connectors = connectors,
             OpenAIPrefixes = ToPaths(configuration.Middleware.PathPrefixes),
             AnthropicPrefixes = ToPaths(configuration.Middleware.EffectiveAnthropicPathPrefixes),
+            ResponsesPrefixes = ToPaths(configuration.Middleware.EffectiveResponsesPathPrefixes),
             ModelAliases = configuration.Middleware.ModelAliases.Select(kv => (kv.Key, kv.Value)).ToArray(),
         };
     }

@@ -39,7 +39,7 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
             return;
         }
 
-        if (_openIndex < 0 || _blocks[_openIndex].IsTool)
+        if (_openIndex < 0 || !_blocks[_openIndex].IsText)
         {
             await CloseBlockAsync(cancellationToken).ConfigureAwait(false);
             _blocks.Add(new Block(null, null));
@@ -67,6 +67,52 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
                 w.WriteStartObject("delta");
                 w.WriteString("type", "text_delta");
                 w.WriteString("text", delta);
+                w.WriteEndObject();
+            }, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Writes a <c>thinking</c> block. Its signature is the router's marker, not Anthropic's: if the client sends the
+    /// block back and the turn reaches an Anthropic backend, the router removes it rather than let the API reject it.
+    /// </summary>
+    public async Task WriteThinkingAsync(string delta, CancellationToken cancellationToken)
+    {
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        if (delta.Length == 0)
+        {
+            return;
+        }
+
+        if (_openIndex < 0 || !_blocks[_openIndex].IsThinking)
+        {
+            await CloseBlockAsync(cancellationToken).ConfigureAwait(false);
+            _blocks.Add(new Block(null, null, thinking: true));
+            _openIndex = _blocks.Count - 1;
+            if (_stream)
+            {
+                int start = _openIndex;
+                await WriteEventAsync("content_block_start", w =>
+                {
+                    w.WriteNumber("index", start);
+                    w.WriteStartObject("content_block");
+                    w.WriteString("type", "thinking");
+                    w.WriteString("thinking", string.Empty);
+                    w.WriteEndObject();
+                }, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        _blocks[_openIndex].Content.Append(delta);
+        if (_stream)
+        {
+            int index = _openIndex;
+            await WriteEventAsync("content_block_delta", w =>
+            {
+                w.WriteNumber("index", index);
+                w.WriteStartObject("delta");
+                w.WriteString("type", "thinking_delta");
+                w.WriteString("thinking", delta);
                 w.WriteEndObject();
             }, cancellationToken).ConfigureAwait(false);
         }
@@ -131,6 +177,8 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
             {
                 ChatStopReason.MaxTokens => "max_tokens",
                 ChatStopReason.StopSequence => "stop_sequence",
+                ChatStopReason.Refusal => "refusal",
+                ChatStopReason.PauseTurn => "pause_turn",
                 _ => "end_turn",
             };
 
@@ -193,7 +241,13 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
             foreach (Block block in _blocks)
             {
                 writer.WriteStartObject();
-                if (block.IsTool)
+                if (block.IsThinking)
+                {
+                    writer.WriteString("type", "thinking");
+                    writer.WriteString("thinking", block.Content.ToString());
+                    writer.WriteString("signature", ThinkingBlock.RouterSignature);
+                }
+                else if (block.IsTool)
                 {
                     writer.WriteString("type", "tool_use");
                     writer.WriteString("id", block.Id);
@@ -274,6 +328,18 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
         _openIndex = -1;
         if (_stream)
         {
+            if (_blocks[index].IsThinking)
+            {
+                await WriteEventAsync("content_block_delta", w =>
+                {
+                    w.WriteNumber("index", index);
+                    w.WriteStartObject("delta");
+                    w.WriteString("type", "signature_delta");
+                    w.WriteString("signature", ThinkingBlock.RouterSignature);
+                    w.WriteEndObject();
+                }, cancellationToken).ConfigureAwait(false);
+            }
+
             await WriteEventAsync("content_block_stop", w => w.WriteNumber("index", index), cancellationToken).ConfigureAwait(false);
         }
     }
@@ -296,7 +362,7 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private sealed class Block(string? id, string? name)
+    private sealed class Block(string? id, string? name, bool thinking = false)
     {
         public string? Id { get; } = id;
 
@@ -305,5 +371,9 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
         public StringBuilder Content { get; } = new();
 
         public bool IsTool => Id is not null;
+
+        public bool IsThinking => thinking;
+
+        public bool IsText => !IsTool && !IsThinking;
     }
 }

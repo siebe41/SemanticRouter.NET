@@ -70,7 +70,7 @@ public static class ActivityReports
         [
             "id", "timestamp", "protocol", "path", "client", "requested_model", "tier", "reason", "route", "similarity", "complexity",
             "has_tools", "tool_continuation", "local_only", "estimated_input_tokens", "planned_model", "served_by", "connector", "attempt",
-            "degraded", "outcome", "budget", "classification_ms", "time_to_first_byte_ms", "total_ms", "input_tokens", "output_tokens",
+            "degraded", "outcome", "budget", "dropped", "classification_ms", "time_to_first_byte_ms", "total_ms", "input_tokens", "output_tokens",
             "cache_read_tokens", "cache_creation_tokens", "cost_usd", "trace_id", "detail",
         ];
         builder.Append(string.Join(',', includePrompts ? [.. header, "prompt_preview"] : header)).Append("\r\n");
@@ -80,7 +80,7 @@ public static class ActivityReports
             [
                 e.Id, e.Timestamp.ToString("o", CultureInfo.InvariantCulture), e.Protocol, e.Path, e.Client, e.RequestedModel, e.Tier, e.Reason, e.Route,
                 e.Similarity, e.Complexity, e.HasTools, e.ToolContinuation, e.LocalOnly, e.EstimatedInputTokens, e.PlannedModel, e.ServedBy,
-                e.Connector, e.Attempt, e.Degraded, e.Outcome, e.Budget, e.ClassificationMilliseconds, e.TimeToFirstByteMilliseconds,
+                e.Connector, e.Attempt, e.Degraded, e.Outcome, e.Budget, e.Dropped, e.ClassificationMilliseconds, e.TimeToFirstByteMilliseconds,
                 e.TotalMilliseconds, e.InputTokens, e.OutputTokens, e.CacheReadTokens, e.CacheCreationTokens, e.CostUsd, e.TraceId, e.Detail,
             ];
             builder.Append(string.Join(',', (includePrompts ? [.. row, e.PromptPreview] : row).Select(Cell))).Append("\r\n");

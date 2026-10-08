@@ -93,6 +93,11 @@ internal static class OpenAIResponseReader
                     JsonElement choice = choices[0];
                     if (choice.TryGetObject("delta", out JsonElement delta))
                     {
+                        if ((delta.GetString("reasoning_content") ?? delta.GetString("reasoning")) is { Length: > 0 } reasoning)
+                        {
+                            await writer.WriteThinkingAsync(reasoning, cancellationToken).ConfigureAwait(false);
+                        }
+
                         if (delta.GetString("content") is { Length: > 0 } text)
                         {
                             await writer.WriteTextAsync(text, cancellationToken).ConfigureAwait(false);
@@ -150,6 +155,11 @@ internal static class OpenAIResponseReader
             JsonElement choice = choices[0];
             if (choice.TryGetObject("message", out JsonElement message))
             {
+                if ((message.GetString("reasoning_content") ?? message.GetString("reasoning")) is { Length: > 0 } reasoning)
+                {
+                    await writer.WriteThinkingAsync(reasoning, cancellationToken).ConfigureAwait(false);
+                }
+
                 if (message.TryGetProperty("content", out JsonElement content))
                 {
                     string text = content.ValueKind == JsonValueKind.String
@@ -192,6 +202,7 @@ internal static class OpenAIResponseReader
     {
         "tool_calls" or "function_call" => ChatStopReason.ToolUse,
         "length" => ChatStopReason.MaxTokens,
+        "content_filter" => ChatStopReason.Refusal,
         _ => ChatStopReason.EndTurn,
     };
 
@@ -270,6 +281,9 @@ internal static class AnthropicResponseReader
                                 case "input_json_delta" when delta.GetString("partial_json") is { Length: > 0 } json:
                                     await writer.WriteToolCallArgumentsAsync(json, cancellationToken).ConfigureAwait(false);
                                     break;
+                                case "thinking_delta" when delta.GetString("thinking") is { Length: > 0 } thinking:
+                                    await writer.WriteThinkingAsync(thinking, cancellationToken).ConfigureAwait(false);
+                                    break;
                             }
 
                             break;
@@ -324,6 +338,9 @@ internal static class AnthropicResponseReader
                     case "text" when block.GetString("text") is { Length: > 0 } text:
                         await writer.WriteTextAsync(text, cancellationToken).ConfigureAwait(false);
                         break;
+                    case "thinking" when block.GetString("thinking") is { Length: > 0 } thinking:
+                        await writer.WriteThinkingAsync(thinking, cancellationToken).ConfigureAwait(false);
+                        break;
                     case "tool_use":
                         await writer.StartToolCallAsync(
                             block.GetString("id") is { Length: > 0 } id ? id : JsonHelpers.NewToolUseId(),
@@ -355,6 +372,8 @@ internal static class AnthropicResponseReader
         "tool_use" => ChatStopReason.ToolUse,
         "max_tokens" => ChatStopReason.MaxTokens,
         "stop_sequence" => ChatStopReason.StopSequence,
+        "refusal" => ChatStopReason.Refusal,
+        "pause_turn" => ChatStopReason.PauseTurn,
         _ => ChatStopReason.EndTurn,
     };
 }
@@ -390,7 +409,8 @@ internal static class PassThroughToolCallScanner
             }
 
             if (line.StartsWith("data:", StringComparison.Ordinal)
-                && (line.Contains("\"id\"", StringComparison.Ordinal) || (onUsage is not null && line.Contains("\"usage\"", StringComparison.Ordinal))))
+                && (line.Contains("\"id\"", StringComparison.Ordinal) || line.Contains("\"call_id\"", StringComparison.Ordinal)
+                    || (onUsage is not null && line.Contains("\"usage\"", StringComparison.Ordinal))))
             {
                 ScanJson(System.Text.Encoding.UTF8.GetBytes(line.AsSpan(5).TrimStart().ToString()), protocol, onToolCall, onUsage);
             }
@@ -410,7 +430,21 @@ internal static class PassThroughToolCallScanner
                 onUsage(usage);
             }
 
-            if (protocol == ChatProtocol.Anthropic)
+            if (protocol == ChatProtocol.Responses)
+            {
+                // Stream events carry the item; the JSON response lists them under "output".
+                IEnumerable<JsonElement> items = root.TryGetObject("item", out JsonElement single) ? [single]
+                    : root.TryGetArray("output", out JsonElement output) ? output.EnumerateArray()
+                    : [];
+                foreach (JsonElement item in items)
+                {
+                    if (item.GetString("type") is "function_call" or "custom_tool_call" && item.GetString("call_id") is { Length: > 0 } callId)
+                    {
+                        onToolCall(callId);
+                    }
+                }
+            }
+            else if (protocol == ChatProtocol.Anthropic)
             {
                 if (root.TryGetObject("content_block", out JsonElement block) && block.GetString("type") == "tool_use" && block.GetString("id") is { } id)
                 {
@@ -450,5 +484,198 @@ internal static class PassThroughToolCallScanner
         {
             // Not JSON (e.g. "[DONE]"): nothing to record.
         }
+    }
+}
+
+/// <summary>
+/// Relays an OpenAI Responses API reply (JSON or the event stream) through a protocol writer: output text, reasoning
+/// summaries, function calls and custom tool calls (whose raw input becomes an <c>{"input": …}</c> argument).
+/// </summary>
+internal static class ResponsesResponseReader
+{
+    public static async Task RelayAsync(HttpResponseMessage response, IChatResponseWriter writer, CancellationToken cancellationToken)
+    {
+        bool sse = response.Content.Headers.ContentType?.MediaType?.Equals("text/event-stream", StringComparison.OrdinalIgnoreCase) == true;
+        Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        await using (stream.ConfigureAwait(false))
+        {
+            if (!sse)
+            {
+                using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                await RelayJsonAsync(document.RootElement, writer, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            var customInputs = new Dictionary<string, System.Text.StringBuilder>(StringComparer.Ordinal);
+            string? openCall = null;
+            bool sawToolCall = false;
+            JsonElement? final = null;
+            JsonDocument? finalDocument = null;
+            try
+            {
+                await foreach (string data in ServerSentEvents.ReadAsync(stream, cancellationToken).ConfigureAwait(false))
+                {
+                    JsonDocument document;
+                    try
+                    {
+                        document = JsonDocument.Parse(data);
+                    }
+                    catch (JsonException)
+                    {
+                        continue;
+                    }
+
+                    JsonElement root = document.RootElement;
+                    bool keep = false;
+                    switch (root.GetString("type"))
+                    {
+                        case "response.output_text.delta" when root.GetString("delta") is { Length: > 0 } text:
+                            await writer.WriteTextAsync(text, cancellationToken).ConfigureAwait(false);
+                            break;
+
+                        case "response.reasoning_summary_text.delta" or "response.reasoning_text.delta" when root.GetString("delta") is { Length: > 0 } thinking:
+                            await writer.WriteThinkingAsync(thinking, cancellationToken).ConfigureAwait(false);
+                            break;
+
+                        case "response.output_item.added" when root.TryGetObject("item", out JsonElement item)
+                                                              && item.GetString("type") is "function_call" or "custom_tool_call":
+                            openCall = item.GetString("id") ?? item.GetString("call_id");
+                            sawToolCall = true;
+                            await writer.StartToolCallAsync(
+                                item.GetString("call_id") ?? JsonHelpers.NewToolUseId(), WireName(item), cancellationToken).ConfigureAwait(false);
+                            if (item.GetString("type") == "custom_tool_call" && openCall is not null)
+                            {
+                                customInputs[openCall] = new System.Text.StringBuilder();
+                            }
+
+                            break;
+
+                        case "response.function_call_arguments.delta" when root.GetString("delta") is { Length: > 0 } arguments:
+                            await writer.WriteToolCallArgumentsAsync(arguments, cancellationToken).ConfigureAwait(false);
+                            break;
+
+                        case "response.custom_tool_call_input.delta" when root.GetString("delta") is { } input:
+                            if (root.GetString("item_id") is { } inputItem && customInputs.TryGetValue(inputItem, out System.Text.StringBuilder? buffer))
+                            {
+                                buffer.Append(input);
+                            }
+
+                            break;
+
+                        case "response.output_item.done" when root.TryGetObject("item", out JsonElement done)
+                                                             && done.GetString("type") is "function_call" or "custom_tool_call":
+                            string? key = done.GetString("id") ?? done.GetString("call_id");
+                            if (done.GetString("type") == "custom_tool_call")
+                            {
+                                string raw = key is not null && customInputs.TryGetValue(key, out System.Text.StringBuilder? collected) && collected.Length > 0
+                                    ? collected.ToString()
+                                    : done.GetString("input") ?? string.Empty;
+                                await writer.WriteToolCallArgumentsAsync(CustomArguments(raw), cancellationToken).ConfigureAwait(false);
+                            }
+
+                            await writer.EndToolCallAsync(cancellationToken).ConfigureAwait(false);
+                            openCall = null;
+                            break;
+
+                        case "response.completed" or "response.incomplete" or "response.failed" when root.TryGetObject("response", out JsonElement finished):
+                            finalDocument?.Dispose();
+                            finalDocument = document;
+                            final = finished;
+                            keep = true;
+                            break;
+                    }
+
+                    if (!keep)
+                    {
+                        document.Dispose();
+                    }
+                }
+
+                // response.completed may leave out the output it already streamed.
+                ChatStopReason stop = final is { } f ? StopReasonOf(f) : ChatStopReason.EndTurn;
+                await writer.CompleteAsync(
+                    sawToolCall && stop == ChatStopReason.EndTurn ? ChatStopReason.ToolUse : stop,
+                    final is { } u && u.TryGetObject("usage", out JsonElement usage) ? Usage(usage) : default,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                finalDocument?.Dispose();
+            }
+        }
+    }
+
+    /// <summary>The arguments a non-Responses client sees for a custom tool call.</summary>
+    public static string CustomArguments(string input) => JsonHelpers.InputObject(input);
+
+    public static ChatUsage Usage(JsonElement usage)
+    {
+        int? cached = usage.TryGetObject("input_tokens_details", out JsonElement details) ? details.GetInt("cached_tokens") : null;
+        int? input = usage.GetInt("input_tokens");
+        return new ChatUsage(input is { } i && cached is { } c ? i - c : input, usage.GetInt("output_tokens"), cached is > 0 ? cached : null);
+    }
+
+    private static async Task RelayJsonAsync(JsonElement root, IChatResponseWriter writer, CancellationToken cancellationToken)
+    {
+        if (root.TryGetArray("output", out JsonElement output))
+        {
+            foreach (JsonElement item in output.EnumerateArray())
+            {
+                switch (item.GetString("type"))
+                {
+                    case "reasoning" when item.TryGetArray("summary", out JsonElement summary):
+                        foreach (JsonElement part in summary.EnumerateArray())
+                        {
+                            if (part.GetString("text") is { Length: > 0 } thinking)
+                            {
+                                await writer.WriteThinkingAsync(thinking, cancellationToken).ConfigureAwait(false);
+                            }
+                        }
+
+                        break;
+
+                    case "message" when item.TryGetArray("content", out JsonElement content):
+                        foreach (JsonElement part in content.EnumerateArray())
+                        {
+                            if ((part.GetString("text") ?? part.GetString("refusal")) is { Length: > 0 } text)
+                            {
+                                await writer.WriteTextAsync(text, cancellationToken).ConfigureAwait(false);
+                            }
+                        }
+
+                        break;
+
+                    case "function_call" or "custom_tool_call":
+                        await writer.StartToolCallAsync(item.GetString("call_id") ?? JsonHelpers.NewToolUseId(), WireName(item), cancellationToken).ConfigureAwait(false);
+                        await writer.WriteToolCallArgumentsAsync(
+                            item.GetString("type") == "custom_tool_call" ? CustomArguments(item.GetString("input") ?? string.Empty) : item.GetString("arguments") ?? "{}",
+                            cancellationToken).ConfigureAwait(false);
+                        await writer.EndToolCallAsync(cancellationToken).ConfigureAwait(false);
+                        break;
+                }
+            }
+        }
+
+        await writer.CompleteAsync(StopReasonOf(root), root.TryGetObject("usage", out JsonElement usage) ? Usage(usage) : default, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static string WireName(JsonElement item) => ChatCompletionRequest.WireToolName(item.GetString("namespace"), item.GetString("name") ?? string.Empty);
+
+    private static ChatStopReason StopReasonOf(JsonElement response)
+    {
+        if (response.TryGetArray("output", out JsonElement output)
+            && output.EnumerateArray().Any(i => i.GetString("type") is "function_call" or "custom_tool_call"))
+        {
+            return ChatStopReason.ToolUse;
+        }
+
+        return response.TryGetObject("incomplete_details", out JsonElement incomplete)
+            ? incomplete.GetString("reason") switch
+            {
+                "max_output_tokens" => ChatStopReason.MaxTokens,
+                "content_filter" => ChatStopReason.Refusal,
+                _ => ChatStopReason.EndTurn,
+            }
+            : ChatStopReason.EndTurn;
     }
 }

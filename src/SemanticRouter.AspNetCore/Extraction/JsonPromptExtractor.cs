@@ -47,6 +47,13 @@ public sealed class JsonPromptExtractor : IPromptExtractor
             }
         }
 
+        // Responses API: "input" is a list of items; messages among them have roles like chat messages.
+        if (body.TryGetProperty("input", out JsonElement items) && items.ValueKind == JsonValueKind.Array
+            && Clean(ExtractFromMessages(items)) is { Length: > 0 } fromItems)
+        {
+            return fromItems;
+        }
+
         foreach (string property in (ReadOnlySpan<string>)["prompt", "input"])
         {
             if (body.TryGetProperty(property, out JsonElement value) && Clean(ReadText(value)) is { Length: > 0 } text)

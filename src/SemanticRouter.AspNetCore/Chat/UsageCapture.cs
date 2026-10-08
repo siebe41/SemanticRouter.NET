@@ -62,6 +62,13 @@ internal sealed class UsageCapture
     /// <summary>Finds usage in one response document or stream event of <paramref name="protocol"/>.</summary>
     public static ChatUsage? Find(JsonElement root, ChatProtocol protocol)
     {
+        if (protocol == ChatProtocol.Responses)
+        {
+            // response.completed carries the response; a JSON reply is the response itself.
+            JsonElement response = root.TryGetObject("response", out JsonElement inner) ? inner : root;
+            return response.TryGetObject("usage", out JsonElement responsesUsage) ? ResponsesResponseReader.Usage(responsesUsage) : null;
+        }
+
         if (protocol == ChatProtocol.Anthropic)
         {
             if (root.TryGetObject("message", out JsonElement message) && message.TryGetObject("usage", out JsonElement started))
@@ -82,6 +89,8 @@ internal sealed class UsageRecordingWriter(IChatResponseWriter inner, UsageCaptu
     public bool HasStarted => inner.HasStarted;
 
     public Task WriteTextAsync(string delta, CancellationToken cancellationToken) => inner.WriteTextAsync(delta, cancellationToken);
+
+    public Task WriteThinkingAsync(string delta, CancellationToken cancellationToken) => inner.WriteThinkingAsync(delta, cancellationToken);
 
     public Task StartToolCallAsync(string id, string name, CancellationToken cancellationToken) => inner.StartToolCallAsync(id, name, cancellationToken);
 

@@ -1,15 +1,16 @@
 # Pointing your tools at the router
 
-The router has two front doors, so almost any tool can use it without changing how you work:
+The router has three front doors, so almost any tool can use it without changing how you work:
 
 | Front door | Path | Who speaks it |
 |---|---|---|
-| OpenAI chat completions | `POST /v1/chat/completions`, `GET /v1/models` | OpenAI SDKs, Codex CLI, Aider, Continue, Cline, Open WebUI, LibreChat, LM Studio clients, … |
+| OpenAI chat completions | `POST /v1/chat/completions`, `GET /v1/models` | OpenAI SDKs, Aider, Continue, Cline, Open WebUI, LibreChat, LM Studio clients, … |
 | Anthropic Messages | `POST /v1/messages`, `POST /v1/messages/count_tokens` | **Claude Code**, the Anthropic SDKs, anything built on them |
+| OpenAI Responses | `POST /v1/responses` | **Codex CLI**, the OpenAI Agents SDK, `client.responses.create` |
 
-> **What has been tested.** Claude Code 2.1.293 (a streaming, tool-using session through a stub OpenAI-compatible backend, and through the real `claude` CLI as a prompted-tools backend) and curl. The other tools below speak standard OpenAI chat completions and should work, but have not been exercised individually. [docs/roadmap.md](roadmap.md) tracks the gaps.
+> **What has been tested.** Claude Code 2.1.293 (a streaming, tool-using session through a stub OpenAI-compatible backend, and through the real `claude` CLI as a prompted-tools backend), Codex CLI 0.161.0 (a streaming session that ran a shell command and a namespaced tool through a stub OpenAI-compatible backend) and curl. The other tools below speak standard OpenAI chat completions and should work, but have not been exercised individually. [docs/roadmap.md](roadmap.md) tracks the gaps.
 
-Whatever the client speaks, every backend can answer: the router translates requests and replies between the two protocols, including streaming, images and tool calls, and passes bodies through untouched when the backend speaks the client's protocol.
+Whatever the client speaks, every backend can answer: the router translates requests and replies between the protocols, including streaming, images, tool calls, reasoning and structured output, and passes bodies through untouched when the backend speaks the client's protocol. What a backend cannot carry is listed in the `X-Prompt-Route-Dropped` response header (see the [compatibility table](providers.md#what-survives-translation)).
 
 The dashboard's **Connect clients** page generates these snippets with your router's actual address.
 
@@ -51,7 +52,7 @@ Context size matters: a Claude Code turn is 15–30k tokens of system prompt, to
 
 ### Checking what happened
 
-Every response carries routing headers (`X-Prompt-Route`, `-Tier`, `-Reason`, `-Model`, `-Connector`, `-Attempt`, `-Degraded`), the console logs each decision, and the dashboard's **Activity** page lists every routed turn with its prompt preview, tier, route and the model that answered.
+Every response carries routing headers (`X-Prompt-Route`, `-Tier`, `-Reason`, `-Model`, `-Connector`, `-Attempt`, `-Degraded`, and `-Dropped` when the backend could not carry a request feature), the console logs each decision, and the dashboard's **Activity** page lists every routed turn with its prompt preview, tier, route and the model that answered.
 
 ## OpenAI SDKs and everything with a base URL
 
@@ -70,9 +71,7 @@ Model names: `auto` (configured strategy), `auto:cheapest`, `auto:best`, `auto:p
 
 ## OpenAI Codex CLI
 
-> **Untested.** This section describes the chat-completions setup. Depending on its version, Codex may speak only the OpenAI Responses API, which the router does not accept yet ([#10](https://github.com/siebe41/SemanticRouter.NET/issues/10)). If Codex fails with a "not found" or wire-format error, that is the cause. Check your version's provider options (`wire_api`) in Codex's own documentation.
-
-Codex can use an OpenAI-compatible provider:
+Codex speaks the Responses API. Point a provider at the router with `wire_api = "responses"`:
 
 ```toml
 # ~/.codex/config.toml
@@ -82,10 +81,21 @@ model = "auto"
 [model_providers.semantic-router]
 name = "Semantic Router"
 base_url = "http://localhost:5080/v1"
+wire_api = "responses"
 env_key = "OPENAI_API_KEY"       # export OPENAI_API_KEY=semantic-router
 ```
 
-Codex's turns carry tools too, so the same rules as for Claude Code apply.
+Any backend can answer. The router maps Codex's items and tools onto the backend's protocol and back:
+
+- **Namespaced tools.** Codex groups tools in namespaces (`multi_agent_v1`, `collaboration`, …). Backends see them as `namespace__name`, and calls come back to Codex under the original name and namespace.
+- **Custom tools.** Codex's free-form tools (such as `exec`) become a function with one `input` string, with the grammar quoted in the description. Calls come back as `custom_tool_call` items.
+- **Reasoning.** `reasoning.effort` becomes `reasoning_effort` or an Anthropic `thinking` budget on models that declare `reasoning`. Backend reasoning comes back as a reasoning summary.
+- **Hosted tools.** Codex declares `web_search` on most turns. Only a `Responses` connector (OpenAI's API) runs it. Other backends answer without it, and the response says `X-Prompt-Route-Dropped: web_search`.
+- **Server-side state.** `previous_response_id`, encrypted reasoning items and `/v1/responses/{id}` lookups only work against OpenAI itself. Codex sends `store: false` and the full history on every turn, so it does not need them. Remote compaction (`/v1/responses/compact`) is not routed: Codex falls back to compacting locally.
+
+Codex's turns carry tools, so the same rules as for Claude Code apply: models need `tools`, and tool-result turns stay on the model that issued the calls. Without metadata for the model name `auto`, Codex prints "Model metadata for `auto` not found" and uses defaults. That is harmless. To silence it, alias a known OpenAI name in `ModelAliases` (`"gpt-*": "auto"`) and set `model` to that name.
+
+If you route through a proxy (`HTTPS_PROXY`), exclude the router: `NO_PROXY=localhost,127.0.0.1`.
 
 ## Aider, Continue, Cline, Open WebUI, LibreChat
 
@@ -94,6 +104,9 @@ Set the OpenAI base URL to `http://localhost:5080/v1`, any API key, and pick `au
 ## curl
 
 ```bash
+# Responses shape
+curl http://localhost:5080/v1/responses -H 'Content-Type: application/json' -d '{"model":"auto","input":"hello"}'
+
 # OpenAI shape
 curl -N http://localhost:5080/v1/chat/completions -H 'Content-Type: application/json' \
   -d '{"model":"auto","stream":true,"messages":[{"role":"user","content":"Compare event sourcing and CRUD"}]}'

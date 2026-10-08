@@ -481,6 +481,7 @@ public static class RouterDashboardEndpoints
                 config.Middleware.Mode.ToString(),
                 config.Middleware.PathPrefixes.ToArray(),
                 config.Middleware.EffectiveAnthropicPathPrefixes.ToArray(),
+                config.Middleware.EffectiveResponsesPathPrefixes.ToArray(),
                 config.Middleware.ModelAliases.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
                 config.Selection.Strategy.ToString()),
             new ActivitySummary(
@@ -577,7 +578,7 @@ public static class RouterDashboardEndpoints
     public sealed record RouteStatus(string Name, int Tier, int Utterances, bool LocalOnly, IReadOnlyList<string> RequiredCapabilities, float Threshold);
 
     /// <summary>Gateway settings.</summary>
-    public sealed record GatewayStatus(string Mode, IReadOnlyList<string> PathPrefixes, IReadOnlyList<string> AnthropicPathPrefixes, IReadOnlyDictionary<string, string> ModelAliases, string Strategy);
+    public sealed record GatewayStatus(string Mode, IReadOnlyList<string> PathPrefixes, IReadOnlyList<string> AnthropicPathPrefixes, IReadOnlyList<string> ResponsesPathPrefixes, IReadOnlyDictionary<string, string> ModelAliases, string Strategy);
 
     /// <summary>Counts over the activity log.</summary>
     public sealed record ActivitySummary(

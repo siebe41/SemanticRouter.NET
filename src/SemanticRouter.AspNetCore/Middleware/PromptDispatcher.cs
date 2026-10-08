@@ -61,6 +61,11 @@ internal sealed partial class PromptDispatcher
                 {
                     activity.TimeToFirstByteMilliseconds = Math.Round(elapsed.TotalMilliseconds, 1);
                 }
+
+                if (middleware.EmitResponseHeaders && context.Features.Get<DroppedFeatures>() is { Names.Count: > 0 } dropped)
+                {
+                    context.Response.Headers[middleware.HeaderPrefix + "-Dropped"] = string.Join(", ", dropped.Names);
+                }
             }
 
             return Task.CompletedTask;
@@ -119,6 +124,8 @@ internal sealed partial class PromptDispatcher
 
             var capture = new UsageCapture();
             context.Features.Set(capture);
+            var dropped = new DroppedFeatures();
+            context.Features.Set(dropped);
             current.Model = model;
             current.Connector = connector.Name;
 
@@ -130,6 +137,11 @@ internal sealed partial class PromptDispatcher
                 span?.SetTag("semantic_router.attempt", tried);
                 result = await connector.SendAsync(new ConnectorRequest(chat, model, body), context, context.RequestAborted).ConfigureAwait(false);
                 span?.SetTag("semantic_router.outcome", result.Outcome.ToString());
+                if (dropped.Names.Count > 0)
+                {
+                    span?.SetTag("semantic_router.dropped", string.Join(",", dropped.Names));
+                }
+
                 if (result.Outcome == ConnectorOutcome.Failed)
                 {
                     span?.SetTag("semantic_router.failure.kind", result.FailureKind.ToString());
@@ -159,6 +171,7 @@ internal sealed partial class PromptDispatcher
                         activity.Outcome = "served";
                         activity.Detail = attempts.Count > 0 ? string.Join("; ", attempts) : null;
                         activity.Budget = budgetsHit.Count > 0 ? string.Join(", ", budgetsHit.Distinct(StringComparer.OrdinalIgnoreCase)) : null;
+                        activity.Dropped = dropped.Names.Count > 0 ? string.Join(", ", dropped.Names) : null;
                     }
 
                     return;

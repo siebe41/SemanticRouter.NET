@@ -10,7 +10,7 @@ A lightweight **semantic prompt router** for .NET 9 and ASP.NET Core. It sends e
 
 When a subscription hits its usage limit, the router cools that model down and moves on to the next-best one automatically.
 
-It speaks **both the OpenAI and the Anthropic protocol**, so you can point **Claude Code**, Codex CLI, the OpenAI SDKs or any chat tool at it and keep working exactly as before: the tool keeps its own model names and its agentic loop, and the router decides which backend answers each turn. A built-in **dashboard** shows live activity and lets you edit every setting, with hot reload.
+It speaks **the OpenAI chat-completions, OpenAI Responses and Anthropic protocols**, so you can point **Claude Code**, **Codex CLI**, the OpenAI SDKs or any chat tool at it and keep working exactly as before: the tool keeps its own model names and its agentic loop, and the router decides which backend answers each turn. A built-in **dashboard** shows live activity and lets you edit every setting, with hot reload.
 
 ![The dashboard](docs/images/dashboard.png)
 
@@ -29,7 +29,7 @@ prompt                                              needs                 → se
   … Claude session limit reached …                  tier 4                → lmstudio-coder   (best available; Claude cools down)
 ```
 
-Two front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/models`) for any tool with a configurable base URL, and the Anthropic Messages API (`POST /v1/messages`) for Claude Code and the Anthropic SDKs. Send `"model": "auto"` and let the router choose, or keep the tool's own model names and map them with aliases.
+Three front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/models`) for any tool with a configurable base URL, the Anthropic Messages API (`POST /v1/messages`) for Claude Code and the Anthropic SDKs, and the OpenAI Responses API (`POST /v1/responses`) for Codex CLI and the Agents SDK. Send `"model": "auto"` and let the router choose, or keep the tool's own model names and map them with aliases.
 
 ---
 
@@ -73,7 +73,8 @@ Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md
 ```mermaid
 flowchart LR
     A1[POST /v1/messages<br/>Claude Code · Anthropic SDKs] --> B
-    A2[POST /v1/chat/completions<br/>OpenAI SDKs · Codex · chat UIs] --> B
+    A2[POST /v1/chat/completions<br/>OpenAI SDKs · chat UIs] --> B
+    A3[POST /v1/responses<br/>Codex CLI · Agents SDK] --> B
     B[UsePromptRouter<br/>parse · map model name · pin tool turns] --> C[IPromptExtractor<br/>latest human message]
     subgraph Core [SemanticRouter.Core]
         C --> D[IComplexityAnalyzer<br/>length · code · structure · reasoning]
@@ -282,7 +283,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSemanticPromptRouting(builder.Configuration.GetSection("SemanticRouter"));
 
 var app = builder.Build();
-app.UsePromptRouter();          // serves POST /v1/chat/completions and POST /v1/messages (Middleware:PathPrefixes / AnthropicPathPrefixes)
+app.UsePromptRouter();          // serves POST /v1/chat/completions, /v1/messages and /v1/responses (Middleware:PathPrefixes / AnthropicPathPrefixes / ResponsesPathPrefixes)
 app.MapRouterModels();          // GET /v1/models
 app.MapAnthropicTokenCount();   // POST /v1/messages/count_tokens
 app.MapRouterDashboard();       // the dashboard and admin API at /router
@@ -397,8 +398,8 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 
 | Key | Applies to | Default | Description |
 |---|---|---|---|
-| `Type` | all | `OpenAICompatible` | `OpenAICompatible`, `Anthropic` (Messages API) or `Cli`. |
-| `BaseAddress`, `RequestPath` | HTTP | –, `/v1/chat/completions` (`/v1/messages` for Anthropic) | |
+| `Type` | all | `OpenAICompatible` | `OpenAICompatible`, `Anthropic` (Messages API), `Responses` (OpenAI Responses API) or `Cli`. |
+| `BaseAddress`, `RequestPath` | HTTP | –, `/v1/chat/completions` (`/v1/messages` for Anthropic, `/v1/responses` for Responses) | |
 | `ApiKey`, `Headers` | HTTP | | Bearer token (`x-api-key` for Anthropic) and extra headers. Keep keys in user-secrets or environment variables, or write a reference: `"${env:OPENAI_API_KEY}"`, `"${secret:…}"`. |
 | `ForwardHeaders[]` | HTTP | `[]` | Client request headers to relay upstream (e.g. `anthropic-beta`). Authorization headers never are. |
 | `AnthropicVersion` | Anthropic | `2023-06-01` | Sent as `anthropic-version`. |
@@ -423,11 +424,12 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:Mode` | `Annotate` | `Annotate` or `Dispatch`. |
 | `Middleware:PathPrefixes[]` | `[]` (all JSON POSTs) | Paths carrying OpenAI chat-completions bodies. Required in Dispatch mode. |
 | `Middleware:AnthropicPathPrefixes[]` | `/v1/messages` | Paths carrying Anthropic Messages bodies (Claude Code). Errors on them use the Anthropic format. |
+| `Middleware:ResponsesPathPrefixes[]` | `/v1/responses` | Paths carrying OpenAI Responses bodies (Codex CLI). Only the path itself is routed; `/v1/responses/{id}` is not. |
 | `Middleware:ModelAliases` | `{}` | Glob → alias/model map for client model names: `"*haiku*": "auto:cheapest"`. Catalog names and `auto:*` are never remapped; unmatched names route as `auto`. |
 | `Middleware:PinToolCallingTurns` | `true` | Requests carrying tool results go to the model that issued the tool calls. |
 | `Middleware:StripSystemReminders` | `true` | Ignore `<system-reminder>` blocks when classifying. |
 | `Middleware:MaxRequestBodyBytes` | `8388608` | Larger bodies get 413. Agentic clients send 100 KB+ requests. |
-| `Middleware:EmitResponseHeaders` / `HeaderPrefix` | `true` / `X-Prompt-Route` | `X-Prompt-Route`, `-Tier`, `-Reason`, `-Similarity`, `-Complexity`, `-Model`, `-Connector`, `-Attempt`. |
+| `Middleware:EmitResponseHeaders` / `HeaderPrefix` | `true` / `X-Prompt-Route` | `X-Prompt-Route`, `-Tier`, `-Reason`, `-Similarity`, `-Complexity`, `-Model`, `-Connector`, `-Attempt`, `-Degraded`, `-Budget`, `-Dropped`. |
 | `Middleware:FailOpen` | `true` | Route with `FallbackTier` if classification fails. |
 | `Middleware:MessageSelection` | `LastUserMessage` | Which messages are classified. |
 | `Usage:ReferenceModel`, `Usage:TimeZone`, `Usage:WarnAtPercent` | –, local, `80` | Yardstick for "saved by routing", the zone budget periods follow, and when to warn. |
@@ -464,7 +466,7 @@ Similarity scales differ between embedding models. These are starting points; ca
 
 - **State is per process unless you persist it.** Cooldowns, tool-call affinity, activity, usage and configuration history live in memory unless `UseSqliteState` is used (the `semantic-router` tool does). Configuration applied through the dashboard is persisted only when a configuration file is registered.
 - **CLI connectors are text in, text out.** Without `ToolCalling: Prompted`, requests with `tools` skip them. With it, tool calls depend on the model following the format, every turn re-sends the whole context, and images are never supported. Multi-turn chats are flattened into a labelled transcript. Each request starts a new process, which adds start-up latency compared with an HTTP call.
-- **Cross-protocol translation keeps the common subset.** Tools, tool results, images, system prompts, sampling parameters and stop sequences are translated; vendor-specific extras (extended thinking, prompt-cache hints, `response_format`) only survive on pass-through to a backend that speaks the client's protocol.
+- **Cross-protocol translation keeps what has an equivalent.** Tools, tool results, images, system prompts, sampling parameters, stop sequences, reasoning requests and replies, structured output and serial tool calls are translated. Prompt-cache hints, documents, `logprobs`, hosted tools and server-side conversation state only survive on pass-through to a backend that speaks the client's protocol. Whatever is left out is named in `X-Prompt-Route-Dropped`; see the [compatibility table](docs/providers.md#what-survives-translation).
 - **Token counts are estimates.** Leave headroom in `ContextWindow`.
 - **The CLI presets track the vendors' documented flags as of October 2026.** If a CLI changes, add flags through `Arguments` or use the `Custom` preset.
 
@@ -499,13 +501,13 @@ The tests cover:
 - durable state in SQLite: cooldowns across restarts and between instances, affinity expiry, activity seeding and caps, history and rollback, concurrent writers, and corrupt or locked databases falling back to memory;
 - usage from every backend shape adding up on the dashboard, budgets (warning, skip, 503 naming the budget), reset times from `Retry-After` and CLI messages, one trace per request with sibling attempt spans and `traceparent` to a real backend, metrics, export and percentiles;
 - in-process `TestServer` runs of both middleware modes, including failover, quota cooldowns, local-only routing and the remote-client guard;
-- both protocols: parsing, translation in each direction (JSON and SSE), the Anthropic front door end to end, tool-turn affinity, model aliases, prompted tool calling, and the dashboard's admin API, configuration store and hot reload.
+- all three protocols: parsing, translation in each direction (JSON and SSE), the Anthropic and Responses front doors end to end (with a recorded Codex request against every backend type), thinking, structured output and dropped-feature reporting, tool-turn affinity, model aliases, prompted tool calling, and the dashboard's admin API, configuration store and hot reload.
 
 No network, model or vendor CLI is needed. CI runs the suite on Linux, Windows and macOS, and builds and smoke-tests the container image. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
 
 ## Roadmap
 
-Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: usage and budget tracking, routing evaluation and calibration, a Responses API front door for Codex, and in-process embeddings.
+Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: routing evaluation and calibration, in-process embeddings and routing profiles.
 
 ## License
 

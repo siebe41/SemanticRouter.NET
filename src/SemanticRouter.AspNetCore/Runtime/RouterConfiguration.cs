@@ -107,7 +107,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 case ConnectorType.Cli when connector.MaxConcurrency < 1:
                     errors.Add($"Connector '{name}' MaxConcurrency must be at least 1.");
                     break;
-                case ConnectorType.OpenAICompatible or ConnectorType.Anthropic when connector.BaseAddress is not { IsAbsoluteUri: true }:
+                case ConnectorType.OpenAICompatible or ConnectorType.Anthropic or ConnectorType.Responses when connector.BaseAddress is not { IsAbsoluteUri: true }:
                     errors.Add($"Connector '{name}' needs an absolute BaseAddress.");
                     break;
             }
