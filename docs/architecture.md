@@ -8,9 +8,11 @@ How a request moves through the router, how configuration reloads without droppi
 |---|---|---|
 | `SemanticRouter.Core` | nothing | Vector math, token estimator, complexity heuristics, the route index, `DefaultRouteSelector`, `DefaultModelSelector`, `ModelHealthTracker`, `PromptRouter`, and the option types (`SemanticRouterOptions`, `RouteDefinition`, `ModelDefinition`, `TierDefinition`). Zero package references, AOT-compatible. |
 | `SemanticRouter.AspNetCore` | Core, ASP.NET Core | Everything that touches HTTP and processes: the middleware and dispatcher, both wire protocols, connectors, the runtime and configuration store, the dashboard and its embedded assets. |
+| `SemanticRouter.Host` | AspNetCore | The `semantic-router` .NET tool and container: `run`, `init` (detects local servers and CLIs), `doctor` (`RouterDoctor`), the embedded neutral template and per-OS configuration directory. See [host.md](host.md). |
 | `samples/RoutingApiSample` | AspNetCore | A host with an annotated `appsettings.json`: Annotate and Dispatch modes, dashboard, Anthropic endpoints. |
 | `samples/LmStudioClaudePoc` | AspNetCore | The LM Studio plus Claude Code personal setup, with a preflight and a self-test. |
-| `tests/SemanticRouter.Tests` | both | 285 tests; no network, model or vendor CLI needed. |
+| `tests/SemanticRouter.Tests` | all | 296 tests; no network, model or vendor CLI needed. Run on Linux, Windows and macOS in CI. |
+| `tests/SemanticRouter.FakeCli` | nothing | A stand-in CLI (`fake-cli`) the process tests start, so they run on every OS. |
 
 ## One request, end to end
 
