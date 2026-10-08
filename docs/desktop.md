@@ -18,7 +18,7 @@ To build it yourself: `dotnet run --project src/SemanticRouter.Desktop`, or `dep
 
 ## Using it
 
-Start it and the dashboard opens. Close the dashboard and the router keeps running; the tray icon brings it back (click it, or choose **Open dashboard**). Starting the app again while it runs also opens the dashboard.
+Start it and the dashboard opens. The first time, a welcome window offers to keep the router running in the background and to show the app in the tray when you sign in; both are ticked, and both can be changed later in the tray menu. Close the dashboard and the router keeps running; the tray icon brings it back (click it, or choose **Open dashboard**). Starting the app again while it runs also opens the dashboard.
 
 The window opens at a size that fits the screen it is on (title bar included, whatever the display scaling), and after that where you left it: its position, size and whether it was maximized are kept in `desktop.json`. If that screen is gone, it opens on the main screen again.
 
@@ -28,9 +28,10 @@ The tray menu:
 |---|---|
 | **Open dashboard** | Opens the dashboard where you chose (below). |
 | Status line | Where the router listens, whether it is the app's own or one already running, or why it could not start. |
-| **Restart router** | Starts the app's own router again, for example after it failed to start. |
+| **Restart router** | Restarts the router: the background service's, or the app's own (for example after it failed to start). |
 | **Open the dashboard in** → **App window** / **Web browser** | Your choice of where the dashboard opens, remembered in `desktop.json`. The app window uses the platform's own web view (WebView2, WebKit, WebKitGTK or WPE WebKit); links that leave the router open in your browser. |
-| **Start at sign-in** | Starts the app, in the tray, whenever you sign in. |
+| **Keep the router running in the background** | The background service on or off; see [below](#the-app-and-the-background-service). |
+| **Start at sign-in** | Shows the app in the tray whenever you sign in. The router itself starts at sign-in through the background service. |
 | **Show the log**, **Show the configuration folder** | The router's log (`logs/semantic-router.log`) and its files. |
 | **About SemanticRouter** | The version, and links to the GitHub repository, the documentation, issues, releases and the licence. |
 | **Quit SemanticRouter** | Stops the app's router and quits. |
@@ -39,13 +40,22 @@ The tray menu:
 
 ## The app and the background service
 
-The app and [`semantic-router service`](host.md#run-it-in-the-background) both run the router without a terminal; use whichever you like. They cooperate rather than compete for the port:
+The router can run in two places, and the app shows it either way:
 
-- **If a router already runs for the configuration directory** (the background service, or `semantic-router` in a terminal), the app uses it: the status line says so, the dashboard opens on it, and quitting the app leaves it running.
-- **Otherwise the app runs the router itself**, and quitting the app stops it.
-- If both start at sign-in, whichever binds the port first serves, and the app attaches to the service.
+- **In the background (recommended).** Tick **Keep the router running in the background** in the tray menu (the welcome window offers it on first start). The operating system's own service manager then runs `SemanticRouter --headless` (this same program, with no window or tray) whenever you sign in, restarts it if it fails, and keeps it answering when the app is closed. The app shows that router; the status line says "Using the router already running on …", **Restart router** restarts the service, and quitting the app leaves it running. It is the same per-user service as [`semantic-router service`](host.md#run-it-in-the-background) (a systemd user unit, a launchd agent, or a sign-in entry on Windows), run by the app instead of the tool. Being a GUI program, it starts on Windows without a console window.
+- **Inside the app.** With the box unticked the app runs the router itself, and quitting the app stops it.
 
-The background service has no icon but runs even when no one is signed in to a desktop (with lingering on Linux). The app has the icon, the window and no console flash at sign-in on Windows.
+Switching hands the port over: the app stops its own router before the service starts, and starts it again when the service is removed. If the service cannot be set up (no systemd user session, for example), the app keeps running the router itself and the tray menu says why.
+
+If a router already runs for the configuration directory when the app starts (the service, or `semantic-router` in a terminal), the app uses it rather than competing for the port.
+
+For scripts and installers, without the tray:
+
+| Command | |
+|---|---|
+| `SemanticRouter --install-service` | Install (or update) and start the background service. Exit code 0 when it worked; the outcome is also written to the log. |
+| `SemanticRouter --uninstall-service` | Stop and remove it. |
+| `SemanticRouter --headless` | Run only the router, as the service does. Logs go to `logs/semantic-router.log`. |
 
 ## Where things live
 
@@ -53,7 +63,7 @@ Everything is in the router's [configuration directory](host.md#where-things-liv
 
 | | |
 |---|---|
-| `desktop.json` | The app's own settings: where the dashboard opens, and where its window was. |
+| `desktop.json` | The app's own settings: where the dashboard opens, where its window was, and whether the welcome window was shown. |
 | `logs/semantic-router.log` | What the router logged (the app has no console). Rolled over to `.1` past 10 MB. |
 | `webview/` | The app window's web view profile. |
 

@@ -5,10 +5,11 @@
 
 .DESCRIPTION
     1. Pulls the latest code (unless -NoPull).
-    2. Quits the desktop app and stops the background service, so their files can be replaced.
+    2. Stops the background service and quits the desktop app, so their files can be replaced.
     3. Packs the semantic-router tool with a unique local version and installs or updates it globally.
-    4. Starts the background service again (installs it with -InstallService, or on first run when asked).
-    5. Publishes the desktop app, self-contained, to -DesktopDir and starts it.
+    4. Publishes the desktop app, self-contained, to -DesktopDir.
+    5. Starts the background service again, or installs it with -InstallService (run by the desktop app as
+       SemanticRouter.exe --headless, with no console window), then starts the desktop app.
 
     Run it from anywhere; it finds the repository from its own location. It needs the .NET 9 SDK and git. Your
     configuration (%APPDATA%\semantic-router) is never touched.
@@ -117,6 +118,15 @@ try {
     Write-Host "Version:    $version"
 
     Write-Step 'Stopping what is running'
+    # The background service first: it may run from the desktop app's folder (SemanticRouter --headless), and it is
+    # a SemanticRouter process the app's quit below would otherwise wait for.
+    $serviceWasInstalled = Test-ServiceInstalled
+    $router = Get-SemanticRouter
+    if ($router) {
+        & $router service stop
+        if ($LASTEXITCODE -ne 0) { Write-Host 'Nothing to stop.' }
+    }
+
     $desktopRunning = @(Get-Process -Name 'SemanticRouter' -ErrorAction SilentlyContinue)
     if ($desktopRunning.Count -gt 0) {
         if (Test-Path $desktopExe) {
@@ -136,14 +146,6 @@ try {
     }
     else {
         Write-Host 'Desktop app is not running.'
-    }
-
-    $serviceWasInstalled = Test-ServiceInstalled
-    $router = Get-SemanticRouter
-    if (-not $SkipService -and $router) {
-        # Stops the background router (and any router using the configuration directory) so the tool can be replaced.
-        & $router service stop
-        if ($LASTEXITCODE -ne 0) { Write-Host 'Nothing to stop.' }
     }
 
     if (-not $SkipService) {
@@ -169,18 +171,6 @@ try {
             throw "semantic-router is installed but not found. Add $toolsDir to your PATH and open a new terminal."
         }
         & $router --version
-
-        Write-Step 'Background service'
-        if ($serviceWasInstalled) {
-            Invoke-Checked 'semantic-router service start' { & $router service start }
-        }
-        elseif ($InstallService) {
-            # Run from this shell, so the service gets this PATH (where claude, codex and copilot are found).
-            Invoke-Checked 'semantic-router service install' { & $router service install }
-        }
-        else {
-            Write-Host 'Not installed. Run this script with -InstallService to start the router at every sign-in.'
-        }
     }
 
     if (-not $SkipDesktop) {
@@ -201,10 +191,39 @@ try {
         }
         Write-Host "Installed $desktopExe"
 
-        if (-not $NoLaunch) {
-            Write-Step 'Starting the desktop app'
-            Start-Process -FilePath $desktopExe
+    }
+
+    # After the app is in place: the service may run the app's own SemanticRouter.exe --headless.
+    Write-Step 'Background service'
+    if ($serviceWasInstalled) {
+        if ($router) {
+            Invoke-Checked 'semantic-router service start' { & $router service start }
         }
+        else {
+            Write-Host 'Installed, but the semantic-router tool is not; it starts again at your next sign-in.'
+        }
+    }
+    elseif ($InstallService) {
+        if (-not $SkipDesktop) {
+            # The app runs the service itself (SemanticRouter.exe --headless): a GUI program, no console window.
+            # Started from this shell, so the service gets this PATH (where claude, codex and copilot are found).
+            $install = Start-Process -FilePath $desktopExe -ArgumentList '--install-service' -Wait -PassThru
+            if ($install.ExitCode -ne 0) {
+                throw "Installing the background service failed (exit code $($install.ExitCode)). See $(Join-Path $env:APPDATA 'semantic-router\logs\semantic-router.log')."
+            }
+            Write-Host 'Installed the background service (SemanticRouter.exe --headless).'
+        }
+        elseif ($router) {
+            Invoke-Checked 'semantic-router service install' { & $router service install }
+        }
+    }
+    else {
+        Write-Host 'Not installed. Run this script with -InstallService, or tick "Keep the router running in the background" in the tray menu.'
+    }
+
+    if (-not $SkipDesktop -and -not $NoLaunch) {
+        Write-Step 'Starting the desktop app'
+        Start-Process -FilePath $desktopExe
     }
 
     if ($router) {
