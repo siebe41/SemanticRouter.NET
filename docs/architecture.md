@@ -11,9 +11,10 @@ How a request moves through the router, how configuration reloads without droppi
 | `SemanticRouter.Host` | AspNetCore | The `semantic-router` .NET tool and container: `run`, `init` (detects local servers and CLIs), `doctor` (`RouterDoctor`), the embedded neutral template and per-OS configuration directory. See [host.md](host.md). |
 | `SemanticRouter.Storage.Sqlite` | AspNetCore, `Microsoft.Data.Sqlite` | Durable state in one SQLite file: cooldowns, tool-call affinity, activity, configuration history (`UseSqliteState`). |
 | `SemanticRouter.Embeddings.Onnx` | AspNetCore, `Microsoft.ML.OnnxRuntime`, `Microsoft.ML.Tokenizers` | In-process sentence embeddings (`Embeddings:Provider = Onnx`): pinned, checksum-verified model downloads, and one loaded model shared across configuration reloads (`AddOnnxEmbeddings`, `UseOnnxEmbeddings`). |
+| `SemanticRouter.Connectors.Copilot` | AspNetCore, `GitHub.Copilot.SDK` | The `Copilot` connector type on GitHub's Copilot SDK (`AddCopilotConnector`): one runtime process shared across configuration reloads, a fresh session per turn, native tool calls returned to the client. |
 | `samples/RoutingApiSample` | AspNetCore | A host with an annotated `appsettings.json`: Annotate and Dispatch modes, dashboard, Anthropic endpoints. |
 | `samples/LmStudioClaudePoc` | AspNetCore | The LM Studio plus Claude Code personal setup, with a preflight and a self-test. |
-| `tests/SemanticRouter.Tests` | all | 327 tests; no network, model or vendor CLI needed. Run on Linux, Windows and macOS in CI. |
+| `tests/SemanticRouter.Tests` | all | 450+ tests; no network, model or vendor CLI needed. Run on Linux, Windows and macOS in CI. |
 | `tests/SemanticRouter.FakeCli` | nothing | A stand-in CLI (`fake-cli`) the process tests start, so they run on every OS. |
 
 ## One request, end to end
@@ -125,6 +126,7 @@ Do not put the file on a network share: SQLite's locking is unreliable there. Fo
 | To… | Implement or call |
 |---|---|
 | Reach a provider with its own protocol | `IChatConnector`, then `.AddConnector<T>()` |
+| Add a connector type that configuration can select | `IChatConnectorFactory` (and `IModelDiscovery` for the Discover button), as `SemanticRouter.Connectors.Copilot` does |
 | Use another embedding backend | `IEmbeddingProvider`, then `.UseEmbeddingProvider<T>()` |
 | Change how requirements are derived | `IRouteSelector`, `IComplexityAnalyzer`, or `IPromptClassifier` |
 | Change how models are ranked | `IModelSelector` |

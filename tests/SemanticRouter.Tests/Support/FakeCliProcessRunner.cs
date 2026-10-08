@@ -4,7 +4,7 @@ using SemanticRouter.AspNetCore;
 namespace SemanticRouter.Tests.Support;
 
 /// <summary>Scripted stand-in for real CLI processes. Records every invocation.</summary>
-internal sealed class FakeCliProcessRunner(Func<CliInvocation, FakeCliProcess> start) : ICliProcessRunner
+internal sealed class FakeCliProcessRunner(Func<CliInvocation, ICliProcess> start) : ICliProcessRunner
 {
     public List<CliInvocation> Invocations { get; } = [];
 

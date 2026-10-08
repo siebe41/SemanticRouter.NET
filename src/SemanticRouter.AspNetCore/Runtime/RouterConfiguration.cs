@@ -113,7 +113,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 case ConnectorType.Cli when connector.Preset == CliPreset.Custom && string.IsNullOrWhiteSpace(connector.Executable):
                     errors.Add($"Connector '{name}' is a Custom CLI and needs an Executable.");
                     break;
-                case ConnectorType.Cli when connector.MaxConcurrency < 1:
+                case ConnectorType.Cli or ConnectorType.Copilot when connector.MaxConcurrency < 1:
                     errors.Add($"Connector '{name}' MaxConcurrency must be at least 1.");
                     break;
                 case ConnectorType.OpenAICompatible or ConnectorType.Anthropic or ConnectorType.Responses when connector.BaseAddress is not { IsAbsoluteUri: true }:

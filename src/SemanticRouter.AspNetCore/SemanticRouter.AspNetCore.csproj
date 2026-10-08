@@ -23,6 +23,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SemanticRouter.Tests" />
+    <!-- First-party connector package, versioned with this one: it reuses the response writers and transcript renderer. -->
+    <InternalsVisibleTo Include="SemanticRouter.Connectors.Copilot" />
   </ItemGroup>
 
 </Project>

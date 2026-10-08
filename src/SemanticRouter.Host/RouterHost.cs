@@ -70,6 +70,7 @@ internal static class RouterHost
             .UseConfigurationFile(settings.ConfigurationFile)
             .UseSecretFile()
             .AddOnnxEmbeddings()
+            .AddCopilotConnector()
             .UseSqliteState(Path.Combine(settings.ConfigurationDirectory, HostSettings.StateFileName));
 
         configure?.Invoke(builder);

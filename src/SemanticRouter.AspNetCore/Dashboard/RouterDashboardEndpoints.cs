@@ -328,6 +328,19 @@ public static class RouterDashboardEndpoints
                 return Results.Problem($"Connector '{name}' is not configured.", statusCode: StatusCodes.Status404NotFound);
             }
 
+            if (provider.Current.Connectors.TryGet(name, out IChatConnector? live) && live is IModelDiscovery discovery)
+            {
+                try
+                {
+                    IReadOnlyList<string> found = await discovery.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+                    return Results.Json(new DiscoverResponse(found, found.Count == 0 ? "The provider listed no models." : null), ApiJson);
+                }
+                catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException or TimeoutException)
+                {
+                    return Results.Json(new DiscoverResponse([], provider.Current.Redactor.Redact(ex.Message)), ApiJson);
+                }
+            }
+
             if (connector.Type == ConnectorType.Cli)
             {
                 return Results.Json(new DiscoverResponse(CliModelHints(connector.Preset), "CLI presets accept the vendor's model aliases; these are common values."), ApiJson);
@@ -594,7 +607,7 @@ public static class RouterDashboardEndpoints
                 config.Connectors.TryGetValue(m.Connector, out ConnectorOptions? c) ? c.Type.ToString() : null)).ToArray(),
             config.Connectors.Select(kv => new ConnectorStatus(
                 kv.Key, kv.Value.Type.ToString(), kv.Value.Type == ConnectorType.Cli ? kv.Value.Preset.ToString() : null,
-                kv.Value.Type == ConnectorType.Cli ? kv.Value.Executable : kv.Value.BaseAddress?.ToString(),
+                kv.Value.Type is ConnectorType.Cli or ConnectorType.Copilot ? kv.Value.Executable : kv.Value.BaseAddress?.ToString(),
                 kv.Value.Type == ConnectorType.Cli ? kv.Value.ToolCalling.ToString() : "Native",
                 !string.IsNullOrEmpty(runtime.Resolved.Connectors.TryGetValue(kv.Key, out ConnectorOptions? resolved) ? resolved.ApiKey : null),
                 config.Models.Count(m => string.Equals(m.Connector, kv.Key, StringComparison.OrdinalIgnoreCase)))).ToArray(),
@@ -613,8 +626,26 @@ public static class RouterDashboardEndpoints
                 recent.Count(e => e.Degraded),
                 recent.Where(e => e.ServedBy is not null).GroupBy(e => e.ServedBy!).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase),
                 recent.GroupBy(e => e.Tier).OrderBy(g => g.Key).ToDictionary(g => g.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), g => g.Count()),
-                recent.GroupBy(e => e.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal)),
+                recent.GroupBy(e => e.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal),
+                recent.Where(e => e.Outcome == "served" && e.Connector is not null && e.TotalMilliseconds is not null)
+                    .GroupBy(e => e.Connector!, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => new ConnectorLatency(
+                        g.Key,
+                        config.Connectors.TryGetValue(g.Key, out ConnectorOptions? kind) ? (kind.Type == ConnectorType.Cli ? $"Cli/{kind.Preset}" : kind.Type.ToString()) : null,
+                        g.Count(),
+                        g.Count(e => e.HasTools),
+                        Percentile(g.Select(e => e.TimeToFirstByteMilliseconds), 0.5),
+                        Percentile(g.Select(e => e.TimeToFirstByteMilliseconds), 0.95),
+                        Percentile(g.Select(e => e.TotalMilliseconds), 0.5)))
+                    .OrderBy(l => l.Connector, StringComparer.OrdinalIgnoreCase)
+                    .ToArray()),
             budgets.Status(config.Usage));
+    }
+
+    private static double? Percentile(IEnumerable<double?> values, double quantile)
+    {
+        double[] sorted = values.Where(v => v is not null).Select(v => v!.Value).Order().ToArray();
+        return sorted.Length == 0 ? null : Math.Round(sorted[Math.Min(sorted.Length - 1, (int)Math.Ceiling(quantile * sorted.Length) - 1)], 0);
     }
 
     private static string[] CliModelHints(CliPreset preset) => preset switch
@@ -737,7 +768,18 @@ public static class RouterDashboardEndpoints
     /// <summary>Counts over the activity log.</summary>
     public sealed record ActivitySummary(
         int Total, int Served, int Failed, int Degraded,
-        IReadOnlyDictionary<string, int> ByModel, IReadOnlyDictionary<string, int> ByTier, IReadOnlyDictionary<string, int> ByReason);
+        IReadOnlyDictionary<string, int> ByModel, IReadOnlyDictionary<string, int> ByTier, IReadOnlyDictionary<string, int> ByReason,
+        IReadOnlyList<ConnectorLatency> Latency);
+
+    /// <summary>How fast one connector answered the served requests in the activity log.</summary>
+    /// <param name="Connector">The connector's name.</param>
+    /// <param name="Kind">Its type (<c>OpenAICompatible</c>, <c>Cli/ClaudeCode</c>, …).</param>
+    /// <param name="Requests">Served requests.</param>
+    /// <param name="WithTools">How many of them offered tools.</param>
+    /// <param name="FirstByteP50">Median time to the first byte of the reply, in milliseconds.</param>
+    /// <param name="FirstByteP95">95th percentile time to the first byte.</param>
+    /// <param name="TotalP50">Median time to the end of the reply.</param>
+    public sealed record ConnectorLatency(string Connector, string? Kind, int Requests, int WithTools, double? FirstByteP50, double? FirstByteP95, double? TotalP50);
 }
 
 internal static partial class DashboardLog

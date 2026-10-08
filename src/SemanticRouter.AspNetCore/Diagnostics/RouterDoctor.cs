@@ -56,7 +56,7 @@ public static class RouterDoctor
                 .ToArray();
             if (models.Length == 0)
             {
-                if (connector.Type == ConnectorType.Cli)
+                if (connector.Type is ConnectorType.Cli or ConnectorType.Copilot)
                 {
                     checks.Add(new RouterCheck($"connector {name}", RouterCheckStatus.Ok, "no enabled model uses it; not checked."));
                     continue;
@@ -75,12 +75,48 @@ public static class RouterDoctor
                 continue;
             }
 
-            checks.AddRange(connector.Type == ConnectorType.Cli
-                ? await CheckCliAsync(name, connector, runner, cancellationToken).ConfigureAwait(false)
-                : await CheckHttpAsync(name, connector, models, resolved, http, cancellationToken).ConfigureAwait(false));
+            checks.AddRange(connector.Type switch
+            {
+                ConnectorType.Cli => await CheckCliAsync(name, connector, runner, cancellationToken).ConfigureAwait(false),
+                ConnectorType.Copilot => [await CheckCopilotAsync(name, runtime, models, cancellationToken).ConfigureAwait(false)],
+                _ => await CheckHttpAsync(name, connector, models, resolved, http, cancellationToken).ConfigureAwait(false),
+            });
         }
 
         return checks;
+    }
+
+    /// <summary>Lists the account's models through the SDK: proves the runtime starts and the sign-in works.</summary>
+    private static async Task<RouterCheck> CheckCopilotAsync(string name, RouterRuntime runtime, ModelDefinition[] models, CancellationToken cancellationToken)
+    {
+        string subject = $"connector {name}";
+        if (!runtime.Connectors.TryGet(name, out IChatConnector connector) || connector is not IModelDiscovery discovery)
+        {
+            return new RouterCheck(subject, RouterCheckStatus.Failed,
+                "the Copilot connector needs the SemanticRouter.Connectors.Copilot package (.AddCopilotConnector()); the semantic-router tool includes it.");
+        }
+
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(60)); // the first call starts the Copilot runtime
+            IReadOnlyList<string> available = await discovery.ListModelsAsync(timeout.Token).ConfigureAwait(false);
+            string[] missing = models.Where(m => m.Model is { Length: > 0 } id && !available.Contains(id, StringComparer.OrdinalIgnoreCase))
+                .Select(m => $"{m.Name} ({m.Model})").ToArray();
+            return missing.Length == 0
+                ? new RouterCheck(subject, RouterCheckStatus.Ok, $"Copilot is signed in; {available.Count} models available.")
+                : new RouterCheck(subject, RouterCheckStatus.Warning,
+                    $"Copilot is signed in, but these models are not offered to this account: {string.Join(", ", missing)}. Available: {string.Join(", ", available)}.");
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or OperationCanceledException or System.ComponentModel.Win32Exception
+                                   && !cancellationToken.IsCancellationRequested)
+        {
+            string reason = ex is OperationCanceledException ? "timed out" : runtime.Redactor.Redact(ex.Message);
+            string fix = reason.Contains("authenticat", StringComparison.OrdinalIgnoreCase)
+                ? "Sign in once with `copilot` (then /login), or `gh auth login`."
+                : $"Install the copilot CLI (npm install -g @github/copilot) or set SemanticRouter:Connectors:{name}:Executable to it, then sign in with `copilot` (/login).";
+            return new RouterCheck(subject, RouterCheckStatus.Failed, $"the Copilot runtime could not list models: {reason.TrimEnd('.')}. {fix}");
+        }
     }
 
     private static async Task<RouterCheck> CheckEmbeddingsAsync(RouterRuntime runtime, CancellationToken cancellationToken)

@@ -61,79 +61,14 @@ internal static class PromptedToolCalls
     public static string RenderToolResult(ToolResultBlock result) =>
         $"[tool_result{(result.IsError ? " error" : string.Empty)}]\n{result.Content}";
 
-    /// <summary>Splits a reply into the leading text and the tool calls it ends with.</summary>
-    public static (string Text, IReadOnlyList<ToolUseBlock> Calls) Parse(string reply)
+    /// <summary>Splits a whole reply into its text and the tool calls it ends with (see <see cref="PromptedReplyStream"/>).</summary>
+    /// <param name="reply">The model's reply.</param>
+    /// <param name="toolNames">The request's tools; when given, near-miss formats that name one of them count as calls too.</param>
+    public static (string Text, IReadOnlyList<ToolUseBlock> Calls) Parse(string reply, IReadOnlyCollection<string>? toolNames = null)
     {
-        var calls = new List<ToolUseBlock>();
-        string remaining = reply;
-        string text = reply;
-        int searchFrom = 0;
-        var textParts = new StringBuilder();
-
-        while (true)
-        {
-            int start = remaining.IndexOf("```" + Fence, searchFrom, StringComparison.OrdinalIgnoreCase);
-            if (start < 0)
-            {
-                textParts.Append(remaining.AsSpan(searchFrom));
-                break;
-            }
-
-            int bodyStart = remaining.IndexOf('\n', start);
-            if (bodyStart < 0)
-            {
-                textParts.Append(remaining.AsSpan(searchFrom));
-                break;
-            }
-
-            int end = remaining.IndexOf("```", bodyStart + 1, StringComparison.Ordinal);
-            string body = end < 0 ? remaining[(bodyStart + 1)..] : remaining[(bodyStart + 1)..end];
-            textParts.Append(remaining.AsSpan(searchFrom, start - searchFrom));
-            if (TryParseCall(body.Trim(), out ToolUseBlock? call) && call is not null)
-            {
-                calls.Add(call);
-            }
-            else
-            {
-                // Not a well-formed call: keep it as text so nothing the model said is lost.
-                textParts.Append(remaining.AsSpan(start, (end < 0 ? remaining.Length : end + 3) - start));
-            }
-
-            if (end < 0)
-            {
-                break;
-            }
-
-            searchFrom = end + 3;
-        }
-
-        text = textParts.ToString().Trim();
-        return (text, calls);
-    }
-
-    private static bool TryParseCall(string json, out ToolUseBlock? call)
-    {
-        call = null;
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(json);
-            JsonElement root = document.RootElement;
-            string? name = root.GetString("name") ?? root.GetString("tool") ?? root.GetString("tool_name");
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                return false;
-            }
-
-            string input = root.TryGetObject("input", out JsonElement i) ? i.GetRawText()
-                : root.TryGetObject("arguments", out JsonElement a) ? a.GetRawText()
-                : root.TryGetObject("parameters", out JsonElement p) ? p.GetRawText()
-                : "{}";
-            call = new ToolUseBlock(JsonHelpers.NewToolUseId(), name, input);
-            return true;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
+        var stream = new PromptedReplyStream(toolNames);
+        string text = stream.Feed(reply);
+        PromptedReply end = stream.Finish();
+        return ((text + end.Text).Trim(), end.Calls);
     }
 }

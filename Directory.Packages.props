@@ -12,6 +12,10 @@
     <PackageVersion Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
   </ItemGroup>
   <ItemGroup>
+    <!-- SemanticRouter.Connectors.Copilot only. -->
+    <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.17" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Test-only dependencies. The Core library ships with zero package references. -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />

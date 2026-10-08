@@ -16,11 +16,28 @@ internal sealed class ConnectorCatalog : IDisposable
         IToolCallAffinity? affinity,
         ILoggerFactory loggerFactory,
         SecretRedactor? redactor = null,
-        PromptRouterMetrics? metrics = null)
+        PromptRouterMetrics? metrics = null,
+        IEnumerable<IChatConnectorFactory>? factories = null)
     {
+        IChatConnectorFactory[] extra = factories?.ToArray() ?? [];
         foreach ((string name, ConnectorOptions connector) in options)
         {
-            if (connector.Type == ConnectorType.Cli)
+            if (extra.FirstOrDefault(f => f.Type == connector.Type) is { } factory)
+            {
+                IChatConnector created = factory.Create(name, connector);
+                if (created is IDisposable disposable)
+                {
+                    _owned.Add(disposable);
+                }
+
+                _connectors[name] = created;
+            }
+            else if (connector.Type == ConnectorType.Copilot)
+            {
+                _connectors[name] = new UnavailableConnector(
+                    name, "the Copilot connector needs the SemanticRouter.Connectors.Copilot package (.AddCopilotConnector())");
+            }
+            else if (connector.Type == ConnectorType.Cli)
             {
                 var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity, redactor, metrics);
                 _owned.Add(cli);

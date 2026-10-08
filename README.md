@@ -62,7 +62,7 @@ Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md
 - **A dashboard with hot reload.** Live status, cooldowns, an activity log with every decision, a prompt tester, and an editor for routes, models, connectors, tiers, routing rules, embeddings and gateway settings. Apply changes to the running router, save them to a file, or revert. Themeable (Machine Dark by default).
 - **Named tiers.** The capability ladder is explicit configuration (`Tiers`), shown everywhere a tier appears, with a matrix of which routes need each rung and which models provide it.
 - **Capability-aware, cost-aware routing.** Routes declare the tier and capabilities an intent needs. Models declare their tier, capabilities, context window, cost and priority. The selector picks the cheapest model that qualifies, the most capable one, or follows your priority order, and clients can choose per request (`auto:cheapest`, `auto:best`, `auto:priority`).
-- **Every kind of provider.** There is an OpenAI-compatible HTTP connector for local servers and APIs, a CLI connector that runs Claude Code, Copilot CLI or Codex CLI on your own login, and an `IChatConnector` interface for anything else.
+- **Every kind of provider.** There is an OpenAI-compatible HTTP connector for local servers and APIs, a CLI connector that runs Claude Code, Copilot CLI or Codex CLI on your own login, a Copilot connector on GitHub's official SDK, and an `IChatConnector` interface for anything else.
 - **Automatic failover and quota cooldowns.** A model that is unreachable, times out, returns 5xx/429 or reports a usage limit is skipped for a cooldown period. An account-wide subscription limit cools down every model on that account at once.
 - **Privacy rails.** Routes marked `LocalOnly` can only be served by models marked `IsLocal`, even on failover. Subscription CLI connectors refuse requests from other machines by default.
 - **Routing profiles.** Named policies for who is asking and what the code belongs to: allowed and denied models, tier floors and caps, a strategy, local-only. Picked by gateway key, header, model name (`auto@private`) or rules on project and tools; a conversation containing a credential can be kept local automatically. See [docs/routing-profiles.md](docs/routing-profiles.md).
@@ -164,6 +164,7 @@ With `AllowBelowRequiredTier` (the default), the remaining eligible models follo
 | Anthropic API | `OpenAICompatible` (Anthropic's OpenAI-compatible endpoint) | per token (API key) | |
 | Google Gemini API | `OpenAICompatible` (`/v1beta/openai/chat/completions`) | per token (API key) | |
 | **Claude Code CLI** | `Cli`, preset `ClaudeCode` | your Claude subscription | personal, local use; see [TERMS.md](docs/TERMS.md) |
+| **GitHub Copilot (SDK)** | `Copilot` | your Copilot plan (AI credits) | personal, local use; native tools and streaming; [providers.md](docs/providers.md#github-copilot-sdk) |
 | **GitHub Copilot CLI** | `Cli`, preset `GitHubCopilot` | your Copilot plan (AI credits) | personal, local use |
 | **OpenAI Codex CLI** | `Cli`, preset `Codex` | your ChatGPT plan | personal, local use |
 | Anything else with a CLI | `Cli`, preset `Custom` | – | argument template with `{model}`, `{prompt}` |
@@ -407,22 +408,25 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 
 | Key | Applies to | Default | Description |
 |---|---|---|---|
-| `Type` | all | `OpenAICompatible` | `OpenAICompatible`, `Anthropic` (Messages API), `Responses` (OpenAI Responses API) or `Cli`. |
+| `Type` | all | `OpenAICompatible` | `OpenAICompatible`, `Anthropic` (Messages API), `Responses` (OpenAI Responses API), `Cli`, or `Copilot` (GitHub's Copilot SDK; package `SemanticRouter.Connectors.Copilot`, included in the tool). |
 | `BaseAddress`, `RequestPath` | HTTP | –, `/v1/chat/completions` (`/v1/messages` for Anthropic, `/v1/responses` for Responses) | |
 | `ApiKey`, `Headers` | HTTP | | Bearer token (`x-api-key` for Anthropic) and extra headers. Keep keys in user-secrets or environment variables, or write a reference: `"${env:OPENAI_API_KEY}"`, `"${secret:…}"`. |
 | `ForwardHeaders[]` | HTTP | `[]` | Client request headers to relay upstream (e.g. `anthropic-beta`). Authorization headers never are. |
 | `AnthropicVersion` | Anthropic | `2023-06-01` | Sent as `anthropic-version`. |
 | `ToolCalling` | CLI | `None` | `None`: decline tool-bearing requests. `Prompted`: describe the tools in the prompt and parse `tool_call` blocks from the reply. |
+| `StreamPromptedReplies` | CLI | `true` | With `Prompted`: stream the reply's text and hold back only what may be a tool call. `false` buffers the reply, so a failed run can still fail over. |
+| `RepairToolCalls` | CLI | `true` | With `Prompted`: re-ask once, briefly, for a tool call that could not be read. See [providers.md](docs/providers.md#prompted-tool-calling-in-practice). |
 | `Preset` | CLI | `Custom` | `ClaudeCode`, `GitHubCopilot`, `Codex` or `Custom`. |
 | `Executable` | CLI | preset's command | Started directly, never through a shell. On Windows use the `.exe`. |
 | `Arguments[]` | CLI | | Custom: the full template (`{model}`, `{prompt}`). Presets: extra arguments appended. |
 | `PromptInput` | CLI (custom) | `Stdin` | `Stdin` or `Argument`. |
 | `QuotaErrorPatterns[]` | CLI | preset patterns | Extra output fragments that mean "quota exhausted". |
 | `EnvironmentVariables`, `RemoveEnvironmentVariables[]` | CLI | preset defaults | The presets remove API-key variables that would switch billing away from your subscription. |
-| `MaxConcurrency` | CLI | `2` | Simultaneous processes. |
-| `MaxQueue` | CLI | `null` (always wait) | When this many requests are already waiting for a process, the next goes to another model. |
+| `MaxConcurrency` | CLI, Copilot | `2` | Simultaneous processes (Copilot: simultaneous turns). |
+| `MaxQueue` | CLI, Copilot | `null` (always wait) | When this many requests are already waiting for a process, the next goes to another model. |
 | `MaxArgumentLength` | CLI | `24000` | Longer prompts are sent on stdin. |
-| `AllowRemoteClients` | CLI | `false` | See [TERMS.md](docs/TERMS.md) before changing this. |
+| `Executable`, `HomeDirectory` | Copilot | `copilot`, `~/.copilot` | The Copilot CLI the SDK runs as its runtime, and its `COPILOT_HOME`. |
+| `AllowRemoteClients` | CLI, Copilot | `false` | See [TERMS.md](docs/TERMS.md) before changing this. |
 | `Timeout` | all | HTTP 100 s · CLI 5 min | Time to first output. Streams are not cut off. |
 
 ### `Embeddings` and `Middleware`
@@ -506,7 +510,7 @@ An embedding server adds a network round trip and its own inference time to ever
 
 | To… | Do this |
 |---|---|
-| Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. |
+| Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. To make a new connector type selectable in configuration, register an `IChatConnectorFactory`; implement `IModelDiscovery` for the dashboard's Discover button. |
 | Keep configuration somewhere other than a file | Implement `IRouterConfigurationStore` and call `.UseConfigurationStore<T>()`. |
 | Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. For an in-process model: `.UseOnnxEmbeddings()` from `SemanticRouter.Embeddings.Onnx`. To make a new kind selectable in configuration, register an `IEmbeddingProviderFactory`. |
 | Change how requirements are derived | Implement `IRouteSelector` or `IComplexityAnalyzer`. |
