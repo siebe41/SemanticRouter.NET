@@ -153,9 +153,16 @@ try {
         Invoke-Checked 'dotnet pack' {
             dotnet pack src/SemanticRouter.Host -c Release -o $artifacts "-p:Version=$version" --nologo
         }
-        $verb = if (Test-ToolInstalled) { 'update' } else { 'install' }
-        Invoke-Checked "dotnet tool $verb" {
-            dotnet tool $verb --global SemanticRouter.Host --add-source $artifacts --version $version
+        # --allow-downgrade: always take this build, even over a higher version installed earlier (say, by hand).
+        if (Test-ToolInstalled) {
+            Invoke-Checked 'dotnet tool update' {
+                dotnet tool update --global SemanticRouter.Host --add-source $artifacts --version $version --allow-downgrade
+            }
+        }
+        else {
+            Invoke-Checked 'dotnet tool install' {
+                dotnet tool install --global SemanticRouter.Host --add-source $artifacts --version $version
+            }
         }
         $router = Get-SemanticRouter
         if (-not $router) {
