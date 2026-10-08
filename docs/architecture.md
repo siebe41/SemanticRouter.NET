@@ -12,7 +12,7 @@ How a request moves through the router, how configuration reloads without droppi
 | `SemanticRouter.Storage.Sqlite` | AspNetCore, `Microsoft.Data.Sqlite` | Durable state in one SQLite file: cooldowns, tool-call affinity, activity, configuration history (`UseSqliteState`). |
 | `samples/RoutingApiSample` | AspNetCore | A host with an annotated `appsettings.json`: Annotate and Dispatch modes, dashboard, Anthropic endpoints. |
 | `samples/LmStudioClaudePoc` | AspNetCore | The LM Studio plus Claude Code personal setup, with a preflight and a self-test. |
-| `tests/SemanticRouter.Tests` | all | 307 tests; no network, model or vendor CLI needed. Run on Linux, Windows and macOS in CI. |
+| `tests/SemanticRouter.Tests` | all | 327 tests; no network, model or vendor CLI needed. Run on Linux, Windows and macOS in CI. |
 | `tests/SemanticRouter.FakeCli` | nothing | A stand-in CLI (`fake-cli`) the process tests start, so they run on every OS. |
 
 ## One request, end to end
@@ -47,7 +47,7 @@ flowchart TD
 6. **Rank.** `DefaultModelSelector` filters by enabled, available, local (if required), capabilities (the request adds `tools` and `vision` itself), and context window, then orders by strategy. Models below the required tier follow when `AllowBelowRequiredTier` is on.
 7. **Dispatch or annotate.** In Annotate mode the plan is attached to the request and the next endpoint decides. In Dispatch mode `PromptDispatcher` tries up to `MaxAttempts` candidates. A failure before any output cools the model down and moves on; once output has started the connector owns the response. An account-wide limit cools down every model on that connector.
 8. **Write the reply in the client's protocol.** See the next section.
-9. **Record.** A `RoutingActivityEntry` (decision, then outcome and timing) goes into the in-memory log that backs the dashboard's Activity page; metrics and routing headers are emitted.
+9. **Record.** A `RoutingActivityEntry` (decision, then outcome, timing, tokens and cost) goes into the activity log behind the dashboard's Activity page; the reported usage goes into the `IUsageLedger` that budgets read; spans, metrics and routing headers (including `X-Prompt-Route-Id`) are emitted. See [observability.md](observability.md).
 
 ## Two protocols, any backend
 
@@ -106,6 +106,7 @@ builder.Services.AddSemanticPromptRouting(builder.Configuration.GetSection("Sema
 | Tool-call affinity | tool-use id → model, with an in-memory cache in front | `AffinityWindow` (24 h), so a tool turn that spans a restart still goes back to the model that issued the call. |
 | Activity | each entry once its request has finished; the log seeds itself on start | `ActivityMaxEntries` (10,000) and `ActivityMaxAge` (30 days). |
 | Configuration history | every applied document, with source, actor and note | `HistoryMaxEntries` (200). The dashboard's JSON page diffs and rolls back; see `api/config/history`. |
+| Usage | one row per served request: model, connector, route, client, tokens, cost, reference cost | `UsageRetention` (400 days), so monthly budgets survive restarts. |
 
 History documents are stored as applied. They keep `${…}` references where the configuration uses them, and literal keys where the configuration file holds them too. With a secret store registered, typed keys never reach either.
 
@@ -130,6 +131,7 @@ Do not put the file on a network share: SQLite's locking is unreliable there. Fo
 | Persist or share tool-call affinity | `IToolCallAffinity` |
 | Keep activity beyond the in-memory window | `IRoutingActivityStore` |
 | Keep configuration history somewhere else | `IRouterConfigurationHistory` |
+| Keep usage somewhere else (budgets read it) | `IUsageLedger` |
 | Support another payload shape | `IPromptExtractor` |
 | Keep configuration somewhere other than a file | `IRouterConfigurationStore`, then `.UseConfigurationStore<T>()` |
 | Keep secrets in a vault or the OS keychain | `IRouterSecretStore`, then `.UseSecretStore<T>()` |

@@ -15,13 +15,14 @@ internal sealed class ConnectorCatalog : IDisposable
         ICliProcessRunner processRunner,
         IToolCallAffinity? affinity,
         ILoggerFactory loggerFactory,
-        SecretRedactor? redactor = null)
+        SecretRedactor? redactor = null,
+        PromptRouterMetrics? metrics = null)
     {
         foreach ((string name, ConnectorOptions connector) in options)
         {
             if (connector.Type == ConnectorType.Cli)
             {
-                var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity, redactor);
+                var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity, redactor, metrics);
                 _owned.Add(cli);
                 _connectors[name] = cli;
             }

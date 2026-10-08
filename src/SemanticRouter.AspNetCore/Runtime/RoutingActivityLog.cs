@@ -77,6 +77,30 @@ public sealed class RoutingActivityEntry
 
     /// <summary>Total time from routing to the end of the response, in milliseconds.</summary>
     public double? TotalMilliseconds { get; set; }
+
+    /// <summary>Time from routing until the first byte of the reply was sent, in milliseconds.</summary>
+    public double? TimeToFirstByteMilliseconds { get; set; }
+
+    /// <summary>Input tokens the backend reported (excluding cached ones).</summary>
+    public int? InputTokens { get; set; }
+
+    /// <summary>Output tokens the backend reported.</summary>
+    public int? OutputTokens { get; set; }
+
+    /// <summary>Input tokens read from the backend's prompt cache.</summary>
+    public int? CacheReadTokens { get; set; }
+
+    /// <summary>Input tokens written to the backend's prompt cache.</summary>
+    public int? CacheCreationTokens { get; set; }
+
+    /// <summary>Cost at the serving model's configured prices, when usage was reported.</summary>
+    public decimal? CostUsd { get; set; }
+
+    /// <summary>Budgets that kept a model from being tried, if any.</summary>
+    public string? Budget { get; set; }
+
+    /// <summary>The W3C trace id of the request, for finding it in a tracing backend.</summary>
+    public string? TraceId { get; set; }
 }
 
 /// <summary>
@@ -90,6 +114,9 @@ public interface IRoutingActivityStore
 
     /// <summary>The newest entries first, at most <paramref name="limit"/>.</summary>
     IReadOnlyList<RoutingActivityEntry> Recent(int limit);
+
+    /// <summary>Entries with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/>, oldest first, at most <paramref name="limit"/>.</summary>
+    IReadOnlyList<RoutingActivityEntry> Between(DateTimeOffset since, DateTimeOffset until, int limit);
 }
 
 /// <summary>
@@ -121,6 +148,20 @@ public sealed class RoutingActivityLog
 
             _next = newest + 1;
         }
+    }
+
+    /// <summary>
+    /// Entries in a time range, oldest first: from the store when there is one (beyond the in-memory window),
+    /// otherwise from memory.
+    /// </summary>
+    public IReadOnlyList<RoutingActivityEntry> Between(DateTimeOffset since, DateTimeOffset until, int limit = 100_000)
+    {
+        if (_store is not null)
+        {
+            return _store.Between(since, until, limit);
+        }
+
+        return Recent(_entries.Length).Where(e => e.Timestamp >= since && e.Timestamp < until).OrderBy(e => e.Id).Take(limit).ToArray();
     }
 
     /// <summary>Hands a finished entry (outcome and timing known) to the store, when there is one.</summary>

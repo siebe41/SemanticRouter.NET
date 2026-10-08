@@ -1,0 +1,128 @@
+using System.Collections.Concurrent;
+using System.Globalization;
+using Microsoft.Extensions.Logging;
+
+namespace SemanticRouter.AspNetCore;
+
+/// <summary>Where a budget stands in its current period.</summary>
+public sealed record BudgetStatus(
+    string Name,
+    string Covers,
+    BudgetPeriod Period,
+    DateTimeOffset PeriodStart,
+    DateTimeOffset PeriodEnd,
+    long TokensUsed,
+    long? MaxTokens,
+    decimal CostUsedUsd,
+    decimal? MaxCostUsd,
+    int Percent,
+    bool Exceeded,
+    bool Warning)
+{
+    /// <summary>"12,400 of 10,000 tokens" / "$4.10 of $5.00", for messages.</summary>
+    public string Describe()
+    {
+        var parts = new List<string>();
+        if (MaxTokens is { } maxTokens)
+        {
+            parts.Add(string.Format(CultureInfo.InvariantCulture, "{0:N0} of {1:N0} tokens", TokensUsed, maxTokens));
+        }
+
+        if (MaxCostUsd is { } maxCost)
+        {
+            parts.Add(string.Format(CultureInfo.InvariantCulture, "${0:0.00} of ${1:0.00}", CostUsedUsd, maxCost));
+        }
+
+        return string.Join(", ", parts) + " this " + Period.ToString().ToLowerInvariant();
+    }
+}
+
+/// <summary>Decides whether a model may be tried under the configured budgets, and reports where each budget stands.</summary>
+internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time, ILogger<BudgetGate> logger)
+{
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _warned = new(StringComparer.OrdinalIgnoreCase);
+
+    public static TimeZoneInfo ZoneOf(UsageOptions usage) =>
+        usage.TimeZone is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out TimeZoneInfo? zone) ? zone : TimeZoneInfo.Local;
+
+    /// <summary>The period containing <paramref name="now"/>, in <paramref name="zone"/>.</summary>
+    public static (DateTimeOffset Start, DateTimeOffset End) PeriodOf(BudgetPeriod period, DateTimeOffset now, TimeZoneInfo zone)
+    {
+        DateTime local = TimeZoneInfo.ConvertTime(now, zone).DateTime.Date;
+        DateTime start = period switch
+        {
+            BudgetPeriod.Week => local.AddDays(-(((int)local.DayOfWeek + 6) % 7)),
+            BudgetPeriod.Month => new DateTime(local.Year, local.Month, 1, 0, 0, 0, DateTimeKind.Unspecified),
+            _ => local,
+        };
+        DateTime end = period switch
+        {
+            BudgetPeriod.Week => start.AddDays(7),
+            BudgetPeriod.Month => start.AddMonths(1),
+            _ => start.AddDays(1),
+        };
+        return (ToOffset(start, zone), ToOffset(end, zone));
+    }
+
+    /// <summary>Every budget's current state.</summary>
+    public IReadOnlyList<BudgetStatus> Status(UsageOptions usage) =>
+        usage.Budgets.Select(b => StatusOf(b, usage)).ToArray();
+
+    /// <summary>The first budget covering <paramref name="model"/> that is spent, or <see langword="null"/>.</summary>
+    public BudgetStatus? Blocking(ModelDefinition model, UsageOptions usage)
+    {
+        foreach (BudgetDefinition budget in usage.Budgets)
+        {
+            if (Covers(budget, model) && StatusOf(budget, usage) is { Exceeded: true } spent)
+            {
+                return spent;
+            }
+        }
+
+        return null;
+    }
+
+    public static bool Covers(BudgetDefinition budget, ModelDefinition model) =>
+        (budget.Model is { Length: > 0 } name && string.Equals(name, model.Name, StringComparison.OrdinalIgnoreCase))
+        || (budget.Connector is { Length: > 0 } connector && string.Equals(connector, model.Connector, StringComparison.OrdinalIgnoreCase));
+
+    private BudgetStatus StatusOf(BudgetDefinition budget, UsageOptions usage)
+    {
+        (DateTimeOffset start, DateTimeOffset end) = PeriodOf(budget.Period, time.GetUtcNow(), ZoneOf(usage));
+        UsageTotals spent = ledger.Total(start, end, string.IsNullOrEmpty(budget.Model) ? null : budget.Model, string.IsNullOrEmpty(budget.Model) ? budget.Connector : null);
+        double tokenShare = budget.MaxTokens is > 0 and { } maxTokens ? (double)spent.TotalTokens / maxTokens : 0;
+        double costShare = budget.MaxCostUsd is > 0 and { } maxCost ? (double)(spent.CostUsd / maxCost) : 0;
+        bool exceeded = (budget.MaxTokens is { } t && spent.TotalTokens >= t) || (budget.MaxCostUsd is { } c && spent.CostUsd >= c);
+        int percent = (int)Math.Floor(Math.Max(tokenShare, costShare) * 100);
+        bool warning = !exceeded && percent >= usage.WarnAtPercent;
+        var status = new BudgetStatus(
+            budget.Name, budget.Model is { Length: > 0 } m ? $"model {m}" : $"connector {budget.Connector}", budget.Period, start, end,
+            spent.TotalTokens, budget.MaxTokens, spent.CostUsd, budget.MaxCostUsd, percent, exceeded, warning);
+
+        string key = budget.Name + (exceeded ? ":spent" : ":warn");
+        if ((warning || exceeded) && (!_warned.TryGetValue(key, out DateTimeOffset warnedFor) || warnedFor != start))
+        {
+            // Once per budget and period, so a busy router does not repeat it on every request.
+            _warned[key] = start;
+            if (exceeded)
+            {
+                LogSpent(logger, budget.Name, status.Covers, status.Describe());
+            }
+            else
+            {
+                LogWarning(logger, budget.Name, status.Covers, percent, status.Describe());
+            }
+        }
+
+        return status;
+    }
+
+    private static DateTimeOffset ToOffset(DateTime local, TimeZoneInfo zone) =>
+        new DateTimeOffset(local, zone.GetUtcOffset(local)).ToUniversalTime();
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Budget {Budget} ({Covers}) is at {Percent}%: {Usage}.")]
+    private static partial void LogWarning(ILogger logger, string budget, string covers, int percent, string usage);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Budget {Budget} ({Covers}) is spent ({Usage}); it is not tried again until the period ends.")]
+    private static partial void LogSpent(ILogger logger, string budget, string covers, string usage);
+}

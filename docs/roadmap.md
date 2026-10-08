@@ -13,7 +13,9 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - Cooldowns, tool-call affinity, activity and every applied configuration can survive restarts (SQLite; on by default in the tool), with diff and rollback on the dashboard.
 
-What it is not yet: something that tells you what it spent, or something that learns from your prompts. Those gaps drive the plan.
+- It records tokens and cost per request, shows usage and "saved by routing" on the dashboard, enforces budgets, honours limit reset times, and emits OpenTelemetry-ready traces and metrics.
+
+What it is not yet: something that learns from your prompts, or a Responses API front door for Codex. Those gaps drive the plan.
 
 ## What done looks like
 

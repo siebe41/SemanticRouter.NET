@@ -32,9 +32,16 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     private readonly string[] _quotaPatterns;
     private readonly string[] _removedEnvironment;
     private readonly SecretRedactor _redactor;
+    private readonly PromptRouterMetrics? _metrics;
 
     public CliChatConnector(
-        string name, ConnectorOptions options, ICliProcessRunner runner, ILogger logger, IToolCallAffinity? affinity = null, SecretRedactor? redactor = null)
+        string name,
+        ConnectorOptions options,
+        ICliProcessRunner runner,
+        ILogger logger,
+        IToolCallAffinity? affinity = null,
+        SecretRedactor? redactor = null,
+        PromptRouterMetrics? metrics = null)
     {
         Name = name;
         _options = options;
@@ -43,6 +50,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         _affinity = affinity;
         _logger = logger;
         _redactor = redactor ?? SecretRedactor.None;
+        _metrics = metrics;
         _gate = new SemaphoreSlim(Math.Max(1, options.MaxConcurrency));
         _executable = string.IsNullOrWhiteSpace(options.Executable) ? _adapter.DefaultExecutable : options.Executable;
         _quotaPatterns = _adapter.DefaultQuotaPatterns.Concat(options.QuotaErrorPatterns).ToArray();
@@ -81,7 +89,17 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             return ConnectorResult.Failed(ModelFailureKind.Unavailable, $"'{_executable}' is a script: {problem}");
         }
 
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        _metrics?.CliQueued(Name, 1);
+        try
+        {
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _metrics?.CliQueued(Name, -1);
+        }
+
+        _metrics?.CliActive(Name, 1);
         string workingDirectory = Path.Combine(Path.GetTempPath(), "semantic-router", Guid.NewGuid().ToString("N"));
         try
         {
@@ -90,6 +108,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
         finally
         {
+            _metrics?.CliActive(Name, -1);
             _gate.Release();
             TryDelete(workingDirectory);
         }
@@ -230,11 +249,13 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
 
         bool quota = quotaSignal || _quotaPatterns.Any(p => diagnostics.Contains(p, StringComparison.OrdinalIgnoreCase));
+        DateTimeOffset? retryAt = quota && QuotaResetParser.TryParse(diagnostics, DateTimeOffset.UtcNow, null, out DateTimeOffset reset) ? reset : null;
         LogRunFailed(_logger, Name, exitCode, quota, Truncate(diagnostics));
         return ConnectorResult.Failed(
             quota ? ModelFailureKind.QuotaExceeded : ModelFailureKind.Unavailable,
             $"exit code {exitCode}: {Truncate(diagnostics, 200)}",
-            affectsAllConnectorModels: quota && !ModelSpecificLimitPatterns.Any(p => diagnostics.Contains(p, StringComparison.OrdinalIgnoreCase)));
+            affectsAllConnectorModels: quota && !ModelSpecificLimitPatterns.Any(p => diagnostics.Contains(p, StringComparison.OrdinalIgnoreCase)),
+            retryAt: retryAt);
     }
 
     /// <summary>Writes a reply that may end in prompted tool calls as text plus structured calls.</summary>

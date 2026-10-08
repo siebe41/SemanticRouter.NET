@@ -38,6 +38,8 @@
     autoRefresh: true,
     session: { role: null, tokenRequired: false, tokensConfigured: false },
     history: { versions: null, diff: null },
+    trends: { window: '24h', data: null, loading: false },
+    usage: { window: '7d', by: 'model', data: null, loading: false },
   };
 
   /* ---------------------------------------------------------------------------------------------
@@ -175,6 +177,8 @@
       state.status = status;
       state.activity = activity.entries;
       renderChrome();
+      if (state.view === 'overview') { state.trends.data = null; }
+      if (state.view === 'usage') { loadUsage(); }
       if (state.view === 'overview' || state.view === 'activity') render();
     } catch (e) { /* keep the last known state */ }
   }
@@ -200,6 +204,7 @@
     if (readOnly()) notes.push('Signed in with the <b>read-only</b> token: you can look, not change.');
     if (state.meta.warning) notes.push(h(state.meta.warning));
     ((s && s.warnings) || []).forEach((w) => notes.push(h(w)));
+    ((s && s.budgets) || []).filter((b) => b.exceeded || b.warning).forEach((b) => notes.push(`Budget <b>${h(b.name)}</b> (${h(b.covers)}) is ${b.exceeded ? 'spent' : 'at ' + b.percent + '%'}. <a href="#/usage">Usage</a>`));
     if (notes.length) banner(notes.join('<br>'), 'warn'); else banner(null);
     const signOut = $('#sign-out');
     if (signOut) signOut.classList.toggle('hidden', !state.session.role || !state.session.tokenRequired);
@@ -225,6 +230,68 @@
      --------------------------------------------------------------------------------------------- */
   const views = {};
 
+  /* ---------------------------------------------------------------------------------------------
+     Charts. Plain SVG; one y-axis; series colours from --series-*; text in text tokens; hover tips.
+     --------------------------------------------------------------------------------------------- */
+  const fmtTime = (iso, span) => { const d = new Date(iso); return span === '7d' || span === '30d' ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + (span === '7d' ? ' ' + d.getHours() + 'h' : '') : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
+  const fmtMs = (v) => v == null ? '–' : v >= 1000 ? (v / 1000).toFixed(1) + ' s' : Math.round(v) + ' ms';
+  const niceMax = (v) => { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p; };
+  const W = 640; const H = 170; const PAD = { l: 44, r: 64, t: 10, b: 22 };
+
+  function axes(max, fmt, buckets, span) {
+    const ih = H - PAD.t - PAD.b;
+    let g = '';
+    [0, 0.5, 1].forEach((f) => { const y = PAD.t + ih - f * ih; g += `<line class="grid-line" x1="${PAD.l}" x2="${W - PAD.r}" y1="${y}" y2="${y}"/><text class="axis" x="${PAD.l - 6}" y="${y + 3}" text-anchor="end">${h(fmt(max * f))}</text>`; });
+    const iw = W - PAD.l - PAD.r; const step = Math.max(1, Math.ceil(buckets.length / 6));
+    buckets.forEach((b, i) => { if (i % step === 0) g += `<text class="axis" x="${PAD.l + (i + 0.5) * iw / buckets.length}" y="${H - 6}" text-anchor="middle">${h(fmtTime(b.start, span))}</text>`; });
+    return g;
+  }
+
+  function requestsChart(series, span) {
+    const b = series.buckets; const max = niceMax(Math.max(1, ...b.map((x) => x.requests)));
+    const iw = W - PAD.l - PAD.r; const ih = H - PAD.t - PAD.b; const bw = iw / b.length;
+    const bars = b.map((x, i) => {
+      const hgt = x.requests / max * ih; const xpos = PAD.l + i * bw + 1; const w = Math.max(1, bw - 2);
+      const tip = `${fmtTime(x.start, span)}\n${x.requests} requests · ${x.served} served · ${x.failed} failed`;
+      return (x.requests ? `<rect class="bar-mark" x="${xpos}" y="${PAD.t + ih - hgt}" width="${w}" height="${hgt}" rx="${Math.min(4, w / 2)}"/>` : '') +
+        `<rect class="hit" x="${PAD.l + i * bw}" y="${PAD.t}" width="${bw}" height="${ih}" data-tip="${h(tip)}"/>`;
+    }).join('');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Requests per interval">${axes(max, (v) => String(Math.round(v)), b, span)}${bars}</svg>`;
+  }
+
+  function latencyChart(series, span) {
+    const b = series.buckets; const max = niceMax(Math.max(1, ...b.map((x) => x.p95Milliseconds || 0)));
+    const iw = W - PAD.l - PAD.r; const ih = H - PAD.t - PAD.b; const bw = iw / b.length;
+    const pt = (i, v) => [PAD.l + (i + 0.5) * bw, PAD.t + ih - v / max * ih];
+    const path = (key) => { let d = ''; let pen = false; b.forEach((x, i) => { const v = x[key]; if (v == null) { pen = false; return; } const [px, py] = pt(i, v); d += (pen ? 'L' : 'M') + px.toFixed(1) + ' ' + py.toFixed(1); pen = true; }); return d; };
+    const last = (key) => { for (let i = b.length - 1; i >= 0; i--) if (b[i][key] != null) return [i, b[i][key]]; return null; };
+    const endLabel = (key, cls, name) => { const l = last(key); if (!l) return ''; const [px, py] = pt(l[0], l[1]); return `<circle class="dot-${cls}" cx="${px}" cy="${py}" r="4"/><text class="end-label" x="${px + 8}" y="${py + (cls === 1 ? 10 : -4)}">${name} ${h(fmtMs(l[1]))}</text>`; };
+    const hits = b.map((x, i) => `<rect class="hit" x="${PAD.l + i * bw}" y="${PAD.t}" width="${bw}" height="${ih}" data-tip="${h(`${fmtTime(x.start, span)}\np50 ${fmtMs(x.p50Milliseconds)} · p95 ${fmtMs(x.p95Milliseconds)}`)}"/>`).join('');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Latency p50 and p95">${axes(max, fmtMs, b, span)}<path class="line-2" d="${path('p95Milliseconds')}"/><path class="line-1" d="${path('p50Milliseconds')}"/>${endLabel('p95Milliseconds', 2, 'p95')}${endLabel('p50Milliseconds', 1, 'p50')}${hits}</svg>`;
+  }
+
+  async function loadTrends() {
+    if (state.trends.loading) return;
+    state.trends.loading = true;
+    try { state.trends.data = await api('GET', '/activity/series?window=' + state.trends.window); } catch { /* keep the last one */ }
+    state.trends.loading = false;
+    if (state.view === 'overview') render();
+  }
+
+  const trendsCard = () => {
+    const t = state.trends; const s = t.data;
+    if (!s) { loadTrends(); return '<div class="card section"><div class="card-head"><h2>Trends</h2></div><div class="muted small">Loading…</div></div>'; }
+    const seg = ['1h', '24h', '7d', '30d'].map((w) => `<button class="${w === t.window ? 'on' : ''}" data-action="trends-window" data-window="${w}">${w}</button>`).join('');
+    const rows = s.buckets.filter((b) => b.requests).map((b) => `<tr><td>${h(fmtTime(b.start, t.window))}</td><td class="num">${b.requests}</td><td class="num">${b.served}</td><td class="num">${b.failed}</td><td class="num">${h(fmtMs(b.p50Milliseconds))}</td><td class="num">${h(fmtMs(b.p95Milliseconds))}</td></tr>`).join('');
+    return `<div class="card section"><div class="card-head"><h2>Trends</h2><span class="muted small">${s.requests} requests · p50 ${h(fmtMs(s.p50Milliseconds))} · p95 ${h(fmtMs(s.p95Milliseconds))} · p99 ${h(fmtMs(s.p99Milliseconds))}</span><span class="spacer"></span><span class="seg" role="group" aria-label="Window">${seg}</span></div>
+      <div class="grid cols-2">
+        <div><h3 class="small muted">Requests</h3>${requestsChart(s, t.window)}</div>
+        <div><h3 class="small muted">Latency (served requests, end to end)</h3><div class="legend"><span><i class="key" style="background:var(--series-1)"></i>p50</span><span><i class="key" style="background:var(--series-2)"></i>p95</span></div>${latencyChart(s, t.window)}</div>
+      </div>
+      <details style="margin-top:8px"><summary class="small muted">Show as a table</summary><table><tr><th>From</th><th>Requests</th><th>Served</th><th>Failed</th><th>p50</th><th>p95</th></tr>${rows || '<tr><td colspan="6" class="muted small">No requests in this window.</td></tr>'}</table></details>
+    </div>`;
+  };
+
   views.overview = () => {
     const s = state.status;
     const a = s.activity;
@@ -242,6 +309,7 @@
         <div class="card stat"><span class="value">${s.models.filter((m) => m.enabled).length}<span class="muted" style="font-size:14px"> / ${s.models.length}</span></span><span class="label">models enabled</span></div>
         <div class="card stat"><span class="value">${s.routes.length}</span><span class="label">routes · ${s.routes.reduce((n, r) => n + r.utterances, 0)} utterances</span></div>
       </div>
+      ${trendsCard()}
 
       <div class="grid cols-2 section">
         <div class="card">
@@ -252,7 +320,7 @@
               <td><span class="${m.enabled ? '' : 'muted'}">${h(m.name)}</span>${m.isLocal ? ' <span class="badge info">local</span>' : ''}<div class="small faint mono">${h(m.model || '')}</div></td>
               <td><span class="tier" title="${h(tierName(m.tier))}">T${m.tier}</span></td>
               <td class="small">${h(m.connector)} <span class="faint">${h(m.connectorType || '')}</span></td>
-              <td>${!m.enabled ? '<span class="badge">disabled</span>' : (m.coolingDownUntil ? `<span class="badge warn" title="until ${h(new Date(m.coolingDownUntil).toLocaleTimeString())}">cooling down</span>` : '<span class="badge ok">ready</span>')}</td>
+              <td>${!m.enabled ? '<span class="badge">disabled</span>' : (m.coolingDownUntil ? `<span class="badge warn">cooling down</span> <span class="small muted">until ${h(new Date(m.coolingDownUntil).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}</span>` : '<span class="badge ok">ready</span>')}</td>
             </tr>`).join('')}
           </table>
         </div>
@@ -320,7 +388,7 @@
       <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th></tr>
       ${entries.map((e) => `<tr title="${h(e.detail || '')}">
         <td class="nowrap small">${h(when(e.timestamp))}</td>
-        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok</div></td>
+        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}</div></td>
         <td><span class="tier">T${e.tier}</span></td>
         <td class="small">${h(e.reason)}</td>
         <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
@@ -428,6 +496,8 @@
             <label class="field"><span class="name">Context window (tokens)</span><input type="number" min="0" data-bind="Models.${i}.ContextWindow" data-kind="number" value="${m.ContextWindow || 0}"><span class="hint">0 = unknown (never skipped).</span></label>
             <label class="field"><span class="name">Input cost ($ / M tokens)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.InputCostPerMillionTokens" data-kind="float" value="${m.InputCostPerMillionTokens || 0}"></label>
             <label class="field"><span class="name">Output cost ($ / M tokens)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.OutputCostPerMillionTokens" data-kind="float" value="${m.OutputCostPerMillionTokens || 0}"><span class="hint">0 for local models and flat-rate subscriptions.</span></label>
+            <label class="field"><span class="name">Cache read cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheReadCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheReadCostPerMillionTokens ?? ''}" placeholder="input price"><span class="hint">Prompt-cache reads, if the provider prices them differently.</span></label>
+            <label class="field"><span class="name">Cache write cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheWriteCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheWriteCostPerMillionTokens ?? ''}" placeholder="input price"></label>
             <label class="field"><span class="name">Priority</span><input type="number" data-bind="Models.${i}.Priority" data-kind="number" value="${m.Priority || 0}"><span class="hint">Lower is preferred; breaks ties.</span></label>
             <label class="field wide"><span class="name">Description</span><input type="text" data-bind="Models.${i}.Description" data-kind="nulltext" value="${h(m.Description || '')}"></label>
             <label class="check wide"><input type="checkbox" data-bind="Models.${i}.IsLocal" data-kind="bool" ${m.IsLocal ? 'checked' : ''}> Local: prompts stay on this machine (required to serve local-only routes)</label>
@@ -655,6 +725,65 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
     </div>`;
   };
 
+  /* Usage: what each model, connector, route or client used and cost, and the budgets. */
+  async function loadUsage() {
+    if (state.usage.loading) return;
+    state.usage.loading = true;
+    try { state.usage.data = await api('GET', `/usage?window=${state.usage.window}&by=${state.usage.by}`); } catch (e) { toast(e.message, 'danger'); }
+    state.usage.loading = false;
+    if (state.view === 'usage') render();
+  }
+  const usd = (v) => '$' + Number(v || 0).toFixed(v && Math.abs(v) < 1 ? 4 : 2);
+  const int = (v) => Number(v || 0).toLocaleString();
+  const budgetRow = (b) => {
+    const pct = Math.min(100, b.percent);
+    const cls = b.exceeded ? 'danger' : b.warning ? 'warn' : '';
+    const limits = [b.maxTokens != null ? `${int(b.tokensUsed)} of ${int(b.maxTokens)} tokens` : null, b.maxCostUsd != null ? `${usd(b.costUsedUsd)} of ${usd(b.maxCostUsd)}` : null].filter(Boolean).join(' · ');
+    return `<tr><td><b>${h(b.name)}</b><div class="small faint">${h(b.covers)} · per ${h(String(b.period).toLowerCase())}</div></td>
+      <td style="min-width:180px"><div class="meter ${cls}" role="meter" aria-valuenow="${b.percent}" aria-valuemin="0" aria-valuemax="100" aria-label="${h(b.name)}"><i style="width:${pct}%"></i></div></td>
+      <td class="small">${b.percent}% ${b.exceeded ? '<span class="badge danger">spent</span>' : b.warning ? '<span class="badge warn">near limit</span>' : '<span class="badge ok">ok</span>'}<div class="faint">${h(limits)}</div></td>
+      <td class="small muted">resets ${h(new Date(b.periodEnd).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</td></tr>`;
+  };
+  views.usage = () => {
+    const u = state.usage; const d = u.data;
+    if (!d) { loadUsage(); return '<div class="section-head"><h1>Usage</h1></div><div class="muted">Loading…</div>'; }
+    const t = d.totals; const max = Math.max(1e-9, ...d.groups.map((g) => g.totals.costUsd || 0)); const maxTok = Math.max(1, ...d.groups.map((g) => g.totals.inputTokens + g.totals.outputTokens + g.totals.cacheReadTokens + g.totals.cacheWriteTokens));
+    const byCost = d.groups.some((g) => g.totals.costUsd > 0);
+    const seg = (key, values) => `<span class="seg" role="group">${values.map(([v, label]) => `<button class="${u[key] === v ? 'on' : ''}" data-action="usage-set" data-key="${key}" data-value="${v}">${label}</button>`).join('')}</span>`;
+    return `
+      <div class="section-head"><h1>Usage</h1><span class="muted">Tokens the backends reported, and cost at the prices in the model catalog.</span><span class="spacer"></span>
+        ${seg('window', [['day', 'Today'], ['week', 'This week'], ['month', 'This month'], ['7d', '7 days'], ['30d', '30 days']])}</div>
+      <div class="grid cols-4 section">
+        <div class="card stat"><span class="value">${int(t.requests)}</span><span class="label">requests with usage</span></div>
+        <div class="card stat"><span class="value">${int(t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens)}</span><span class="label">tokens · ${int(t.inputTokens)} in · ${int(t.outputTokens)} out · ${int(t.cacheReadTokens)} cached</span></div>
+        <div class="card stat"><span class="value">${usd(t.costUsd)}</span><span class="label">at catalog prices (subscriptions and local models count as 0)</span></div>
+        <div class="card stat"><span class="value">${d.referenceModel ? usd(t.referenceCostUsd - t.costUsd) : '–'}</span><span class="label">${d.referenceModel ? 'saved compared with sending everything to ' + h(d.referenceModel) : 'set Usage → reference model to estimate savings'}</span></div>
+      </div>
+      ${d.budgets.length ? `<div class="card section"><div class="card-head"><h2>Budgets</h2><span class="muted small">A spent budget's models are not tried until it resets.</span></div><table>${d.budgets.map(budgetRow).join('')}</table></div>` : ''}
+      <div class="card section"><div class="card-head"><h2>By ${h(u.by)}</h2><span class="spacer"></span>${seg('by', [['model', 'Model'], ['connector', 'Connector'], ['route', 'Route'], ['client', 'Client'], ['day', 'Day']])}</div>
+        <table><tr><th>${h(u.by)}</th><th>Requests</th><th>Input</th><th>Output</th><th>Cached</th><th>Cost</th><th style="width:30%"></th></tr>
+        ${d.groups.map((g) => { const tk = g.totals.inputTokens + g.totals.outputTokens + g.totals.cacheReadTokens + g.totals.cacheWriteTokens; const share = byCost ? g.totals.costUsd / max : tk / maxTok; return `<tr><td>${h(g.key)}</td><td class="num">${int(g.totals.requests)}</td><td class="num">${int(g.totals.inputTokens)}</td><td class="num">${int(g.totals.outputTokens)}</td><td class="num">${int(g.totals.cacheReadTokens + g.totals.cacheWriteTokens)}</td><td class="num">${usd(g.totals.costUsd)}</td><td><div class="bar" title="${byCost ? 'share of cost' : 'share of tokens'}"><i style="width:${Math.round(share * 100)}%"></i></div></td></tr>`; }).join('') || '<tr><td colspan="7" class="muted small">Nothing recorded in this window. Usage appears once backends report tokens (streamed OpenAI pass-through replies only when the client asks for <code>stream_options.include_usage</code>).</td></tr>'}
+        </table></div>
+      <div class="card section"><div class="card-head"><h2>Settings</h2><span class="muted small">Saved with the configuration.</span></div><div class="form-grid">
+        <label class="field"><span class="name">Reference model</span><select data-bind="Usage.ReferenceModel" data-kind="nulltext"><option value="">(none)</option>${(state.config.Models || []).map((m) => `<option ${m.Name === (state.config.Usage || {}).ReferenceModel ? 'selected' : ''}>${h(m.Name)}</option>`).join('')}</select><span class="hint">Its prices are the yardstick for "saved".</span></label>
+        <label class="field"><span class="name">Warn at (%)</span><input type="number" min="1" max="100" data-bind="Usage.WarnAtPercent" data-kind="number" value="${(state.config.Usage || {}).WarnAtPercent || 80}"></label>
+        <label class="field"><span class="name">Time zone for periods</span><input type="text" data-bind="Usage.TimeZone" data-kind="nulltext" value="${h((state.config.Usage || {}).TimeZone || '')}" placeholder="this machine's"></label>
+      </div>
+      <h3 style="margin-top:14px">Budgets</h3>
+      <table><tr><th>Name</th><th>Model</th><th>or connector</th><th>Period</th><th>Max tokens</th><th>Max USD</th><th></th></tr>
+        ${((state.config.Usage || {}).Budgets || []).map((b, i) => `<tr>
+          <td><input type="text" data-bind="Usage.Budgets.${i}.Name" value="${h(b.Name || '')}"></td>
+          <td><select data-bind="Usage.Budgets.${i}.Model" data-kind="nulltext"><option value=""></option>${(state.config.Models || []).map((m) => `<option ${m.Name === b.Model ? 'selected' : ''}>${h(m.Name)}</option>`).join('')}</select></td>
+          <td><select data-bind="Usage.Budgets.${i}.Connector" data-kind="nulltext"><option value=""></option>${connectorNames().map((c) => `<option ${c === b.Connector ? 'selected' : ''}>${h(c)}</option>`).join('')}</select></td>
+          <td><select data-bind="Usage.Budgets.${i}.Period">${['Day', 'Week', 'Month'].map((p) => `<option ${p === (b.Period || 'Day') ? 'selected' : ''}>${p}</option>`).join('')}</select></td>
+          <td><input type="number" min="0" data-bind="Usage.Budgets.${i}.MaxTokens" data-kind="number" data-nullable="1" value="${b.MaxTokens ?? ''}"></td>
+          <td><input type="number" min="0" step="0.01" data-bind="Usage.Budgets.${i}.MaxCostUsd" data-kind="float" data-nullable="1" value="${b.MaxCostUsd ?? ''}"></td>
+          <td><button class="btn ghost small" data-action="budget-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted small">No budgets.</td></tr>'}
+      </table>
+      <div class="inline" style="margin-top:8px"><button class="btn small" data-action="budget-add">Add budget</button></div>
+      </div>`;
+  };
+
   views.json = () => `
       <div class="section-head"><h1>JSON</h1><span class="muted">The whole document, the same shape as the <code>SemanticRouter</code> section of appsettings.json.</span><span class="spacer"></span>
         <button class="btn small" data-action="json-load">Load into editor</button><button class="btn small" data-action="json-download">Download</button><button class="btn ghost small" data-action="json-baseline" title="Show what the application's own configuration says">Show baseline</button></div>
@@ -669,6 +798,7 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
      Rendering and routing
      --------------------------------------------------------------------------------------------- */
   function render() {
+    const staleTip = $('.chart-tip'); if (staleTip) staleTip.classList.add('hidden');
     const view = views[state.view] || views.overview;
     const root = $('#view');
     if (!state.config || !state.status) { root.innerHTML = '<div class="muted">Loading…</div>'; return; }
@@ -710,6 +840,10 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       render();
       toast('Reset to baseline.', 'ok');
     },
+    'trends-window'(el) { state.trends.window = el.dataset.window; state.trends.data = null; render(); },
+    'usage-set'(el) { state.usage[el.dataset.key] = el.dataset.value; state.usage.data = null; render(); },
+    'budget-add'() { state.config.Usage = state.config.Usage || {}; (state.config.Usage.Budgets = state.config.Usage.Budgets || []).push({ Name: 'budget-' + (state.config.Usage.Budgets.length + 1), Model: null, Connector: null, Period: 'Day', MaxTokens: null, MaxCostUsd: 5 }); render(); },
+    'budget-remove'(el) { state.config.Usage.Budgets.splice(+el.dataset.index, 1); render(); },
     async 'history-load'() { state.history.versions = (await api('GET', '/config/history?limit=100')).versions; render(); },
     async 'history-diff'(el) {
       const v = await api('GET', '/config/history/' + el.dataset.id);
@@ -870,6 +1004,17 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
     } else if (el.id === 'activity-filter') { state.activityFilter = el.value; render(); }
     else if (el.id === 'auto-refresh') { state.autoRefresh = el.checked; }
     else if (el.id === 'tester-model') { state.tester.model = el.value; }
+  });
+
+  // Chart tooltips: any element with data-tip.
+  const tip = document.createElement('div'); tip.className = 'chart-tip hidden'; tip.setAttribute('role', 'tooltip'); document.body.appendChild(tip);
+  document.addEventListener('mousemove', (ev) => {
+    const el = ev.target.closest && ev.target.closest('[data-tip]');
+    if (!el) { tip.classList.add('hidden'); return; }
+    tip.textContent = el.getAttribute('data-tip').replace(/\\n/g, '\n');
+    tip.classList.remove('hidden');
+    tip.style.left = Math.min(window.innerWidth - tip.offsetWidth - 8, ev.clientX + 12) + 'px';
+    tip.style.top = (ev.clientY + 14) + 'px';
   });
 
   window.addEventListener('hashchange', route);

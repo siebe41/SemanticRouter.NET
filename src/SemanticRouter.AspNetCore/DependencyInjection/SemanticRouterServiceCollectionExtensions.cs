@@ -15,7 +15,7 @@ public static class SemanticRouterServiceCollectionExtensions
     /// <summary>
     /// Registers prompt routing, binding <see cref="SemanticRouterOptions"/> (routes, models, selection) from
     /// <paramref name="configuration"/> (typically <c>builder.Configuration.GetSection("SemanticRouter")</c>) along with
-    /// the <c>Connectors</c>, <c>Embeddings</c>, <c>Middleware</c> and <c>Dashboard</c> child sections.
+    /// the <c>Connectors</c>, <c>Embeddings</c>, <c>Middleware</c>, <c>Usage</c> and <c>Dashboard</c> child sections.
     /// </summary>
     public static SemanticRouterBuilder AddSemanticPromptRouting(this IServiceCollection services, IConfiguration configuration)
     {
@@ -26,6 +26,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.AddOptions<EmbeddingProviderOptions>().Bind(configuration.GetSection("Embeddings"));
         services.AddOptions<PromptRouterMiddlewareOptions>().Bind(configuration.GetSection("Middleware"));
         services.AddOptions<SemanticRouterConnectorsOptions>().Bind(configuration);
+        services.AddOptions<UsageOptions>().Bind(configuration.GetSection("Usage"));
         services.AddOptions<Microsoft.AspNetCore.Builder.RouterDashboardOptions>().Bind(configuration.GetSection("Dashboard"));
 
         return AddCore(services);
@@ -59,6 +60,10 @@ public static class SemanticRouterServiceCollectionExtensions
             sp.GetService<TimeProvider>() ?? TimeProvider.System,
             sp.GetService<ICooldownStore>()));
         services.TryAddSingleton<IRouterConfigurationHistory>(_ => new InMemoryRouterConfigurationHistory());
+        services.TryAddSingleton<IUsageLedger, InMemoryUsageLedger>();
+        services.TryAddSingleton(sp => new BudgetGate(
+            sp.GetRequiredService<IUsageLedger>(), sp.GetService<TimeProvider>() ?? TimeProvider.System,
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BudgetGate>>()));
         services.TryAddSingleton<IToolCallAffinity, ToolCallAffinity>();
         services.TryAddSingleton<RoutingActivityLog>();
         services.TryAddSingleton<PromptRouterMetrics>();

@@ -139,9 +139,11 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
             if (status is 404 or 408 or 429 || status >= 500)
             {
-                string detail = $"HTTP {status.ToString(CultureInfo.InvariantCulture)}";
+                DateTimeOffset? retryAt = status == 429 ? await ReadResetAsync(response, cancellationToken).ConfigureAwait(false) : null;
+                string detail = $"HTTP {status.ToString(CultureInfo.InvariantCulture)}" +
+                                (retryAt is { } reset ? $" (limit resets {reset.ToString("u", CultureInfo.InvariantCulture)})" : string.Empty);
                 LogUpstreamStatus(_logger, Name, status);
-                return ConnectorResult.Failed(status == 429 ? ModelFailureKind.QuotaExceeded : ModelFailureKind.Unavailable, detail);
+                return ConnectorResult.Failed(status == 429 ? ModelFailureKind.QuotaExceeded : ModelFailureKind.Unavailable, detail, retryAt: retryAt);
             }
 
             if (passThrough && !response.IsSuccessStatusCode)
@@ -251,10 +253,13 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         await using (upstream.ConfigureAwait(false))
         {
             bool sse = response.Content.Headers.ContentType?.MediaType?.Equals("text/event-stream", StringComparison.OrdinalIgnoreCase) == true;
-            if (_affinity is { } affinity && response.IsSuccessStatusCode)
+            UsageCapture? capture = UsageCapture.Of(context);
+            if ((_affinity is not null || capture is not null) && response.IsSuccessStatusCode)
             {
+                IToolCallAffinity? affinity = _affinity;
                 await PassThroughToolCallScanner.CopyAsync(
-                    upstream, outgoing.Body, sse, Protocol, id => affinity.Remember(id, modelName), cancellationToken).ConfigureAwait(false);
+                    upstream, outgoing.Body, sse, Protocol, id => affinity?.Remember(id, modelName), cancellationToken,
+                    capture is null ? null : capture.Observe).ConfigureAwait(false);
             }
             else
             {
@@ -271,6 +276,39 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         string detail = ExtractErrorMessage(upstreamBody) ?? (upstreamBody.Length > 500 ? upstreamBody[..500] : upstreamBody);
         await ProtocolErrors.WriteAsync(
             context, clientProtocol, (int)response.StatusCode, "Upstream request rejected", detail, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// When a 429's limit ends: <c>Retry-After</c>, Anthropic's <c>anthropic-ratelimit-*-reset</c> timestamps, or a
+    /// reset time in the error message.
+    /// </summary>
+    internal static async Task<DateTimeOffset?> ReadResetAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (response.Headers.TryGetValues("Retry-After", out IEnumerable<string>? retryAfter)
+            && QuotaResetParser.TryParseRetryAfter(retryAfter.FirstOrDefault(), now, out DateTimeOffset fromHeader))
+        {
+            return fromHeader;
+        }
+
+        DateTimeOffset? latest = null;
+        foreach (string header in new[] { "anthropic-ratelimit-requests-reset", "anthropic-ratelimit-tokens-reset", "anthropic-ratelimit-input-tokens-reset", "anthropic-ratelimit-output-tokens-reset" })
+        {
+            if (response.Headers.TryGetValues(header, out IEnumerable<string>? values)
+                && DateTimeOffset.TryParse(values.FirstOrDefault(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset reset)
+                && reset > now && (latest is null || reset > latest))
+            {
+                latest = reset;
+            }
+        }
+
+        if (latest is not null)
+        {
+            return latest;
+        }
+
+        string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return QuotaResetParser.TryParse(body.Length > 2000 ? body[..2000] : body, now, null, out DateTimeOffset fromBody) ? fromBody : null;
     }
 
     /// <summary>What to fix when a server rejects the connector's credentials (names the setting, never the value).</summary>

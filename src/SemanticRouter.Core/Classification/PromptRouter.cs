@@ -109,9 +109,23 @@ public sealed class PromptRouter : IPromptRouter
             return plan with { Candidates = [first, .. plan.Candidates.Where(c => c.Model != pinned)] };
         }
 
-        PromptClassificationResult classification =
-            await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false);
-        return Plan(classification, request);
+        PromptClassificationResult classification;
+        using (System.Diagnostics.Activity? classify = RouterTelemetry.Source.StartActivity("semantic_router.classify"))
+        {
+            classification = await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false);
+            classify?.SetTag("semantic_router.tier", classification.RequiredTier);
+            classify?.SetTag("semantic_router.reason", classification.Reason.ToString());
+            classify?.SetTag("semantic_router.route", classification.RouteName);
+            classify?.SetTag("semantic_router.similarity", classification.Similarity);
+            classify?.SetTag("semantic_router.complexity", classification.Complexity.Score);
+        }
+
+        using System.Diagnostics.Activity? select = RouterTelemetry.Source.StartActivity("semantic_router.select");
+        RoutingPlan routed = Plan(classification, request);
+        select?.SetTag("semantic_router.candidates", routed.Candidates.Count);
+        select?.SetTag("semantic_router.planned_model", routed.Candidates.Count > 0 ? routed.Candidates[0].Model.Name : null);
+        select?.SetTag("semantic_router.local_only", routed.Requirements.LocalOnly);
+        return routed;
     }
 
     /// <inheritdoc />
