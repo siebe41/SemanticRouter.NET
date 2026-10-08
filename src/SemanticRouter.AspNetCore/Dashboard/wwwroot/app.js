@@ -194,7 +194,7 @@
     const byModel = Object.entries(a.byModel).sort((x, y) => y[1] - x[1]);
     const byTier = Object.entries(a.byTier);
     const max = Math.max(1, ...byModel.map((x) => x[1]), ...byTier.map((x) => x[1]));
-    const bars = (rows, label) => rows.length ? `<div class="bars">${rows.map(([k, v]) => `<div class="bar-row"><span class="nowrap" title="${h(k)}">${h(label ? label(k) : k)}</span><div class="bar"><i style="width:${Math.round(v / max * 100)}%"></i></div><span class="num">${v}</span></div>`).join('')}</div>` : '<div class="muted small">No requests yet.</div>';
+    const bars = (rows, label, alt) => rows.length ? `<div class="bars">${rows.map(([k, v]) => `<div class="bar-row"><span class="nowrap" title="${h(k)}">${h(label ? label(k) : k)}</span><div class="bar${alt ? ' alt' : ''}"><i style="width:${Math.round(v / max * 100)}%"></i></div><span class="num">${v}</span></div>`).join('')}</div>` : '<div class="muted small">No requests yet.</div>';
     const t = state.tester;
 
     return `
@@ -235,7 +235,7 @@
 
       <div class="grid cols-2 section">
         <div class="card"><div class="card-head"><h2>Served by</h2></div>${bars(byModel)}</div>
-        <div class="card"><div class="card-head"><h2>Required tier</h2></div>${bars(byTier, (k) => tierName(parseInt(k, 10)))}</div>
+        <div class="card"><div class="card-head"><h2>Required tier</h2></div>${bars(byTier, (k) => tierName(parseInt(k, 10)), true)}</div>
       </div>
 
       <div class="card section tester">
@@ -262,7 +262,7 @@
   function renderClassification(r) {
     return `
       <div class="result-line">
-        <span class="badge accent">tier ${h(tierName(r.requiredTier))}</span>
+        <span class="badge signal">tier ${h(tierName(r.requiredTier))}</span>
         <span class="badge">${h(r.reason)}</span>
         ${r.route ? `<span class="badge">route ${h(r.route)} · ${num(r.similarity, 3)}</span>` : ''}
         <span class="badge">complexity ${num(r.complexity.score, 3)}</span>

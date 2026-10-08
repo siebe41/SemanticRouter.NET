@@ -73,6 +73,6 @@ curl -X PUT http://localhost:5080/router/api/config -H 'Content-Type: applicatio
 
 ## Themes
 
-Themes are token blocks in `app.css`: every colour, font and radius the UI uses is a CSS variable set per `[data-theme]`, and the rest of the stylesheet only refers to the variables. The default, **Machine Dark**, uses the Siebert & The Machine palette (near-black surfaces, one yellow signal colour, green and red for status, Inter headings with Fira Sans text). **Machine Light** and **Terminal** are included.
+Themes are token blocks in `app.css`: every colour, font and radius the UI uses is a CSS variable set per `[data-theme]`, and the rest of the stylesheet only refers to the variables. The default, **Machine Dark**, is built on two colours: blue `#228fa7` for the working surfaces (primary actions, navigation, links, focus) and orange `#d08c34` for signals (the tier decision, warnings, cooldowns, the second chart), on near-black surfaces with Inter headings and Fira Sans text. Green and red are kept for status only. **Machine Light** uses the same two colours with darker ink variants for small text, and **Terminal** is a green-on-black alternative.
 
-To add a theme: copy a `:root[data-theme="…"]` block in `app.css`, change the values, and add `{ id, name }` to `THEMES` at the top of `app.js`. The picker in the sidebar lists it; the choice is remembered per browser.
+To add a theme: copy a `:root[data-theme="…"]` block in `app.css`, change the values (`--accent` and `--signal` are the two brand colours; `--accent-ink` is the variant used for small text), and add `{ id, name }` to `THEMES` at the top of `app.js`. The picker in the sidebar lists it; the choice is remembered per browser.

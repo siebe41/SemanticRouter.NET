@@ -6,30 +6,35 @@
 
 :root,
 :root[data-theme="machine-dark"] {
-  /* "Machine Dark": the Siebert & The Machine palette. Near-black surfaces, a single yellow signal
-     colour, and the blog's green / red / mid-grey for status. */
+  /* "Machine Dark": near-black surfaces with a cool teal bias. Blue (#228fa7) is the working colour:
+     primary actions, navigation, links, focus. Orange (#d08c34) is the signal colour: the tier decision,
+     warnings, cooldowns, the second chart. Green and red are kept for status only. */
   color-scheme: dark;
-  --bg: #151719;
-  --bg-elevated: #1c1f23;
-  --bg-sunken: #0f1113;
-  --bg-hover: #23272c;
-  --border: #2a2f35;
-  --border-strong: #3a4149;
-  --text: #e9eaec;
-  --text-muted: #979797;
-  --text-faint: #6b7279;
-  --accent: #fecd35;
-  --accent-contrast: #151719;
-  --accent-soft: rgba(254, 205, 53, 0.14);
+  --bg: #111619;
+  --bg-elevated: #181d21;
+  --bg-sunken: #0c1013;
+  --bg-hover: #1f262b;
+  --border: #283138;
+  --border-strong: #37434c;
+  --text: #e8edf0;
+  --text-muted: #94a3ac;
+  --text-faint: #66757e;
+  --accent: #228fa7;
+  --accent-ink: #228fa7;
+  --accent-contrast: #0a1114;
+  --accent-soft: rgba(34, 143, 167, 0.2);
+  --signal: #d08c34;
+  --signal-soft: rgba(208, 140, 52, 0.18);
+  --signal-contrast: #14100a;
   --ok: #a4d037;
   --ok-soft: rgba(164, 208, 55, 0.16);
-  --warn: #fecd35;
-  --warn-soft: rgba(254, 205, 53, 0.16);
-  --danger: #f05230;
-  --danger-soft: rgba(240, 82, 48, 0.16);
+  --warn: #d08c34;
+  --warn-soft: rgba(208, 140, 52, 0.18);
+  --danger: #e5484d;
+  --danger-soft: rgba(229, 72, 77, 0.16);
   --info: #738a94;
   --info-soft: rgba(115, 138, 148, 0.18);
-  --brand-mark-bg: #0f1113;
+  --brand-mark-bg: #0c1013;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.25);
   --font-heading: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-body: "Fira Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -39,30 +44,35 @@
 }
 
 :root[data-theme="machine-light"] {
-  /* "Machine Light": the same palette on the blog's light wash. */
+  /* "Machine Light": the same two colours on a cool white wash. Small text uses darker ink variants
+     of each (--accent-ink, --warn) so it stays readable; fills keep the exact blue and orange. */
   color-scheme: light;
   --bg: #ffffff;
-  --bg-elevated: #f6f8fa;
-  --bg-sunken: #e5eff5;
-  --bg-hover: #eef2f5;
-  --border: #e1e1e1;
-  --border-strong: #c9d1d8;
-  --text: #15171a;
-  --text-muted: #5c6b74;
-  --text-faint: #8a969e;
-  --accent: #15171a;
-  --accent-contrast: #fecd35;
-  --accent-soft: rgba(254, 205, 53, 0.32);
-  --ok: #5f8f00;
+  --bg-elevated: #f5f8fa;
+  --bg-sunken: #e6f0f3;
+  --bg-hover: #edf3f6;
+  --border: #dce4e8;
+  --border-strong: #c3cfd6;
+  --text: #121a1e;
+  --text-muted: #54666f;
+  --text-faint: #86959d;
+  --accent: #228fa7;
+  --accent-ink: #1a6f82;
+  --accent-contrast: #0a1114;
+  --accent-soft: rgba(34, 143, 167, 0.16);
+  --signal: #d08c34;
+  --signal-soft: rgba(208, 140, 52, 0.22);
+  --signal-contrast: #14100a;
+  --ok: #4f8a14;
   --ok-soft: rgba(164, 208, 55, 0.28);
-  --warn: #b78600;
-  --warn-soft: rgba(254, 205, 53, 0.3);
-  --danger: #d23a1b;
-  --danger-soft: rgba(240, 82, 48, 0.14);
+  --warn: #8a530c;
+  --warn-soft: rgba(208, 140, 52, 0.2);
+  --danger: #c6282d;
+  --danger-soft: rgba(229, 72, 77, 0.13);
   --info: #4e6670;
   --info-soft: rgba(115, 138, 148, 0.18);
-  --brand-mark-bg: #15171a;
-  --shadow: 0 1px 2px rgba(21, 23, 26, 0.08), 0 8px 24px rgba(21, 23, 26, 0.08);
+  --brand-mark-bg: #121a1e;
+  --shadow: 0 1px 2px rgba(18, 26, 30, 0.08), 0 8px 24px rgba(18, 26, 30, 0.08);
 }
 
 :root[data-theme="terminal"] {
@@ -78,8 +88,12 @@
   --text-muted: #7fa27f;
   --text-faint: #4f6b4f;
   --accent: #5cff8d;
+  --accent-ink: #5cff8d;
   --accent-contrast: #050705;
   --accent-soft: rgba(92, 255, 141, 0.14);
+  --signal: #ffd166;
+  --signal-soft: rgba(255, 209, 102, 0.16);
+  --signal-contrast: #050705;
   --ok: #5cff8d;
   --ok-soft: rgba(92, 255, 141, 0.16);
   --warn: #ffd166;
@@ -113,7 +127,7 @@ h1 { font-size: 22px; }
 h2 { font-size: 16px; }
 h3 { font-size: 14px; }
 p { margin: 0 0 10px; }
-a { color: var(--accent); text-decoration: none; }
+a { color: var(--accent-ink); text-decoration: none; }
 a:hover { text-decoration: underline; }
 code, pre, .mono { font-family: var(--font-mono); font-size: 12.5px; }
 pre {
@@ -199,11 +213,13 @@ nav a.active { background: var(--accent-soft); color: var(--text); font-weight: 
 .badge.danger { background: var(--danger-soft); border-color: transparent; color: var(--danger); }
 .badge.info { background: var(--info-soft); border-color: transparent; color: var(--info); }
 .badge.accent { background: var(--accent-soft); border-color: transparent; color: var(--text); }
+.badge.signal { background: var(--signal-soft); border-color: var(--signal); color: var(--text); font-weight: 500; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); display: inline-block; }
 .dot.ok { background: var(--ok); }
 .dot.warn { background: var(--warn); }
 .dot.danger { background: var(--danger); }
 .tier { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 7px; border-radius: 4px; background: var(--bg-sunken); border: 1px solid var(--border); }
+.tier.hot { border-color: var(--signal); color: var(--text); background: var(--signal-soft); }
 
 /* Cards and grids */
 .grid { display: grid; gap: 14px; }
@@ -321,6 +337,7 @@ label.check { display: inline-flex; align-items: center; gap: 8px; font-size: 13
 .bar-row { display: grid; grid-template-columns: 140px 1fr 40px; gap: 8px; align-items: center; font-size: 12.5px; }
 .bar { height: 8px; background: var(--bg-sunken); border-radius: 4px; overflow: hidden; }
 .bar > i { display: block; height: 100%; background: var(--accent); }
+.bar.alt > i { background: var(--signal); }
 .bar-row .num { text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
 /* Matrix */
