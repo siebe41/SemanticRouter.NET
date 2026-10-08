@@ -23,7 +23,7 @@ internal sealed class FakeCliProcessRunner(Func<CliInvocation, ICliProcess> star
     }
 }
 
-internal sealed class FakeCliProcess(IReadOnlyList<string> lines, int exitCode = 0, string stderr = "", TimeSpan? delay = null) : ICliProcess
+internal sealed class FakeCliProcess(IReadOnlyList<string> lines, int exitCode = 0, string stderr = "", TimeSpan? delay = null, Task? until = null) : ICliProcess
 {
     public string StandardError => stderr;
 
@@ -34,6 +34,11 @@ internal sealed class FakeCliProcess(IReadOnlyList<string> lines, int exitCode =
         if (delay is { } wait)
         {
             await Task.Delay(wait, cancellationToken);
+        }
+
+        if (until is not null)
+        {
+            await until.WaitAsync(cancellationToken);
         }
 
         foreach (string line in lines)

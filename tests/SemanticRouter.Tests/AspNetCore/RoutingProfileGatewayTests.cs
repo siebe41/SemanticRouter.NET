@@ -216,7 +216,13 @@ public sealed class RoutingProfileGatewayTests : RouterHostTest
     [Fact]
     public async Task A_full_cli_queue_sends_the_request_to_another_model()
     {
-        Cli = new FakeCliProcessRunner(_ => new FakeCliProcess([ClaudeStream.Success("Hi")], delay: TimeSpan.FromSeconds(1)));
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Cli = new FakeCliProcessRunner(_ =>
+        {
+            started.TrySetResult(); // the connector only starts a process once the request holds its one slot
+            return new FakeCliProcess([ClaudeStream.Success("Hi")], until: release.Task);
+        });
         HttpClient client = await StartAsync(
             o =>
             {
@@ -232,8 +238,9 @@ public sealed class RoutingProfileGatewayTests : RouterHostTest
             withCli: true);
 
         Task<HttpResponseMessage> busy = PostAsync(client, Chat("design a platform", "auto:priority"));
-        await Task.Delay(200);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
         HttpResponseMessage overflow = await PostAsync(client, Chat("design a platform", "auto:priority"));
+        release.SetResult();
 
         Header(await busy, "X-Prompt-Route-Model").Should().Be("claude-cli");
         Header(overflow, "X-Prompt-Route-Model").Should().Be("cloud");
