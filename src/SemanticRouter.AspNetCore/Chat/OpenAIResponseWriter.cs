@@ -19,6 +19,7 @@ internal sealed class OpenAIResponseWriter : IChatResponseWriter
     private readonly string _id = "chatcmpl-" + Guid.NewGuid().ToString("N");
     private readonly long _created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     private readonly StringBuilder _text = new();
+    private readonly StringBuilder _reasoning = new();
     private readonly List<(string Id, string Name, StringBuilder Arguments)> _toolCalls = [];
     private bool _started;
     private bool _toolCallOpen;
@@ -48,6 +49,25 @@ internal sealed class OpenAIResponseWriter : IChatResponseWriter
         else
         {
             _text.Append(delta);
+        }
+    }
+
+    /// <summary>Reasoning goes out as <c>reasoning_content</c>, the field DeepSeek, vLLM, LM Studio and OpenRouter use.</summary>
+    public async Task WriteThinkingAsync(string delta, CancellationToken cancellationToken)
+    {
+        await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
+        if (delta.Length == 0)
+        {
+            return;
+        }
+
+        if (_stream)
+        {
+            await WriteChunkAsync(w => w.WriteString("reasoning_content", delta), finishReason: null, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            _reasoning.Append(delta);
         }
     }
 
@@ -90,7 +110,12 @@ internal sealed class OpenAIResponseWriter : IChatResponseWriter
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
         string finishReason = _toolCalls.Count > 0 || stopReason == ChatStopReason.ToolUse
             ? "tool_calls"
-            : stopReason == ChatStopReason.MaxTokens ? "length" : "stop";
+            : stopReason switch
+            {
+                ChatStopReason.MaxTokens => "length",
+                ChatStopReason.Refusal => "content_filter",
+                _ => "stop",
+            };
 
         if (_stream)
         {
@@ -117,6 +142,11 @@ internal sealed class OpenAIResponseWriter : IChatResponseWriter
             else
             {
                 writer.WriteNull("content");
+            }
+
+            if (_reasoning.Length > 0)
+            {
+                writer.WriteString("reasoning_content", _reasoning.ToString());
             }
 
             if (_toolCalls.Count > 0)

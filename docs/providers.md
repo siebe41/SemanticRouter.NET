@@ -15,7 +15,7 @@ dotnet user-secrets set "SemanticRouter:Connectors:openai:ApiKey" "<key>"
 - [Choosing tiers, capabilities and costs](#choosing-tiers-capabilities-and-costs)
 - Local: [LM Studio](#lm-studio) · [Ollama](#ollama) · [vLLM / llama.cpp / others](#vllm-llamacpp-and-other-openai-compatible-servers)
 - Subscription CLIs: [Claude Code](#claude-code-cli) · [GitHub Copilot CLI](#github-copilot-cli) · [OpenAI Codex CLI](#openai-codex-cli) · [Any other CLI](#any-other-cli)
-- APIs: [OpenAI](#openai-api) · [Anthropic](#anthropic-api) · [Google Gemini](#google-gemini-api) · [Azure OpenAI](#azure-openai) · [OpenRouter](#openrouter)
+- APIs: [OpenAI](#openai-api) · [OpenAI Responses](#openai-responses-api) · [Anthropic](#anthropic-api) · [Google Gemini](#google-gemini-api) · [Azure OpenAI](#azure-openai) · [OpenRouter](#openrouter)
 - [Tool calling and agentic clients](#tool-calling-and-agentic-clients)
 - [Writing your own connector](#writing-your-own-connector)
 
@@ -187,6 +187,20 @@ The executable is started directly, never through a shell, so prompts cannot inj
 
 Set `SemanticRouter:Connectors:openai:ApiKey`. If you need an organization header, add it under `Headers`, e.g. `"Headers": { "OpenAI-Organization": "org_…" }`.
 
+## OpenAI Responses API
+
+The `Responses` connector speaks `POST /v1/responses`. Use it for OpenAI's own API when your clients are Codex or the Agents SDK. Their requests then pass through untouched, so hosted tools (`web_search`, `file_search`, …), encrypted reasoning and `previous_response_id` keep working. Chat-completions and Anthropic clients are translated to it.
+
+```jsonc
+"Connectors": { "openai-responses": { "Type": "Responses", "BaseAddress": "https://api.openai.com" } },
+"Models": [
+  { "Name": "openai-frontier", "Connector": "openai-responses", "Model": "<model id>", "Tier": 5,
+    "Capabilities": [ "chat", "code", "tools", "vision", "reasoning" ], "InputCostPerMillionTokens": 2, "OutputCostPerMillionTokens": 8 }
+]
+```
+
+Set `ApiKey`. The router sends `store: false` on translated requests.
+
 ## Anthropic API
 
 The `Anthropic` connector speaks the Messages API (`POST /v1/messages`) with your API key, billed per token and separate from any Claude subscription. Requests from Anthropic-protocol clients (Claude Code, the Anthropic SDKs) pass through untouched, prompt caching and all; OpenAI-protocol requests are translated, including tools and streaming.
@@ -248,13 +262,37 @@ Agentic clients (Claude Code, Codex CLI, agent frameworks) send every turn with 
 | Connector | Tool-bearing requests |
 |---|---|
 | `OpenAICompatible` | Passed through (OpenAI clients) or translated from the Anthropic format: tool definitions, `tool_use`/`tool_calls` and tool results map 1:1, streaming included. Declare `tools` on models whose server supports function calling (LM Studio and Ollama with `qwen3-coder` or similar, vLLM, OpenRouter, OpenAI, Gemini). |
-| `Anthropic` | Passed through (Anthropic clients) or translated from the OpenAI format. |
+| `Anthropic` | Passed through (Anthropic clients) or translated from the OpenAI and Responses formats. |
+| `Responses` | Passed through (Responses clients) or translated from the chat-completions and Anthropic formats. |
 | `Cli` with `ToolCalling: None` (default) | Skipped; the request falls through to the next candidate. |
 | `Cli` with `ToolCalling: Prompted` | The tools are described in the system prompt with a fixed call format; the CLI's reply is parsed for fenced `tool_call` blocks, which become structured tool calls for the client. Earlier tool calls and results are rendered into the transcript of the next run. Declare `tools` on the model to make it a candidate. |
 
 Prompted tool calling keeps the CLI text-in/text-out (the vendor CLI's own tools stay disabled; the **client** runs the tools), so it fits the design rules in [TERMS.md](TERMS.md). It costs more than native tool use: every turn re-sends the whole context, there is no prompt caching, and it depends on the model following the format, which frontier models do and small ones often do not.
 
 Across a tool-calling turn the router pins follow-up requests (those carrying tool results) to the model that issued the calls (`Middleware:PinToolCallingTurns`), so a turn never changes models halfway.
+
+## What survives translation
+
+When a backend speaks the client's protocol, the body passes through untouched (only `model` is rewritten). Otherwise the request is translated, and anything the backend cannot carry is listed in the `X-Prompt-Route-Dropped` response header and the activity entry's `dropped` field.
+
+| Feature | OpenAI-compatible backend | Anthropic backend | Responses backend | CLI backend |
+|---|---|---|---|---|
+| Text, images, streaming | ✓ | ✓ | ✓ | text only (images: skipped) |
+| Tools and tool results | ✓ | ✓ | ✓ | with `ToolCalling: Prompted` |
+| Codex custom tools and namespaces | as functions | as tools | ✓ | with `ToolCalling: Prompted` |
+| Reasoning request (`reasoning_effort`, `thinking`, `reasoning.effort`) | `reasoning_effort` on models with `reasoning` | `thinking` with a budget on models with `reasoning` | `reasoning.effort` on models with `reasoning` | dropped |
+| Reasoning in the reply | read from `reasoning_content` | `thinking` blocks | reasoning summaries | n/a |
+| Structured output (`response_format`, `text.format`) | ✓ | a forced `structured_output` tool for a JSON schema; an instruction for JSON mode | ✓ | dropped |
+| `parallel_tool_calls: false` | ✓ | `disable_parallel_tool_use` | ✓ | dropped |
+| Stop reasons (length, refusal, tool use) | ✓ | ✓ (`refusal`, `pause_turn`) | ✓ (`incomplete`) | end of turn, or tool use with prompted tools |
+| Hosted tools (`web_search`, …) | dropped | dropped | ✓ | dropped |
+| Protocol-only features (`cache_control`, documents, `logprobs`, `n` > 1, audio, `previous_response_id`, reasoning items) | dropped | dropped | dropped | dropped |
+
+Notes:
+
+- **Reasoning across protocols.** Reasoning a backend returns is shown to the client in its own format. An Anthropic client gets a `thinking` block signed `semantic-router-relayed`. Anthropic's API would reject that signature, so the router removes such blocks before a native Anthropic backend sees the conversation. Real Anthropic thinking blocks pass through.
+- **Thinking and a schema don't mix.** Anthropic cannot think while a tool is forced, so a JSON-schema request to an Anthropic backend drops the reasoning request. Thinking also needs `max_tokens` above 1,024. While thinking is on, `temperature` and `top_p` are not sent.
+- **Declare `reasoning` only on models that accept it.** Servers that don't know `reasoning_effort` may reject the request.
 
 ## Writing your own connector
 

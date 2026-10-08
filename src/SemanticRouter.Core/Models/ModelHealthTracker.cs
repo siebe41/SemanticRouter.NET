@@ -24,26 +24,64 @@ public interface IModelHealth
     /// <summary>Records a failure, putting the model into cooldown.</summary>
     void ReportFailure(ModelDefinition model, ModelFailureKind kind);
 
+    /// <summary>
+    /// Records a failure whose end is known, e.g. a usage limit that "resets 3:45pm" or an HTTP <c>Retry-After</c>.
+    /// Implementations without support fall back to the usual cooldown.
+    /// </summary>
+    void ReportFailure(ModelDefinition model, ModelFailureKind kind, DateTimeOffset? until) => ReportFailure(model, kind);
+
     /// <summary>The models currently cooling down and when each becomes available again.</summary>
     IReadOnlyDictionary<string, DateTimeOffset> GetCooldowns();
 }
 
 /// <summary>
-/// In-memory <see cref="IModelHealth"/> with time-based cooldowns. This is what makes "my subscription hit its
-/// limit" fall through to the next model automatically. Thread-safe; register as a singleton.
+/// Keeps cooldowns somewhere that outlives the process (a database file, a cache shared by several router instances).
+/// Cooldowns are stored with their absolute expiry, so one that started before a restart ends when it was meant to.
+/// </summary>
+public interface ICooldownStore
+{
+    /// <summary>Every stored cooldown, by model name. Expired ones may be included; the caller ignores them.</summary>
+    IReadOnlyDictionary<string, DateTimeOffset> LoadCooldowns();
+
+    /// <summary>Stores (or replaces) the cooldown of <paramref name="model"/>.</summary>
+    void SaveCooldown(string model, DateTimeOffset until);
+
+    /// <summary>Removes the cooldown of <paramref name="model"/>.</summary>
+    void RemoveCooldown(string model);
+
+    /// <summary>Removes every cooldown.</summary>
+    void ClearCooldowns();
+}
+
+/// <summary>
+/// <see cref="IModelHealth"/> with time-based cooldowns. This is what makes "my subscription hit its limit" fall
+/// through to the next model automatically. Cooldowns live in memory and, when an <see cref="ICooldownStore"/> is
+/// given, are written through to it and loaded from it on start, so a restart does not forget a weekly limit. When
+/// the store is shared by several instances, <see cref="RefreshInterval"/> picks up the others' cooldowns.
+/// Thread-safe; register as a singleton.
 /// </summary>
 public sealed class ModelHealthTracker : IModelHealth
 {
     private readonly ConcurrentDictionary<string, DateTimeOffset> _cooldownUntil = new(StringComparer.OrdinalIgnoreCase);
     private readonly TimeProvider _time;
+    private readonly ICooldownStore? _store;
     private volatile ModelSelectionOptions _options;
+    private long _lastRefreshTicks;
 
     /// <summary>Creates a tracker.</summary>
-    public ModelHealthTracker(ModelSelectionOptions? options = null, TimeProvider? timeProvider = null)
+    public ModelHealthTracker(ModelSelectionOptions? options = null, TimeProvider? timeProvider = null, ICooldownStore? store = null)
     {
         _options = options ?? new ModelSelectionOptions();
         _time = timeProvider ?? TimeProvider.System;
+        _store = store;
+        Refresh();
     }
+
+    /// <summary>
+    /// How often cooldowns are re-read from the store, to see ones recorded by other router instances. Default 5
+    /// seconds; <see cref="TimeSpan.Zero"/> reads only at start-up.
+    /// </summary>
+    public TimeSpan RefreshInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>Replaces the cooldown durations, e.g. after configuration is reloaded. Existing cooldowns keep their expiry.</summary>
     public void Configure(ModelSelectionOptions options)
@@ -53,12 +91,17 @@ public sealed class ModelHealthTracker : IModelHealth
     }
 
     /// <summary>Clears every cooldown so all models are tried again immediately.</summary>
-    public void Clear() => _cooldownUntil.Clear();
+    public void Clear()
+    {
+        _cooldownUntil.Clear();
+        _store?.ClearCooldowns();
+    }
 
     /// <inheritdoc />
     public bool IsAvailable(ModelDefinition model)
     {
         ArgumentNullException.ThrowIfNull(model);
+        RefreshIfDue();
         if (!_cooldownUntil.TryGetValue(model.Name, out DateTimeOffset until))
         {
             return true;
@@ -77,24 +120,85 @@ public sealed class ModelHealthTracker : IModelHealth
     public void ReportSuccess(ModelDefinition model)
     {
         ArgumentNullException.ThrowIfNull(model);
-        _cooldownUntil.TryRemove(model.Name, out _);
+        if (_cooldownUntil.ContainsKey(model.Name))
+        {
+            // Only a model that was cooling down costs a write; ordinary successes stay in memory. The store goes
+            // first so a concurrent refresh cannot bring the cooldown back.
+            _store?.RemoveCooldown(model.Name);
+            _cooldownUntil.TryRemove(model.Name, out _);
+        }
     }
 
+    /// <summary>The longest cooldown a parsed reset time may set, so a misread date cannot shelve a model for long.</summary>
+    public static readonly TimeSpan MaximumResetCooldown = TimeSpan.FromDays(8);
+
     /// <inheritdoc />
-    public void ReportFailure(ModelDefinition model, ModelFailureKind kind)
+    public void ReportFailure(ModelDefinition model, ModelFailureKind kind) => ReportFailure(model, kind, null);
+
+    /// <inheritdoc />
+    public void ReportFailure(ModelDefinition model, ModelFailureKind kind, DateTimeOffset? until)
     {
         ArgumentNullException.ThrowIfNull(model);
+        DateTimeOffset now = _time.GetUtcNow();
         TimeSpan cooldown = kind == ModelFailureKind.QuotaExceeded ? _options.QuotaCooldown : _options.FailureCooldown;
-        if (cooldown > TimeSpan.Zero)
+        DateTimeOffset end = until is { } reset && reset > now && reset - now <= MaximumResetCooldown
+            ? reset
+            : now + cooldown;
+        if (end > now)
         {
-            _cooldownUntil[model.Name] = _time.GetUtcNow() + cooldown;
+            _store?.SaveCooldown(model.Name, end);
+            _cooldownUntil[model.Name] = end;
         }
     }
 
     /// <inheritdoc />
     public IReadOnlyDictionary<string, DateTimeOffset> GetCooldowns()
     {
+        RefreshIfDue();
         DateTimeOffset now = _time.GetUtcNow();
         return _cooldownUntil.Where(kv => kv.Value > now).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void RefreshIfDue()
+    {
+        if (_store is null || RefreshInterval <= TimeSpan.Zero)
+        {
+            return;
+        }
+
+        long now = _time.GetUtcNow().UtcTicks;
+        long last = Interlocked.Read(ref _lastRefreshTicks);
+        if (now - last >= RefreshInterval.Ticks && Interlocked.CompareExchange(ref _lastRefreshTicks, now, last) == last)
+        {
+            Refresh();
+        }
+    }
+
+    private void Refresh()
+    {
+        if (_store is null)
+        {
+            return;
+        }
+
+        DateTimeOffset now = _time.GetUtcNow();
+        Interlocked.Exchange(ref _lastRefreshTicks, now.UtcTicks);
+        IReadOnlyDictionary<string, DateTimeOffset> stored = _store.LoadCooldowns();
+        foreach ((string model, DateTimeOffset until) in stored)
+        {
+            if (until > now)
+            {
+                _cooldownUntil[model] = until;
+            }
+        }
+
+        // A cooldown another instance cleared (success, reset) ends here too.
+        foreach (string model in _cooldownUntil.Keys)
+        {
+            if (!stored.ContainsKey(model))
+            {
+                _cooldownUntil.TryRemove(model, out _);
+            }
+        }
     }
 }

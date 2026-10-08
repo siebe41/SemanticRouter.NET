@@ -19,6 +19,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\SemanticRouter.Core\SemanticRouter.Core.csproj" />
     <ProjectReference Include="..\..\src\SemanticRouter.AspNetCore\SemanticRouter.AspNetCore.csproj" />
+    <!-- The stand-in CLI for process integration tests; its executable is copied next to the tests. -->
+    <ProjectReference Include="..\SemanticRouter.FakeCli\SemanticRouter.FakeCli.csproj" />
+    <ProjectReference Include="..\..\src\SemanticRouter.Host\SemanticRouter.Host.csproj" />
+    <ProjectReference Include="..\..\src\SemanticRouter.Storage.Sqlite\SemanticRouter.Storage.Sqlite.csproj" />
   </ItemGroup>
 
   <ItemGroup>

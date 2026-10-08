@@ -29,18 +29,23 @@ public enum ConnectorOutcome
 /// The failure applies to the whole account behind the connector (e.g. a subscription's session limit), so every
 /// catalog model served by this connector should cool down, not just the one that was tried.
 /// </param>
+/// <param name="RetryAt">
+/// When the limit ends, if the provider said so (<c>Retry-After</c>, "resets 3:45pm"). The cooldown then lasts until
+/// this time instead of the configured <see cref="ModelSelectionOptions.QuotaCooldown"/>.
+/// </param>
 public readonly record struct ConnectorResult(
     ConnectorOutcome Outcome,
     ModelFailureKind FailureKind = default,
     string? Detail = null,
-    bool AffectsAllConnectorModels = false)
+    bool AffectsAllConnectorModels = false,
+    DateTimeOffset? RetryAt = null)
 {
     /// <summary>The response was written.</summary>
     public static ConnectorResult Completed { get; } = new(ConnectorOutcome.Completed);
 
     /// <summary>The attempt failed before writing anything.</summary>
-    public static ConnectorResult Failed(ModelFailureKind kind, string detail, bool affectsAllConnectorModels = false) =>
-        new(ConnectorOutcome.Failed, kind, detail, affectsAllConnectorModels);
+    public static ConnectorResult Failed(ModelFailureKind kind, string detail, bool affectsAllConnectorModels = false, DateTimeOffset? retryAt = null) =>
+        new(ConnectorOutcome.Failed, kind, detail, affectsAllConnectorModels, retryAt);
 
     /// <summary>The connector declined the request.</summary>
     public static ConnectorResult Skipped(string detail) => new(ConnectorOutcome.Skipped, Detail: detail);

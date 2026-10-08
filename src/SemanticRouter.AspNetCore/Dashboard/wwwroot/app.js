@@ -17,7 +17,7 @@
   const CAPABILITY_HINTS = ['chat', 'code', 'tools', 'vision', 'reasoning'];
   const STRATEGIES = ['CheapestCapable', 'MostCapable', 'Priority'];
   const SCORING = ['MaxSimilarity', 'Centroid'];
-  const CONNECTOR_TYPES = ['OpenAICompatible', 'Anthropic', 'Cli'];
+  const CONNECTOR_TYPES = ['OpenAICompatible', 'Anthropic', 'Responses', 'Cli'];
   const PRESETS = ['ClaudeCode', 'GitHubCopilot', 'Codex', 'Custom'];
   const MESSAGE_SELECTION = ['LastUserMessage', 'AllUserMessages', 'AllMessages'];
 
@@ -37,6 +37,9 @@
     activityFilter: 'all',
     autoRefresh: true,
     session: { role: null, tokenRequired: false, tokensConfigured: false },
+    history: { versions: null, diff: null },
+    trends: { window: '24h', data: null, loading: false },
+    usage: { window: '7d', by: 'model', data: null, loading: false },
   };
 
   /* ---------------------------------------------------------------------------------------------
@@ -174,6 +177,8 @@
       state.status = status;
       state.activity = activity.entries;
       renderChrome();
+      if (state.view === 'overview') { state.trends.data = null; }
+      if (state.view === 'usage') { loadUsage(); }
       if (state.view === 'overview' || state.view === 'activity') render();
     } catch (e) { /* keep the last known state */ }
   }
@@ -199,6 +204,7 @@
     if (readOnly()) notes.push('Signed in with the <b>read-only</b> token: you can look, not change.');
     if (state.meta.warning) notes.push(h(state.meta.warning));
     ((s && s.warnings) || []).forEach((w) => notes.push(h(w)));
+    ((s && s.budgets) || []).filter((b) => b.exceeded || b.warning).forEach((b) => notes.push(`Budget <b>${h(b.name)}</b> (${h(b.covers)}) is ${b.exceeded ? 'spent' : 'at ' + b.percent + '%'}. <a href="#/usage">Usage</a>`));
     if (notes.length) banner(notes.join('<br>'), 'warn'); else banner(null);
     const signOut = $('#sign-out');
     if (signOut) signOut.classList.toggle('hidden', !state.session.role || !state.session.tokenRequired);
@@ -224,6 +230,68 @@
      --------------------------------------------------------------------------------------------- */
   const views = {};
 
+  /* ---------------------------------------------------------------------------------------------
+     Charts. Plain SVG; one y-axis; series colours from --series-*; text in text tokens; hover tips.
+     --------------------------------------------------------------------------------------------- */
+  const fmtTime = (iso, span) => { const d = new Date(iso); return span === '7d' || span === '30d' ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + (span === '7d' ? ' ' + d.getHours() + 'h' : '') : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
+  const fmtMs = (v) => v == null ? '–' : v >= 1000 ? (v / 1000).toFixed(1) + ' s' : Math.round(v) + ' ms';
+  const niceMax = (v) => { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p; };
+  const W = 640; const H = 170; const PAD = { l: 44, r: 64, t: 10, b: 22 };
+
+  function axes(max, fmt, buckets, span) {
+    const ih = H - PAD.t - PAD.b;
+    let g = '';
+    [0, 0.5, 1].forEach((f) => { const y = PAD.t + ih - f * ih; g += `<line class="grid-line" x1="${PAD.l}" x2="${W - PAD.r}" y1="${y}" y2="${y}"/><text class="axis" x="${PAD.l - 6}" y="${y + 3}" text-anchor="end">${h(fmt(max * f))}</text>`; });
+    const iw = W - PAD.l - PAD.r; const step = Math.max(1, Math.ceil(buckets.length / 6));
+    buckets.forEach((b, i) => { if (i % step === 0) g += `<text class="axis" x="${PAD.l + (i + 0.5) * iw / buckets.length}" y="${H - 6}" text-anchor="middle">${h(fmtTime(b.start, span))}</text>`; });
+    return g;
+  }
+
+  function requestsChart(series, span) {
+    const b = series.buckets; const max = niceMax(Math.max(1, ...b.map((x) => x.requests)));
+    const iw = W - PAD.l - PAD.r; const ih = H - PAD.t - PAD.b; const bw = iw / b.length;
+    const bars = b.map((x, i) => {
+      const hgt = x.requests / max * ih; const xpos = PAD.l + i * bw + 1; const w = Math.max(1, bw - 2);
+      const tip = `${fmtTime(x.start, span)}\n${x.requests} requests · ${x.served} served · ${x.failed} failed`;
+      return (x.requests ? `<rect class="bar-mark" x="${xpos}" y="${PAD.t + ih - hgt}" width="${w}" height="${hgt}" rx="${Math.min(4, w / 2)}"/>` : '') +
+        `<rect class="hit" x="${PAD.l + i * bw}" y="${PAD.t}" width="${bw}" height="${ih}" data-tip="${h(tip)}"/>`;
+    }).join('');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Requests per interval">${axes(max, (v) => String(Math.round(v)), b, span)}${bars}</svg>`;
+  }
+
+  function latencyChart(series, span) {
+    const b = series.buckets; const max = niceMax(Math.max(1, ...b.map((x) => x.p95Milliseconds || 0)));
+    const iw = W - PAD.l - PAD.r; const ih = H - PAD.t - PAD.b; const bw = iw / b.length;
+    const pt = (i, v) => [PAD.l + (i + 0.5) * bw, PAD.t + ih - v / max * ih];
+    const path = (key) => { let d = ''; let pen = false; b.forEach((x, i) => { const v = x[key]; if (v == null) { pen = false; return; } const [px, py] = pt(i, v); d += (pen ? 'L' : 'M') + px.toFixed(1) + ' ' + py.toFixed(1); pen = true; }); return d; };
+    const last = (key) => { for (let i = b.length - 1; i >= 0; i--) if (b[i][key] != null) return [i, b[i][key]]; return null; };
+    const endLabel = (key, cls, name) => { const l = last(key); if (!l) return ''; const [px, py] = pt(l[0], l[1]); return `<circle class="dot-${cls}" cx="${px}" cy="${py}" r="4"/><text class="end-label" x="${px + 8}" y="${py + (cls === 1 ? 10 : -4)}">${name} ${h(fmtMs(l[1]))}</text>`; };
+    const hits = b.map((x, i) => `<rect class="hit" x="${PAD.l + i * bw}" y="${PAD.t}" width="${bw}" height="${ih}" data-tip="${h(`${fmtTime(x.start, span)}\np50 ${fmtMs(x.p50Milliseconds)} · p95 ${fmtMs(x.p95Milliseconds)}`)}"/>`).join('');
+    return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Latency p50 and p95">${axes(max, fmtMs, b, span)}<path class="line-2" d="${path('p95Milliseconds')}"/><path class="line-1" d="${path('p50Milliseconds')}"/>${endLabel('p95Milliseconds', 2, 'p95')}${endLabel('p50Milliseconds', 1, 'p50')}${hits}</svg>`;
+  }
+
+  async function loadTrends() {
+    if (state.trends.loading) return;
+    state.trends.loading = true;
+    try { state.trends.data = await api('GET', '/activity/series?window=' + state.trends.window); } catch { /* keep the last one */ }
+    state.trends.loading = false;
+    if (state.view === 'overview') render();
+  }
+
+  const trendsCard = () => {
+    const t = state.trends; const s = t.data;
+    if (!s) { loadTrends(); return '<div class="card section"><div class="card-head"><h2>Trends</h2></div><div class="muted small">Loading…</div></div>'; }
+    const seg = ['1h', '24h', '7d', '30d'].map((w) => `<button class="${w === t.window ? 'on' : ''}" data-action="trends-window" data-window="${w}">${w}</button>`).join('');
+    const rows = s.buckets.filter((b) => b.requests).map((b) => `<tr><td>${h(fmtTime(b.start, t.window))}</td><td class="num">${b.requests}</td><td class="num">${b.served}</td><td class="num">${b.failed}</td><td class="num">${h(fmtMs(b.p50Milliseconds))}</td><td class="num">${h(fmtMs(b.p95Milliseconds))}</td></tr>`).join('');
+    return `<div class="card section"><div class="card-head"><h2>Trends</h2><span class="muted small">${s.requests} requests · p50 ${h(fmtMs(s.p50Milliseconds))} · p95 ${h(fmtMs(s.p95Milliseconds))} · p99 ${h(fmtMs(s.p99Milliseconds))}</span><span class="spacer"></span><span class="seg" role="group" aria-label="Window">${seg}</span></div>
+      <div class="grid cols-2">
+        <div><h3 class="small muted">Requests</h3>${requestsChart(s, t.window)}</div>
+        <div><h3 class="small muted">Latency (served requests, end to end)</h3><div class="legend"><span><i class="key" style="background:var(--series-1)"></i>p50</span><span><i class="key" style="background:var(--series-2)"></i>p95</span></div>${latencyChart(s, t.window)}</div>
+      </div>
+      <details style="margin-top:8px"><summary class="small muted">Show as a table</summary><table><tr><th>From</th><th>Requests</th><th>Served</th><th>Failed</th><th>p50</th><th>p95</th></tr>${rows || '<tr><td colspan="6" class="muted small">No requests in this window.</td></tr>'}</table></details>
+    </div>`;
+  };
+
   views.overview = () => {
     const s = state.status;
     const a = s.activity;
@@ -241,6 +309,7 @@
         <div class="card stat"><span class="value">${s.models.filter((m) => m.enabled).length}<span class="muted" style="font-size:14px"> / ${s.models.length}</span></span><span class="label">models enabled</span></div>
         <div class="card stat"><span class="value">${s.routes.length}</span><span class="label">routes · ${s.routes.reduce((n, r) => n + r.utterances, 0)} utterances</span></div>
       </div>
+      ${trendsCard()}
 
       <div class="grid cols-2 section">
         <div class="card">
@@ -251,7 +320,7 @@
               <td><span class="${m.enabled ? '' : 'muted'}">${h(m.name)}</span>${m.isLocal ? ' <span class="badge info">local</span>' : ''}<div class="small faint mono">${h(m.model || '')}</div></td>
               <td><span class="tier" title="${h(tierName(m.tier))}">T${m.tier}</span></td>
               <td class="small">${h(m.connector)} <span class="faint">${h(m.connectorType || '')}</span></td>
-              <td>${!m.enabled ? '<span class="badge">disabled</span>' : (m.coolingDownUntil ? `<span class="badge warn" title="until ${h(new Date(m.coolingDownUntil).toLocaleTimeString())}">cooling down</span>` : '<span class="badge ok">ready</span>')}</td>
+              <td>${!m.enabled ? '<span class="badge">disabled</span>' : (m.coolingDownUntil ? `<span class="badge warn">cooling down</span> <span class="small muted">until ${h(new Date(m.coolingDownUntil).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}</span>` : '<span class="badge ok">ready</span>')}</td>
             </tr>`).join('')}
           </table>
         </div>
@@ -262,7 +331,7 @@
             <tr><th>Store</th><td class="mono small">${s.store ? h(s.store) : '<span class="muted">none (changes apply in memory only)</span>'}</td></tr>
             <tr><th>Embeddings</th><td>${h(s.embeddings.provider)} ${s.embeddings.model ? '· <span class="mono">' + h(s.embeddings.model) + '</span>' : ''} ${s.embeddings.endpoint ? '<span class="faint small">' + h(s.embeddings.endpoint) + '</span>' : ''}
               ${s.warmedUp ? '<span class="badge ok">index ready</span>' : (s.warmUpError ? `<span class="badge danger" title="${h(s.warmUpError)}">warm-up failed</span>` : '<span class="badge info">warming up</span>')}</td></tr>
-            <tr><th>Gateway</th><td>${h(s.gateway.mode)} · OpenAI on <span class="mono">${h(s.gateway.pathPrefixes.join(', ') || '(all JSON POSTs)')}</span> · Anthropic on <span class="mono">${h(s.gateway.anthropicPathPrefixes.join(', '))}</span></td></tr>
+            <tr><th>Gateway</th><td>${h(s.gateway.mode)} · OpenAI on <span class="mono">${h(s.gateway.pathPrefixes.join(', ') || '(all JSON POSTs)')}</span> · Anthropic on <span class="mono">${h(s.gateway.anthropicPathPrefixes.join(', '))}</span> · Responses on <span class="mono">${h(s.gateway.responsesPathPrefixes.join(', '))}</span></td></tr>
             <tr><th>Strategy</th><td>${h(s.gateway.strategy)}</td></tr>
             <tr><th>Connectors</th><td>${s.connectors.map((c) => `<span class="badge" title="${h(c.target || '')}">${h(c.name)} <span class="faint">${h(c.type)}${c.preset ? '/' + h(c.preset) : ''}</span></span>`).join(' ')}</td></tr>
           </table>
@@ -319,7 +388,7 @@
       <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th></tr>
       ${entries.map((e) => `<tr title="${h(e.detail || '')}">
         <td class="nowrap small">${h(when(e.timestamp))}</td>
-        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok</div></td>
+        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}</div></td>
         <td><span class="tier">T${e.tier}</span></td>
         <td class="small">${h(e.reason)}</td>
         <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
@@ -427,6 +496,8 @@
             <label class="field"><span class="name">Context window (tokens)</span><input type="number" min="0" data-bind="Models.${i}.ContextWindow" data-kind="number" value="${m.ContextWindow || 0}"><span class="hint">0 = unknown (never skipped).</span></label>
             <label class="field"><span class="name">Input cost ($ / M tokens)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.InputCostPerMillionTokens" data-kind="float" value="${m.InputCostPerMillionTokens || 0}"></label>
             <label class="field"><span class="name">Output cost ($ / M tokens)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.OutputCostPerMillionTokens" data-kind="float" value="${m.OutputCostPerMillionTokens || 0}"><span class="hint">0 for local models and flat-rate subscriptions.</span></label>
+            <label class="field"><span class="name">Cache read cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheReadCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheReadCostPerMillionTokens ?? ''}" placeholder="input price"><span class="hint">Prompt-cache reads, if the provider prices them differently.</span></label>
+            <label class="field"><span class="name">Cache write cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheWriteCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheWriteCostPerMillionTokens ?? ''}" placeholder="input price"></label>
             <label class="field"><span class="name">Priority</span><input type="number" data-bind="Models.${i}.Priority" data-kind="number" value="${m.Priority || 0}"><span class="hint">Lower is preferred; breaks ties.</span></label>
             <label class="field wide"><span class="name">Description</span><input type="text" data-bind="Models.${i}.Description" data-kind="nulltext" value="${h(m.Description || '')}"></label>
             <label class="check wide"><input type="checkbox" data-bind="Models.${i}.IsLocal" data-kind="bool" ${m.IsLocal ? 'checked' : ''}> Local: prompts stay on this machine (required to serve local-only routes)</label>
@@ -462,7 +533,7 @@
           </div>
           <div class="item-body"><div class="form-grid">
             <label class="field"><span class="name">Name</span><input type="text" data-action-input="connector-rename" data-name="${h(name)}" value="${h(name)}"><span class="hint">Models refer to it by this name; renaming updates them.</span></label>
-            <label class="field"><span class="name">Type</span><select data-bind="${p}.Type">${CONNECTOR_TYPES.map((t) => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('')}</select><span class="hint">OpenAICompatible: LM Studio, Ollama, vLLM, OpenAI, Gemini, OpenRouter… · Anthropic: Messages API with a key · Cli: a vendor CLI on your own login.</span></label>
+            <label class="field"><span class="name">Type</span><select data-bind="${p}.Type">${CONNECTOR_TYPES.map((t) => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('')}</select><span class="hint">OpenAICompatible: LM Studio, Ollama, vLLM, OpenAI, Gemini, OpenRouter… · Anthropic: Messages API with a key · Responses: OpenAI Responses API (/v1/responses) · Cli: a vendor CLI on your own login.</span></label>
             ${type === 'Cli' ? `
               <label class="field"><span class="name">Preset</span><select data-bind="${p}.Preset">${PRESETS.map((x) => `<option ${x === (c.Preset || 'Custom') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
               <label class="field"><span class="name">Executable</span><input type="text" data-bind="${p}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="preset default (claude / copilot / codex)"><span class="hint">Started directly, never through a shell. On Windows use the .exe.</span></label>
@@ -561,6 +632,7 @@
         <label class="field"><span class="name">Message selection</span><select data-bind="Middleware.MessageSelection">${MESSAGE_SELECTION.map((x) => `<option ${x === (m.MessageSelection || 'LastUserMessage') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Which messages are classified.</span></label>
         <label class="field"><span class="name">OpenAI paths (one per line)</span><textarea data-bind="Middleware.PathPrefixes" data-kind="lines" rows="3">${h(lines(m.PathPrefixes))}</textarea><span class="hint">Chat-completions bodies. Required in Dispatch mode.</span></label>
         <label class="field"><span class="name">Anthropic paths (one per line)</span><textarea data-bind="Middleware.AnthropicPathPrefixes" data-kind="lines" rows="3" placeholder="/v1/messages">${h(lines(m.AnthropicPathPrefixes))}</textarea><span class="hint">Messages API bodies (Claude Code, Anthropic SDKs). Empty = <code>/v1/messages</code>.</span></label>
+        <label class="field"><span class="name">Responses paths (one per line)</span><textarea data-bind="Middleware.ResponsesPathPrefixes" data-kind="lines" rows="3" placeholder="/v1/responses">${h(lines(m.ResponsesPathPrefixes))}</textarea><span class="hint">OpenAI Responses API bodies (Codex CLI, the Agents SDK). Empty = <code>/v1/responses</code>.</span></label>
         <label class="field"><span class="name">Max request body (bytes)</span><input type="number" min="1024" data-bind="Middleware.MaxRequestBodyBytes" data-kind="number" value="${m.MaxRequestBodyBytes || 8388608}"><span class="hint">Agentic clients send large system prompts and tool lists; 8 MiB is a safe default.</span></label>
         <label class="field"><span class="name">Header prefix</span><input type="text" data-bind="Middleware.HeaderPrefix" value="${h(m.HeaderPrefix || 'X-Prompt-Route')}"></label>
         <label class="check"><input type="checkbox" data-bind="Middleware.EmitResponseHeaders" data-kind="bool" ${m.EmitResponseHeaders !== false ? 'checked' : ''}> Emit routing headers</label>
@@ -612,7 +684,8 @@ model = "auto"
 [model_providers.semantic-router]
 name = "Semantic Router"
 base_url = "${origin}/v1"
-env_key = "OPENAI_API_KEY"   # export OPENAI_API_KEY=semantic-router`, 'Codex treats the router as an OpenAI-compatible provider.')}
+wire_api = "responses"
+env_key = "OPENAI_API_KEY"   # export OPENAI_API_KEY=semantic-router`, `Codex speaks the Responses API to <code>${h(s.gateway.responsesPathPrefixes[0] || '/v1/responses')}</code>; any backend can answer it. Hosted tools (web search) need a Responses backend.`)}
       ${snippet('curl', `curl -N ${origin}/v1/chat/completions -H 'Content-Type: application/json' \\
   -d '{"model":"auto","stream":true,"messages":[{"role":"user","content":"Compare event sourcing and CRUD"}]}'
 
@@ -620,7 +693,97 @@ curl ${origin}${anth} -H 'Content-Type: application/json' -H 'anthropic-version:
   -d '{"model":"auto","max_tokens":256,"messages":[{"role":"user","content":"hello"}]}'
 
 curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -d '{"prompt":"why does this deadlock?"}'`)}
-      <div class="card section"><div class="card-head"><h2>Routing headers</h2></div><p class="muted small">Every response carries <code>${h(s.gateway && state.config.Middleware.HeaderPrefix || 'X-Prompt-Route')}</code>, <code>-Tier</code>, <code>-Reason</code>, <code>-Similarity</code>, <code>-Complexity</code>, <code>-Model</code>, <code>-Connector</code>, <code>-Attempt</code> and <code>-Degraded</code> headers, so you can see what happened without reading logs.</p></div>`;
+      <div class="card section"><div class="card-head"><h2>Routing headers</h2></div><p class="muted small">Every response carries <code>${h(s.gateway && state.config.Middleware.HeaderPrefix || 'X-Prompt-Route')}</code>, <code>-Tier</code>, <code>-Reason</code>, <code>-Similarity</code>, <code>-Complexity</code>, <code>-Model</code>, <code>-Connector</code>, <code>-Attempt</code> and <code>-Degraded</code> headers (plus <code>-Dropped</code> when the serving backend could not carry a request feature), so you can see what happened without reading logs.</p></div>`;
+  };
+
+  /* Line diff (longest common subsequence), with unchanged runs folded to three lines of context. */
+  function lineDiff(before, after) {
+    const a = before.split('\n'); const b = after.split('\n');
+    const n = a.length; const m = b.length;
+    const lcs = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    const out = []; let i = 0; let j = 0;
+    while (i < n || j < m) {
+      if (i < n && j < m && a[i] === b[j]) { out.push([' ', a[i]]); i++; j++; }
+      else if (j < m && (i >= n || lcs[i][j + 1] > lcs[i + 1][j])) { out.push(['+', b[j]]); j++; }
+      else { out.push(['-', a[i]]); i++; }
+    }
+    const keep = out.map((l, k) => l[0] !== ' ' || out.slice(Math.max(0, k - 3), k + 4).some((x) => x[0] !== ' '));
+    const lines = []; let skipped = 0;
+    out.forEach((l, k) => { if (keep[k]) { if (skipped) { lines.push(`<span class="faint">… ${skipped} unchanged line${skipped === 1 ? '' : 's'}</span>`); skipped = 0; } lines.push(`<span class="${l[0] === '+' ? 'diff-add' : l[0] === '-' ? 'diff-del' : ''}">${h(l[0] + ' ' + l[1])}</span>`); } else skipped++; });
+    if (skipped) lines.push(`<span class="faint">… ${skipped} unchanged line${skipped === 1 ? '' : 's'}</span>`);
+    return out.some((l) => l[0] !== ' ') ? lines.join('\n') : '<span class="faint">No differences.</span>';
+  }
+
+  const historyCard = () => {
+    const hs = state.history;
+    if (!hs.versions) return `<div class="card section"><div class="card-head"><h2>History</h2><span class="spacer"></span><button class="btn small" data-action="history-load">Show applied versions</button></div></div>`;
+    return `<div class="card section"><div class="card-head"><h2>History</h2><span class="muted small">Every applied configuration. Compare one with the draft, or roll back to it (applied and saved).</span><span class="spacer"></span><button class="btn ghost small" data-action="history-load">Refresh</button></div>
+      <table><tr><th>Version</th><th>When</th><th>What</th><th>Who</th><th></th></tr>
+        ${hs.versions.map((v) => `<tr><td class="mono">${v.id}</td><td>${h(new Date(v.timestamp).toLocaleString())}</td><td>${h(v.source)}${v.note ? ' <span class="faint small">' + h(v.note) + '</span>' : ''}</td><td class="small">${h(v.actor || '')}</td>
+          <td class="row-actions"><button class="btn small" data-action="history-diff" data-id="${v.id}">Compare with draft</button>${readOnly() ? '' : `<button class="btn ghost small" data-action="history-rollback" data-id="${v.id}">Roll back</button>`}</td></tr>`).join('') || '<tr><td colspan="5" class="muted small">Nothing applied yet.</td></tr>'}
+      </table>
+      ${hs.diff ? `<h3 style="margin-top:14px">Version ${hs.diff.id} → draft</h3><pre class="diff">${hs.diff.html}</pre>` : ''}
+    </div>`;
+  };
+
+  /* Usage: what each model, connector, route or client used and cost, and the budgets. */
+  async function loadUsage() {
+    if (state.usage.loading) return;
+    state.usage.loading = true;
+    try { state.usage.data = await api('GET', `/usage?window=${state.usage.window}&by=${state.usage.by}`); } catch (e) { toast(e.message, 'danger'); }
+    state.usage.loading = false;
+    if (state.view === 'usage') render();
+  }
+  const usd = (v) => '$' + Number(v || 0).toFixed(v && Math.abs(v) < 1 ? 4 : 2);
+  const int = (v) => Number(v || 0).toLocaleString();
+  const budgetRow = (b) => {
+    const pct = Math.min(100, b.percent);
+    const cls = b.exceeded ? 'danger' : b.warning ? 'warn' : '';
+    const limits = [b.maxTokens != null ? `${int(b.tokensUsed)} of ${int(b.maxTokens)} tokens` : null, b.maxCostUsd != null ? `${usd(b.costUsedUsd)} of ${usd(b.maxCostUsd)}` : null].filter(Boolean).join(' · ');
+    return `<tr><td><b>${h(b.name)}</b><div class="small faint">${h(b.covers)} · per ${h(String(b.period).toLowerCase())}</div></td>
+      <td style="min-width:180px"><div class="meter ${cls}" role="meter" aria-valuenow="${b.percent}" aria-valuemin="0" aria-valuemax="100" aria-label="${h(b.name)}"><i style="width:${pct}%"></i></div></td>
+      <td class="small">${b.percent}% ${b.exceeded ? '<span class="badge danger">spent</span>' : b.warning ? '<span class="badge warn">near limit</span>' : '<span class="badge ok">ok</span>'}<div class="faint">${h(limits)}</div></td>
+      <td class="small muted">resets ${h(new Date(b.periodEnd).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</td></tr>`;
+  };
+  views.usage = () => {
+    const u = state.usage; const d = u.data;
+    if (!d) { loadUsage(); return '<div class="section-head"><h1>Usage</h1></div><div class="muted">Loading…</div>'; }
+    const t = d.totals; const max = Math.max(1e-9, ...d.groups.map((g) => g.totals.costUsd || 0)); const maxTok = Math.max(1, ...d.groups.map((g) => g.totals.inputTokens + g.totals.outputTokens + g.totals.cacheReadTokens + g.totals.cacheWriteTokens));
+    const byCost = d.groups.some((g) => g.totals.costUsd > 0);
+    const seg = (key, values) => `<span class="seg" role="group">${values.map(([v, label]) => `<button class="${u[key] === v ? 'on' : ''}" data-action="usage-set" data-key="${key}" data-value="${v}">${label}</button>`).join('')}</span>`;
+    return `
+      <div class="section-head"><h1>Usage</h1><span class="muted">Tokens the backends reported, and cost at the prices in the model catalog.</span><span class="spacer"></span>
+        ${seg('window', [['day', 'Today'], ['week', 'This week'], ['month', 'This month'], ['7d', '7 days'], ['30d', '30 days']])}</div>
+      <div class="grid cols-4 section">
+        <div class="card stat"><span class="value">${int(t.requests)}</span><span class="label">requests with usage</span></div>
+        <div class="card stat"><span class="value">${int(t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens)}</span><span class="label">tokens · ${int(t.inputTokens)} in · ${int(t.outputTokens)} out · ${int(t.cacheReadTokens)} cached</span></div>
+        <div class="card stat"><span class="value">${usd(t.costUsd)}</span><span class="label">at catalog prices (subscriptions and local models count as 0)</span></div>
+        <div class="card stat"><span class="value">${d.referenceModel ? usd(t.referenceCostUsd - t.costUsd) : '–'}</span><span class="label">${d.referenceModel ? 'saved compared with sending everything to ' + h(d.referenceModel) : 'set Usage → reference model to estimate savings'}</span></div>
+      </div>
+      ${d.budgets.length ? `<div class="card section"><div class="card-head"><h2>Budgets</h2><span class="muted small">A spent budget's models are not tried until it resets.</span></div><table>${d.budgets.map(budgetRow).join('')}</table></div>` : ''}
+      <div class="card section"><div class="card-head"><h2>By ${h(u.by)}</h2><span class="spacer"></span>${seg('by', [['model', 'Model'], ['connector', 'Connector'], ['route', 'Route'], ['client', 'Client'], ['day', 'Day']])}</div>
+        <table><tr><th>${h(u.by)}</th><th>Requests</th><th>Input</th><th>Output</th><th>Cached</th><th>Cost</th><th style="width:30%"></th></tr>
+        ${d.groups.map((g) => { const tk = g.totals.inputTokens + g.totals.outputTokens + g.totals.cacheReadTokens + g.totals.cacheWriteTokens; const share = byCost ? g.totals.costUsd / max : tk / maxTok; return `<tr><td>${h(g.key)}</td><td class="num">${int(g.totals.requests)}</td><td class="num">${int(g.totals.inputTokens)}</td><td class="num">${int(g.totals.outputTokens)}</td><td class="num">${int(g.totals.cacheReadTokens + g.totals.cacheWriteTokens)}</td><td class="num">${usd(g.totals.costUsd)}</td><td><div class="bar" title="${byCost ? 'share of cost' : 'share of tokens'}"><i style="width:${Math.round(share * 100)}%"></i></div></td></tr>`; }).join('') || '<tr><td colspan="7" class="muted small">Nothing recorded in this window. Usage appears once backends report tokens (streamed OpenAI pass-through replies only when the client asks for <code>stream_options.include_usage</code>).</td></tr>'}
+        </table></div>
+      <div class="card section"><div class="card-head"><h2>Settings</h2><span class="muted small">Saved with the configuration.</span></div><div class="form-grid">
+        <label class="field"><span class="name">Reference model</span><select data-bind="Usage.ReferenceModel" data-kind="nulltext"><option value="">(none)</option>${(state.config.Models || []).map((m) => `<option ${m.Name === (state.config.Usage || {}).ReferenceModel ? 'selected' : ''}>${h(m.Name)}</option>`).join('')}</select><span class="hint">Its prices are the yardstick for "saved".</span></label>
+        <label class="field"><span class="name">Warn at (%)</span><input type="number" min="1" max="100" data-bind="Usage.WarnAtPercent" data-kind="number" value="${(state.config.Usage || {}).WarnAtPercent || 80}"></label>
+        <label class="field"><span class="name">Time zone for periods</span><input type="text" data-bind="Usage.TimeZone" data-kind="nulltext" value="${h((state.config.Usage || {}).TimeZone || '')}" placeholder="this machine's"></label>
+      </div>
+      <h3 style="margin-top:14px">Budgets</h3>
+      <table><tr><th>Name</th><th>Model</th><th>or connector</th><th>Period</th><th>Max tokens</th><th>Max USD</th><th></th></tr>
+        ${((state.config.Usage || {}).Budgets || []).map((b, i) => `<tr>
+          <td><input type="text" data-bind="Usage.Budgets.${i}.Name" value="${h(b.Name || '')}"></td>
+          <td><select data-bind="Usage.Budgets.${i}.Model" data-kind="nulltext"><option value=""></option>${(state.config.Models || []).map((m) => `<option ${m.Name === b.Model ? 'selected' : ''}>${h(m.Name)}</option>`).join('')}</select></td>
+          <td><select data-bind="Usage.Budgets.${i}.Connector" data-kind="nulltext"><option value=""></option>${connectorNames().map((c) => `<option ${c === b.Connector ? 'selected' : ''}>${h(c)}</option>`).join('')}</select></td>
+          <td><select data-bind="Usage.Budgets.${i}.Period">${['Day', 'Week', 'Month'].map((p) => `<option ${p === (b.Period || 'Day') ? 'selected' : ''}>${p}</option>`).join('')}</select></td>
+          <td><input type="number" min="0" data-bind="Usage.Budgets.${i}.MaxTokens" data-kind="number" data-nullable="1" value="${b.MaxTokens ?? ''}"></td>
+          <td><input type="number" min="0" step="0.01" data-bind="Usage.Budgets.${i}.MaxCostUsd" data-kind="float" data-nullable="1" value="${b.MaxCostUsd ?? ''}"></td>
+          <td><button class="btn ghost small" data-action="budget-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted small">No budgets.</td></tr>'}
+      </table>
+      <div class="inline" style="margin-top:8px"><button class="btn small" data-action="budget-add">Add budget</button></div>
+      </div>`;
   };
 
   views.json = () => `
@@ -630,12 +793,14 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
         <textarea id="json-editor" rows="30" spellcheck="false">${h(JSON.stringify(state.config, null, 2))}</textarea>
         <div class="inline" style="margin-top:10px"><button class="btn primary" data-action="json-use">Use this JSON as the draft</button><span class="muted small">Secrets show as <code>***</code>; that placeholder keeps the stored value.</span></div>
       </div>
-      <div class="card section flat"><details><summary>Where does the configuration come from?</summary><p class="small muted" style="margin-top:8px">The application's <code>SemanticRouter</code> section (appsettings.json, environment variables, user-secrets, code) is the baseline. When a configuration store is registered (<code>UseConfigurationFile</code>), a saved document replaces the baseline on start-up; secrets left empty in the document are inherited from the baseline. <b>Apply</b> changes the running router; <b>Apply &amp; save</b> also writes the store. <b>Reset</b> (in the JSON page) goes back to the baseline for this process.</p><button class="btn danger small" data-action="config-reset">Reset running configuration to baseline</button></details></div>`;
+      <div class="card section flat"><details><summary>Where does the configuration come from?</summary><p class="small muted" style="margin-top:8px">The application's <code>SemanticRouter</code> section (appsettings.json, environment variables, user-secrets, code) is the baseline. When a configuration store is registered (<code>UseConfigurationFile</code>), a saved document replaces the baseline on start-up; secrets left empty in the document are inherited from the baseline. <b>Apply</b> changes the running router; <b>Apply &amp; save</b> also writes the store. <b>Reset</b> (in the JSON page) goes back to the baseline for this process.</p><button class="btn danger small" data-action="config-reset">Reset running configuration to baseline</button></details></div>
+      ${historyCard()}`;
 
   /* ---------------------------------------------------------------------------------------------
      Rendering and routing
      --------------------------------------------------------------------------------------------- */
   function render() {
+    const staleTip = $('.chart-tip'); if (staleTip) staleTip.classList.add('hidden');
     const view = views[state.view] || views.overview;
     const root = $('#view');
     if (!state.config || !state.status) { root.innerHTML = '<div class="muted">Loading…</div>'; return; }
@@ -676,6 +841,23 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       await refreshStatus();
       render();
       toast('Reset to baseline.', 'ok');
+    },
+    'trends-window'(el) { state.trends.window = el.dataset.window; state.trends.data = null; render(); },
+    'usage-set'(el) { state.usage[el.dataset.key] = el.dataset.value; state.usage.data = null; render(); },
+    'budget-add'() { state.config.Usage = state.config.Usage || {}; (state.config.Usage.Budgets = state.config.Usage.Budgets || []).push({ Name: 'budget-' + (state.config.Usage.Budgets.length + 1), Model: null, Connector: null, Period: 'Day', MaxTokens: null, MaxCostUsd: 5 }); render(); },
+    'budget-remove'(el) { state.config.Usage.Budgets.splice(+el.dataset.index, 1); render(); },
+    async 'history-load'() { state.history.versions = (await api('GET', '/config/history?limit=100')).versions; render(); },
+    async 'history-diff'(el) {
+      const v = await api('GET', '/config/history/' + el.dataset.id);
+      state.history.diff = { id: el.dataset.id, html: lineDiff(JSON.stringify(v.config, null, 2), JSON.stringify(state.config, null, 2)) };
+      render();
+    },
+    async 'history-rollback'(el) {
+      if (!confirm(`Roll back to version ${el.dataset.id}? It is applied and saved; the current version stays in the history.`)) return;
+      setConfig(await api('POST', `/config/history/${el.dataset.id}/rollback`));
+      state.history.diff = null;
+      state.history.versions = (await api('GET', '/config/history?limit=100')).versions;
+      await refreshStatus(); render(); toast(`Rolled back to version ${el.dataset.id}.`, 'ok');
     },
     async 'reset-health'() { await api('POST', '/health/reset'); await refreshStatus(); toast('Cooldowns cleared.', 'ok'); },
 
@@ -824,6 +1006,17 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
     } else if (el.id === 'activity-filter') { state.activityFilter = el.value; render(); }
     else if (el.id === 'auto-refresh') { state.autoRefresh = el.checked; }
     else if (el.id === 'tester-model') { state.tester.model = el.value; }
+  });
+
+  // Chart tooltips: any element with data-tip.
+  const tip = document.createElement('div'); tip.className = 'chart-tip hidden'; tip.setAttribute('role', 'tooltip'); document.body.appendChild(tip);
+  document.addEventListener('mousemove', (ev) => {
+    const el = ev.target.closest && ev.target.closest('[data-tip]');
+    if (!el) { tip.classList.add('hidden'); return; }
+    tip.textContent = el.getAttribute('data-tip').replace(/\\n/g, '\n');
+    tip.classList.remove('hidden');
+    tip.style.left = Math.min(window.innerWidth - tip.offsetWidth - 8, ev.clientX + 12) + 'px';
+    tip.style.top = (ev.clientY + 14) + 'px';
   });
 
   window.addEventListener('hashchange', route);

@@ -1,0 +1,281 @@
+using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace SemanticRouter.AspNetCore;
+
+/// <summary>How a <see cref="RouterCheck"/> came out.</summary>
+public enum RouterCheckStatus
+{
+    /// <summary>Works.</summary>
+    Ok = 0,
+
+    /// <summary>Works, or may work, but something deserves attention.</summary>
+    Warning = 1,
+
+    /// <summary>Does not work; the message names what to fix.</summary>
+    Failed = 2,
+}
+
+/// <summary>One finding of <see cref="RouterDoctor.CheckAsync"/>.</summary>
+/// <param name="Subject">What was checked, e.g. <c>connector lmstudio</c>.</param>
+/// <param name="Status">The outcome.</param>
+/// <param name="Message">What was found, and for problems the setting to change. Never contains a secret.</param>
+public sealed record RouterCheck(string Subject, RouterCheckStatus Status, string Message);
+
+/// <summary>
+/// Checks the active configuration against the machine it runs on, without calling any model: unresolved secret
+/// references, the embedding provider, every HTTP connector (reachable, credentials accepted, configured model ids
+/// offered) and every CLI connector (installed, starts, and for Claude Code signed in). This is what
+/// <c>semantic-router doctor</c> prints; any host can call it.
+/// </summary>
+public static class RouterDoctor
+{
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>Runs every check against the router registered in <paramref name="services"/>.</summary>
+    public static async Task<IReadOnlyList<RouterCheck>> CheckAsync(IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        RouterRuntime runtime = services.GetRequiredService<RouterRuntimeProvider>().Current;
+        RouterConfiguration resolved = runtime.Resolved;
+        var checks = new List<RouterCheck>();
+
+        foreach (string warning in runtime.Warnings)
+        {
+            checks.Add(new RouterCheck("configuration", RouterCheckStatus.Warning, warning));
+        }
+
+        checks.Add(await CheckEmbeddingsAsync(runtime, cancellationToken).ConfigureAwait(false));
+
+        IHttpClientFactory http = services.GetRequiredService<IHttpClientFactory>();
+        ICliProcessRunner runner = services.GetRequiredService<ICliProcessRunner>();
+        foreach ((string name, ConnectorOptions connector) in resolved.Connectors.OrderBy(c => c.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            ModelDefinition[] models = resolved.Models
+                .Where(m => m.Enabled && string.Equals(m.Connector, name, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (models.Length == 0)
+            {
+                if (connector.Type == ConnectorType.Cli)
+                {
+                    checks.Add(new RouterCheck($"connector {name}", RouterCheckStatus.Ok, "no enabled model uses it; not checked."));
+                    continue;
+                }
+
+                // Still worth a probe (it is cheap): it shows whether the server is up and accepts the credentials.
+                foreach (RouterCheck check in await CheckHttpAsync(name, connector, [], resolved, http, cancellationToken).ConfigureAwait(false))
+                {
+                    checks.Add(check with
+                    {
+                        Status = check.Status == RouterCheckStatus.Failed ? RouterCheckStatus.Warning : check.Status,
+                        Message = check.Message + " (No enabled model uses it yet.)",
+                    });
+                }
+
+                continue;
+            }
+
+            checks.AddRange(connector.Type == ConnectorType.Cli
+                ? await CheckCliAsync(name, connector, runner, cancellationToken).ConfigureAwait(false)
+                : await CheckHttpAsync(name, connector, models, resolved, http, cancellationToken).ConfigureAwait(false));
+        }
+
+        return checks;
+    }
+
+    private static async Task<RouterCheck> CheckEmbeddingsAsync(RouterRuntime runtime, CancellationToken cancellationToken)
+    {
+        EmbeddingProviderOptions embeddings = runtime.Resolved.Embeddings;
+        if (embeddings.Provider == EmbeddingProviderKind.Hashing)
+        {
+            return new RouterCheck("embeddings", RouterCheckStatus.Warning,
+                "the Hashing provider only matches shared words. For meaning-based routing set SemanticRouter:Embeddings to an " +
+                "OpenAICompatible endpoint (LM Studio, Ollama, OpenAI) and raise DefaultSimilarityThreshold (see the README's calibration table).");
+        }
+
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(ProbeTimeout);
+            ReadOnlyMemory<float> vector = await runtime.EmbeddingProvider.GenerateEmbeddingAsync("hello", timeout.Token).ConfigureAwait(false);
+            return new RouterCheck("embeddings", RouterCheckStatus.Ok, $"{embeddings.Model} at {embeddings.Endpoint}: {vector.Length} dimensions.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or OperationCanceledException or JsonException
+                                   && !cancellationToken.IsCancellationRequested)
+        {
+            string reason = ex is OperationCanceledException ? "timed out" : runtime.Redactor.Redact(ex.Message);
+            return new RouterCheck("embeddings", RouterCheckStatus.Failed,
+                $"{embeddings.Model} at {embeddings.Endpoint} failed: {reason} (SemanticRouter:Embeddings:Endpoint / Model / ApiKey).");
+        }
+    }
+
+    private static async Task<IEnumerable<RouterCheck>> CheckHttpAsync(
+        string name, ConnectorOptions connector, ModelDefinition[] models, RouterConfiguration resolved, IHttpClientFactory http, CancellationToken cancellationToken)
+    {
+        string subject = $"connector {name}";
+        ConnectorProbeResult probe = await ConnectorProbe.ListModelsAsync(
+            name, connector, http.CreateClient(OpenAICompatibleConnector.HttpClientNamePrefix + name), ProbeTimeout, cancellationToken).ConfigureAwait(false);
+
+        switch (probe.Failure)
+        {
+            case ConnectorProbeFailure.None:
+                break;
+            case ConnectorProbeFailure.HttpError or ConnectorProbeFailure.InvalidResponse:
+                // Some APIs (Azure OpenAI deployments, a few gateways) have no model list; chat may still work.
+                return [new RouterCheck(subject, RouterCheckStatus.Warning, probe.Message + " Could not list models; chat requests may still work.")];
+            default:
+                return [new RouterCheck(subject, RouterCheckStatus.Failed, probe.Message)];
+        }
+
+        var checks = new List<RouterCheck> { new(subject, RouterCheckStatus.Ok, probe.Message) };
+        var offered = new HashSet<string>(probe.Models, StringComparer.OrdinalIgnoreCase);
+        foreach (ModelDefinition model in models)
+        {
+            if (string.IsNullOrEmpty(model.Model))
+            {
+                continue;
+            }
+
+            int index = resolved.Models.IndexOf(model);
+            checks.Add(offered.Contains(model.Model)
+                ? new RouterCheck($"model {model.Name}", RouterCheckStatus.Ok, $"'{model.Model}' is offered by {name}.")
+                : new RouterCheck($"model {model.Name}", RouterCheckStatus.Failed,
+                    $"'{model.Model}' is not offered by {name}; set SemanticRouter:Models:{index}:Model to one of: " +
+                    string.Join(", ", probe.Models.Take(12)) + (probe.Models.Count > 12 ? ", …" : string.Empty) + "."));
+        }
+
+        return checks;
+    }
+
+    private static async Task<IEnumerable<RouterCheck>> CheckCliAsync(
+        string name, ConnectorOptions connector, ICliProcessRunner runner, CancellationToken cancellationToken)
+    {
+        string subject = $"connector {name}";
+        string executable = string.IsNullOrWhiteSpace(connector.Executable) ? CliAdapter.For(connector.Preset).DefaultExecutable : connector.Executable;
+        CliExecutableLookup lookup = CliExecutableLocator.Find(executable);
+        if (lookup.Path is not { } path)
+        {
+            return [new RouterCheck(subject, RouterCheckStatus.Failed, lookup.Problem(name)!)];
+        }
+
+        (int exit, string output) = await RunAsync(runner, path, ["--version"], connector, cancellationToken).ConfigureAwait(false);
+        if (exit != 0)
+        {
+            return [new RouterCheck(subject, RouterCheckStatus.Failed, $"{path} --version failed (exit {exit}): {FirstLine(output)}")];
+        }
+
+        string version = FirstLine(output);
+        var checks = new List<RouterCheck>();
+        if (connector.Preset != CliPreset.ClaudeCode)
+        {
+            checks.Add(new RouterCheck(subject, RouterCheckStatus.Ok, $"{version} at {path}. Sign-in is not checked for this CLI; run it once yourself to log in."));
+        }
+        else
+        {
+            // `claude auth status` prints JSON such as {"loggedIn":true,"authMethod":"claude.ai",...}.
+            (int authExit, string auth) = await RunAsync(runner, path, ["auth", "status"], connector, cancellationToken).ConfigureAwait(false);
+            (bool? loggedIn, string? method) = ReadClaudeAuthStatus(auth);
+            if (authExit != 0 || loggedIn == false)
+            {
+                checks.Add(new RouterCheck(subject, RouterCheckStatus.Failed, $"{version} at {path} is not signed in. Run `claude` once and use /login."));
+            }
+            else if (method is "api_key" or "api_key_helper" or "third_party")
+            {
+                checks.Add(new RouterCheck(subject, RouterCheckStatus.Warning,
+                    $"{version} at {path} is signed in with {method}, so requests are not billed to a Claude subscription. Use /logout and /login to change that."));
+            }
+            else
+            {
+                checks.Add(new RouterCheck(subject, RouterCheckStatus.Ok, $"{version} at {path}, signed in ({method ?? "unknown method"})."));
+            }
+        }
+
+        return checks;
+    }
+
+    private static async Task<(int ExitCode, string Output)> RunAsync(
+        ICliProcessRunner runner, string executable, string[] arguments, ConnectorOptions connector, CancellationToken cancellationToken)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "semantic-router", "doctor-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            // The same environment requests get, so the result reflects what the router will use.
+            var invocation = new CliInvocation
+            {
+                Executable = executable,
+                Arguments = arguments,
+                WorkingDirectory = directory,
+                SetEnvironment = new Dictionary<string, string>(connector.EnvironmentVariables),
+                RemoveEnvironment = ((IEnumerable<string>?)connector.RemoveEnvironmentVariables ?? CliAdapter.For(connector.Preset).DefaultRemovedEnvironment).ToArray(),
+            };
+
+            ICliProcess process;
+            try
+            {
+                process = runner.Start(invocation);
+            }
+            catch (FileNotFoundException ex)
+            {
+                return (-1, ex.Message);
+            }
+
+            await using (process.ConfigureAwait(false))
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(20));
+                try
+                {
+                    var output = new System.Text.StringBuilder();
+                    await foreach (string line in process.ReadOutputLinesAsync(timeout.Token).ConfigureAwait(false))
+                    {
+                        output.AppendLine(line);
+                    }
+
+                    int exit = await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+                    return (exit, output.Append(process.StandardError).ToString());
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    return (-1, "timed out after 20 s");
+                }
+            }
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    internal static (bool? LoggedIn, string? Method) ReadClaudeAuthStatus(string output)
+    {
+        int start = output.IndexOf('{', StringComparison.Ordinal);
+        if (start < 0)
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            using JsonDocument json = JsonDocument.Parse(output[start..]);
+            JsonElement root = json.RootElement;
+            bool? loggedIn = root.TryGetProperty("loggedIn", out JsonElement l) && l.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? l.GetBoolean()
+                : null;
+            return (loggedIn, root.GetString("authMethod"));
+        }
+        catch (JsonException)
+        {
+            return (null, null);
+        }
+    }
+
+    private static string FirstLine(string text) =>
+        text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? string.Empty;
+}

@@ -9,25 +9,23 @@ using static SemanticRouter.Tests.Support.TestEmbeddings;
 namespace SemanticRouter.Tests.AspNetCore;
 
 /// <summary>
-/// Runs real child processes (POSIX shell scripts standing in for the vendor CLIs) through
-/// <see cref="SystemCliProcessRunner"/>. Skipped on Windows.
+/// Runs real child processes through <see cref="SystemCliProcessRunner"/>. The stand-in CLI is a small .NET program
+/// (<c>tests/SemanticRouter.FakeCli</c>, copied next to the tests), so the same tests run on Windows, macOS and Linux:
+/// argument quoting, stdin encoding, environment scrubbing, working directories and process-tree termination.
 /// </summary>
 public sealed class CliProcessIntegrationTests : IDisposable
 {
-    private readonly string _bin = Directory.CreateTempSubdirectory("fake-cli").FullName;
+    private static readonly string FakeCli = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "fake-cli.exe" : "fake-cli");
 
-    public void Dispose() => Directory.Delete(_bin, recursive: true);
+    private readonly string _scratch = Directory.CreateTempSubdirectory("fake-cli").FullName;
 
-    private string Script(string name, string body)
+    public void Dispose() => Directory.Delete(_scratch, recursive: true);
+
+    private static ConnectorOptions Options(string mode, CliPreset preset = CliPreset.Custom, string? executable = null)
     {
-        string path = Path.Combine(_bin, name);
-        File.WriteAllText(path, "#!/bin/sh\n" + body.ReplaceLineEndings("\n"));
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-
-        return path;
+        var options = new ConnectorOptions { Type = ConnectorType.Cli, Preset = preset, Executable = executable ?? FakeCli };
+        options.EnvironmentVariables["FAKE_CLI_MODE"] = mode;
+        return options;
     }
 
     private static async Task<(ConnectorResult Result, string Body)> SendAsync(
@@ -55,40 +53,31 @@ public sealed class CliProcessIntegrationTests : IDisposable
         JsonDocument.Parse(body).RootElement.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()!;
 
     [Fact]
+    public void The_stand_in_cli_was_built_next_to_the_tests()
+    {
+        File.Exists(FakeCli).Should().BeTrue($"the FakeCli project reference copies its executable to {AppContext.BaseDirectory}");
+    }
+
+    [Fact]
     public async Task Claude_preset_runs_with_scrubbed_environment_in_an_empty_directory()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        // Echoes what it received back as a Claude Code stream-json reply.
-        string claude = Script("claude", """
-            input=$(cat)
-            files=$(ls -A | wc -l | tr -d ' ')
-            reply="prompt=$2 secret=${SR_TEST_SECRET:-unset} set=${SR_TEST_SET:-unset} files=$files stdin=$input"
-            echo '{"type":"system","subtype":"init","apiKeySource":"none"}'
-            printf '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"%s"}}}\n' "$reply"
-            printf '{"type":"result","subtype":"success","is_error":false,"result":"%s"}\n' "$reply"
-            """);
-
         Environment.SetEnvironmentVariable("SR_TEST_SECRET", "leaked");
         try
         {
-            var options = new ConnectorOptions
-            {
-                Type = ConnectorType.Cli,
-                Preset = CliPreset.ClaudeCode,
-                Executable = claude,
-                RemoveEnvironmentVariables = ["SR_TEST_SECRET"],
-            };
+            ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);
+            options.RemoveEnvironmentVariables = ["SR_TEST_SECRET"];
             options.EnvironmentVariables["SR_TEST_SET"] = "yes";
             using var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
 
             (ConnectorResult result, string body) = await SendAsync(connector, "hello there");
 
             result.Outcome.Should().Be(ConnectorOutcome.Completed);
-            Content(body).Should().Be("prompt=hello there secret=unset set=yes files=0 stdin=");
+            using JsonDocument report = JsonDocument.Parse(Content(body));
+            report.RootElement.GetProperty("prompt").GetString().Should().Be("hello there");
+            report.RootElement.GetProperty("secret").GetString().Should().Be("unset", "RemoveEnvironmentVariables is honoured");
+            report.RootElement.GetProperty("set").GetString().Should().Be("yes");
+            report.RootElement.GetProperty("files").GetInt32().Should().Be(0, "each run gets a fresh empty directory");
+            report.RootElement.GetProperty("stdinLength").GetInt32().Should().Be(0);
         }
         finally
         {
@@ -97,44 +86,42 @@ public sealed class CliProcessIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task Long_prompts_and_system_prompts_reach_the_process()
+    public async Task Long_non_ascii_prompts_go_through_stdin_and_system_prompts_as_arguments()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        string claude = Script("claude", """
-            input=$(cat)
-            while [ $# -gt 0 ]; do
-              if [ "$1" = "--system-prompt" ]; then system="$2"; fi
-              shift
-            done
-            printf '{"type":"result","subtype":"success","is_error":false,"result":"system=%s stdin=%s"}\n' "$system" "${#input}"
-            """);
-        var options = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode, Executable = claude, MaxArgumentLength = 50 };
+        ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);
+        options.MaxArgumentLength = 50;
         using var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
+        string prompt = string.Concat(Enumerable.Repeat("Grüße, 世界 — ", 400));
 
-        (ConnectorResult result, string body) = await SendAsync(connector, new string('x', 5000), system: "Be terse.");
+        (ConnectorResult result, string body) = await SendAsync(connector, prompt, system: "Be terse: \"quoted\" & spaced.");
 
         result.Outcome.Should().Be(ConnectorOutcome.Completed);
-        Content(body).Should().Be("system=Be terse. stdin=5000");
+        using JsonDocument report = JsonDocument.Parse(Content(body));
+        report.RootElement.GetProperty("system").GetString().Should().Be("Be terse: \"quoted\" & spaced.");
+        report.RootElement.GetProperty("stdinLength").GetInt32().Should().Be(prompt.Length, "UTF-8 on stdin, no BOM, no lost characters");
+    }
+
+    [Fact]
+    public async Task Arguments_with_quotes_spaces_dashes_and_unicode_arrive_intact()
+    {
+        // The hard cases for Windows command-line quoting, plus an empty argument (Claude Code's "--tools ''").
+        string prompt = "-rf \"quoted words\" back\\slash\\\" trailing\\ ünïcödé 日本 $HOME %PATH% `cmd` & | ; > <";
+        ConnectorOptions options = Options("args-json");
+        options.PromptInput = CliPromptInput.Argument;
+        options.Arguments = ["--flag", string.Empty, "{prompt}"];
+        using var connector = new CliChatConnector("custom", options, new SystemCliProcessRunner(), NullLogger.Instance);
+
+        (ConnectorResult result, string body) = await SendAsync(connector, prompt);
+
+        result.Outcome.Should().Be(ConnectorOutcome.Completed);
+        string firstLine = Content(body).Split('\n')[0];
+        JsonSerializer.Deserialize<string[]>(firstLine).Should().Equal("--flag", string.Empty, prompt);
     }
 
     [Fact]
     public async Task Custom_cli_quota_message_and_exit_code_are_classified()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        string tool = Script("llm", """
-            echo "Error: You have exceeded your daily quota" >&2
-            exit 3
-            """);
-        var options = new ConnectorOptions { Type = ConnectorType.Cli, Executable = tool, Arguments = ["{prompt}"] };
-        using var connector = new CliChatConnector("custom", options, new SystemCliProcessRunner(), NullLogger.Instance);
+        using var connector = new CliChatConnector("custom", Options("quota"), new SystemCliProcessRunner(), NullLogger.Instance);
 
         (ConnectorResult result, string body) = await SendAsync(connector, "hi");
 
@@ -146,38 +133,20 @@ public sealed class CliProcessIntegrationTests : IDisposable
     [Fact]
     public async Task Custom_cli_text_output_is_the_reply()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
+        using var connector = new CliChatConnector("custom", Options("cat"), new SystemCliProcessRunner(), NullLogger.Instance);
 
-        string tool = Script("llm", """
-            cat
-            echo
-            echo "(done)"
-            """);
-        var options = new ConnectorOptions { Type = ConnectorType.Cli, Executable = tool };
-        using var connector = new CliChatConnector("custom", options, new SystemCliProcessRunner(), NullLogger.Instance);
+        (_, string body) = await SendAsync(connector, "echo me, ça va?");
 
-        (_, string body) = await SendAsync(connector, "echo me");
-
-        Content(body).Should().Be("echo me\n(done)");
+        Content(body).Should().Be("echo me, ça va?\n(done)");
     }
 
     [Fact]
     public async Task Silent_processes_time_out_and_are_killed()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
-        string marker = Path.Combine(_bin, "still-running");
-        string tool = Script("slow", $"""
-            sleep 5
-            touch "{marker}"
-            """);
-        var options = new ConnectorOptions { Type = ConnectorType.Cli, Executable = tool, Timeout = TimeSpan.FromMilliseconds(300) };
+        string marker = Path.Combine(_scratch, "still-running");
+        ConnectorOptions options = Options("slow");
+        options.EnvironmentVariables["FAKE_CLI_MARKER"] = marker;
+        options.Timeout = TimeSpan.FromMilliseconds(300);
         using var connector = new CliChatConnector("slow", options, new SystemCliProcessRunner(), NullLogger.Instance);
 
         var stopwatch = Stopwatch.StartNew();
@@ -190,14 +159,50 @@ public sealed class CliProcessIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task Missing_executable_is_a_failure_not_an_exception()
+    public async Task Missing_executable_is_a_failure_that_names_the_setting()
     {
-        var options = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.Codex, Executable = Path.Combine(_bin, "does-not-exist") };
+        ConnectorOptions options = Options("cat", CliPreset.Codex, Path.Combine(_scratch, "does-not-exist"));
         using var connector = new CliChatConnector("codex", options, new SystemCliProcessRunner(), NullLogger.Instance);
 
         (ConnectorResult result, _) = await SendAsync(connector, "hi");
 
         result.Outcome.Should().Be(ConnectorOutcome.Failed);
-        result.Detail.Should().Contain("could not start");
+        result.Detail.Should().Contain("could not start").And.Contain("SemanticRouter:Connectors:codex:Executable");
+    }
+
+    [Fact]
+    public async Task Batch_file_shims_are_refused_with_the_fix()
+    {
+        string shim = Path.Combine(_scratch, "claude.cmd");
+        await File.WriteAllTextAsync(shim, "@echo off\r\nnode claude.js %*\r\n");
+        using var connector = new CliChatConnector("claude-cli", Options("cat", CliPreset.ClaudeCode, shim), new SystemCliProcessRunner(), NullLogger.Instance);
+
+        (ConnectorResult result, string body) = await SendAsync(connector, "hi & del *");
+
+        result.Outcome.Should().Be(ConnectorOutcome.Failed);
+        result.Detail.Should().Contain("script").And.Contain("claude.exe").And.Contain("SemanticRouter:Connectors:claude-cli:Executable");
+        body.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Locator_searches_path_adds_exe_on_windows_and_explains_npm_shims()
+    {
+        string bin = Directory.CreateDirectory(Path.Combine(_scratch, "bin")).FullName;
+        File.WriteAllText(Path.Combine(bin, "codex.exe"), string.Empty);
+        File.WriteAllText(Path.Combine(bin, "claude.cmd"), string.Empty);
+        File.WriteAllText(Path.Combine(bin, "tool"), string.Empty);
+        string path = "/nowhere" + Path.PathSeparator + bin;
+
+        CliExecutableLocator.Find("codex", path, windows: true).Path.Should().Be(Path.Combine(bin, "codex.exe"));
+        CliExecutableLocator.Find("tool", path, windows: false).Path.Should().Be(Path.Combine(bin, "tool"));
+        CliExecutableLocator.Find("codex", path, windows: false).Found.Should().BeFalse("POSIX adds no extension");
+
+        CliExecutableLookup claude = CliExecutableLocator.Find("claude", path, windows: true);
+        claude.Found.Should().BeFalse();
+        claude.ScriptPath.Should().Be(Path.Combine(bin, "claude.cmd"));
+        claude.Problem("claude-cli").Should().Contain("never through cmd.exe").And.Contain("claude.exe");
+
+        CliExecutableLocator.Find("gemini", path, windows: true).Problem("g").Should().Contain("not found on PATH");
+        CliExecutableLocator.Find(FakeCli).Found.Should().BeTrue();
     }
 }

@@ -6,7 +6,11 @@ namespace SemanticRouter.AspNetCore;
 /// <summary>Re-expresses a parsed request as an OpenAI <c>/v1/chat/completions</c> body.</summary>
 internal static class OpenAIRequestBuilder
 {
-    public static ReadOnlyMemory<byte> Build(ChatCompletionRequest request, string? model, bool? stream = null)
+    /// <param name="request">The parsed request.</param>
+    /// <param name="model">The backend model id.</param>
+    /// <param name="stream">Overrides the request's streaming flag.</param>
+    /// <param name="reasoning">The target model declares <c>reasoning</c>: send <c>reasoning_effort</c>.</param>
+    public static ReadOnlyMemory<byte> Build(ChatCompletionRequest request, string? model, bool? stream = null, bool reasoning = false)
     {
         var buffer = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(buffer, ChatJsonOptions.Writer))
@@ -100,6 +104,41 @@ internal static class OpenAIRequestBuilder
             if (request.UserId is { } user)
             {
                 writer.WriteString("user", user);
+            }
+
+            if (reasoning && request.Reasoning is { } effort)
+            {
+                writer.WriteString("reasoning_effort", effort.EffectiveEffort is "xhigh" or "max" ? "high" : effort.EffectiveEffort);
+            }
+
+            if (request.Tools.Count > 0 && request.ParallelToolCalls == false)
+            {
+                writer.WriteBoolean("parallel_tool_calls", false);
+            }
+
+            if (request.ResponseFormat is { } format)
+            {
+                writer.WriteStartObject("response_format");
+                if (format.Kind == ResponseFormatKind.JsonObject)
+                {
+                    writer.WriteString("type", "json_object");
+                }
+                else
+                {
+                    writer.WriteString("type", "json_schema");
+                    writer.WriteStartObject("json_schema");
+                    writer.WriteString("name", format.Name ?? "response");
+                    writer.WritePropertyName("schema");
+                    WriteRaw(writer, format.SchemaJson ?? """{"type":"object"}""");
+                    if (format.Strict)
+                    {
+                        writer.WriteBoolean("strict", true);
+                    }
+
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndObject();
             }
 
             writer.WriteEndObject();
@@ -209,19 +248,58 @@ internal static class AnthropicRequestBuilder
     /// <summary>Used when an OpenAI client did not set a limit; the Messages API requires one.</summary>
     public const int DefaultMaxTokens = 8192;
 
-    public static ReadOnlyMemory<byte> Build(ChatCompletionRequest request, string? model, bool? stream = null)
+    /// <summary>The tool that carries a JSON-schema reply (structured output) on the Messages API.</summary>
+    public const string StructuredOutputTool = "structured_output";
+
+    /// <summary>Whether <paramref name="request"/> asks for a schema reply that the builder turns into a forced tool call.</summary>
+    public static bool UsesStructuredOutputTool(ChatCompletionRequest request) =>
+        request.ResponseFormat is { Kind: ResponseFormatKind.JsonSchema } && request.Tools.Count == 0;
+
+    /// <summary>
+    /// Whether a reasoning request can become <c>thinking</c>: it needs a budget of at least 1,024 below
+    /// <c>max_tokens</c>, and cannot be combined with the forced structured-output tool.
+    /// </summary>
+    public static bool CarriesThinking(ChatCompletionRequest request) =>
+        request.Reasoning is not null && !UsesStructuredOutputTool(request) && (request.MaxTokens ?? DefaultMaxTokens) > 1024;
+
+    /// <param name="request">The parsed request.</param>
+    /// <param name="model">The backend model id.</param>
+    /// <param name="stream">Overrides the request's streaming flag.</param>
+    /// <param name="reasoning">The target model declares <c>reasoning</c>: send <c>thinking</c> with a budget.</param>
+    public static ReadOnlyMemory<byte> Build(ChatCompletionRequest request, string? model, bool? stream = null, bool reasoning = false)
     {
+        bool structured = UsesStructuredOutputTool(request);
+        int maxTokens = request.MaxTokens ?? DefaultMaxTokens;
+        int? thinkingBudget = reasoning && CarriesThinking(request) && request.Reasoning is { } wanted
+            ? Math.Clamp(wanted.EffectiveBudget, 1024, maxTokens - 1)
+            : null;
+
         var buffer = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(buffer, ChatJsonOptions.Writer))
         {
             writer.WriteStartObject();
             writer.WriteString("model", model ?? request.Model ?? "auto");
-            writer.WriteNumber("max_tokens", request.MaxTokens ?? DefaultMaxTokens);
+            writer.WriteNumber("max_tokens", maxTokens);
 
             string system = string.Join("\n\n", request.Turns.Where(t => t.Role == "system").Select(t => t.Text).Where(t => t.Length > 0));
+            if (request.ResponseFormat is { Kind: ResponseFormatKind.JsonObject } || (request.ResponseFormat is not null && !structured))
+            {
+                // The Messages API has no JSON mode: ask for it in the system prompt (an approximation).
+                system = (system.Length > 0 ? system + "\n\n" : string.Empty) + "Reply with a single JSON object and nothing else."
+                         + (request.ResponseFormat!.SchemaJson is { } schema ? " It must match this JSON schema: " + schema : string.Empty);
+            }
+
             if (system.Length > 0)
             {
                 writer.WriteString("system", system);
+            }
+
+            if (thinkingBudget is { } budget)
+            {
+                writer.WriteStartObject("thinking");
+                writer.WriteString("type", "enabled");
+                writer.WriteNumber("budget_tokens", budget);
+                writer.WriteEndObject();
             }
 
             writer.WriteStartArray("messages");
@@ -256,6 +334,7 @@ internal static class AnthropicRequestBuilder
 
             writer.WriteEndArray();
 
+            bool serial = request.ParallelToolCalls == false;
             if (request.Tools.Count > 0)
             {
                 writer.WriteStartArray("tools");
@@ -278,15 +357,35 @@ internal static class AnthropicRequestBuilder
                 switch (request.ToolChoice.Mode)
                 {
                     case ToolChoiceMode.None:
-                        WriteToolChoice(writer, "none", null);
+                        WriteToolChoice(writer, "none", null, serial);
                         break;
                     case ToolChoiceMode.Required:
-                        WriteToolChoice(writer, "any", null);
+                        WriteToolChoice(writer, "any", null, serial);
                         break;
                     case ToolChoiceMode.Named when request.ToolChoice.Name is { } name:
-                        WriteToolChoice(writer, "tool", name);
+                        WriteToolChoice(writer, "tool", name, serial);
+                        break;
+                    default:
+                        if (serial)
+                        {
+                            WriteToolChoice(writer, "auto", null, serial);
+                        }
+
                         break;
                 }
+            }
+            else if (structured)
+            {
+                // Structured output as a forced call to one tool whose input schema is the requested schema.
+                writer.WriteStartArray("tools");
+                writer.WriteStartObject();
+                writer.WriteString("name", StructuredOutputTool);
+                writer.WriteString("description", "Reply by calling this tool with the answer as its input.");
+                writer.WritePropertyName("input_schema");
+                OpenAIRequestBuilder.WriteRaw(writer, request.ResponseFormat!.SchemaJson ?? """{"type":"object"}""");
+                writer.WriteEndObject();
+                writer.WriteEndArray();
+                WriteToolChoice(writer, "tool", StructuredOutputTool, false);
             }
 
             if (stream ?? request.Stream)
@@ -294,12 +393,13 @@ internal static class AnthropicRequestBuilder
                 writer.WriteBoolean("stream", true);
             }
 
-            if (request.Temperature is { } temperature)
+            // With thinking on, the Messages API only accepts the default temperature.
+            if (request.Temperature is { } temperature && thinkingBudget is null)
             {
                 writer.WriteNumber("temperature", temperature);
             }
 
-            if (request.TopP is { } topP)
+            if (request.TopP is { } topP && thinkingBudget is null)
             {
                 writer.WriteNumber("top_p", topP);
             }
@@ -328,13 +428,18 @@ internal static class AnthropicRequestBuilder
         return buffer.WrittenMemory;
     }
 
-    private static void WriteToolChoice(Utf8JsonWriter writer, string type, string? name)
+    private static void WriteToolChoice(Utf8JsonWriter writer, string type, string? name, bool disableParallel)
     {
         writer.WriteStartObject("tool_choice");
         writer.WriteString("type", type);
         if (name is not null)
         {
             writer.WriteString("name", name);
+        }
+
+        if (disableParallel && type != "none")
+        {
+            writer.WriteBoolean("disable_parallel_tool_use", true);
         }
 
         writer.WriteEndObject();
@@ -396,6 +501,230 @@ internal static class AnthropicRequestBuilder
                     writer.WriteEndObject();
                     break;
             }
+        }
+    }
+}
+
+/// <summary>Re-expresses a parsed request as an OpenAI Responses API (<c>/v1/responses</c>) body.</summary>
+internal static class ResponsesRequestBuilder
+{
+    /// <param name="request">The parsed request.</param>
+    /// <param name="model">The backend model id.</param>
+    /// <param name="stream">Overrides the request's streaming flag.</param>
+    /// <param name="reasoning">The target model declares <c>reasoning</c>: send <c>reasoning.effort</c>.</param>
+    public static ReadOnlyMemory<byte> Build(ChatCompletionRequest request, string? model, bool? stream = null, bool reasoning = false)
+    {
+        var customTools = request.Tools.Where(t => t.Kind == ToolKind.Custom).Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
+        var customCalls = request.Turns.SelectMany(t => t.Blocks).OfType<ToolUseBlock>()
+            .Where(u => customTools.Contains(u.Name)).Select(u => u.Id).ToHashSet(StringComparer.Ordinal);
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer, ChatJsonOptions.Writer))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("model", model ?? request.Model ?? "auto");
+            writer.WriteBoolean("store", false);
+            string instructions = string.Join("\n\n", request.Turns.Where(t => t.Role == "system").Select(t => t.Text).Where(t => t.Length > 0));
+            if (instructions.Length > 0)
+            {
+                writer.WriteString("instructions", instructions);
+            }
+
+            writer.WriteStartArray("input");
+            foreach (ChatTurn turn in request.Turns.Where(t => t.Role != "system"))
+            {
+                WriteTurn(writer, turn, customTools, customCalls);
+            }
+
+            writer.WriteEndArray();
+
+            if (request.Tools.Count > 0)
+            {
+                writer.WriteStartArray("tools");
+                foreach (ToolDefinition tool in request.Tools)
+                {
+                    writer.WriteStartObject();
+                    if (tool.Kind == ToolKind.Custom)
+                    {
+                        writer.WriteString("type", "custom");
+                        writer.WriteString("name", tool.Name);
+                        if (tool.Description is not null)
+                        {
+                            writer.WriteString("description", tool.Description);
+                        }
+                    }
+                    else
+                    {
+                        writer.WriteString("type", "function");
+                        writer.WriteString("name", tool.Name);
+                        if (tool.Description is not null)
+                        {
+                            writer.WriteString("description", tool.Description);
+                        }
+
+                        writer.WritePropertyName("parameters");
+                        OpenAIRequestBuilder.WriteRaw(writer, tool.InputSchemaJson);
+                        writer.WriteBoolean("strict", false);
+                    }
+
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+                switch (request.ToolChoice.Mode)
+                {
+                    case ToolChoiceMode.None:
+                        writer.WriteString("tool_choice", "none");
+                        break;
+                    case ToolChoiceMode.Required:
+                        writer.WriteString("tool_choice", "required");
+                        break;
+                    case ToolChoiceMode.Named when request.ToolChoice.Name is { } name:
+                        writer.WriteStartObject("tool_choice");
+                        writer.WriteString("type", customTools.Contains(name) ? "custom" : "function");
+                        writer.WriteString("name", name);
+                        writer.WriteEndObject();
+                        break;
+                }
+
+                if (request.ParallelToolCalls == false)
+                {
+                    writer.WriteBoolean("parallel_tool_calls", false);
+                }
+            }
+
+            if (stream ?? request.Stream)
+            {
+                writer.WriteBoolean("stream", true);
+            }
+
+            if (request.MaxTokens is { } maxTokens)
+            {
+                writer.WriteNumber("max_output_tokens", maxTokens);
+            }
+
+            if (request.Temperature is { } temperature)
+            {
+                writer.WriteNumber("temperature", temperature);
+            }
+
+            if (request.TopP is { } topP)
+            {
+                writer.WriteNumber("top_p", topP);
+            }
+
+            if (reasoning && request.Reasoning is { } effort)
+            {
+                writer.WriteStartObject("reasoning");
+                writer.WriteString("effort", effort.EffectiveEffort);
+                writer.WriteString("summary", "auto");
+                writer.WriteEndObject();
+            }
+
+            if (request.ResponseFormat is { } format)
+            {
+                writer.WriteStartObject("text");
+                writer.WriteStartObject("format");
+                if (format.Kind == ResponseFormatKind.JsonObject)
+                {
+                    writer.WriteString("type", "json_object");
+                }
+                else
+                {
+                    writer.WriteString("type", "json_schema");
+                    writer.WriteString("name", format.Name ?? "response");
+                    writer.WritePropertyName("schema");
+                    OpenAIRequestBuilder.WriteRaw(writer, format.SchemaJson ?? """{"type":"object"}""");
+                    writer.WriteBoolean("strict", format.Strict);
+                }
+
+                writer.WriteEndObject();
+                writer.WriteEndObject();
+            }
+
+            if (request.UserId is { } user)
+            {
+                writer.WriteString("safety_identifier", user);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return buffer.WrittenMemory;
+    }
+
+    private static void WriteTurn(Utf8JsonWriter writer, ChatTurn turn, HashSet<string> customTools, HashSet<string> customCalls)
+    {
+        var content = turn.Blocks.Where(b => b is TextBlock or ImageBlock).ToArray();
+        if (content.Length > 0)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("type", "message");
+            writer.WriteString("role", turn.Role);
+            writer.WriteStartArray("content");
+            foreach (ContentBlock block in content)
+            {
+                writer.WriteStartObject();
+                if (block is TextBlock text)
+                {
+                    writer.WriteString("type", turn.Role == "assistant" ? "output_text" : "input_text");
+                    writer.WriteString("text", text.Text);
+                }
+                else if (block is ImageBlock image)
+                {
+                    writer.WriteString("type", "input_image");
+                    writer.WriteString("image_url", image.Url ?? $"data:{image.MediaType ?? "image/png"};base64,{image.Data}");
+                }
+
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        foreach (ContentBlock block in turn.Blocks)
+        {
+            switch (block)
+            {
+                case ToolUseBlock call when customTools.Contains(call.Name):
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "custom_tool_call");
+                    writer.WriteString("call_id", call.Id);
+                    writer.WriteString("name", call.Name);
+                    writer.WriteString("input", CustomInput(call.InputJson));
+                    writer.WriteEndObject();
+                    break;
+
+                case ToolUseBlock call:
+                    writer.WriteStartObject();
+                    writer.WriteString("type", "function_call");
+                    writer.WriteString("call_id", call.Id);
+                    writer.WriteString("name", call.Name);
+                    writer.WriteString("arguments", call.InputJson);
+                    writer.WriteEndObject();
+                    break;
+
+                case ToolResultBlock result:
+                    writer.WriteStartObject();
+                    writer.WriteString("type", customCalls.Contains(result.ToolUseId) ? "custom_tool_call_output" : "function_call_output");
+                    writer.WriteString("call_id", result.ToolUseId);
+                    writer.WriteString("output", result.IsError && result.Content.Length == 0 ? "The tool call failed." : result.Content);
+                    writer.WriteEndObject();
+                    break;
+            }
+        }
+    }
+
+    private static string CustomInput(string argumentsJson)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(argumentsJson);
+            return document.RootElement.GetString("input") ?? argumentsJson;
+        }
+        catch (JsonException)
+        {
+            return argumentsJson;
         }
     }
 }

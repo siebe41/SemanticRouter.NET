@@ -22,6 +22,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
         WriteIndented = true,
+        NewLine = "\n", // the same file on every OS, so it diffs cleanly and survives a copy between machines
     };
 
     /// <summary>How to reach each provider, by connector name.</summary>
@@ -32,6 +33,9 @@ public sealed class RouterConfiguration : SemanticRouterOptions
 
     /// <summary>The gateway (middleware) settings.</summary>
     public PromptRouterMiddlewareOptions Middleware { get; set; } = new();
+
+    /// <summary>Usage accounting and budgets.</summary>
+    public UsageOptions Usage { get; set; } = new();
 
     /// <summary>Serializes a document (secrets included).</summary>
     public string ToJson() => JsonSerializer.Serialize(this, Json);
@@ -51,8 +55,17 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         SemanticRouterOptions routing,
         IReadOnlyDictionary<string, ConnectorOptions> connectors,
         EmbeddingProviderOptions embeddings,
-        PromptRouterMiddlewareOptions middleware)
+        PromptRouterMiddlewareOptions middleware) => Compose(routing, connectors, embeddings, middleware, new UsageOptions());
+
+    /// <summary>Builds a document from separately bound option objects, including the usage section.</summary>
+    public static RouterConfiguration Compose(
+        SemanticRouterOptions routing,
+        IReadOnlyDictionary<string, ConnectorOptions> connectors,
+        EmbeddingProviderOptions embeddings,
+        PromptRouterMiddlewareOptions middleware,
+        UsageOptions usage)
     {
+        ArgumentNullException.ThrowIfNull(usage);
         ArgumentNullException.ThrowIfNull(routing);
         ArgumentNullException.ThrowIfNull(connectors);
         ArgumentNullException.ThrowIfNull(embeddings);
@@ -67,6 +80,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
 
         document.Embeddings = JsonSerializer.Deserialize<EmbeddingProviderOptions>(JsonSerializer.Serialize(embeddings, Json), Json)!;
         document.Middleware = JsonSerializer.Deserialize<PromptRouterMiddlewareOptions>(JsonSerializer.Serialize(middleware, Json), Json)!;
+        document.Usage = JsonSerializer.Deserialize<UsageOptions>(JsonSerializer.Serialize(usage, Json), Json)!;
         return document;
     }
 
@@ -93,7 +107,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 case ConnectorType.Cli when connector.MaxConcurrency < 1:
                     errors.Add($"Connector '{name}' MaxConcurrency must be at least 1.");
                     break;
-                case ConnectorType.OpenAICompatible or ConnectorType.Anthropic when connector.BaseAddress is not { IsAbsoluteUri: true }:
+                case ConnectorType.OpenAICompatible or ConnectorType.Anthropic or ConnectorType.Responses when connector.BaseAddress is not { IsAbsoluteUri: true }:
                     errors.Add($"Connector '{name}' needs an absolute BaseAddress.");
                     break;
             }
@@ -146,6 +160,52 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
+        foreach (BudgetDefinition budget in Usage.Budgets)
+        {
+            string label = string.IsNullOrWhiteSpace(budget.Name) ? "A budget" : $"Budget '{budget.Name}'";
+            if (string.IsNullOrWhiteSpace(budget.Name))
+            {
+                errors.Add("Usage:Budgets entries must have a Name.");
+            }
+
+            if (string.IsNullOrWhiteSpace(budget.Model) == string.IsNullOrWhiteSpace(budget.Connector))
+            {
+                errors.Add($"{label} must name exactly one of Model or Connector.");
+            }
+            else if (!string.IsNullOrWhiteSpace(budget.Connector) && !Connectors.ContainsKey(budget.Connector))
+            {
+                errors.Add($"{label} covers connector '{budget.Connector}', which is not configured.");
+            }
+            else if (!string.IsNullOrWhiteSpace(budget.Model) && !Models.Any(m => string.Equals(m.Name, budget.Model, StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add($"{label} covers model '{budget.Model}', which is not in the catalog.");
+            }
+
+            if (budget.MaxTokens is null && budget.MaxCostUsd is null)
+            {
+                errors.Add($"{label} needs MaxTokens or MaxCostUsd.");
+            }
+            else if (budget.MaxTokens < 0 || budget.MaxCostUsd < 0)
+            {
+                errors.Add($"{label} limits must not be negative.");
+            }
+        }
+
+        if (Usage.WarnAtPercent is < 1 or > 100)
+        {
+            errors.Add("Usage:WarnAtPercent must be between 1 and 100.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(Usage.ReferenceModel) && !Models.Any(m => string.Equals(m.Name, Usage.ReferenceModel, StringComparison.OrdinalIgnoreCase)))
+        {
+            errors.Add($"Usage:ReferenceModel '{Usage.ReferenceModel}' is not in the catalog (it may be disabled, but it must be listed).");
+        }
+
+        if (!string.IsNullOrWhiteSpace(Usage.TimeZone) && !TimeZoneInfo.TryFindSystemTimeZoneById(Usage.TimeZone, out _))
+        {
+            errors.Add($"Usage:TimeZone '{Usage.TimeZone}' is not a known time zone.");
+        }
+
         if (string.IsNullOrWhiteSpace(Middleware.HeaderPrefix))
         {
             errors.Add("Middleware:HeaderPrefix must not be empty.");
@@ -156,11 +216,6 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             if (!Middleware.PathPrefixes.Any(p => !string.IsNullOrWhiteSpace(p)))
             {
                 errors.Add("Middleware:PathPrefixes must list at least one path in Dispatch mode, otherwise every JSON POST in the application would be proxied.");
-            }
-
-            if (!Models.Any(m => m.Enabled))
-            {
-                errors.Add("Models must define at least one enabled model in Dispatch mode.");
             }
         }
 

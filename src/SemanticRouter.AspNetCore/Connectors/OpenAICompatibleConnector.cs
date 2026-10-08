@@ -73,11 +73,16 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
     public async Task<ConnectorResult> SendAsync(ConnectorRequest request, HttpContext context, CancellationToken cancellationToken)
     {
         bool passThrough = request.Chat.Protocol == Protocol;
+        bool reasoning = request.Model.Capabilities.Contains("reasoning", StringComparer.OrdinalIgnoreCase);
+        DroppedFeatures.Report(context, DroppedFeatures.ForTranslation(request.Chat, Protocol, reasoning));
         ReadOnlyMemory<byte> body = passThrough
-            ? RewriteModel(request.RawBody, request.Model.Model)
-            : Protocol == ChatProtocol.Anthropic
-                ? AnthropicRequestBuilder.Build(request.Chat, request.Model.Model)
-                : OpenAIRequestBuilder.Build(request.Chat, request.Model.Model);
+            ? RewriteModel(request.RawBody, request.Model.Model, stripRelayedThinking: Protocol == ChatProtocol.Anthropic)
+            : Protocol switch
+            {
+                ChatProtocol.Anthropic => AnthropicRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
+                ChatProtocol.Responses => ResponsesRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
+                _ => OpenAIRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
+            };
 
         using var message = new HttpRequestMessage(HttpMethod.Post, _requestUri) { Content = new ReadOnlyMemoryContent(body) };
         message.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
@@ -139,9 +144,11 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
             if (status is 404 or 408 or 429 || status >= 500)
             {
-                string detail = $"HTTP {status.ToString(CultureInfo.InvariantCulture)}";
+                DateTimeOffset? retryAt = status == 429 ? await ReadResetAsync(response, cancellationToken).ConfigureAwait(false) : null;
+                string detail = $"HTTP {status.ToString(CultureInfo.InvariantCulture)}" +
+                                (retryAt is { } reset ? $" (limit resets {reset.ToString("u", CultureInfo.InvariantCulture)})" : string.Empty);
                 LogUpstreamStatus(_logger, Name, status);
-                return ConnectorResult.Failed(status == 429 ? ModelFailureKind.QuotaExceeded : ModelFailureKind.Unavailable, detail);
+                return ConnectorResult.Failed(status == 429 ? ModelFailureKind.QuotaExceeded : ModelFailureKind.Unavailable, detail, retryAt: retryAt);
             }
 
             if (passThrough && !response.IsSuccessStatusCode)
@@ -167,22 +174,31 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             }
 
             IChatResponseWriter writer = ChatResponseWriterFactory.Create(context, request.Chat, request.Model, _affinity);
-            if (Protocol == ChatProtocol.Anthropic)
+            if (Protocol == ChatProtocol.Anthropic && AnthropicRequestBuilder.UsesStructuredOutputTool(request.Chat))
             {
-                await AnthropicResponseReader.RelayAsync(response, writer, cancellationToken).ConfigureAwait(false);
+                writer = new StructuredOutputWriter(writer, AnthropicRequestBuilder.StructuredOutputTool);
             }
-            else
+
+            Task relay = Protocol switch
             {
-                await OpenAIResponseReader.RelayAsync(response, writer, cancellationToken).ConfigureAwait(false);
-            }
+                ChatProtocol.Anthropic => AnthropicResponseReader.RelayAsync(response, writer, cancellationToken),
+                ChatProtocol.Responses => ResponsesResponseReader.RelayAsync(response, writer, cancellationToken),
+                _ => OpenAIResponseReader.RelayAsync(response, writer, cancellationToken),
+            };
+            await relay.ConfigureAwait(false);
 
             return ConnectorResult.Completed;
         }
     }
 
-    internal static ReadOnlyMemory<byte> RewriteModel(ReadOnlyMemory<byte> body, string? model)
+    /// <summary>
+    /// Sets <c>model</c> on a pass-through body. With <paramref name="stripRelayedThinking"/>, also removes thinking
+    /// blocks the router itself relayed from another backend: Anthropic would reject their signature.
+    /// </summary>
+    internal static ReadOnlyMemory<byte> RewriteModel(ReadOnlyMemory<byte> body, string? model, bool stripRelayedThinking = false)
     {
-        if (string.IsNullOrEmpty(model))
+        bool strip = stripRelayedThinking && body.Span.IndexOf(System.Text.Encoding.UTF8.GetBytes(ThinkingBlock.RouterSignature)) >= 0;
+        if (string.IsNullOrEmpty(model) && !strip)
         {
             return body;
         }
@@ -191,7 +207,22 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         {
             if (JsonNode.Parse(body.Span) is JsonObject json)
             {
-                json["model"] = model;
+                if (!string.IsNullOrEmpty(model))
+                {
+                    json["model"] = model;
+                }
+
+                if (strip && json["messages"] is JsonArray messages)
+                {
+                    foreach (JsonArray content in messages.OfType<JsonObject>().Select(m => m["content"]).OfType<JsonArray>())
+                    {
+                        foreach (JsonNode? block in content.Where(b => b is JsonObject o && (string?)o["signature"] == ThinkingBlock.RouterSignature).ToArray())
+                        {
+                            content.Remove(block);
+                        }
+                    }
+                }
+
                 return JsonSerializer.SerializeToUtf8Bytes(json, ConnectorJsonContext.Default.JsonObject);
             }
         }
@@ -251,10 +282,13 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         await using (upstream.ConfigureAwait(false))
         {
             bool sse = response.Content.Headers.ContentType?.MediaType?.Equals("text/event-stream", StringComparison.OrdinalIgnoreCase) == true;
-            if (_affinity is { } affinity && response.IsSuccessStatusCode)
+            UsageCapture? capture = UsageCapture.Of(context);
+            if ((_affinity is not null || capture is not null) && response.IsSuccessStatusCode)
             {
+                IToolCallAffinity? affinity = _affinity;
                 await PassThroughToolCallScanner.CopyAsync(
-                    upstream, outgoing.Body, sse, Protocol, id => affinity.Remember(id, modelName), cancellationToken).ConfigureAwait(false);
+                    upstream, outgoing.Body, sse, Protocol, id => affinity?.Remember(id, modelName), cancellationToken,
+                    capture is null ? null : capture.Observe).ConfigureAwait(false);
             }
             else
             {
@@ -271,6 +305,39 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         string detail = ExtractErrorMessage(upstreamBody) ?? (upstreamBody.Length > 500 ? upstreamBody[..500] : upstreamBody);
         await ProtocolErrors.WriteAsync(
             context, clientProtocol, (int)response.StatusCode, "Upstream request rejected", detail, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// When a 429's limit ends: <c>Retry-After</c>, Anthropic's <c>anthropic-ratelimit-*-reset</c> timestamps, or a
+    /// reset time in the error message.
+    /// </summary>
+    internal static async Task<DateTimeOffset?> ReadResetAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (response.Headers.TryGetValues("Retry-After", out IEnumerable<string>? retryAfter)
+            && QuotaResetParser.TryParseRetryAfter(retryAfter.FirstOrDefault(), now, out DateTimeOffset fromHeader))
+        {
+            return fromHeader;
+        }
+
+        DateTimeOffset? latest = null;
+        foreach (string header in new[] { "anthropic-ratelimit-requests-reset", "anthropic-ratelimit-tokens-reset", "anthropic-ratelimit-input-tokens-reset", "anthropic-ratelimit-output-tokens-reset" })
+        {
+            if (response.Headers.TryGetValues(header, out IEnumerable<string>? values)
+                && DateTimeOffset.TryParse(values.FirstOrDefault(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset reset)
+                && reset > now && (latest is null || reset > latest))
+            {
+                latest = reset;
+            }
+        }
+
+        if (latest is not null)
+        {
+            return latest;
+        }
+
+        string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        return QuotaResetParser.TryParse(body.Length > 2000 ? body[..2000] : body, now, null, out DateTimeOffset fromBody) ? fromBody : null;
     }
 
     /// <summary>What to fix when a server rejects the connector's credentials (names the setting, never the value).</summary>
@@ -314,6 +381,25 @@ internal static class ProtocolErrors
 {
     public static async Task WriteAsync(HttpContext context, ChatProtocol protocol, int statusCode, string title, string detail, CancellationToken cancellationToken)
     {
+        if (protocol == ChatProtocol.Responses)
+        {
+            // The OpenAI error envelope, which the OpenAI SDKs and Codex read.
+            var error = new OpenAIErrorEnvelope(new OpenAIError($"{title}: {detail}", statusCode switch
+            {
+                401 => "authentication_error",
+                403 => "permission_error",
+                404 => "not_found_error",
+                429 => "rate_limit_exceeded",
+                >= 500 => "server_error",
+                _ => "invalid_request_error",
+            }));
+            context.Response.StatusCode = statusCode;
+            context.Response.ContentType = "application/json";
+            await context.Response.Body.WriteAsync(
+                JsonSerializer.SerializeToUtf8Bytes(error, ConnectorJsonContext.Default.OpenAIErrorEnvelope), cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (protocol != ChatProtocol.Anthropic)
         {
             await Microsoft.AspNetCore.Http.Results.Problem(detail, statusCode: statusCode, title: title).ExecuteAsync(context).ConfigureAwait(false);
@@ -348,6 +434,13 @@ internal sealed record AnthropicError(
     [property: System.Text.Json.Serialization.JsonPropertyName("type")] string Type,
     [property: System.Text.Json.Serialization.JsonPropertyName("message")] string Message);
 
+internal sealed record OpenAIErrorEnvelope([property: System.Text.Json.Serialization.JsonPropertyName("error")] OpenAIError Error);
+
+internal sealed record OpenAIError(
+    [property: System.Text.Json.Serialization.JsonPropertyName("message")] string Message,
+    [property: System.Text.Json.Serialization.JsonPropertyName("type")] string Type);
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(OpenAIErrorEnvelope))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(JsonObject))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(AnthropicErrorEnvelope))]
 internal sealed partial class ConnectorJsonContext : System.Text.Json.Serialization.JsonSerializerContext;

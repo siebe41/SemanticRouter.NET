@@ -27,3 +27,7 @@ dotnet_diagnostic.CA1861.severity = none
 [samples/**.cs]
 dotnet_diagnostic.CA2007.severity = none
 dotnet_diagnostic.CA1861.severity = none
+
+[src/SemanticRouter.Host/**.cs]
+# An application, not a library: there is no synchronization context to avoid.
+dotnet_diagnostic.CA2007.severity = none
