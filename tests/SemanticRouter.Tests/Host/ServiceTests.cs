@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -174,10 +176,17 @@ public sealed class ServiceTests : IDisposable
 
         string key = $@"Software\SemanticRouter.Tests\{Guid.NewGuid():N}";
         var windows = new WindowsSignInService(ConfigurationDirectory, key, "SemanticRouter");
+        int? started = null;
         try
         {
-            // The stand-in CLI exits at once, so the "router" it starts never records itself.
-            (await windows.InstallAsync(Definition() with { Program = FakeCli })).Succeeded.Should().BeTrue();
+            // Installing starts the definition in the background. The stand-in CLI then waits for input and never
+            // records itself as a router, so the test ends it: running in the configuration directory, it would
+            // keep that directory from being deleted.
+            ServiceOutcome installed = await windows.InstallAsync(Definition() with { Program = FakeCli });
+            installed.Succeeded.Should().BeTrue(installed.Detail);
+            Match pid = Regex.Match(installed.Detail ?? string.Empty, @"in the background \(pid (?<pid>\d+)\)");
+            pid.Success.Should().BeTrue(installed.Detail);
+            started = int.Parse(pid.Groups["pid"].Value, CultureInfo.InvariantCulture);
 
             windows.IsInstalled().Should().BeTrue();
             (await windows.StatusAsync()).Should().Contain("starts at sign-in").And.Contain("service start --no-wait");
@@ -190,6 +199,19 @@ public sealed class ServiceTests : IDisposable
         finally
         {
             Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(@"Software\SemanticRouter.Tests", throwOnMissingSubKey: false);
+            if (started is { } id)
+            {
+                try
+                {
+                    using var process = System.Diagnostics.Process.GetProcessById(id);
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync();
+                }
+                catch (ArgumentException)
+                {
+                    // Already gone.
+                }
+            }
         }
     }
 

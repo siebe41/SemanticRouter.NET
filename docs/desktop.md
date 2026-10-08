@@ -20,6 +20,8 @@ To build it yourself: `dotnet run --project src/SemanticRouter.Desktop`, or `dep
 
 Start it and the dashboard opens. Close the dashboard and the router keeps running; the tray icon brings it back (click it, or choose **Open dashboard**). Starting the app again while it runs also opens the dashboard.
 
+The window opens at a size that fits the screen it is on (title bar included, whatever the display scaling), and after that where you left it: its position, size and whether it was maximized are kept in `desktop.json`. If that screen is gone, it opens on the main screen again.
+
 The tray menu:
 
 | Item | What it does |
@@ -30,6 +32,7 @@ The tray menu:
 | **Open the dashboard in** → **App window** / **Web browser** | Your choice of where the dashboard opens, remembered in `desktop.json`. The app window uses the platform's own web view (WebView2, WebKit, WebKitGTK or WPE WebKit); links that leave the router open in your browser. |
 | **Start at sign-in** | Starts the app, in the tray, whenever you sign in. |
 | **Show the log**, **Show the configuration folder** | The router's log (`logs/semantic-router.log`) and its files. |
+| **About SemanticRouter** | The version, and links to the GitHub repository, the documentation, issues, releases and the licence. |
 | **Quit SemanticRouter** | Stops the app's router and quits. |
 
 `SemanticRouter --quit` quits a running app from a script.
@@ -50,7 +53,7 @@ Everything is in the router's [configuration directory](host.md#where-things-liv
 
 | | |
 |---|---|
-| `desktop.json` | The app's own settings: where the dashboard opens. |
+| `desktop.json` | The app's own settings: where the dashboard opens, and where its window was. |
 | `logs/semantic-router.log` | What the router logged (the app has no console). Rolled over to `.1` past 10 MB. |
 | `webview/` | The app window's web view profile. |
 
