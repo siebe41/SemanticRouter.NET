@@ -209,6 +209,8 @@ public class ChatProtocolTests
 
         public Task WriteTextAsync(string delta, CancellationToken cancellationToken) { Events.Add("text:" + delta); return Task.CompletedTask; }
 
+        public Task WriteThinkingAsync(string delta, CancellationToken cancellationToken) { Events.Add("think:" + delta); return Task.CompletedTask; }
+
         public Task StartToolCallAsync(string id, string name, CancellationToken cancellationToken) { Events.Add($"tool:{id}:{name}"); return Task.CompletedTask; }
 
         public Task WriteToolCallArgumentsAsync(string delta, CancellationToken cancellationToken) { Events.Add("args:" + delta); return Task.CompletedTask; }

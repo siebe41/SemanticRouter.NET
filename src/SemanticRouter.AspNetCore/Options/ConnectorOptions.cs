@@ -20,6 +20,12 @@ public enum ConnectorType
     /// clients such as Claude Code pass through untouched; OpenAI-protocol requests are translated.
     /// </summary>
     Anthropic = 2,
+
+    /// <summary>
+    /// HTTP <c>POST /v1/responses</c> (the OpenAI Responses API) with an API key. Requests from Responses clients such
+    /// as Codex CLI pass through untouched (hosted tools and reasoning items included); other clients are translated.
+    /// </summary>
+    Responses = 3,
 }
 
 /// <summary>How a CLI connector handles requests that offer tools (agentic clients such as Claude Code).</summary>
@@ -168,11 +174,22 @@ public sealed class ConnectorOptions
         Timeout > TimeSpan.Zero ? Timeout : Type == ConnectorType.Cli ? TimeSpan.FromMinutes(5) : TimeSpan.FromSeconds(100);
 
     /// <summary>The wire protocol an HTTP connector speaks.</summary>
-    internal ChatProtocol Protocol => Type == ConnectorType.Anthropic ? ChatProtocol.Anthropic : ChatProtocol.OpenAI;
+    internal ChatProtocol Protocol => Type switch
+    {
+        ConnectorType.Anthropic => ChatProtocol.Anthropic,
+        ConnectorType.Responses => ChatProtocol.Responses,
+        _ => ChatProtocol.OpenAI,
+    };
 
     /// <summary>The effective request path: the configured one, or the protocol's default when left at the OpenAI default.</summary>
-    internal string EffectiveRequestPath =>
-        Type == ConnectorType.Anthropic && RequestPath == "/v1/chat/completions" ? "/v1/messages" : RequestPath;
+    internal string EffectiveRequestPath => RequestPath != "/v1/chat/completions"
+        ? RequestPath
+        : Type switch
+        {
+            ConnectorType.Anthropic => "/v1/messages",
+            ConnectorType.Responses => "/v1/responses",
+            _ => RequestPath,
+        };
 }
 
 /// <summary>The connector catalog, bound from <c>SemanticRouter:Connectors</c>.</summary>

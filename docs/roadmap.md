@@ -4,13 +4,20 @@ Where SemanticRouter.NET is headed, and why in this order. Each goal is a GitHub
 
 ## Where we are
 
-Today the router is a library with two samples:
+Today the router is a library, a `semantic-router` .NET tool and container image (`init`, `doctor`, run), and two samples:
 
 - It accepts OpenAI chat completions and the Anthropic Messages API, routes each turn to local models, subscription CLIs or paid APIs, and writes the reply in the client's protocol, including streaming and tool calls.
 - Claude Code can be pointed at it with `ANTHROPIC_BASE_URL`; its model names map through aliases, its tool loops stay on one model, and a subscription CLI can answer its tool-bearing turns through prompted tool calling.
 - A dashboard edits every setting with hot reload and shows live status and activity.
+- Keys can stay out of the configuration file (`${env:…}` references, an encrypted secret store), and the dashboard and gateway can be opened to other machines with tokens and gateway keys.
 
-What it is not yet: something you install, something you can safely expose beyond localhost, something that remembers anything across a restart, or something that tells you what it spent. Those gaps drive the plan.
+- Cooldowns, tool-call affinity, activity and every applied configuration can survive restarts (SQLite; on by default in the tool), with diff and rollback on the dashboard.
+
+- It records tokens and cost per request, shows usage and "saved by routing" on the dashboard, enforces budgets, honours limit reset times, and emits OpenTelemetry-ready traces and metrics.
+
+- It has a Responses API front door for Codex. Thinking, structured output and serial tool calls cross protocols, and what a backend cannot carry is reported in the `X-Prompt-Route-Dropped` header.
+
+What it is not yet: something that learns from your prompts. That gap drives the plan.
 
 ## What done looks like
 
@@ -23,10 +30,10 @@ Claims in the docs should match what has been exercised.
 | Client | Status |
 |---|---|
 | Claude Code 2.1.293 | Exercised end to end against a stub OpenAI-compatible backend (a 38-tool streaming turn, tool execution by the client, tool-result continuation) and against the real `claude` CLI as a prompted-tools backend. |
-| curl, both protocols | Exercised. |
+| Codex CLI 0.161.0 | Exercised end to end against a stub OpenAI-compatible backend: a streaming Responses session in which Codex ran a shell command and a namespaced tool, and got the answer back. Recorded Codex requests are replayed in the tests against OpenAI-compatible, Anthropic and prompted-CLI backends. |
+| curl, all three protocols | Exercised. |
 | OpenAI SDKs, Aider, Continue, Cline, Open WebUI, LibreChat | Standard OpenAI chat completions; not individually tested. |
-| Codex CLI | Not tested. It may need the Responses API ([#10](https://github.com/siebe41/SemanticRouter.NET/issues/10)). |
-| Windows and macOS | Builds and unit tests run on Linux only in CI ([#14](https://github.com/siebe41/SemanticRouter.NET/issues/14)). |
+| Windows and macOS | The whole suite runs on Linux, Windows and macOS in CI, including real child processes started from a stand-in CLI (argument quoting, UTF-8 stdin, process-tree kill). The real vendor CLIs have been exercised on Linux only. |
 
 ## Plan
 

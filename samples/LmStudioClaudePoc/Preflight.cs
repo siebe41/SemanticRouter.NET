@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Text.Json;
 using SemanticRouter.AspNetCore;
 
@@ -121,14 +120,10 @@ internal static class Preflight
             ? configured
             : "claude";
 
-        string? resolved = Resolve(executable);
-        if (resolved is null)
+        CliExecutableLookup lookup = CliExecutableLocator.Find(executable);
+        if (lookup.Path is not { } resolved)
         {
-            string hint = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && Resolve("claude.cmd") is { } shim
-                ? $" Only an npm shim was found ({shim}); the router starts executables directly, never through cmd.exe. " +
-                  "Install Claude Code with the native installer (claude.exe) or set Connectors:claude-cli:Executable to claude.exe."
-                : " Install Claude Code, or set SemanticRouter:Connectors:claude-cli:Executable to its full path.";
-            Fail("Claude CLI", $"'{executable}' not found on PATH.{hint}");
+            Fail("Claude CLI", lookup.Problem("claude-cli")!);
             return false;
         }
 
@@ -200,32 +195,6 @@ internal static class Preflight
             .Where(m => string.Equals(m["Connector"], connector, StringComparison.OrdinalIgnoreCase))
             .Select(m => m.GetSection("Model").Path)
             .FirstOrDefault();
-
-    private static string? Resolve(string executable)
-    {
-        if (Path.IsPathRooted(executable) || executable.Contains(Path.DirectorySeparatorChar))
-        {
-            return File.Exists(executable) ? Path.GetFullPath(executable) : null;
-        }
-
-        string[] extensions = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && !Path.HasExtension(executable)
-            ? [".exe"]
-            : [string.Empty];
-
-        foreach (string directory in (Environment.GetEnvironmentVariable("PATH") ?? string.Empty).Split(Path.PathSeparator))
-        {
-            foreach (string extension in extensions)
-            {
-                string candidate = Path.Combine(directory.Trim('"'), executable + extension);
-                if (File.Exists(candidate))
-                {
-                    return candidate;
-                }
-            }
-        }
-
-        return null;
-    }
 
     private static async Task<(int ExitCode, string Output)> RunAsync(string executable, params string[] arguments)
     {

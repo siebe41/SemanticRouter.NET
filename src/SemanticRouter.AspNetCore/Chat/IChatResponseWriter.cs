@@ -14,6 +14,9 @@ internal interface IChatResponseWriter
     /// <summary>Appends assistant text.</summary>
     Task WriteTextAsync(string delta, CancellationToken cancellationToken);
 
+    /// <summary>Appends the model's visible reasoning (written before the answer it belongs to).</summary>
+    Task WriteThinkingAsync(string delta, CancellationToken cancellationToken);
+
     /// <summary>Starts a tool call; arguments follow through <see cref="WriteToolCallArgumentsAsync"/>.</summary>
     Task StartToolCallAsync(string id, string name, CancellationToken cancellationToken);
 
@@ -33,8 +36,12 @@ internal static class ChatResponseWriterFactory
     public static IChatResponseWriter Create(HttpContext context, ChatCompletionRequest request, ModelDefinition model, IToolCallAffinity? affinity)
     {
         Action<string>? onToolCall = affinity is null ? null : id => affinity.Remember(id, model.Name);
-        return request.Protocol == ChatProtocol.Anthropic
-            ? new AnthropicResponseWriter(context, model.Name, request.Stream, onToolCall)
-            : new OpenAIResponseWriter(context, model.Name, request.Stream, onToolCall);
+        IChatResponseWriter writer = request.Protocol switch
+        {
+            ChatProtocol.Anthropic => new AnthropicResponseWriter(context, model.Name, request.Stream, onToolCall),
+            ChatProtocol.Responses => new ResponsesResponseWriter(context, model.Name, request.Stream, request.Tools, onToolCall),
+            _ => new OpenAIResponseWriter(context, model.Name, request.Stream, onToolCall),
+        };
+        return UsageCapture.Of(context) is { } capture ? new UsageRecordingWriter(writer, capture) : writer;
     }
 }

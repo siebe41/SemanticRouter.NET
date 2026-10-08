@@ -203,6 +203,7 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
             config["FallbackTier"] = 2;
             (await client.PutAsync("/router/api/config", new StringContent(config.ToJsonString(), Encoding.UTF8, "application/json"))).StatusCode.Should().Be(HttpStatusCode.OK);
             RouterConfiguration reloaded = new JsonFileRouterConfigurationStore(path).Load()!;
+            (await File.ReadAllTextAsync(path)).Should().NotContain("\r", "the file uses LF on every OS");
             reloaded.FallbackTier.Should().Be(2);
             reloaded.Connectors["anthropic"].ApiKey.Should().Be("sk-test", "the real value is stored, not the mask");
 

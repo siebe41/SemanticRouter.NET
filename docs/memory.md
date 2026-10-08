@@ -62,7 +62,7 @@ Limits worth knowing:
 - Matching is per whole line. A sentence from a note quoted in the middle of a longer line is not recognised; a note pasted, read by a tool, or injected as a block is.
 - Notes whose lines are all shorter than `MinimumLineLength` (one-word lists, very short observations) can only be detected by mention. The note's details say so.
 - Paraphrases are not detected: a model that summarised your note in an earlier turn and is now sent that summary does not count.
-- Counts are kept in memory and start at zero when the router starts (like the activity log). **Clear sharing** resets them.
+- Counts are kept in memory and start at zero when the router starts, even with `UseSqliteState` (the activity entries, with the notes each request carried, do persist there). **Clear sharing** resets them.
 
 ## Privacy
 

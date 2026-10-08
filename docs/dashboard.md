@@ -17,7 +17,9 @@ builder.Services
 | Page | What it does |
 |---|---|
 | **Overview** | Counters, every model with its tier and health (ready, cooling down, disabled), the runtime (configuration version and source, store, embeddings state, gateway paths), served-by and required-tier charts, and **Try a prompt**: classify without calling a model, or send it through the gateway for real. |
-| **Live** | What is happening now, pushed over server-sent events: tiles for requests, the share answered locally, estimated input tokens to cloud and local models, and notes whose text went to the cloud; a **model router** graph from clients (named by gateway key, or by protocol) through the router to every model, with the edge that just carried a request animated; a feed of decisions with the notes each request carried; and a strip of the latest memory crossings. |
+| **Live** | What is happening now, pushed over server-sent events: tiles for requests, the share answered locally, input tokens (reported by the backend, or estimated) to cloud and local models, and notes whose text went to the cloud; a **model router** graph from clients (named by gateway key, or by protocol) through the router to every model, with the edge that just carried a request animated; a feed of decisions with the notes each request carried; and a strip of the latest memory crossings. |
+| **Overview → Trends** | Requests per interval and p50/p95 latency over 1 hour, 24 hours, 7 or 30 days, with a table view. |
+| **Usage** | Tokens and cost by model, connector, route, client or day; "saved by routing" against a reference model; budgets with their state; the usage settings and budget editor. |
 | **Activity** | The last 500 routed requests: prompt preview, protocol, tier, reason, route and similarity, the model that answered, attempt number, degraded flag, timing. Filter by failed, degraded or tool-bearing. |
 | **Memory** | The [memory map](memory.md): notes from an Obsidian vault, Claude Code's memory or the MCP memory server as a force-directed graph, coloured by where they have been sent (text to the cloud, mentioned to the cloud, local only, not sent) or by source or folder. Search, filter, select a note for its links and per-model counts; notes pulse as requests carry them. The memory sources are edited here too. |
 | **Tiers** | The capability ladder with names and descriptions, and a matrix of which routes require each tier and which models provide it. Shows at a glance when a tier has nothing that can serve it. |
@@ -28,7 +30,7 @@ builder.Services
 | **Embeddings** | Provider, endpoint, model, batch size, timeout, warm-up, and a probe that embeds a sentence with the applied provider. |
 | **Gateway** | Mode (Dispatch or Annotate), OpenAI and Anthropic path prefixes, model aliases, tool-turn pinning, system-reminder stripping, body limit, response headers, fail-open, message selection. |
 | **Connect clients** | Ready-to-paste snippets for Claude Code, OpenAI SDKs, Codex CLI and curl, filled in with the router's address. |
-| **JSON** | The whole document as text (the same shape as the `SemanticRouter` section of `appsettings.json`): edit, download, compare with the application baseline, reset. |
+| **JSON** | The whole document as text (the same shape as the `SemanticRouter` section of `appsettings.json`): edit, download, compare with the application baseline, reset. **History** lists every applied version (when, what applied it, who), diffs any of them against the draft and rolls back to it. |
 
 ![The Live page](images/live.png)
 
@@ -48,6 +50,8 @@ Editing never touches the running router until you choose:
 1. The application's `SemanticRouter` section (`appsettings.json`, environment variables, user-secrets, code) is the **baseline**.
 2. With `UseConfigurationFile(path)` (or a custom `IRouterConfigurationStore`), a saved document **replaces** the baseline on start-up. Secrets left empty in the document (connector `ApiKey`, header values, the embeddings key) are inherited from the baseline, so keys can stay in user-secrets or environment variables.
 3. Without a store, changes apply in memory and are lost on restart; the UI says so.
+
+Applied documents are kept in the configuration history: in memory by default, or on disk with `UseSqliteState` (see [architecture.md](architecture.md#durable-state)).
 
 Secrets are never sent to the browser: the API masks them as `***`, and sending `***` back keeps the stored value.
 
@@ -73,7 +77,13 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `POST api/config/validate` | Validation errors for a document. |
 | `PUT api/config?persist=true\|false` | Validate, apply, and save (default) or apply in memory. `400` with `errors` when invalid. |
 | `POST api/config/reset` | Back to the baseline. |
+| `GET api/config/history?limit=50` | Applied versions, newest first: `id`, `timestamp`, `source` (`startup`, `admin API`, `reset`, `rollback`), `actor`, `note`. `PUT api/config?note=...` sets the note. |
+| `GET api/config/history/{id}` | That version's document (masked). |
+| `POST api/config/history/{id}/rollback` | Apply and save that version; recorded as a `rollback`. |
 | `GET api/activity?limit=100&after=<id>` | Recent routing activity. Entries carry `sentTo` (the models a request was sent to, failed attempts included) and `memory` (notes found in it). |
+| `GET api/activity/series?window=1h\|24h\|7d\|30d` | Counts, mix and latency percentiles per bucket. |
+| `GET api/activity/export?format=csv\|jsonl&prompts=false&since=&until=` | Download activity; prompt previews only with `prompts=true`. |
+| `GET api/usage?window=day\|week\|month\|7d\|30d&by=model\|connector\|route\|client\|day` | Usage totals and groups, the reference model and every budget's state. |
 | `GET api/events` | Server-sent events for live views: `activity` when a request is routed and again when it finishes, and a keep-alive comment every 15 s. |
 | `GET api/memory` | The memory map and sharing counts ([memory.md](memory.md#api)). |
 | `POST api/memory/refresh` | Rescan the memory sources. |
@@ -86,7 +96,7 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `POST api/session` | `{ "token": "..." }` → sets the session cookie. |
 | `DELETE api/session` | Signs out. |
 
-`PUT api/config`, `POST api/config/reset`, `POST api/health/reset` and `POST api/memory/exposure/reset` change the router and need the admin role; everything else is open to the read-only role.
+`PUT api/config`, `POST api/config/reset`, rollback, `POST api/health/reset` and `POST api/memory/exposure/reset` change the router and need the admin role; everything else is open to the read-only role.
 
 The same document works with `PUT` from scripts, e.g. to promote a tested configuration:
 

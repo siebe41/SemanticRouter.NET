@@ -1,0 +1,3 @@
+# LF everywhere, so raw string literals in tests and the embedded dashboard assets are identical on every OS.
+* text=auto eol=lf
+*.png binary

@@ -61,7 +61,23 @@ public sealed class PromptRouterMiddlewareOptions
     /// </summary>
     public IList<string> AnthropicPathPrefixes { get; } = new List<string>();
 
+    /// <summary>The Responses API path used when <see cref="ResponsesPathPrefixes"/> is empty.</summary>
+    public const string DefaultResponsesPathPrefix = "/v1/responses";
+
+    /// <summary>
+    /// Paths that carry OpenAI Responses API bodies (<c>POST /v1/responses</c>), as sent by Codex CLI. When empty,
+    /// <see cref="DefaultResponsesPathPrefix"/> applies. Only the path itself is routed: <c>/v1/responses/{id}</c> and
+    /// other sub-paths pass through to the application.
+    /// </summary>
+    public IList<string> ResponsesPathPrefixes { get; } = new List<string>();
+
+    /// <summary>The Responses prefixes in effect: the configured ones, or the default.</summary>
+    [JsonIgnore]
+    public IEnumerable<string> EffectiveResponsesPathPrefixes =>
+        ResponsesPathPrefixes.Any(p => !string.IsNullOrWhiteSpace(p)) ? ResponsesPathPrefixes : [DefaultResponsesPathPrefix];
+
     /// <summary>The Anthropic prefixes in effect: the configured ones, or the default.</summary>
+    [JsonIgnore]
     public IEnumerable<string> EffectiveAnthropicPathPrefixes =>
         AnthropicPathPrefixes.Any(p => !string.IsNullOrWhiteSpace(p)) ? AnthropicPathPrefixes : [DefaultAnthropicPathPrefix];
 

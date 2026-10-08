@@ -78,6 +78,9 @@ internal sealed partial class PromptRoutingMiddleware
             return;
         }
 
+        using Activity? routeSpan = RouterTelemetry.Source.StartActivity("semantic_router.route");
+        routeSpan?.SetTag("semantic_router.protocol", protocol.ToString());
+        routeSpan?.SetTag("semantic_router.client", client);
         ReadOnlyMemory<byte>? body = await ReadBodyAsync(context.Request, options.MaxRequestBodyBytes, context.RequestAborted).ConfigureAwait(false);
         if (body is not { } bodyBytes)
         {
@@ -93,7 +96,16 @@ internal sealed partial class PromptRoutingMiddleware
         // Give downstream handlers a fresh, seekable copy of the body we consumed.
         context.Request.Body = new MemoryStream(bodyBytes.ToArray(), writable: false);
 
-        if (!TryParse(context, runtime, protocol, bodyBytes, out string? prompt, out ChatCompletionRequest chat, out IReadOnlyList<MemoryReference> memory))
+        bool parsed;
+        string? prompt;
+        ChatCompletionRequest chat;
+        IReadOnlyList<MemoryReference> memory;
+        using (RouterTelemetry.Source.StartActivity("semantic_router.parse"))
+        {
+            parsed = TryParse(context, runtime, protocol, bodyBytes, out prompt, out chat, out memory);
+        }
+
+        if (!parsed)
         {
             LogNoPrompt(_logger, context.Request.Path);
             if (options.Mode == PromptRouterMode.Dispatch)
@@ -102,9 +114,12 @@ internal sealed partial class PromptRoutingMiddleware
                     context, protocol,
                     StatusCodes.Status400BadRequest,
                     "No prompt found",
-                    protocol == ChatProtocol.Anthropic
-                        ? "Expected an Anthropic Messages JSON body with 'messages'."
-                        : "Expected an OpenAI chat-completions JSON body with 'messages'.",
+                    protocol switch
+                    {
+                        ChatProtocol.Anthropic => "Expected an Anthropic Messages JSON body with 'messages'.",
+                        ChatProtocol.Responses => "Expected an OpenAI Responses JSON body with 'input'.",
+                        _ => "Expected an OpenAI chat-completions JSON body with 'messages'.",
+                    },
                     context.RequestAborted).ConfigureAwait(false);
                 return;
             }
@@ -155,6 +170,7 @@ internal sealed partial class PromptRoutingMiddleware
         RoutingActivityEntry entry = _activity.Add(new RoutingActivityEntry
         {
             Id = _activity.Reserve(),
+            TraceId = Activity.Current?.TraceId.ToHexString(),
             Timestamp = DateTimeOffset.UtcNow,
             Protocol = protocol,
             Path = context.Request.Path.Value ?? string.Empty,
@@ -175,7 +191,18 @@ internal sealed partial class PromptRoutingMiddleware
             Memory = memory,
         });
 
-        try
+        routeSpan?.SetTag("semantic_router.request_id", entry.Id);
+        routeSpan?.SetTag("semantic_router.tier", result.RequiredTier);
+        routeSpan?.SetTag("semantic_router.reason", result.Reason.ToString());
+        routeSpan?.SetTag("semantic_router.route", result.RouteName);
+        routeSpan?.SetTag("semantic_router.planned_model", entry.PlannedModel);
+        if (options.EmitResponseHeaders)
+        {
+            // Matches the activity entry (dashboard, export), so a client can quote it when something went wrong.
+            context.Response.Headers[options.HeaderPrefix + "-Id"] = entry.Id.ToString(CultureInfo.InvariantCulture);
+        }
+
+        using (_logger.BeginScope(new Dictionary<string, object> { ["RouteRequestId"] = entry.Id }))
         {
             if (options.Mode == PromptRouterMode.Dispatch)
             {
@@ -186,12 +213,17 @@ internal sealed partial class PromptRoutingMiddleware
                 await _next(context).ConfigureAwait(false);
             }
         }
-        finally
+
+        entry.TotalMilliseconds = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1);
+        routeSpan?.SetTag("semantic_router.outcome", entry.Outcome);
+        routeSpan?.SetTag("semantic_router.served_by", entry.ServedBy);
+        if (entry.Outcome == "failed")
         {
-            entry.TotalMilliseconds = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1);
-            RecordMemoryExposure(runtime, entry);
-            _activity.Complete(entry);
+            routeSpan?.SetStatus(ActivityStatusCode.Error, "no model available");
         }
+
+        RecordMemoryExposure(runtime, entry);
+        _activity.Complete(entry);
     }
 
     /// <summary>Counts the request's memory notes against every model it was sent to (Dispatch mode only: in Annotate mode the router does not know).</summary>
@@ -330,6 +362,15 @@ internal sealed partial class PromptRoutingMiddleware
                 }
 
                 protocol = ChatProtocol.Anthropic;
+                return true;
+            }
+        }
+
+        foreach (PathString prefix in runtime.ResponsesPrefixes)
+        {
+            if (request.Path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase, out PathString rest) && (!rest.HasValue || rest.Value == "/"))
+            {
+                protocol = ChatProtocol.Responses;
                 return true;
             }
         }

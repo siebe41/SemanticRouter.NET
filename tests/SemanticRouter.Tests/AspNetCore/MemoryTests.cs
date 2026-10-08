@@ -338,6 +338,24 @@ public sealed class MemoryMapTests : RouterHostTest, IDisposable
     }
 
     [Fact]
+    public void Activity_entries_keep_their_models_and_notes_through_a_json_round_trip()
+    {
+        // The SQLite activity store keeps entries as JSON; the memory columns must survive a restart.
+        var entry = new RoutingActivityEntry
+        {
+            Id = 7,
+            Memory = [new MemoryReference("vault:a.md", "a", "vault", MemoryShareKind.Content, 2, 3)],
+        };
+        entry.SentTo.Add("cloud");
+
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        RoutingActivityEntry copy = JsonSerializer.Deserialize<RoutingActivityEntry>(JsonSerializer.Serialize(entry, json), json)!;
+
+        copy.SentTo.Should().Equal("cloud");
+        copy.Memory.Should().Equal(entry.Memory);
+    }
+
+    [Fact]
     public void Validation_requires_a_path_except_for_claude_code()
     {
         var config = new RouterConfiguration();

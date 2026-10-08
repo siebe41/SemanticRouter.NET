@@ -118,8 +118,8 @@ public static class RouterDashboardEndpoints
             })
             .WithMetadata(DashboardAnonymousMetadata.Instance);
 
-        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity) =>
-            Results.Json(BuildStatus(provider, health, activity), ApiJson));
+        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets) =>
+            Results.Json(BuildStatus(provider, health, activity, budgets), ApiJson));
 
         api.MapGet("/config", (RouterRuntimeProvider provider) =>
         {
@@ -141,7 +141,7 @@ public static class RouterDashboardEndpoints
             return Results.Json(new ValidationResult(RouterRuntimeProvider.Validate(candidate)), ApiJson);
         });
 
-        api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist) =>
+        api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist, string? note) =>
         {
             RouterConfiguration? candidate = await ReadConfigurationAsync(context, provider).ConfigureAwait(false);
             if (candidate is null)
@@ -156,7 +156,7 @@ public static class RouterDashboardEndpoints
             }
 
             bool shouldPersist = persist ?? true;
-            RouterRuntime runtime = provider.Apply(candidate, shouldPersist);
+            RouterRuntime runtime = provider.Apply(candidate, shouldPersist, "admin API", Actor(context), note);
             var warnings = new List<string>(runtime.ApplyNotes);
             if (shouldPersist && provider.Store is null)
             {
@@ -166,10 +166,45 @@ public static class RouterDashboardEndpoints
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), warnings.Count > 0 ? string.Join(" ", warnings) : null);
         }).WithMetadata(DashboardWriteMetadata.Instance);
 
-        api.MapPost("/config/reset", (RouterRuntimeProvider provider) =>
+        api.MapPost("/config/reset", (HttpContext context, RouterRuntimeProvider provider) =>
         {
-            RouterRuntime runtime = provider.ResetToBaseline();
+            RouterRuntime runtime = provider.ResetToBaseline(Actor(context));
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), "Reverted to the application's configuration (the stored document was left in place).");
+        }).WithMetadata(DashboardWriteMetadata.Instance);
+
+        api.MapGet("/config/history", (RouterRuntimeProvider provider, int? limit) =>
+            provider.History is { } history
+                ? Results.Json(new HistoryResponse(history.List(Math.Clamp(limit ?? 50, 1, 500))), ApiJson)
+                : Results.Json(new HistoryResponse([]), ApiJson));
+
+        api.MapGet("/config/history/{id:long}", (RouterRuntimeProvider provider, long id) =>
+        {
+            RouterConfiguration? document = provider.History?.GetVersion(id);
+            if (document is null)
+            {
+                return Results.Problem($"Version {id} is not in the history.", statusCode: StatusCodes.Status404NotFound);
+            }
+
+            var envelope = new JsonObject { ["id"] = id, ["config"] = JsonNode.Parse(document.Masked().ToJson()) };
+            return Results.Content(envelope.ToJsonString(), "application/json");
+        });
+
+        api.MapPost("/config/history/{id:long}/rollback", (HttpContext context, RouterRuntimeProvider provider, long id) =>
+        {
+            RouterConfiguration? document = provider.History?.GetVersion(id);
+            if (document is null)
+            {
+                return Results.Problem($"Version {id} is not in the history.", statusCode: StatusCodes.Status404NotFound);
+            }
+
+            IReadOnlyList<string> errors = RouterRuntimeProvider.Validate(document);
+            if (errors.Count > 0)
+            {
+                return Results.Json(new ValidationResult(errors), ApiJson, statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            RouterRuntime runtime = provider.Apply(document, persist: true, "rollback", Actor(context), $"to version {id}");
+            return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), $"Rolled back to version {id}.");
         }).WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapGet("/activity", (RoutingActivityLog activity, int? limit, long? after) =>
@@ -200,6 +235,43 @@ public static class RouterDashboardEndpoints
             exposure.Clear();
             return Results.Ok(new { cleared = true });
         }).WithMetadata(DashboardWriteMetadata.Instance);
+
+        api.MapGet("/activity/series", (RoutingActivityLog activity, string? window) =>
+        {
+            (TimeSpan span, TimeSpan bucket) = ActivityReports.Window(window);
+            DateTimeOffset until = Align(DateTimeOffset.UtcNow, bucket) + bucket;
+            DateTimeOffset since = until - span;
+            return Results.Json(ActivityReports.Series(activity.Between(since, until), since, until, bucket), ApiJson);
+        });
+
+        api.MapGet("/activity/export", (RoutingActivityLog activity, string? format, bool? prompts, DateTimeOffset? since, DateTimeOffset? until) =>
+        {
+            DateTimeOffset end = until ?? DateTimeOffset.UtcNow.AddMinutes(1);
+            IReadOnlyList<RoutingActivityEntry> entries = activity.Between(since ?? end.AddDays(-7), end);
+            bool includePrompts = prompts ?? false;
+            string stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
+            return string.Equals(format, "jsonl", StringComparison.OrdinalIgnoreCase)
+                ? Results.File(System.Text.Encoding.UTF8.GetBytes(ActivityReports.ToJsonLines(entries, includePrompts)), "application/jsonl", $"semantic-router-activity-{stamp}.jsonl")
+                : Results.File(System.Text.Encoding.UTF8.GetBytes(ActivityReports.ToCsv(entries, includePrompts)), "text/csv", $"semantic-router-activity-{stamp}.csv");
+        });
+
+        api.MapGet("/usage", (RouterRuntimeProvider provider, IUsageLedger ledger, BudgetGate budgets, string? window, string? by) =>
+        {
+            UsageOptions usage = provider.Current.Configuration.Usage;
+            TimeZoneInfo zone = BudgetGate.ZoneOf(usage);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            (DateTimeOffset since, DateTimeOffset until) = window switch
+            {
+                "day" => BudgetGate.PeriodOf(BudgetPeriod.Day, now, zone),
+                "week" => BudgetGate.PeriodOf(BudgetPeriod.Week, now, zone),
+                "month" => BudgetGate.PeriodOf(BudgetPeriod.Month, now, zone),
+                "30d" => (now.AddDays(-30), now.AddMinutes(1)),
+                _ => (now.AddDays(-7), now.AddMinutes(1)),
+            };
+            UsageGrouping grouping = Enum.TryParse(by, ignoreCase: true, out UsageGrouping parsed) ? parsed : UsageGrouping.Model;
+            return Results.Json(new UsageResponse(
+                since, until, grouping, usage.ReferenceModel, ledger.Total(since, until), ledger.Summarize(since, until, grouping, zone), budgets.Status(usage)), ApiJson);
+        });
 
         api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, CancellationToken cancellationToken) =>
         {
@@ -344,6 +416,18 @@ public static class RouterDashboardEndpoints
             exposures);
     }
 
+    private static DateTimeOffset Align(DateTimeOffset time, TimeSpan bucket) =>
+        new(time.UtcTicks - (time.UtcTicks % bucket.Ticks), TimeSpan.Zero);
+
+    /// <summary>Who is making a change, for the configuration history. Never contains a token.</summary>
+    private static string Actor(HttpContext context)
+    {
+        string role = DashboardAccess.RoleOf(context) == RouterDashboardRole.ReadOnly ? "read-only" : "admin";
+        return DashboardAccess.IsLocal(context)
+            ? "this machine"
+            : $"{role} from {context.Connection.RemoteIpAddress}";
+    }
+
     private static RouterDashboardOptions CopyOf(RouterDashboardOptions? source)
     {
         var copy = new RouterDashboardOptions();
@@ -468,7 +552,7 @@ public static class RouterDashboardEndpoints
         return Results.Content(envelope.ToJsonString(), "application/json");
     }
 
-    private static StatusResponse BuildStatus(RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity)
+    private static StatusResponse BuildStatus(RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets)
     {
         RouterRuntime runtime = provider.Current;
         RouterConfiguration config = runtime.Configuration;
@@ -503,6 +587,7 @@ public static class RouterDashboardEndpoints
                 config.Middleware.Mode.ToString(),
                 config.Middleware.PathPrefixes.ToArray(),
                 config.Middleware.EffectiveAnthropicPathPrefixes.ToArray(),
+                config.Middleware.EffectiveResponsesPathPrefixes.ToArray(),
                 config.Middleware.ModelAliases.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
                 config.Selection.Strategy.ToString()),
             new ActivitySummary(
@@ -512,7 +597,8 @@ public static class RouterDashboardEndpoints
                 recent.Count(e => e.Degraded),
                 recent.Where(e => e.ServedBy is not null).GroupBy(e => e.ServedBy!).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase),
                 recent.GroupBy(e => e.Tier).OrderBy(g => g.Key).ToDictionary(g => g.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), g => g.Count()),
-                recent.GroupBy(e => e.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal)));
+                recent.GroupBy(e => e.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal)),
+            budgets.Status(config.Usage));
     }
 
     private static string[] CliModelHints(CliPreset preset) => preset switch
@@ -539,6 +625,14 @@ public static class RouterDashboardEndpoints
         /// <summary>Whether the document can be applied.</summary>
         public bool Valid => Errors.Count == 0;
     }
+
+    /// <summary>Usage over a window.</summary>
+    public sealed record UsageResponse(
+        DateTimeOffset Since, DateTimeOffset Until, UsageGrouping By, string? ReferenceModel, UsageTotals Totals,
+        IReadOnlyList<UsageGroup> Groups, IReadOnlyList<BudgetStatus> Budgets);
+
+    /// <summary>Applied configuration versions, newest first.</summary>
+    public sealed record HistoryResponse(IReadOnlyList<RouterConfigurationVersion> Versions);
 
     /// <summary>Recent routing activity.</summary>
     public sealed record ActivityResponse(IReadOnlyList<RoutingActivityEntry> Entries, long Latest);
@@ -593,7 +687,8 @@ public static class RouterDashboardEndpoints
         IReadOnlyList<ConnectorStatus> Connectors,
         IReadOnlyList<RouteStatus> Routes,
         GatewayStatus Gateway,
-        ActivitySummary Activity);
+        ActivitySummary Activity,
+        IReadOnlyList<BudgetStatus> Budgets);
 
     /// <summary>Embedding provider in use.</summary>
     public sealed record EmbeddingsStatus(string Provider, string? Model, string? Endpoint, int Dimensions);
@@ -613,7 +708,7 @@ public static class RouterDashboardEndpoints
     public sealed record RouteStatus(string Name, int Tier, int Utterances, bool LocalOnly, IReadOnlyList<string> RequiredCapabilities, float Threshold);
 
     /// <summary>Gateway settings.</summary>
-    public sealed record GatewayStatus(string Mode, IReadOnlyList<string> PathPrefixes, IReadOnlyList<string> AnthropicPathPrefixes, IReadOnlyDictionary<string, string> ModelAliases, string Strategy);
+    public sealed record GatewayStatus(string Mode, IReadOnlyList<string> PathPrefixes, IReadOnlyList<string> AnthropicPathPrefixes, IReadOnlyList<string> ResponsesPathPrefixes, IReadOnlyDictionary<string, string> ModelAliases, string Strategy);
 
     /// <summary>Counts over the activity log.</summary>
     public sealed record ActivitySummary(

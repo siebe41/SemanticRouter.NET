@@ -12,6 +12,9 @@ public enum ChatProtocol
 
     /// <summary>Anthropic <c>POST /v1/messages</c>: used by Claude Code and the Anthropic SDKs.</summary>
     Anthropic = 1,
+
+    /// <summary>OpenAI <c>POST /v1/responses</c>: used by Codex CLI and the OpenAI SDKs' newer agent paths.</summary>
+    Responses = 2,
 }
 
 /// <summary>One part of a chat message.</summary>
@@ -32,6 +35,19 @@ public sealed record ImageBlock(string? MediaType, string? Data, string? Url) : 
 /// <param name="Name">The tool name.</param>
 /// <param name="InputJson">The call arguments as a JSON object.</param>
 public sealed record ToolUseBlock(string Id, string Name, string InputJson) : ContentBlock;
+
+/// <summary>
+/// The model's visible reasoning ("extended thinking"). Carried back by clients on tool-loop continuations; only an
+/// Anthropic backend can use it again, and only with the signature it issued.
+/// </summary>
+/// <param name="Text">The reasoning text (empty for redacted thinking).</param>
+/// <param name="Signature">The backend's signature, or the router's marker for reasoning it relayed from elsewhere.</param>
+/// <param name="RedactedData">Encrypted content of a <c>redacted_thinking</c> block.</param>
+public sealed record ThinkingBlock(string Text, string? Signature, string? RedactedData = null) : ContentBlock
+{
+    /// <summary>The signature the router puts on reasoning it relays from a non-Anthropic backend.</summary>
+    public const string RouterSignature = "semantic-router-relayed";
+}
 
 /// <summary>The result of a tool call, sent by the client.</summary>
 /// <param name="ToolUseId">The <see cref="ToolUseBlock.Id"/> this answers.</param>
@@ -54,11 +70,76 @@ public sealed record ChatTurn(string Role, IReadOnlyList<ContentBlock> Blocks)
     public static ChatTurn FromText(string role, string text) => new(role, [new TextBlock(text)]);
 }
 
+/// <summary>What kind of tool a client offers.</summary>
+public enum ToolKind
+{
+    /// <summary>A function with JSON arguments.</summary>
+    Function = 0,
+
+    /// <summary>
+    /// A Responses API custom tool whose input is free text (optionally constrained by a grammar), such as Codex's
+    /// <c>exec</c>. Other protocols see it as a function with one string argument, <c>input</c>.
+    /// </summary>
+    Custom = 1,
+}
+
 /// <summary>A tool the client offers the model.</summary>
-/// <param name="Name">Tool name.</param>
+/// <param name="Name">The name used with backends: unique and safe for every protocol (namespaces are folded in).</param>
 /// <param name="Description">What it does.</param>
 /// <param name="InputSchemaJson">JSON Schema of its arguments (an object schema).</param>
-public sealed record ToolDefinition(string Name, string? Description, string InputSchemaJson);
+/// <param name="Kind">Function or custom (free-text input).</param>
+/// <param name="Namespace">The Responses API namespace the client declared it in, when not the default.</param>
+/// <param name="ClientName">The name the client uses, when it differs from <paramref name="Name"/>.</param>
+public sealed record ToolDefinition(
+    string Name, string? Description, string InputSchemaJson, ToolKind Kind = ToolKind.Function, string? Namespace = null, string? ClientName = null)
+{
+    /// <summary>The schema a custom tool is given when a backend only knows functions.</summary>
+    public const string CustomInputSchema = """{"type":"object","properties":{"input":{"type":"string","description":"The tool's raw input."}},"required":["input"]}""";
+
+    /// <summary>The name the client knows the tool by.</summary>
+    public string OriginalName => ClientName ?? Name;
+}
+
+/// <summary>A request for the model to reason before answering.</summary>
+/// <param name="Effort"><c>minimal</c>, <c>low</c>, <c>medium</c> or <c>high</c>, when the client gave one.</param>
+/// <param name="BudgetTokens">The thinking budget, when the client gave one (Anthropic).</param>
+public sealed record ReasoningRequest(string? Effort, int? BudgetTokens)
+{
+    /// <summary>The effort, derived from the budget when the client only gave a budget.</summary>
+    public string EffectiveEffort => Effort ?? BudgetTokens switch
+    {
+        null => "medium",
+        <= 2048 => "low",
+        <= 12_000 => "medium",
+        _ => "high",
+    };
+
+    /// <summary>The budget, derived from the effort when the client only gave an effort.</summary>
+    public int EffectiveBudget => BudgetTokens ?? (Effort switch
+    {
+        "minimal" or "low" => 2048,
+        "high" => 16_384,
+        "xhigh" or "max" => 32_768,
+        _ => 8192,
+    });
+}
+
+/// <summary>What shape the reply must have.</summary>
+public enum ResponseFormatKind
+{
+    /// <summary>Any JSON object.</summary>
+    JsonObject = 1,
+
+    /// <summary>JSON matching a schema.</summary>
+    JsonSchema = 2,
+}
+
+/// <summary>Structured output: OpenAI <c>response_format</c> or Responses <c>text.format</c>.</summary>
+/// <param name="Kind">JSON object or JSON schema.</param>
+/// <param name="Name">The schema's name.</param>
+/// <param name="SchemaJson">The JSON schema.</param>
+/// <param name="Strict">Whether the schema must be followed exactly.</param>
+public sealed record ResponseFormat(ResponseFormatKind Kind, string? Name = null, string? SchemaJson = null, bool Strict = false);
 
 /// <summary>How the model may use the offered tools.</summary>
 public enum ToolChoiceMode
@@ -95,6 +176,12 @@ public enum ChatStopReason
 
     /// <summary>A stop sequence was produced.</summary>
     StopSequence = 3,
+
+    /// <summary>The model declined (Anthropic <c>refusal</c>, OpenAI <c>content_filter</c>).</summary>
+    Refusal = 4,
+
+    /// <summary>A long-running turn paused and can be continued (Anthropic <c>pause_turn</c>).</summary>
+    PauseTurn = 5,
 }
 
 /// <summary>Token usage reported by a backend.</summary>
@@ -163,7 +250,21 @@ internal static class JsonHelpers
         {
         }
 
-        return JsonSerializer.Serialize(new Dictionary<string, string> { ["input"] = json }, ChatJsonContext.Default.DictionaryStringString);
+        return InputObject(json);
+    }
+
+    /// <summary><c>{"input": text}</c>: how free-text tool input (custom tools, non-object arguments) travels as JSON.</summary>
+    public static string InputObject(string text)
+    {
+        var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer, ChatJsonOptions.Writer))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("input", text);
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
     public static string NewToolUseId() => "toolu_" + Guid.NewGuid().ToString("N")[..24];

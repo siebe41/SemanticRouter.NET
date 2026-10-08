@@ -34,7 +34,7 @@ public sealed class ProtectedFileSecretStore : IRouterSecretStore
 {
     private const string Purpose = "SemanticRouter.Secrets.v1";
 
-    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, NewLine = "\n" };
 
     private readonly string _path;
     private readonly IDataProtector _protector;
