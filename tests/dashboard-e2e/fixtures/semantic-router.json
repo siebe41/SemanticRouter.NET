@@ -1,0 +1,21 @@
+{
+  "Connectors": {
+    "local": { "Type": "OpenAICompatible", "BaseAddress": "__STUB__" },
+    "cloud": { "Type": "OpenAICompatible", "BaseAddress": "__STUB__", "ApiKey": "sk-e2e-not-a-real-key-0000" }
+  },
+  "Models": [
+    { "Name": "local-small", "Connector": "local", "Model": "stub-small", "Tier": 1, "IsLocal": true, "Capabilities": [ "chat" ] },
+    { "Name": "cloud-large", "Connector": "cloud", "Model": "stub-large", "Tier": 4, "Capabilities": [ "chat", "code", "tools" ], "InputCostPerMillionTokens": 3, "OutputCostPerMillionTokens": 15 }
+  ],
+  "Routes": [
+    { "Name": "smalltalk", "Tier": 1, "Utterances": [ "hello there", "thanks a lot", "how are you" ] },
+    { "Name": "architecture", "Tier": 4, "Utterances": [ "design a scalable architecture", "compare these system designs" ] }
+  ],
+  "Profiles": {
+    "private": { "LocalOnly": true, "Description": "Never leaves this machine." }
+  },
+  "DefaultSimilarityThreshold": 0.3,
+  "FallbackTier": 1,
+  "Embeddings": { "Provider": "Hashing", "WarmUpOnStartup": true },
+  "Middleware": { "Mode": "Dispatch", "PathPrefixes": [ "/v1/chat/completions" ] }
+}
