@@ -62,10 +62,17 @@ public sealed class RouterDashboardOptions
 
     /// <summary>Entries shown by the activity endpoint when the client gives no limit. Default 100.</summary>
     public int DefaultActivityLimit { get; set; } = 100;
+
+    /// <summary>
+    /// Directory of drop-in themes: one <c>{id}.css</c> file per theme declaring <c>:root[data-theme="{id}"] { … }</c>,
+    /// with an optional <c>{id}.json</c> manifest (<c>{ "name": "Ocean" }</c>). Default: a <c>themes</c> directory next to
+    /// the configuration file (<c>UseConfigurationFile</c>), or none. See docs/dashboard.md#themes.
+    /// </summary>
+    public string? ThemesDirectory { get; set; }
 }
 
 /// <summary>Maps the configuration dashboard and its admin API.</summary>
-public static class RouterDashboardEndpoints
+public static partial class RouterDashboardEndpoints
 {
     private static readonly JsonSerializerOptions ApiJson = new(JsonSerializerDefaults.Web) { WriteIndented = false };
 
@@ -86,15 +93,34 @@ public static class RouterDashboardEndpoints
         prefix = "/" + prefix.Trim('/');
         DashboardAccess access = CreateAccess(endpoints.ServiceProvider, options, prefix);
         RouteGroupBuilder group = endpoints.MapGroup(prefix);
+        var themes = new ThemeCatalog(options.ThemesDirectory ?? (endpoints.ServiceProvider.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store
+            ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Location))!, "themes")
+            : null));
         group.AddEndpointFilter(access.FilterAsync);
 
         group.MapGet("/", (HttpContext context) => Asset(context, "index.html", "text/html; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
         group.MapGet("/index.html", (HttpContext context) => Asset(context, "index.html", "text/html; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
         group.MapGet("/app.css", (HttpContext context) => Asset(context, "app.css", "text/css; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
-        group.MapGet("/app.js", (HttpContext context) => Asset(context, "app.js", "text/javascript; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
+        group.MapGet("/themes/{file}", (HttpContext context, string file) =>
+            {
+                string id = file.EndsWith(".css", StringComparison.Ordinal) ? file[..^4] : string.Empty;
+                if (themes.ReadCss(id) is not { } css)
+                {
+                    return Results.NotFound();
+                }
+
+                context.Response.Headers.CacheControl = "no-cache";
+                return Results.Text(css, "text/css; charset=utf-8");
+            })
+            .WithMetadata(DashboardAnonymousMetadata.Instance);
+        group.MapGet("/js/{file}", (HttpContext context, string file) => ModuleName().IsMatch(file)
+                ? Asset(context, "js/" + file, "text/javascript; charset=utf-8", prefix)
+                : Results.NotFound())
+            .WithMetadata(DashboardAnonymousMetadata.Instance);
         group.MapGet("/graph.js", (HttpContext context) => Asset(context, "graph.js", "text/javascript; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
 
         RouteGroupBuilder api = group.MapGroup("/api");
+        api.MapGet("/themes", () => Results.Json(new ThemesResponse(themes.Directory, ThemeCatalog.RequiredTokens, themes.List()), ApiJson));
         api.MapGet("/session", (HttpContext context) =>
                 Results.Json(new SessionResponse(DashboardAccess.RoleOf(context)?.ToString(), access.TokenRequired(context), access.TokensConfigured), ApiJson))
             .WithMetadata(DashboardAnonymousMetadata.Instance);
@@ -460,6 +486,7 @@ public static class RouterDashboardEndpoints
             copy.AllowUnauthenticatedRemoteClients = source.AllowUnauthenticatedRemoteClients;
             copy.RequireTokenForLocalClients = source.RequireTokenForLocalClients;
             copy.DefaultActivityLimit = source.DefaultActivityLimit;
+            copy.ThemesDirectory = source.ThemesDirectory;
             foreach (string origin in source.PublicOrigins)
             {
                 copy.PublicOrigins.Add(origin);
@@ -510,6 +537,9 @@ public static class RouterDashboardEndpoints
 
         return access;
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[a-z0-9-]+\\.js$")]
+    private static partial System.Text.RegularExpressions.Regex ModuleName();
 
     private static IResult Asset(HttpContext context, string name, string contentType, string prefix)
     {
@@ -716,6 +746,12 @@ public static class RouterDashboardEndpoints
 
     /// <summary>Models a connector reports.</summary>
     public sealed record DiscoverResponse(IReadOnlyList<string> Models, string? Note);
+
+    /// <summary>The themes the picker offers.</summary>
+    /// <param name="Directory">Where theme files are read from, if anywhere.</param>
+    /// <param name="RequiredTokens">The tokens a theme file should declare.</param>
+    /// <param name="Themes">Built-in themes first, then the files.</param>
+    public sealed record ThemesResponse(string? Directory, IReadOnlyList<string> RequiredTokens, IReadOnlyList<DashboardTheme> Themes);
 
     /// <summary>Live status of the router.</summary>
     public sealed record StatusResponse(

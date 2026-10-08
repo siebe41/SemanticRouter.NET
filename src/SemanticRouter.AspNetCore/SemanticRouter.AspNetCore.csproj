@@ -19,6 +19,8 @@
   <ItemGroup>
     <!-- The dashboard single-page app, served by MapRouterDashboard(). -->
     <EmbeddedResource Include="Dashboard\wwwroot\*" LogicalName="dashboard/%(Filename)%(Extension)" />
+    <!-- Native ES modules, served from /js/; no build step. -->
+    <EmbeddedResource Include="Dashboard\wwwroot\js\*.js" LogicalName="dashboard/js/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

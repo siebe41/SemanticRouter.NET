@@ -94,6 +94,7 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `POST api/health/reset` | Clear every cooldown. |
 | `GET/PUT api/evaluation/set`, `POST api/evaluation/cases`, `GET api/evaluation/set/export` | The evaluation set. See [routing-quality.md](routing-quality.md#api). |
 | `POST api/evaluate?calibrate=true`, `POST api/evaluate/compare`, `GET api/routes/health` | Evaluate, calibrate, compare embedding models, check routes. |
+| `GET api/themes` | Built-in themes and theme files, with missing tokens and contrast issues; the files are served at `{prefix}/themes/{id}.css`. |
 | `POST api/routes/{name}/utterances` | Add an utterance (or create the route) and apply. |
 | `POST api/embeddings/test` | Embed a sentence with the applied provider. |
 | `POST api/connectors/{name}/discover` | Ask an HTTP connector for its model list (a `401` is reported as "requires authentication", naming the key to set). |
@@ -146,4 +147,69 @@ The chat endpoints (`/v1/chat/completions`, `/v1/messages`) are separate from th
 
 Themes are token blocks in `app.css`: every colour, font and radius the UI uses is a CSS variable set per `[data-theme]`, and the rest of the stylesheet only refers to the variables. The default, **Machine Dark**, is built on two colours: blue `#228fa7` for the working surfaces (primary actions, navigation, links, focus) and orange `#d08c34` for signals (the tier decision, warnings, cooldowns, the second chart), on near-black surfaces with Inter headings and Fira Sans text. Green and red are kept for status only. **Machine Light** uses the same two colours with darker ink variants for small text, and **Terminal** is a green-on-black alternative.
 
-To add a theme: copy a `:root[data-theme="…"]` block in `app.css`, change the values (`--accent` and `--signal` are the two brand colours; `--accent-ink` is the variant used for small text), and add `{ id, name }` to `THEMES` at the top of `app.js`. The picker in the sidebar lists it; the choice is remembered per browser.
+Every built-in theme meets WCAG AA (4.5:1) for body and small text. That includes the status colours on their tinted badge fills and the ink on the blue and orange buttons. A test checks it on every build.
+
+### Adding a theme without rebuilding
+
+Drop a token file into the **themes directory**: `themes/` next to the configuration file (for the tool, next to `semantic-router.json`), or `Dashboard:ThemesDirectory`. After a reload the theme appears in the picker under **Theme files**. Nothing is rebuilt or restarted.
+
+```css
+/* themes/ocean.css: the file name is the theme id (lower-case letters, digits and dashes). */
+:root[data-theme="ocean"] {
+  color-scheme: dark;
+  --bg: #0b1726;
+  --text: #e6f0fa;
+  /* … the rest of the tokens below … */
+}
+```
+
+An optional manifest next to it gives the display name; without one, the picker shows the id in title case:
+
+```json
+{ "name": "Ocean" }
+```
+
+**Tokens.** A theme should declare every colour token:
+- `color-scheme`
+- surfaces and borders: `--bg`, `--bg-elevated`, `--bg-sunken`, `--bg-hover`, `--border`, `--border-strong`
+- text: `--text`, `--text-muted`, `--text-faint`
+- the working colour: `--accent`, `--accent-ink` (small text and links), `--accent-contrast` (text on accent fills), `--accent-soft`
+- the signal colour: `--signal`, `--signal-ink`, `--signal-soft`, `--signal-contrast`
+- status: `--ok`, `--warn`, `--danger` and `--info`, each with a `-soft` fill
+- charts: `--series-1`, `--series-2`
+- `--brand-mark-bg` and `--shadow`
+
+Fonts (`--font-heading`, `--font-body`, `--font-mono`) and radii (`--radius`, `--radius-lg`) are optional. A token the file leaves out falls back to Machine Dark's value.
+
+**Checks.** `GET api/themes` lists every theme with:
+- the tokens it is missing;
+- its text and surface pairs below 4.5:1, computed the way WCAG defines contrast, with badge fills blended over their surface;
+- a problem when the file declares no tokens for its own id.
+
+The picker marks such themes with ⚠ and lists the issues in the option's tooltip.
+
+To add a built-in theme instead, add a token block to `app.css` and `{ id, name }` to `THEMES` in `js/core.js`. The contrast test then covers it too.
+
+## Accessibility
+
+- **Structure.** Landmarks: a navigation with the pages, a main region, and a skip link to it. The current page is marked `aria-current`, and every form control has a label (the end-to-end tests fail when one loses it).
+- **Keyboard.** Everything works from the keyboard, and focus is always visible. Expandable items (routes, models, connectors, profiles, memory sources) are buttons that open with Enter or Space. After navigation, focus moves to the page content.
+- **Small screens.** Below 720 px the navigation becomes a drawer behind a menu button. Escape closes it.
+- **Motion.** `prefers-reduced-motion` turns off transitions, the router graph's flowing edges and the memory map's pulses.
+
+## Testing the dashboard
+
+`tests/dashboard-e2e` is a Playwright suite run in CI against the real `semantic-router` host and a stub model backend. It:
+- visits every page, failing on any script or console error and on any control without an accessible name;
+- edits and applies a route, adds a model, renames a connector (its models follow), and checks that validation errors appear and that discard restores the configuration;
+- runs the prompt tester, switches themes and checks the choice is remembered, and picks up a theme file dropped in at run time;
+- checks keyboard operation, the phone navigation and contrast;
+- compares screenshots of the three built-in themes at desktop and phone widths.
+
+```bash
+dotnet build -c Release
+cd tests/dashboard-e2e && npm ci && npx playwright install chromium
+npm test                       # or: npm run update-screenshots after an intended visual change
+```
+
+The page code is plain JavaScript in native ES modules under `wwwroot/js/` (no build step, no dependencies). `app.js` is the entry point, `core.js` holds state and helpers, `shell.js` holds loading, chrome, themes and routing, and there is one module per group of pages.

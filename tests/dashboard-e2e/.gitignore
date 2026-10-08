@@ -1,0 +1,5 @@
+node_modules/
+test-results/
+playwright-report/
+# The fixture configuration (the root .gitignore excludes saved configurations; this one holds no secrets).
+!fixtures/semantic-router.json
