@@ -38,7 +38,7 @@ public sealed class SemanticRouterBuilder
             o.Provider = EmbeddingProviderKind.Hashing;
             o.Dimensions = dimensions;
         });
-        return UseEmbeddingProvider(SemanticRouterServiceCollectionExtensions.CreateEmbeddingProvider);
+        return this;
     }
 
     /// <summary>Uses an OpenAI-compatible <c>/v1/embeddings</c> endpoint such as Ollama or OpenAI.</summary>
@@ -49,7 +49,27 @@ public sealed class SemanticRouterBuilder
             o.Provider = EmbeddingProviderKind.OpenAICompatible;
             configure?.Invoke(o);
         });
-        return UseEmbeddingProvider(SemanticRouterServiceCollectionExtensions.CreateEmbeddingProvider);
+        return this;
+    }
+
+    /// <summary>
+    /// Keeps the configuration in a JSON file so changes made through the dashboard or the admin API survive restarts.
+    /// When the file exists it replaces the application's <c>SemanticRouter</c> section (secrets left empty in the file
+    /// are inherited from it). Relative paths resolve against the current directory.
+    /// </summary>
+    public SemanticRouterBuilder UseConfigurationFile(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Services.Replace(ServiceDescriptor.Singleton<IRouterConfigurationStore>(new JsonFileRouterConfigurationStore(path)));
+        return this;
+    }
+
+    /// <summary>Uses a custom <see cref="IRouterConfigurationStore"/>.</summary>
+    public SemanticRouterBuilder UseConfigurationStore<TStore>()
+        where TStore : class, IRouterConfigurationStore
+    {
+        Services.Replace(ServiceDescriptor.Singleton<IRouterConfigurationStore, TStore>());
+        return this;
     }
 
     /// <summary>Customizes the routing rules (applied after configuration binding).</summary>

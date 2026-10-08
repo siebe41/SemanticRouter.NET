@@ -28,7 +28,8 @@ Each mechanism below exists because of a specific line in a vendor's terms. Thos
 | 4 | **Personal, local use only.** A subscription login must not be turned into a service for other people. | `AllowRemoteClients` defaults to **false**. CLI connectors answer only requests from the loopback interface, and remote callers fall through to the next (API-key) model. The sample listens on `localhost`. |
 | 5 | **Respect usage limits; never get around them.** When a vendor says you have hit a limit, stop asking. | Usage-limit messages put the model, or every model on that account, into a **cooldown** (`QuotaCooldown`, 15 minutes by default) instead of retrying. The router never rotates accounts or tokens. |
 | 6 | **Ordinary volumes.** | CLI connectors have a concurrency limit (`MaxConcurrency`, default 2; the sample uses 1 for Codex, per OpenAI's "one machine or serialized job stream" guidance). With `CheapestCapable`, easy prompts go to free local models first. |
-| 7 | **Least privilege for the CLI.** This is a safety measure, not a terms requirement. | Each run gets a fresh empty working directory, with built-in tools disabled or denied and MCP servers and custom instructions turned off (flags per preset). The prompt is never passed through a shell. |
+| 7 | **Least privilege for the CLI.** This is a safety measure, not a terms requirement. | Each run gets a fresh empty working directory, with built-in tools disabled or denied and MCP servers and custom instructions turned off (flags per preset). The prompt is never passed through a shell. With `ToolCalling: Prompted`, tools are only *described* to the CLI; the client that asked runs them. |
+| 8 | **Never relay a client's credentials.** When Claude Code or another tool is pointed at the router, its `Authorization`/`x-api-key` headers are ignored and never forwarded or stored. | HTTP connectors always use the key from configuration. The recommended client setup sends a placeholder token (`ANTHROPIC_AUTH_TOKEN=semantic-router`), so the real session token never leaves the client. |
 
 ## Anthropic: Claude Code
 
@@ -50,9 +51,11 @@ Each mechanism below exists because of a specific line in a vendor's terms. Thos
 - *Not on behalf of other users, not in a product.* Loopback-only by default (rule 4). Turning on `AllowRemoteClients` to serve other people would be exactly what the third-party-developer and product clauses rule out.
 - *Ordinary, individual usage.* Cooldowns, concurrency limits, and local models absorbing easy prompts (rules 5 and 6) all keep usage within normal individual patterns.
 
+**Claude Code as the client.** Pointing Claude Code at the router (`ANTHROPIC_BASE_URL`) changes nothing above: the router does not touch the client's session token (rule 8), and when a turn lands on the Claude Code *connector* the router runs the unmodified `claude` binary on your own login exactly as before. With `ToolCalling: Prompted` the inner `claude` answers with text describing a tool call and your outer Claude Code runs the tool: the inner process still never runs tools, and the subscription still only serves you.
+
 **Grey areas:**
 
-- *"Ordinary, individual usage" is not defined.* A router that only sends *you* your own hard prompts is ordinary use by any reasonable reading. Feeding it unattended batch jobs around the clock is not.
+- *"Ordinary, individual usage" is not defined.* A router that only sends *you* your own hard prompts is ordinary use by any reasonable reading. Feeding it unattended batch jobs around the clock is not. Prompted tool calling re-sends the full agent context on every turn (no prompt cache), so an agentic session through the router uses more of your quota than Claude Code talking to Anthropic directly; keep easy turns on local models.
 - *Billing for third-party harnesses.* Press reports from 2026 say Anthropic began billing third-party *harnesses* that use subscription logins as pay-as-you-go "extra usage". This connector runs the official binary rather than reimplementing it, but whether a given setup counts as a harness is Anthropic's call. If your usage meter shows extra usage you did not expect, that is the signal; contact Anthropic.
 
 ## GitHub: Copilot CLI

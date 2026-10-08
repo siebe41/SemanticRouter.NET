@@ -35,8 +35,8 @@ public interface IModelHealth
 public sealed class ModelHealthTracker : IModelHealth
 {
     private readonly ConcurrentDictionary<string, DateTimeOffset> _cooldownUntil = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ModelSelectionOptions _options;
     private readonly TimeProvider _time;
+    private volatile ModelSelectionOptions _options;
 
     /// <summary>Creates a tracker.</summary>
     public ModelHealthTracker(ModelSelectionOptions? options = null, TimeProvider? timeProvider = null)
@@ -44,6 +44,16 @@ public sealed class ModelHealthTracker : IModelHealth
         _options = options ?? new ModelSelectionOptions();
         _time = timeProvider ?? TimeProvider.System;
     }
+
+    /// <summary>Replaces the cooldown durations, e.g. after configuration is reloaded. Existing cooldowns keep their expiry.</summary>
+    public void Configure(ModelSelectionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        _options = options;
+    }
+
+    /// <summary>Clears every cooldown so all models are tried again immediately.</summary>
+    public void Clear() => _cooldownUntil.Clear();
 
     /// <inheritdoc />
     public bool IsAvailable(ModelDefinition model)

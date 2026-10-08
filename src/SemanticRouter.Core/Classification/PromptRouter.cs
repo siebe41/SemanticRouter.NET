@@ -20,6 +20,13 @@ public sealed record PromptRoutingRequest
 
     /// <summary>Overrides the configured <see cref="ModelSelectionOptions.Strategy"/> for this request.</summary>
     public SelectionStrategy? Strategy { get; init; }
+
+    /// <summary>
+    /// A catalog model that served an earlier turn of this conversation (it issued the tool calls this request answers).
+    /// When it is enabled and available it is tried first without re-classifying the prompt
+    /// (<see cref="RoutingReason.ConversationAffinity"/>); otherwise the request is routed normally.
+    /// </summary>
+    public string? AffinityModel { get; init; }
 }
 
 /// <summary>The routing outcome: requirements, and the models to try in order.</summary>
@@ -88,6 +95,18 @@ public sealed class PromptRouter : IPromptRouter
                 PromptClassificationResult.Bypass(forced.Tier, RoutingReason.ModelOverride),
                 requirements,
                 [new ModelCandidate(forced, forced.EstimateCost(tokens, 0), MeetsRequiredTier: true)]);
+        }
+
+        if (request.AffinityModel is { } affinity
+            && _models.FirstOrDefault(m => m.Enabled && string.Equals(m.Name, affinity, StringComparison.OrdinalIgnoreCase)) is { } pinned
+            && _health.IsAvailable(pinned))
+        {
+            // Continue the turn on the model that started it; the normally ranked models remain as fallbacks.
+            var pinnedRequest = request with { EstimatedInputTokens = request.EstimatedInputTokens ?? TokenEstimator.Estimate(request.Prompt) };
+            RoutingPlan plan = Plan(PromptClassificationResult.Bypass(pinned.Tier, RoutingReason.ConversationAffinity), pinnedRequest);
+            ModelCandidate first = plan.Candidates.FirstOrDefault(c => c.Model == pinned)
+                ?? new ModelCandidate(pinned, pinned.EstimateCost(plan.Requirements.EstimatedInputTokens, 0), MeetsRequiredTier: true);
+            return plan with { Candidates = [first, .. plan.Candidates.Where(c => c.Model != pinned)] };
         }
 
         PromptClassificationResult classification =

@@ -17,6 +17,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The dashboard single-page app, served by MapRouterDashboard(). -->
+    <EmbeddedResource Include="Dashboard\wwwroot\*" LogicalName="dashboard/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="SemanticRouter.Tests" />
   </ItemGroup>
 

@@ -75,6 +75,18 @@ Claude is slower to answer than LM Studio, because every request starts the `cla
 dotnet run --project samples/LmStudioClaudePoc
 ```
 
+The dashboard is at <http://localhost:5090/router>: live activity, the models' state, and every setting editable with hot reload (saved to `semantic-router.json` next to the app).
+
+### From Claude Code
+
+Keep using Claude Code exactly as before; just point it here:
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:5090 ANTHROPIC_AUTH_TOKEN=semantic-router claude
+```
+
+Every turn is routed on your latest message: easy and private ones go to LM Studio, hard ones to Claude. The `claude-cli` connector has `ToolCalling: Prompted`, so Claude Code's tool-bearing turns can land on your subscription too: the router describes Claude Code's tools to the inner `claude -p` run, parses the tool call it answers with, and hands it back to your Claude Code, which runs the tool. If your LM Studio model supports function calling (e.g. `qwen3-coder`), add `"tools"` to the `lmstudio` model's capabilities and easy agentic turns stay local. See [docs/clients.md](../../docs/clients.md).
+
 Then send requests (`poc.http` has more examples):
 
 ```bash
@@ -95,6 +107,7 @@ Any tool that lets you set an OpenAI base URL will work. Use base URL `http://lo
 | `lmstudio` | force LM Studio |
 | `claude` | force Claude |
 | `auto:best` | the most capable model available |
+| `claude-sonnet-…`, `claude-opus-…` (what Claude Code sends) | mapped by `Middleware:ModelAliases`: `*haiku*` → `auto:cheapest`, `*opus*` → `auto:best`, otherwise `auto` |
 
 Every response carries routing headers:
 

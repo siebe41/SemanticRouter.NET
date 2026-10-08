@@ -24,11 +24,17 @@ public abstract class RouterHostTest : IAsyncDisposable
 
     protected Mock<IPromptClassifier> Classifier { get; } = new();
 
+    /// <summary>The running host's services (after <see cref="StartAsync"/>).</summary>
+    protected IServiceProvider Services => _host!.Services;
+
     private protected StubHttpMessageHandler LocalHttp { get; set; } = StubHttpMessageHandler.Json("""{"from":"local"}""");
 
     private protected StubHttpMessageHandler CloudHttp { get; set; } = StubHttpMessageHandler.Json("""{"from":"cloud"}""");
 
     private protected FakeCliProcessRunner Cli { get; set; } = FakeCliProcessRunner.Replying(ClaudeStream.Delta("Hi"), ClaudeStream.Success("Hi"));
+
+    /// <summary>Stub for the optional native Anthropic connector ("anthropic-native").</summary>
+    private protected StubHttpMessageHandler AnthropicHttp { get; set; } = StubHttpMessageHandler.Json("""{"type":"message","role":"assistant","content":[{"type":"text","text":"from anthropic"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":2}}""");
 
     protected RouterHostTest() => ClassifyAs(tier: 1);
 
@@ -111,6 +117,7 @@ public abstract class RouterHostTest : IAsyncDisposable
 
                     s.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "lmstudio").ConfigurePrimaryHttpMessageHandler(() => LocalHttp);
                     s.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "anthropic").ConfigurePrimaryHttpMessageHandler(() => CloudHttp);
+                    s.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "anthropic-native").ConfigurePrimaryHttpMessageHandler(() => AnthropicHttp);
                     s.AddSingleton<ICliProcessRunner>(Cli);
 
                     if (mockClassifier)
@@ -129,6 +136,8 @@ public abstract class RouterHostTest : IAsyncDisposable
                     {
                         e.MapPromptClassification();
                         e.MapRouterModels();
+                        e.MapAnthropicTokenCount();
+                        e.MapRouterDashboard();
                         e.MapFallback(EchoAsync);
                     });
                 }))

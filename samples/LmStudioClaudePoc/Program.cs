@@ -29,12 +29,16 @@ if (demo)
     builder.Logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.Warning);
 }
 
-builder.Services.AddSemanticPromptRouting(builder.Configuration.GetSection(SemanticRouterOptions.SectionName));
+builder.Services
+    .AddSemanticPromptRouting(builder.Configuration.GetSection(SemanticRouterOptions.SectionName))
+    .UseConfigurationFile("semantic-router.json");   // dashboard edits are saved here and survive restarts
 
 var app = builder.Build();
-app.UsePromptRouter();                // serves POST /v1/chat/completions
+app.UsePromptRouter();                // serves POST /v1/chat/completions (OpenAI) and POST /v1/messages (Anthropic / Claude Code)
 app.MapRouterModels();                // GET /v1/models
+app.MapAnthropicTokenCount();         // POST /v1/messages/count_tokens
 app.MapPromptClassification();        // POST /semantic-router/classify {"prompt": "..."}: explains a decision, calls no model
+app.MapRouterDashboard("/router");    // the dashboard: status, activity and every setting, with hot reload
 
 await app.StartAsync();
 string baseUrl = app.Urls.First();
@@ -46,7 +50,9 @@ if (demo)
     return exitCode;
 }
 
-Console.WriteLine($"Router ready. Point an OpenAI-compatible client at {baseUrl}/v1 with model \"auto\" (or \"lmstudio\" / \"claude\").");
+Console.WriteLine($"Router ready. Dashboard: {baseUrl}/router");
+Console.WriteLine($"  OpenAI clients:  base URL {baseUrl}/v1, model \"auto\" (or \"lmstudio\" / \"claude\")");
+Console.WriteLine($"  Claude Code:     ANTHROPIC_BASE_URL={baseUrl} ANTHROPIC_AUTH_TOKEN=semantic-router claude");
 Console.WriteLine("Each request is logged with the tier, route and model chosen. Ctrl+C to stop.");
 await app.WaitForShutdownAsync();
 return 0;

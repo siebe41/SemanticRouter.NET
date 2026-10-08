@@ -55,3 +55,6 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Router configuration saved from the dashboard (may contain API keys)
+semantic-router.json

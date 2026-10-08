@@ -25,18 +25,20 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     private readonly ConnectorOptions _options;
     private readonly CliAdapter _adapter;
     private readonly ICliProcessRunner _runner;
+    private readonly IToolCallAffinity? _affinity;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _gate;
     private readonly string _executable;
     private readonly string[] _quotaPatterns;
     private readonly string[] _removedEnvironment;
 
-    public CliChatConnector(string name, ConnectorOptions options, ICliProcessRunner runner, ILogger logger)
+    public CliChatConnector(string name, ConnectorOptions options, ICliProcessRunner runner, ILogger logger, IToolCallAffinity? affinity = null)
     {
         Name = name;
         _options = options;
         _adapter = CliAdapter.For(options.Preset);
         _runner = runner;
+        _affinity = affinity;
         _logger = logger;
         _gate = new SemaphoreSlim(Math.Max(1, options.MaxConcurrency));
         _executable = string.IsNullOrWhiteSpace(options.Executable) ? _adapter.DefaultExecutable : options.Executable;
@@ -58,9 +60,14 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             return ConnectorResult.Skipped("CLI connectors only serve requests from this machine (AllowRemoteClients is false)");
         }
 
-        if (request.Chat.HasTools)
+        if (request.Chat.HasTools && _options.ToolCalling != CliToolCalling.Prompted)
         {
-            return ConnectorResult.Skipped("CLI connectors cannot execute client-defined tools");
+            return ConnectorResult.Skipped("CLI connectors cannot carry client-defined tools (set ToolCalling to Prompted to describe them in the prompt)");
+        }
+
+        if (request.Chat.HasImages)
+        {
+            return ConnectorResult.Skipped("CLI connectors cannot carry images");
         }
 
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -82,7 +89,8 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     private async Task<ConnectorResult> RunAsync(
         ConnectorRequest request, HttpContext context, string workingDirectory, CancellationToken cancellationToken)
     {
-        var cliRequest = new CliRequest(request.Model.Model, request.Chat.Messages, workingDirectory, _options);
+        bool prompted = request.Chat.HasTools || request.Chat.Turns.Any(t => t.Blocks.Any(b => b is ToolUseBlock or ToolResultBlock));
+        var cliRequest = new CliRequest(request.Model.Model, request.Chat.Messages, workingDirectory, _options, prompted ? request.Chat : null);
         (List<string> arguments, string? standardInput) = _adapter.Build(cliRequest);
         if (_options.Preset != CliPreset.Custom && _options.Arguments is { Count: > 0 } extra)
         {
@@ -101,7 +109,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
 
         using var firstOutputTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         firstOutputTimeout.CancelAfter(_options.EffectiveTimeout);
-        var writer = new ChatCompletionWriter(context, request.Model.Name, request.Chat.Stream);
+        IChatResponseWriter writer = ChatResponseWriterFactory.Create(context, request.Chat, request.Model, _affinity);
 
         ICliProcess process;
         try
@@ -118,7 +126,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         {
             try
             {
-                return await ReadAsync(process, writer, firstOutputTimeout, cancellationToken).ConfigureAwait(false);
+                return await ReadAsync(process, writer, request.Chat.HasTools, firstOutputTimeout, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && !writer.HasStarted)
             {
@@ -129,12 +137,14 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     }
 
     private async Task<ConnectorResult> ReadAsync(
-        ICliProcess process, ChatCompletionWriter writer, CancellationTokenSource firstOutputTimeout, CancellationToken cancellationToken)
+        ICliProcess process, IChatResponseWriter writer, bool parseToolCalls, CancellationTokenSource firstOutputTimeout, CancellationToken cancellationToken)
     {
         ICliOutputParser? parser = _adapter.OutputMode == CliOutputMode.JsonLines ? _adapter.CreateParser() : null;
         var text = new StringBuilder();
+        var streamed = new StringBuilder();
         CliEvent? final = null;
         bool quotaSignal = false;
+        bool committed = false;
 
         await foreach (string line in process.ReadOutputLinesAsync(firstOutputTimeout.Token).ConfigureAwait(false))
         {
@@ -148,13 +158,22 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             quotaSignal |= evt.QuotaSignal;
             if (evt.Kind == CliEventKind.Delta && !string.IsNullOrEmpty(evt.Text))
             {
-                if (!writer.HasStarted)
+                if (!committed)
                 {
                     // Committed: from here on the client owns the stream and only the request's own token applies.
+                    committed = true;
                     firstOutputTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
                 }
 
-                await writer.WriteDeltaAsync(evt.Text, cancellationToken).ConfigureAwait(false);
+                if (parseToolCalls)
+                {
+                    // A reply may end in tool calls, which must reach the client structured: buffer until the end.
+                    streamed.Append(evt.Text);
+                }
+                else
+                {
+                    await writer.WriteTextAsync(evt.Text, cancellationToken).ConfigureAwait(false);
+                }
             }
             else if (evt.Kind == CliEventKind.Final)
             {
@@ -163,21 +182,29 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
 
         int exitCode = await process.WaitForExitAsync(firstOutputTimeout.Token).ConfigureAwait(false);
-        string reply = parser is null ? text.ToString().Trim() : final?.Text ?? string.Empty;
+        string reply = parser is null ? text.ToString().Trim() : final?.Text ?? streamed.ToString();
+        bool produced = writer.HasStarted || streamed.Length > 0;
         // An empty "successful" reply is treated as a failure so the router can try another model.
         bool succeeded = parser is null
             ? exitCode == 0 && reply.Length > 0
-            : (final is { IsError: false } && (writer.HasStarted || reply.Length > 0))
-              || (final is null && exitCode == 0 && writer.HasStarted);
+            : (final is { IsError: false } && (produced || reply.Length > 0))
+              || (final is null && exitCode == 0 && produced);
 
         if (succeeded)
         {
-            if (!writer.HasStarted && reply.Length > 0)
+            var usage = new ChatUsage(final?.InputTokens, final?.OutputTokens);
+            if (parseToolCalls)
             {
-                await writer.WriteDeltaAsync(reply, cancellationToken).ConfigureAwait(false);
+                await WriteParsedReplyAsync(writer, reply, usage, cancellationToken).ConfigureAwait(false);
+                return ConnectorResult.Completed;
             }
 
-            await writer.CompleteAsync(final?.InputTokens, final?.OutputTokens, cancellationToken).ConfigureAwait(false);
+            if (!writer.HasStarted && reply.Length > 0)
+            {
+                await writer.WriteTextAsync(reply, cancellationToken).ConfigureAwait(false);
+            }
+
+            await writer.CompleteAsync(ChatStopReason.EndTurn, usage, cancellationToken).ConfigureAwait(false);
             return ConnectorResult.Completed;
         }
 
@@ -186,7 +213,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         {
             // Too late to fail over: end the stream cleanly and record what happened.
             LogMidStreamFailure(_logger, Name, exitCode, Truncate(diagnostics));
-            await writer.CompleteAsync(null, null, cancellationToken).ConfigureAwait(false);
+            await writer.CompleteAsync(ChatStopReason.EndTurn, default, cancellationToken).ConfigureAwait(false);
             return ConnectorResult.Completed;
         }
 
@@ -196,6 +223,25 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             quota ? ModelFailureKind.QuotaExceeded : ModelFailureKind.Unavailable,
             $"exit code {exitCode}: {Truncate(diagnostics, 200)}",
             affectsAllConnectorModels: quota && !ModelSpecificLimitPatterns.Any(p => diagnostics.Contains(p, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>Writes a reply that may end in prompted tool calls as text plus structured calls.</summary>
+    private static async Task WriteParsedReplyAsync(IChatResponseWriter writer, string reply, ChatUsage usage, CancellationToken cancellationToken)
+    {
+        (string text, IReadOnlyList<ToolUseBlock> calls) = PromptedToolCalls.Parse(reply);
+        if (text.Length > 0)
+        {
+            await writer.WriteTextAsync(text, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (ToolUseBlock call in calls)
+        {
+            await writer.StartToolCallAsync(call.Id, call.Name, cancellationToken).ConfigureAwait(false);
+            await writer.WriteToolCallArgumentsAsync(call.InputJson, cancellationToken).ConfigureAwait(false);
+            await writer.EndToolCallAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await writer.CompleteAsync(calls.Count > 0 ? ChatStopReason.ToolUse : ChatStopReason.EndTurn, usage, cancellationToken).ConfigureAwait(false);
     }
 
     private static bool IsLocalRequest(HttpContext context)

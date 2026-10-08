@@ -52,6 +52,27 @@ public static class PromptRouterApplicationBuilderExtensions
     }
 
     /// <summary>
+    /// Maps the Anthropic <c>POST /v1/messages/count_tokens</c> endpoint, which agentic clients call to track context
+    /// size. Returns the router's own estimate; no model is called.
+    /// </summary>
+    public static RouteHandlerBuilder MapAnthropicTokenCount(
+        this IEndpointRouteBuilder endpoints,
+        [System.Diagnostics.CodeAnalysis.StringSyntax("Route")] string pattern = "/v1/messages/count_tokens")
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+
+        return endpoints.MapPost(pattern, async (HttpContext context) =>
+            {
+                using System.Text.Json.JsonDocument document = await System.Text.Json.JsonDocument
+                    .ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted).ConfigureAwait(false);
+                ChatCompletionRequest request = ChatCompletionRequest.ParseAnthropic(document.RootElement);
+                return Results.Ok(new TokenCountResponse(request.EstimatedInputTokens));
+            })
+            .WithName("CountAnthropicTokens")
+            .WithSummary("Estimates the input tokens of an Anthropic Messages request.");
+    }
+
+    /// <summary>
     /// Maps an OpenAI-compatible <c>GET /v1/models</c> listing the routing aliases (<c>auto</c>, <c>auto:cheapest</c>,
     /// <c>auto:best</c>, <c>auto:priority</c>) and every enabled catalog model, so chat clients can offer them.
     /// </summary>
@@ -76,6 +97,10 @@ public static class PromptRouterApplicationBuilderExtensions
             .WithSummary("Lists routing aliases and catalog models.");
     }
 }
+
+/// <summary>The <c>count_tokens</c> response.</summary>
+/// <param name="InputTokens">Estimated input tokens.</param>
+public sealed record TokenCountResponse([property: System.Text.Json.Serialization.JsonPropertyName("input_tokens")] int InputTokens);
 
 /// <summary>Request body for the classification endpoint.</summary>
 /// <param name="Prompt">The prompt to route.</param>

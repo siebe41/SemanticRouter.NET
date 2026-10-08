@@ -3,11 +3,25 @@ using System.Text.Json;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>What the connector needs to build one CLI invocation.</summary>
+/// <param name="Model">The provider model id, if any.</param>
+/// <param name="Messages">The conversation, flattened to text.</param>
+/// <param name="WorkingDirectory">The scratch directory the process runs in.</param>
+/// <param name="Options">The connector's options.</param>
+/// <param name="Request">The full request, when tools or tool traffic must be rendered into the prompt.</param>
 internal sealed record CliRequest(
     string? Model,
     IReadOnlyList<ChatMessage> Messages,
     string WorkingDirectory,
-    ConnectorOptions Options);
+    ConnectorOptions Options,
+    ChatCompletionRequest? Request = null)
+{
+    /// <summary>The system prompt and the conversation prompt.</summary>
+    public (string? System, string Prompt) RenderTranscript() =>
+        Request is null ? ChatTranscript.Render(Messages) : ChatTranscript.Render(Request);
+
+    /// <summary>The whole prompt with the system prompt inlined.</summary>
+    public string RenderInline() => Request is null ? ChatTranscript.RenderInline(Messages) : ChatTranscript.RenderInline(Request);
+}
 
 internal enum CliOutputMode
 {
@@ -110,11 +124,11 @@ internal sealed class ClaudeCodeCliAdapter : CliAdapter
 
     public override (List<string> Arguments, string? StandardInput) Build(CliRequest request)
     {
-        (string? system, string prompt) = ChatTranscript.Render(request.Messages);
+        (string? system, string prompt) = request.RenderTranscript();
         if (system is not null && system.Length > request.Options.MaxArgumentLength)
         {
             // Too long for an argument: keep it in the conversation text instead.
-            prompt = ChatTranscript.RenderInline(request.Messages);
+            prompt = request.RenderInline();
             system = null;
         }
 
@@ -218,7 +232,7 @@ internal sealed class CopilotCliAdapter : CliAdapter
 
     public override (List<string> Arguments, string? StandardInput) Build(CliRequest request)
     {
-        string prompt = ChatTranscript.RenderInline(request.Messages);
+        string prompt = request.RenderInline();
         bool useStdin = prompt.Length > request.Options.MaxArgumentLength;
 
         // "--prompt=<value>" keeps the prompt a single token even when it starts with '-'. Piped input is the
@@ -279,7 +293,7 @@ internal sealed class CodexCliAdapter : CliAdapter
         }
 
         arguments.Add("-");
-        return (arguments, ChatTranscript.RenderInline(request.Messages));
+        return (arguments, request.RenderInline());
     }
 
     public override ICliOutputParser CreateParser() => new Parser();
@@ -340,7 +354,7 @@ internal sealed class CustomCliAdapter : CliAdapter
 
     public override (List<string> Arguments, string? StandardInput) Build(CliRequest request)
     {
-        string prompt = ChatTranscript.RenderInline(request.Messages);
+        string prompt = request.RenderInline();
         bool asArgument = request.Options.PromptInput == CliPromptInput.Argument;
 
         var arguments = new List<string>();

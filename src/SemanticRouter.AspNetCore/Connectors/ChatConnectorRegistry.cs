@@ -1,33 +1,33 @@
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace SemanticRouter.AspNetCore;
 
-/// <summary>Resolves connectors by name: configured ones plus any <see cref="IChatConnector"/> registered in DI.</summary>
-internal sealed class ChatConnectorRegistry : IDisposable
+/// <summary>The connectors built from one configuration snapshot: configured ones plus any <see cref="IChatConnector"/> registered in DI.</summary>
+internal sealed class ConnectorCatalog : IDisposable
 {
     private readonly Dictionary<string, IChatConnector> _connectors = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<IDisposable> _owned = [];
 
-    public ChatConnectorRegistry(
-        IOptions<SemanticRouterConnectorsOptions> options,
+    public ConnectorCatalog(
+        IReadOnlyDictionary<string, ConnectorOptions> options,
         IEnumerable<IChatConnector> registered,
         IHttpClientFactory httpClientFactory,
         ICliProcessRunner processRunner,
+        IToolCallAffinity? affinity,
         ILoggerFactory loggerFactory)
     {
-        foreach ((string name, ConnectorOptions connector) in options.Value.Connectors)
+        foreach ((string name, ConnectorOptions connector) in options)
         {
             if (connector.Type == ConnectorType.Cli)
             {
-                var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>());
+                var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity);
                 _owned.Add(cli);
                 _connectors[name] = cli;
             }
             else
             {
                 _connectors[name] = new OpenAICompatibleConnector(
-                    name, connector, httpClientFactory, loggerFactory.CreateLogger<OpenAICompatibleConnector>());
+                    name, connector, httpClientFactory, loggerFactory.CreateLogger<OpenAICompatibleConnector>(), affinity);
             }
         }
 
@@ -49,4 +49,19 @@ internal sealed class ChatConnectorRegistry : IDisposable
             disposable.Dispose();
         }
     }
+}
+
+/// <summary>Resolves connectors by name from the current runtime (survives configuration reloads).</summary>
+internal sealed class ChatConnectorRegistry
+{
+    private readonly RouterRuntimeProvider _runtime;
+
+    public ChatConnectorRegistry(RouterRuntimeProvider runtime)
+    {
+        _runtime = runtime;
+    }
+
+    public IReadOnlyCollection<string> Names => _runtime.Current.Connectors.Names;
+
+    public bool TryGet(string name, out IChatConnector connector) => _runtime.Current.Connectors.TryGet(name, out connector);
 }

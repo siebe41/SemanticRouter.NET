@@ -32,4 +32,10 @@ public enum RoutingReason
 
     /// <summary>The caller asked for a specific catalog model, so classification was skipped.</summary>
     ModelOverride = 7,
+
+    /// <summary>
+    /// The request continues a tool-calling turn that an earlier request started (it carries tool results), so it was
+    /// pinned to the model that issued those tool calls instead of being classified again.
+    /// </summary>
+    ConversationAffinity = 8,
 }

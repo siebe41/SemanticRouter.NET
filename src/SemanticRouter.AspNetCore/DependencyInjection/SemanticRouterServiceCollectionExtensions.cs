@@ -52,29 +52,21 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddEnumerable(
             ServiceDescriptor.Singleton<IValidateOptions<SemanticRouterOptions>, SemanticRouterOptionsValidator>());
 
-        services.TryAddSingleton<IComplexityAnalyzer>(sp =>
-            new HeuristicComplexityAnalyzer(RouterOptions(sp).Complexity));
-        services.TryAddSingleton<IRouteSelector>(sp => new DefaultRouteSelector(RouterOptions(sp)));
-        services.TryAddSingleton<IEmbeddingProvider>(CreateEmbeddingProvider);
-        services.TryAddSingleton<IPromptClassifier>(sp => new SemanticPromptClassifier(
-            sp.GetRequiredService<IEmbeddingProvider>(),
-            RouterOptions(sp),
-            sp.GetRequiredService<IComplexityAnalyzer>(),
-            sp.GetRequiredService<IRouteSelector>()));
-        services.TryAddSingleton<IPromptExtractor>(sp => new JsonPromptExtractor(
-            sp.GetRequiredService<IOptions<PromptRouterMiddlewareOptions>>().Value.MessageSelection));
-
-        services.TryAddSingleton<IModelSelector>(sp => new DefaultModelSelector(RouterOptions(sp).Selection));
+        // Long-lived state shared across configuration reloads.
         services.TryAddSingleton<IModelHealth>(sp => new ModelHealthTracker(
-            RouterOptions(sp).Selection, sp.GetService<TimeProvider>() ?? TimeProvider.System));
-        services.TryAddSingleton<IPromptRouter>(sp => new PromptRouter(
-            sp.GetRequiredService<IPromptClassifier>(),
-            RouterOptions(sp),
-            sp.GetRequiredService<IModelSelector>(),
-            sp.GetRequiredService<IModelHealth>()));
-
+            sp.GetRequiredService<IOptions<SemanticRouterOptions>>().Value.Selection, sp.GetService<TimeProvider>() ?? TimeProvider.System));
+        services.TryAddSingleton<IToolCallAffinity, ToolCallAffinity>();
+        services.TryAddSingleton<RoutingActivityLog>();
         services.TryAddSingleton<PromptRouterMetrics>();
         services.TryAddSingleton<ICliProcessRunner, SystemCliProcessRunner>();
+
+        // Everything derived from configuration lives in the current RouterRuntime; these facades forward to it.
+        // Register your own implementation of any of these interfaces to replace the router's default.
+        services.TryAddSingleton<RouterRuntimeProvider>();
+        services.TryAddSingleton<IPromptClassifier, RuntimeClassifierFacade>();
+        services.TryAddSingleton<IPromptRouter, RuntimeRouterFacade>();
+        services.TryAddSingleton<IEmbeddingProvider, RuntimeEmbeddingProviderFacade>();
+        services.TryAddSingleton<IPromptExtractor, RuntimeExtractorFacade>();
         services.TryAddSingleton<ChatConnectorRegistry>();
         services.TryAddSingleton<PromptDispatcher>();
         services.AddHostedService<SemanticRouterWarmupService>();
@@ -83,26 +75,10 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<HttpClientFactoryOptions>, ConnectorHttpClientOptions>());
         services.AddHttpClient(EmbeddingsClientName)
             .ConfigureHttpClient((sp, client) =>
-                client.Timeout = sp.GetRequiredService<IOptions<EmbeddingProviderOptions>>().Value.Timeout);
+                client.Timeout = sp.GetRequiredService<RouterRuntimeProvider>().Current.Configuration.Embeddings.Timeout);
 
         return new SemanticRouterBuilder(services);
     }
-
-    internal static IEmbeddingProvider CreateEmbeddingProvider(IServiceProvider services)
-    {
-        EmbeddingProviderOptions options = services.GetRequiredService<IOptions<EmbeddingProviderOptions>>().Value;
-        return options.Provider switch
-        {
-            EmbeddingProviderKind.Hashing => new HashingEmbeddingProvider(options.Dimensions),
-            EmbeddingProviderKind.OpenAICompatible => new OpenAICompatibleEmbeddingProvider(
-                () => services.GetRequiredService<IHttpClientFactory>().CreateClient(EmbeddingsClientName),
-                options),
-            _ => throw new InvalidOperationException($"Unknown embedding provider '{options.Provider}'."),
-        };
-    }
-
-    private static SemanticRouterOptions RouterOptions(IServiceProvider sp) =>
-        sp.GetRequiredService<IOptions<SemanticRouterOptions>>().Value;
 
     private sealed class ConnectorHttpClientOptions : IConfigureNamedOptions<HttpClientFactoryOptions>
     {

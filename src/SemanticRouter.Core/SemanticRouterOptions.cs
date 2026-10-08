@@ -34,7 +34,7 @@ public sealed class ComplexityTierRule
 /// <summary>
 /// Configuration for semantic prompt routing. Bindable from the <c>SemanticRouter</c> configuration section.
 /// </summary>
-public sealed class SemanticRouterOptions
+public class SemanticRouterOptions
 {
     /// <summary>The conventional configuration section name.</summary>
     public const string SectionName = "SemanticRouter";
@@ -47,8 +47,26 @@ public sealed class SemanticRouterOptions
         new() { MinScore = 0.85, Tier = 4 },
     ];
 
+    /// <summary>The default capability ladder used when <see cref="Tiers"/> is not configured.</summary>
+    public static IReadOnlyList<TierDefinition> DefaultTiers { get; } =
+    [
+        new() { Level = 1, Name = "Local small", Description = "Small local models (up to ~8B): chit-chat, rewrite, summarize, translate." },
+        new() { Level = 2, Name = "Local coder / mini", Description = "Mid-size local coder models and \"mini\" API models: small self-contained code tasks, extraction." },
+        new() { Level = 3, Name = "Strong general", Description = "Strong general models: everyday reasoning and unmatched prompts." },
+        new() { Level = 4, Name = "Frontier", Description = "Frontier models: architecture, debugging, agentic coding, multi-step analysis." },
+        new() { Level = 5, Name = "Frontier + deep reasoning", Description = "Frontier models with extended reasoning: the hardest problems." },
+    ];
+
     /// <summary>The semantic intent clusters that decide how capable a model must be.</summary>
     public IList<RouteDefinition> Routes { get; } = new List<RouteDefinition>();
+
+    /// <summary>
+    /// Names and descriptions for the tier numbers used by routes and models. Purely descriptive: routing compares
+    /// the numbers. When <see langword="null"/>, <see cref="DefaultTiers"/> apply.
+    /// </summary>
+#pragma warning disable CA2227 // Settable so configuration binding replaces (rather than appends to) the defaults.
+    public IList<TierDefinition>? Tiers { get; set; }
+#pragma warning restore CA2227
 
     /// <summary>The models the router may dispatch to.</summary>
     public IList<ModelDefinition> Models { get; } = new List<ModelDefinition>();
@@ -95,6 +113,10 @@ public sealed class SemanticRouterOptions
 
     /// <summary>Model selection and failover settings.</summary>
     public ModelSelectionOptions Selection { get; set; } = new();
+
+    /// <summary>The effective tier ladder: <see cref="Tiers"/>, or <see cref="DefaultTiers"/> when none are configured.</summary>
+    public IReadOnlyList<TierDefinition> EffectiveTiers =>
+        Tiers is { Count: > 0 } ? Tiers.OrderBy(t => t.Level).ToArray() : DefaultTiers;
 
     /// <summary>The tier implied by a complexity score alone (0 when no rule applies).</summary>
     public int TierForComplexity(double score)
@@ -167,6 +189,7 @@ public sealed class SemanticRouterOptions
             errors.AddRange(Selection.GetValidationErrors());
         }
 
+        ValidateTiers(errors);
         ValidateRoutes(errors);
         ValidateModels(errors);
         return errors;
@@ -186,6 +209,23 @@ public sealed class SemanticRouterOptions
     }
 
     internal float GetThreshold(RouteDefinition route) => route.SimilarityThreshold ?? DefaultSimilarityThreshold;
+
+    private void ValidateTiers(List<string> errors)
+    {
+        var levels = new HashSet<int>();
+        foreach (TierDefinition tier in Tiers ?? [])
+        {
+            if (tier.Level < 0)
+            {
+                errors.Add($"Tier '{tier.Name}' must not have a negative Level.");
+            }
+
+            if (!levels.Add(tier.Level))
+            {
+                errors.Add($"Tier level {tier.Level} is defined more than once.");
+            }
+        }
+    }
 
     private void ValidateRoutes(List<string> errors)
     {
