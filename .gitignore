@@ -56,5 +56,6 @@ CodeCoverage/
 TestResult.xml
 nunit-*.xml
 
-# Router configuration saved from the dashboard (may contain API keys)
+# Router configuration saved from the dashboard (may contain API keys), and its encrypted secret file
 semantic-router.json
+*.secrets.json

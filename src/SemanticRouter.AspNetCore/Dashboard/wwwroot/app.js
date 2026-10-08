@@ -36,6 +36,7 @@
     tester: { prompt: '', model: 'auto', result: null, reply: null, busy: false },
     activityFilter: 'all',
     autoRefresh: true,
+    session: { role: null, tokenRequired: false, tokensConfigured: false },
   };
 
   /* ---------------------------------------------------------------------------------------------
@@ -47,6 +48,8 @@
   const num = (v, d) => (v == null || v === '' ? '' : (typeof v === 'number' ? Number(v.toFixed(d == null ? 3 : d)) : v));
   const when = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString(); };
   const isDirty = () => state.config && JSON.stringify(state.config) !== state.original;
+  const readOnly = () => state.session.role === 'ReadOnly';
+  const isReference = (v) => typeof v === 'string' && /\$\{(env|secret):[^}]+\}/i.test(v);
   const tierName = (level) => {
     const t = (state.status && state.status.tiers || []).find((x) => x.level === level);
     return t ? `${level} · ${t.name}` : String(level);
@@ -69,6 +72,7 @@
     const text = await res.text();
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+    if (res.status === 401 && path !== '/session') { showSignIn(); }
     if (!res.ok) {
       const err = new Error((data && (data.detail || data.title || (data.errors && data.errors.join('; ')))) || `HTTP ${res.status}`);
       err.data = data; err.status = res.status;
@@ -121,9 +125,35 @@
   }
 
   /* ---------------------------------------------------------------------------------------------
+     Sign-in (remote access with a dashboard token)
+     --------------------------------------------------------------------------------------------- */
+  function showSignIn(message) {
+    if (!message && $('#signin-form')) return; // already showing; background refreshes must not clear the input
+    $('#view').innerHTML = `
+      <div class="card section signin" style="max-width:460px">
+        <h2>Sign in</h2>
+        <p class="muted small">This router asks for its dashboard token (<code>SemanticRouter:Dashboard:AdminToken</code>, or the read-only token).</p>
+        <form id="signin-form">
+          <label class="field"><span class="name">Token</span><input type="password" id="signin-token" autocomplete="current-password" required></label>
+          ${message ? `<p class="small" style="color:var(--danger)">${h(message)}</p>` : ''}
+          <div class="inline" style="margin-top:10px"><button class="btn primary" type="submit">Sign in</button></div>
+        </form>
+      </div>`;
+    $('#signin-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      try {
+        state.session = await api('POST', '/session', { token: $('#signin-token').value });
+        await loadAll(); route();
+      } catch (e) { showSignIn(e.message); }
+    });
+    const input = $('#signin-token'); if (input) input.focus();
+  }
+
+  /* ---------------------------------------------------------------------------------------------
      Data loading
      --------------------------------------------------------------------------------------------- */
   async function loadAll() {
+    try { state.session = await api('GET', '/session'); } catch { /* older router: no session endpoint */ }
     const [status, cfg, activity] = await Promise.all([api('GET', '/status'), api('GET', '/config'), api('GET', '/activity?limit=200')]);
     state.status = status;
     setConfig(cfg);
@@ -134,7 +164,7 @@
   function setConfig(envelope) {
     state.config = envelope.config;
     state.original = JSON.stringify(envelope.config);
-    state.meta = { version: envelope.version, source: envelope.source, store: envelope.store, warning: envelope.warning, createdAt: envelope.createdAt };
+    state.meta = { version: envelope.version, source: envelope.source, store: envelope.store, secretStore: envelope.secretStore, warning: envelope.warning, createdAt: envelope.createdAt };
     state.errors = null;
   }
 
@@ -163,9 +193,15 @@
         (cooling ? ` · <span class="badge warn">${cooling} cooling down</span>` : '') +
         (s.warmedUp ? '' : (s.warmUpError ? ` · <span class="badge danger" title="${h(s.warmUpError)}">embeddings failed</span>` : ' · <span class="badge info">warming up</span>'));
     }
-    $('#save-bar').classList.toggle('hidden', !isDirty());
+    $('#save-bar').classList.toggle('hidden', !isDirty() || readOnly());
     $$('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === state.view));
-    if (state.meta.warning) banner(h(state.meta.warning), 'warn'); else banner(null);
+    const notes = [];
+    if (readOnly()) notes.push('Signed in with the <b>read-only</b> token: you can look, not change.');
+    if (state.meta.warning) notes.push(h(state.meta.warning));
+    ((s && s.warnings) || []).forEach((w) => notes.push(h(w)));
+    if (notes.length) banner(notes.join('<br>'), 'warn'); else banner(null);
+    const signOut = $('#sign-out');
+    if (signOut) signOut.classList.toggle('hidden', !state.session.role || !state.session.tokenRequired);
   }
 
   function initTheme() {
@@ -283,7 +319,7 @@
       <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th></tr>
       ${entries.map((e) => `<tr title="${h(e.detail || '')}">
         <td class="nowrap small">${h(when(e.timestamp))}</td>
-        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok</div></td>
+        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok</div></td>
         <td><span class="tier">T${e.tier}</span></td>
         <td class="small">${h(e.reason)}</td>
         <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
@@ -403,9 +439,12 @@
   const secretField = (path, value, label) => `
     <label class="field"><span class="name">${label}</span>
       <div class="inline">
-        ${value === '***' ? '<span class="badge ok">set</span><button class="btn small" data-action="secret-change" data-path="' + path + '">Change</button><button class="btn ghost small" data-action="secret-clear" data-path="' + path + '">Clear</button>'
-          : `<input type="password" data-bind="${path}" data-kind="nulltext" value="${h(value || '')}" placeholder="not set" autocomplete="new-password">`}
-      </div><span class="hint">Stored in the configuration store when you save. Values in appsettings or environment variables are inherited when left empty.</span></label>`;
+        ${value === '***' || isReference(value)
+          ? (isReference(value) ? `<code class="small" title="Resolved when the configuration is applied">${h(value)}</code>` : '<span class="badge ok">set</span>') + '<button class="btn small" data-action="secret-change" data-path="' + path + '">Change</button><button class="btn ghost small" data-action="secret-clear" data-path="' + path + '">Clear</button>'
+          : `<input type="password" data-bind="${path}" data-kind="nulltext" value="${h(value || '')}" placeholder="not set, or \${env:VARIABLE}" autocomplete="new-password">`}
+      </div><span class="hint">${state.meta.secretStore
+        ? 'Typed keys are encrypted into the secret store when you save; the file keeps a <code>${secret:…}</code> reference.'
+        : 'Typed keys are written to the configuration file when you save. Prefer <code>${env:VARIABLE}</code>, or leave empty to inherit from appsettings, user-secrets or the environment.'}</span></label>`;
 
   views.connectors = () => {
     const conns = state.config.Connectors || {};
@@ -419,7 +458,7 @@
         return `<div class="item ${state.open.has(key) ? 'open' : ''}" data-key="${key}">
           <div class="item-head" data-action="toggle" data-key="${key}">
             <span class="chev">▶</span><span class="title">${h(name)}</span>
-            <span class="meta"><span class="badge accent">${h(type)}${type === 'Cli' ? ' / ' + h(c.Preset || 'Custom') : ''}</span><span class="mono">${h(type === 'Cli' ? (c.Executable || '(preset default)') : (c.BaseAddress || ''))}</span><span>${models.length} model${models.length === 1 ? '' : 's'}</span>${c.ApiKey === '***' ? '<span class="badge ok">key set</span>' : ''}${type === 'Cli' && c.ToolCalling === 'Prompted' ? '<span class="badge info">prompted tools</span>' : ''}</span>
+            <span class="meta"><span class="badge accent">${h(type)}${type === 'Cli' ? ' / ' + h(c.Preset || 'Custom') : ''}</span><span class="mono">${h(type === 'Cli' ? (c.Executable || '(preset default)') : (c.BaseAddress || ''))}</span><span>${models.length} model${models.length === 1 ? '' : 's'}</span>${c.ApiKey === '***' ? '<span class="badge ok">key set</span>' : (isReference(c.ApiKey) ? '<span class="badge ok" title="' + h(c.ApiKey) + '">key: reference</span>' : '')}${type === 'Cli' && c.ToolCalling === 'Prompted' ? '<span class="badge info">prompted tools</span>' : ''}</span>
           </div>
           <div class="item-body"><div class="form-grid">
             <label class="field"><span class="name">Name</span><input type="text" data-action-input="connector-rename" data-name="${h(name)}" value="${h(name)}"><span class="hint">Models refer to it by this name; renaming updates them.</span></label>
@@ -528,6 +567,10 @@
         <label class="check"><input type="checkbox" data-bind="Middleware.FailOpen" data-kind="bool" ${m.FailOpen !== false ? 'checked' : ''}> Fail open (fallback tier when classification throws)</label>
         <label class="check"><input type="checkbox" data-bind="Middleware.PinToolCallingTurns" data-kind="bool" ${m.PinToolCallingTurns !== false ? 'checked' : ''}> Pin tool-calling turns to the model that started them</label>
         <label class="check"><input type="checkbox" data-bind="Middleware.StripSystemReminders" data-kind="bool" ${m.StripSystemReminders !== false ? 'checked' : ''}> Ignore &lt;system-reminder&gt; blocks when classifying</label>
+      </div></div>
+      <div class="card section"><div class="card-head"><h2>Gateway keys</h2><span class="muted small">Optional. When set, clients on other machines must send one (<code>Authorization: Bearer</code> or <code>x-api-key</code>); the client name is shown in Activity.</span></div><div class="form-grid">
+        <label class="field wide"><span class="name">Keys (client=key, one per line)</span><textarea data-bind="Middleware.GatewayKeys" data-kind="kv" rows="3" placeholder="laptop=\${env:ROUTER_KEY_LAPTOP}">${h(kv(m.GatewayKeys))}</textarea><span class="hint">Stored keys show as <code>***</code> and are kept when left as is. Use <code>\${env:…}</code> references to keep keys out of the file.</span></label>
+        <label class="check"><input type="checkbox" data-bind="Middleware.RequireGatewayKeyForLocalClients" data-kind="bool" ${m.RequireGatewayKeyForLocalClients ? 'checked' : ''}> Require a key from this machine too (for a local reverse proxy)</label>
       </div></div>
       <div class="card section"><div class="card-head"><h2>Model aliases</h2><span class="muted small">Map the names clients send to routing aliases or catalog models. Globs, first match wins.</span><span class="spacer"></span><button class="btn small" data-action="alias-add">Add alias</button><button class="btn ghost small" data-action="alias-claude">Add Claude Code defaults</button></div>
         <table><tr><th>Client model (glob)</th><th>Routes as</th><th></th></tr>
@@ -787,6 +830,10 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
   window.addEventListener('beforeunload', (ev) => { if (isDirty()) { ev.preventDefault(); ev.returnValue = ''; } });
 
   initTheme();
-  loadAll().then(route).catch((e) => { $('#view').innerHTML = `<div class="card"><h3>Could not reach the router API</h3><pre>${h(e.message)}</pre><p class="muted small">Is the dashboard mapped (<code>app.MapRouterDashboard()</code>) and are you browsing from the same machine?</p></div>`; });
+  const signOutBtn = $('#sign-out');
+  if (signOutBtn) signOutBtn.addEventListener('click', async () => { await api('DELETE', '/session').catch(() => {}); location.reload(); });
+  loadAll().then(route).catch((e) => {
+    if (e.status === 401) { showSignIn(); return; }
+    $('#view').innerHTML = `<div class="card"><h3>Could not reach the router API</h3><pre>${h(e.message)}</pre><p class="muted small">Is the dashboard mapped (<code>app.MapRouterDashboard()</code>) and are you browsing from the same machine?</p></div>`; });
   setInterval(() => { if (state.autoRefresh && document.visibilityState === 'visible' && !isDirty()) refreshStatus(); else if (state.autoRefresh && document.visibilityState === 'visible') { api('GET', '/status').then((s) => { state.status = s; renderChrome(); }).catch(() => {}); } }, 5000);
 })();

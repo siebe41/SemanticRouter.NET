@@ -31,7 +31,8 @@ if (demo)
 
 builder.Services
     .AddSemanticPromptRouting(builder.Configuration.GetSection(SemanticRouterOptions.SectionName))
-    .UseConfigurationFile("semantic-router.json");   // dashboard edits are saved here and survive restarts
+    .UseConfigurationFile("semantic-router.json")    // dashboard edits are saved here and survive restarts
+    .UseSecretFile();                                 // keys typed into the dashboard are encrypted into semantic-router.secrets.json
 
 var app = builder.Build();
 app.UsePromptRouter();                // serves POST /v1/chat/completions (OpenAI) and POST /v1/messages (Anthropic / Claude Code)

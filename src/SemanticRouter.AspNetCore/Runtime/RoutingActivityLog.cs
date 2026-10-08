@@ -15,6 +15,9 @@ public sealed class RoutingActivityEntry
     /// <summary>The request path.</summary>
     public string Path { get; init; } = string.Empty;
 
+    /// <summary>The name of the gateway key the client presented, when gateway keys are configured.</summary>
+    public string? Client { get; init; }
+
     /// <summary>The model the client asked for, before alias mapping.</summary>
     public string? RequestedModel { get; init; }
 

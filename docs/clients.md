@@ -108,4 +108,6 @@ curl -s http://localhost:5080/semantic-router/classify -H 'Content-Type: applica
 
 ## Keep it local
 
-Subscription CLI connectors only answer loopback clients (`AllowRemoteClients: false`), and the dashboard's admin API does too (`RouterDashboardOptions.RequireLocalClient`). Bind the router to `localhost` when it fronts your personal subscriptions; see [TERMS.md](TERMS.md).
+Subscription CLI connectors only answer loopback clients (`AllowRemoteClients: false`), and the dashboard's admin API does too unless a dashboard token is configured (see [dashboard.md](dashboard.md#access-and-security)). Bind the router to `localhost` when it fronts your personal subscriptions; see [TERMS.md](TERMS.md).
+
+If you do share the router (with API-key and local models only), set `Middleware:GatewayKeys` so each client presents its own key: `ANTHROPIC_AUTH_TOKEN=<key>` for Claude Code, `OPENAI_API_KEY=<key>` for OpenAI clients. The router compares the key and records the client's name in Activity; it never forwards it.

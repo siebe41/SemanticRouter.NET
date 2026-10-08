@@ -45,11 +45,21 @@ Editing never touches the running router until you choose:
 2. With `UseConfigurationFile(path)` (or a custom `IRouterConfigurationStore`), a saved document **replaces** the baseline on start-up. Secrets left empty in the document (connector `ApiKey`, header values, the embeddings key) are inherited from the baseline, so keys can stay in user-secrets or environment variables.
 3. Without a store, changes apply in memory and are lost on restart; the UI says so.
 
-Secrets are never sent to the browser: the API masks them as `***`, and sending `***` back keeps the stored value. Values you type are stored in the configuration file, so keep that file out of source control (the samples' `.gitignore` does).
+Secrets are never sent to the browser: the API masks them as `***`, and sending `***` back keeps the stored value.
+
+## Keeping secrets out of the file
+
+Three ways to give a connector its key, from safest to least safe:
+
+1. **Leave the field empty** and keep the key in user-secrets or an environment variable (`SemanticRouter__Connectors__openai__ApiKey`). The saved document inherits it from the baseline.
+2. **Write a reference** in the field: `${env:OPENAI_API_KEY}` reads an environment variable each time the configuration is applied; `${secret:connectors/openai/ApiKey}` reads the secret store. A reference can sit inside a value (`Bearer ${env:TOKEN}` in a header). References are shown as they are (they are not secrets), and an unresolved one is listed as a warning in the banner, in `GET api/status` (`warnings`) and in the log.
+3. **Type the key.** With a secret store registered (`.UseSecretFile()`, or your own `IRouterSecretStore` through `.UseSecretStore<T>()`), **Apply & save** moves it into the store and the file keeps a `${secret:…}` reference. `UseSecretFile` encrypts values with ASP.NET Core Data Protection into `{config name}.secrets.json` next to the configuration file; the data-protection keys stay in your user profile (DPAPI-protected on Windows), so a copy of the configuration directory carries no usable key. Without a store, the key is written to the file in plain text and the save says so, with these alternatives.
+
+References work in connector `ApiKey` and `Headers`, CLI `EnvironmentVariables`, `Embeddings:ApiKey`, `Middleware:GatewayKeys` and the dashboard tokens. Resolved values are redacted (`***`) from 503 details, relayed upstream errors, activity entries and log messages, so a backend that echoes a key back cannot leak it through the router.
 
 ## Admin API
 
-All under the dashboard prefix, JSON in and out. By default only loopback clients are accepted (`RouterDashboardOptions.RequireLocalClient`); turn that off only behind your own authentication.
+All under the dashboard prefix, JSON in and out. Who may call it is described in [Access and security](#access-and-security).
 
 | Method and path | Purpose |
 |---|---|
@@ -63,13 +73,51 @@ All under the dashboard prefix, JSON in and out. By default only loopback client
 | `POST api/classify` | `{ "prompt": "...", "model": "auto" }` → the routing plan, without calling a model. |
 | `POST api/health/reset` | Clear every cooldown. |
 | `POST api/embeddings/test` | Embed a sentence with the applied provider. |
-| `POST api/connectors/{name}/discover` | Ask an HTTP connector for its model list. |
+| `POST api/connectors/{name}/discover` | Ask an HTTP connector for its model list (a `401` is reported as "requires authentication", naming the key to set). |
+| `GET api/session` | `{ role, tokenRequired, tokensConfigured }` for the caller. |
+| `POST api/session` | `{ "token": "..." }` → sets the session cookie. |
+| `DELETE api/session` | Signs out. |
+
+`PUT api/config`, `POST api/config/reset` and `POST api/health/reset` change the router and need the admin role; everything else is open to the read-only role.
 
 The same document works with `PUT` from scripts, e.g. to promote a tested configuration:
 
 ```bash
 curl -X PUT http://localhost:5080/router/api/config -H 'Content-Type: application/json' --data @semantic-router.json
 ```
+
+## Access and security
+
+The admin API can change where prompts go, so the default is strict and opening it up takes two explicit settings.
+
+| Setup | Settings | What happens |
+|---|---|---|
+| **Loopback only** (default) | nothing | Requests from other machines get `403`. Loopback requests must carry a `Host` header naming this machine (`localhost`, `127.0.0.1`, `[::1]`, or a `PublicOrigins` entry), which stops a web page from reaching the dashboard through DNS rebinding. |
+| **Token** | `RequireLocalClient: false`, `AdminToken` (and optionally `ReadOnlyToken`) | Remote callers send `Authorization: Bearer <token>`, or sign in on the dashboard, which sets an `HttpOnly`, `SameSite=Strict` session cookie derived from the token (never the token itself; changing the token signs everyone out). The read-only token can view status, activity and the masked configuration and use the prompt tester; it cannot apply, save or reset. Loopback clients still need no token. |
+| **Reverse proxy that authenticates** | `RequireLocalClient: false`, `AllowUnauthenticatedRemoteClients: true` | Remote callers are trusted. Only for a proxy that authenticates every request; a warning is logged at start-up. |
+
+```jsonc
+"SemanticRouter": {
+  "Dashboard": {
+    "RequireLocalClient": false,
+    "AdminToken": "${env:ROUTER_ADMIN_TOKEN}",       // 16+ characters, e.g. `openssl rand -hex 24`
+    "ReadOnlyToken": "${env:ROUTER_VIEW_TOKEN}",
+    "PublicOrigins": [ "https://router.home.lan" ]    // where people browse to it, if not localhost
+  }
+}
+```
+
+The same settings are on `RouterDashboardOptions` (`app.MapRouterDashboard("/router", o => ...)` runs after the bound section). With `RequireLocalClient: false` and no token, remote requests are still refused and the log says what to configure.
+
+Whatever the setup:
+
+- **Writes must come from the dashboard's own origin.** `PUT`, `POST` and `DELETE` with an `Origin` other than the request's host (or a `PublicOrigins` entry), or with `Sec-Fetch-Site: cross-site`, get `403`. Scripts that send no `Origin` (curl) are unaffected.
+- **A reverse proxy on this machine makes every request look local.** Use ASP.NET Core's forwarded-headers middleware so the real client address is seen, or set `RequireTokenForLocalClients: true`.
+- **Subscription CLI connectors stay loopback-only** (`AllowRemoteClients: false`) whatever the dashboard allows: a remote client's request falls through to an API-key or local model. Serving other people from your personal subscription is what [TERMS.md](TERMS.md) rules out.
+
+### Gateway keys
+
+The chat endpoints (`/v1/chat/completions`, `/v1/messages`) are separate from the dashboard. To tell clients of a shared router apart, give each one a key under `Middleware:GatewayKeys` (`"laptop": "${env:ROUTER_KEY_LAPTOP}"`). Remote requests without a valid key get `401` in their protocol's error format; the matched name appears in the Activity page (`client`). Clients send the key the way they send any API key: `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` for Claude Code, `OPENAI_API_KEY` for OpenAI clients. Keys are compared in constant time and never logged or forwarded; backends always get the connector's own credentials. Loopback clients may omit the key unless `RequireGatewayKeyForLocalClients` is on. `GET /v1/models` and `count_tokens` are not covered.
 
 ## Themes
 

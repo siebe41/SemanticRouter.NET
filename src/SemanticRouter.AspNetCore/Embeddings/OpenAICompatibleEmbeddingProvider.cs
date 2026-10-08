@@ -90,6 +90,16 @@ public sealed class OpenAICompatibleEmbeddingProvider : IEmbeddingProvider
 
         HttpClient client = _clientFactory();
         using HttpResponseMessage response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+        {
+            throw new HttpRequestException(
+                string.IsNullOrEmpty(_options.ApiKey)
+                    ? $"The embeddings endpoint requires authentication (HTTP {(int)response.StatusCode}); set SemanticRouter:Embeddings:ApiKey."
+                    : $"The embeddings endpoint rejected the credentials (HTTP {(int)response.StatusCode}); check SemanticRouter:Embeddings:ApiKey.",
+                null,
+                response.StatusCode);
+        }
+
         response.EnsureSuccessStatusCode();
 
         EmbeddingResponse? payload = await response.Content

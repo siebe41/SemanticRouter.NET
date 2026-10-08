@@ -103,13 +103,15 @@ internal sealed partial class PromptDispatcher
                         }
                     }
 
-                    LogFailover(_logger, model.Name, result.FailureKind, result.Detail ?? "failed");
-                    attempts.Add($"{model.Name}: {result.Detail ?? "failed"}");
+                    string failure = runtime.Redactor.Redact(result.Detail ?? "failed");
+                    LogFailover(_logger, model.Name, result.FailureKind, failure);
+                    attempts.Add($"{model.Name}: {failure}");
                     break;
 
                 default:
-                    LogSkipped(_logger, model.Name, result.Detail ?? "skipped");
-                    attempts.Add($"{model.Name}: skipped ({result.Detail})");
+                    string reason = runtime.Redactor.Redact(result.Detail ?? "skipped");
+                    LogSkipped(_logger, model.Name, reason);
+                    attempts.Add($"{model.Name}: skipped ({reason})");
                     break;
             }
         }

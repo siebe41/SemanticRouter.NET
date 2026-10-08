@@ -40,10 +40,16 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IToolCallAffinity? _affinity;
     private readonly ILogger _logger;
+    private readonly SecretRedactor _redactor;
     private readonly Uri _requestUri;
 
     public OpenAICompatibleConnector(
-        string name, ConnectorOptions options, IHttpClientFactory httpClientFactory, ILogger logger, IToolCallAffinity? affinity = null)
+        string name,
+        ConnectorOptions options,
+        IHttpClientFactory httpClientFactory,
+        ILogger logger,
+        IToolCallAffinity? affinity = null,
+        SecretRedactor? redactor = null)
     {
         if (options.BaseAddress is not { IsAbsoluteUri: true })
         {
@@ -55,6 +61,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         _httpClientFactory = httpClientFactory;
         _affinity = affinity;
         _logger = logger;
+        _redactor = redactor ?? SecretRedactor.None;
         _requestUri = new Uri(options.BaseAddress, options.EffectiveRequestPath);
     }
 
@@ -112,21 +119,39 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
                                        && !cancellationToken.IsCancellationRequested)
             {
                 // Expected operational failures (server down, timeout): one line, no stack trace.
-                LogUpstreamFailure(_logger, Name, message.RequestUri!, ex is OperationCanceledException ? "timed out" : ex.Message);
+                string error = ex is OperationCanceledException ? "timed out" : _redactor.Redact(ex.Message);
+                LogUpstreamFailure(_logger, Name, message.RequestUri!, error);
                 return ConnectorResult.Failed(
                     ModelFailureKind.Unavailable,
-                    ex is OperationCanceledException ? "timed out" : $"unreachable ({ex.Message})");
+                    ex is OperationCanceledException ? "timed out" : $"unreachable ({error})");
             }
         }
 
         using (response)
         {
             int status = (int)response.StatusCode;
-            if (status is 401 or 403 or 404 or 408 or 429 || status >= 500)
+            if (status is 401 or 403)
+            {
+                string advice = CredentialAdvice(Name, status, hasKey: !string.IsNullOrEmpty(_options.ApiKey));
+                LogUpstreamRejectedCredentials(_logger, Name, status, advice);
+                return ConnectorResult.Failed(ModelFailureKind.Unavailable, $"HTTP {status.ToString(CultureInfo.InvariantCulture)}: {advice}");
+            }
+
+            if (status is 404 or 408 or 429 || status >= 500)
             {
                 string detail = $"HTTP {status.ToString(CultureInfo.InvariantCulture)}";
                 LogUpstreamStatus(_logger, Name, status);
                 return ConnectorResult.Failed(status == 429 ? ModelFailureKind.QuotaExceeded : ModelFailureKind.Unavailable, detail);
+            }
+
+            if (passThrough && !response.IsSuccessStatusCode)
+            {
+                // Relay the backend's error in its own shape, but never a key it may have echoed back.
+                string error = _redactor.Redact(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+                context.Response.StatusCode = status;
+                context.Response.ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/json";
+                await context.Response.WriteAsync(error, cancellationToken).ConfigureAwait(false);
+                return ConnectorResult.Completed;
             }
 
             if (passThrough)
@@ -137,7 +162,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
             if (!response.IsSuccessStatusCode)
             {
-                await RelayErrorAsync(context, response, request.Chat.Protocol, cancellationToken).ConfigureAwait(false);
+                await RelayErrorAsync(context, response, request.Chat.Protocol, _redactor, cancellationToken).ConfigureAwait(false);
                 return ConnectorResult.Completed;
             }
 
@@ -239,13 +264,21 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
     }
 
     /// <summary>Relays a non-failover upstream error (e.g. 400) to a client that speaks another protocol.</summary>
-    private static async Task RelayErrorAsync(HttpContext context, HttpResponseMessage response, ChatProtocol clientProtocol, CancellationToken cancellationToken)
+    private static async Task RelayErrorAsync(
+        HttpContext context, HttpResponseMessage response, ChatProtocol clientProtocol, SecretRedactor redactor, CancellationToken cancellationToken)
     {
-        string upstreamBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        string upstreamBody = redactor.Redact(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
         string detail = ExtractErrorMessage(upstreamBody) ?? (upstreamBody.Length > 500 ? upstreamBody[..500] : upstreamBody);
         await ProtocolErrors.WriteAsync(
             context, clientProtocol, (int)response.StatusCode, "Upstream request rejected", detail, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>What to fix when a server rejects the connector's credentials (names the setting, never the value).</summary>
+    internal static string CredentialAdvice(string connector, int status, bool hasKey) => hasKey
+        ? $"the server rejected the credentials; check SemanticRouter:Connectors:{connector}:ApiKey"
+        : status == 401
+            ? $"the server requires authentication; set SemanticRouter:Connectors:{connector}:ApiKey"
+            : $"the server refused the request; check SemanticRouter:Connectors:{connector}:ApiKey and the server's permissions";
 
     private static string? ExtractErrorMessage(string body)
     {
@@ -268,6 +301,9 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: request to {Uri} failed: {Error}")]
     private static partial void LogUpstreamFailure(ILogger logger, string connector, Uri uri, string error);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: HTTP {Status}, {Advice}. Trying the next model.")]
+    private static partial void LogUpstreamRejectedCredentials(ILogger logger, string connector, int status, string advice);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: upstream returned HTTP {Status}; trying the next model.")]
     private static partial void LogUpstreamStatus(ILogger logger, string connector, int status);

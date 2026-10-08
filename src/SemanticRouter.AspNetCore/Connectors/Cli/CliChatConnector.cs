@@ -31,8 +31,10 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     private readonly string _executable;
     private readonly string[] _quotaPatterns;
     private readonly string[] _removedEnvironment;
+    private readonly SecretRedactor _redactor;
 
-    public CliChatConnector(string name, ConnectorOptions options, ICliProcessRunner runner, ILogger logger, IToolCallAffinity? affinity = null)
+    public CliChatConnector(
+        string name, ConnectorOptions options, ICliProcessRunner runner, ILogger logger, IToolCallAffinity? affinity = null, SecretRedactor? redactor = null)
     {
         Name = name;
         _options = options;
@@ -40,6 +42,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         _runner = runner;
         _affinity = affinity;
         _logger = logger;
+        _redactor = redactor ?? SecretRedactor.None;
         _gate = new SemaphoreSlim(Math.Max(1, options.MaxConcurrency));
         _executable = string.IsNullOrWhiteSpace(options.Executable) ? _adapter.DefaultExecutable : options.Executable;
         _quotaPatterns = _adapter.DefaultQuotaPatterns.Concat(options.QuotaErrorPatterns).ToArray();
@@ -208,7 +211,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             return ConnectorResult.Completed;
         }
 
-        string diagnostics = string.Join(" | ", new[] { reply, process.StandardError.Trim() }.Where(s => s.Length > 0));
+        string diagnostics = _redactor.Redact(string.Join(" | ", new[] { reply, process.StandardError.Trim() }.Where(s => s.Length > 0)));
         if (writer.HasStarted)
         {
             // Too late to fail over: end the stream cleanly and record what happened.
