@@ -72,6 +72,12 @@ public class SemanticRouterOptions
     public IList<ModelDefinition> Models { get; } = new List<ModelDefinition>();
 
     /// <summary>
+    /// Named routing policies (<see cref="PromptRoutingRequest.Profile"/>): which models a context may use, its strategy,
+    /// tier floor and ceiling, and whether its prompts must stay local. Names are case-insensitive.
+    /// </summary>
+    public IDictionary<string, RoutingProfile> Profiles { get; } = new Dictionary<string, RoutingProfile>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Cosine similarity a prompt must reach to match a route that does not set its own threshold.
     /// The right value depends heavily on the embedding model. Default 0.75.
     /// </summary>
@@ -203,7 +209,56 @@ public class SemanticRouterOptions
         ValidateTiers(errors);
         ValidateRoutes(errors);
         ValidateModels(errors);
+        ValidateProfiles(errors);
         return errors;
+    }
+
+    private void ValidateProfiles(List<string> errors)
+    {
+        var connectors = new HashSet<string>(Models.Select(m => m.Connector), StringComparer.OrdinalIgnoreCase);
+        foreach ((string name, RoutingProfile profile) in Profiles)
+        {
+            if (string.IsNullOrWhiteSpace(name) || name.Contains('@', StringComparison.Ordinal))
+            {
+                errors.Add($"Profile names must not be empty or contain '@' ('{name}').");
+            }
+
+            if (profile.MinTier is < 0 || profile.MaxTier is < 0 || (profile.MinTier is { } min && profile.MaxTier is { } max && min > max))
+            {
+                errors.Add($"Profile '{name}' needs MinTier and MaxTier that are not negative, with MinTier ≤ MaxTier.");
+            }
+
+            foreach (string model in profile.AllowedModels.Concat(profile.DeniedModels))
+            {
+                if (!model.Contains('*', StringComparison.Ordinal) && !Models.Any(m => string.Equals(m.Name, model, StringComparison.OrdinalIgnoreCase)))
+                {
+                    errors.Add($"Profile '{name}' names model '{model}', which is not in the catalog.");
+                }
+            }
+
+            foreach (string connector in profile.AllowedConnectors.Concat(profile.DeniedConnectors))
+            {
+                if (Models.Count > 0 && !connectors.Contains(connector))
+                {
+                    errors.Add($"Profile '{name}' names connector '{connector}', which no model uses.");
+                }
+            }
+
+            if (profile.Strategy is { } strategy && !Enum.IsDefined(strategy))
+            {
+                errors.Add($"Profile '{name}' has an unknown strategy '{strategy}'.");
+            }
+        }
+
+        foreach (ModelDefinition model in Models.Where(m => m.ActiveHours is { Length: > 0 } && !TimeWindow.TryParse(m.ActiveHours, out _)))
+        {
+            errors.Add($"Model '{model.Name}' ActiveHours '{model.ActiveHours}' is not HH:mm-HH:mm.");
+        }
+
+        if (Selection.TimeZone is { Length: > 0 } zone && !TimeZoneInfo.TryFindSystemTimeZoneById(zone, out _))
+        {
+            errors.Add($"Selection TimeZone '{zone}' is not a known time zone.");
+        }
     }
 
     /// <summary>Throws when <see cref="GetValidationErrors"/> reports any problem.</summary>

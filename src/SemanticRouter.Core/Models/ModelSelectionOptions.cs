@@ -24,6 +24,13 @@ public sealed class ModelSelectionOptions
     /// <summary>How long a model is skipped after it fails or is unreachable. Default 30 seconds.</summary>
     public TimeSpan FailureCooldown { get; set; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>The time zone of models' <see cref="ModelDefinition.ActiveHours"/> (an IANA or Windows id). Default: this machine's.</summary>
+    public string? TimeZone { get; set; }
+
+    /// <summary>The <see cref="TimeZone"/>, or this machine's when unset or unknown.</summary>
+    public TimeZoneInfo EffectiveTimeZone =>
+        TimeZone is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out TimeZoneInfo? zone) ? zone : TimeZoneInfo.Local;
+
     internal IEnumerable<string> GetValidationErrors()
     {
         if (!Enum.IsDefined(Strategy))

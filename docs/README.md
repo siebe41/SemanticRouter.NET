@@ -6,6 +6,7 @@
 | [clients.md](clients.md) | Point Claude Code, Codex, the OpenAI SDKs or curl at the router, and see what is tested. |
 | [dashboard.md](dashboard.md) | Use or extend the dashboard and its admin API, and add a theme. |
 | [routing-quality.md](routing-quality.md) | Measure how well your routes work on your own prompts: evaluation sets, threshold calibration, route health, labelling activity, retry escalation. |
+| [routing-profiles.md](routing-profiles.md) | Route by context, not only by prompt: profiles per project, client or tool set, virtual models, keeping secrets local, budgets per profile, active hours. |
 | [providers.md](providers.md) | Configure a provider: LM Studio, Ollama, the subscription CLIs, OpenAI, Anthropic, Gemini, Azure, OpenRouter; tool calling per connector. |
 | [architecture.md](architecture.md) | Follow a request through the code, understand hot reload, or find the right extension point. |
 | [roadmap.md](roadmap.md) | See where the project is going and why in that order. |

@@ -125,8 +125,17 @@ internal sealed partial class PromptRoutingMiddleware
         }
 
         long started = Stopwatch.GetTimestamp();
-        string? mapped = MapModel(runtime, chat.Model);
-        (SelectionStrategy? strategy, string? requestedModel) = ModelAliases.Resolve(mapped);
+        ProfileSelection.ModelChoice modelChoice = ProfileSelection.ResolveModel(runtime, chat.Model);
+        SelectionStrategy? strategy = modelChoice.Strategy;
+        string? requestedModel = modelChoice.RequestedModel;
+        ProfileSelection.Choice profile = ProfileSelection.Choose(context.Request, runtime, chat, client, modelChoice.Profile);
+        if (profile.Error is { } profileError)
+        {
+            await ProtocolErrors.WriteAsync(context, protocol, StatusCodes.Status400BadRequest, "Unknown routing profile", profileError, context.RequestAborted)
+                .ConfigureAwait(false);
+            return;
+        }
+
         if (requestedModel is not null
             && !runtime.Router.Models.Any(m => m.Enabled && string.Equals(m.Name, requestedModel, StringComparison.OrdinalIgnoreCase)))
         {
@@ -149,6 +158,8 @@ internal sealed partial class PromptRoutingMiddleware
         var routingRequest = new PromptRoutingRequest
         {
             MinimumTier = minimumTier,
+            Profile = profile.Profile,
+            LocalOnly = profile.LocalOnly,
             Prompt = prompt,
             EstimatedInputTokens = chat.EstimatedInputTokens,
             AdditionalCapabilities = ImpliedCapabilities(chat),
@@ -188,6 +199,9 @@ internal sealed partial class PromptRoutingMiddleware
             Similarity = result.Similarity,
             Complexity = Math.Round(result.Complexity.Score, 3),
             Cached = result.Cached,
+            Profile = profile.Profile,
+            Project = profile.Project is { Length: > 0 } project ? project[..Math.Min(project.Length, 120)] : null,
+            Signals = profile.Signals.Count > 0 ? string.Join(", ", profile.Signals) : null,
             HasTools = chat.HasTools,
             ToolContinuation = chat.IsToolResultContinuation,
             LocalOnly = plan.Requirements.LocalOnly,
@@ -461,6 +475,16 @@ internal sealed partial class PromptRoutingMiddleware
         if (result.Similarity is { } similarity)
         {
             headers[prefix + "-Similarity"] = similarity.ToString("0.0000", CultureInfo.InvariantCulture);
+        }
+
+        if (plan.Requirements.Profile is { } profile)
+        {
+            headers[prefix + "-Profile"] = profile;
+        }
+
+        if (plan.Requirements.LocalOnly)
+        {
+            headers[prefix + "-Local-Only"] = "true";
         }
     }
 

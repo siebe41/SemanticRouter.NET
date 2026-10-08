@@ -36,7 +36,7 @@ Prices come from the catalog: `InputCostPerMillionTokens` and `OutputCostPerMill
 
 ## Budgets
 
-A budget covers one model or every model on one connector, per `Day`, `Week` (from Monday) or `Month`, in tokens, dollars or both.
+A budget covers one model, every model on one connector, or every request under one [routing profile](routing-profiles.md#budgets-per-profile), per `Day`, `Week` (from Monday) or `Month`, in tokens, dollars or both.
 
 - **At `WarnAtPercent`**, the dashboard shows a banner and the log gets one warning per budget and period.
 - **Once spent**, the model is not tried until the period ends:

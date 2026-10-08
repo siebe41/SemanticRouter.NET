@@ -26,11 +26,17 @@ public sealed class BudgetDefinition
     /// <summary>A name for messages and the dashboard, e.g. <c>daily-openai</c>.</summary>
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>The catalog model this budget covers. Set this or <see cref="Connector"/>.</summary>
+    /// <summary>The catalog model this budget covers. Set exactly one of this, <see cref="Connector"/> or <see cref="Profile"/>.</summary>
     public string? Model { get; set; }
 
-    /// <summary>The connector whose models (together) this budget covers. Set this or <see cref="Model"/>.</summary>
+    /// <summary>The connector whose models (together) this budget covers.</summary>
     public string? Connector { get; set; }
+
+    /// <summary>
+    /// The routing profile whose requests (on any model) this budget covers. Once spent, requests under the profile are
+    /// only tried on models that cost nothing (local models and flat-rate subscriptions).
+    /// </summary>
+    public string? Profile { get; set; }
 
     /// <summary>The period. Default <see cref="BudgetPeriod.Day"/>.</summary>
     public BudgetPeriod Period { get; set; } = BudgetPeriod.Day;

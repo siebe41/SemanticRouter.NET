@@ -42,6 +42,7 @@
     usage: { window: '7d', by: 'model', data: null, loading: false },
     evaluation: { text: null, location: null, count: 0, report: null, busy: false, health: null, compare: null, addFor: null, add: {}, form: { provider: 'OpenAICompatible', endpoint: '', model: '', apiKey: '', dimensions: 512 } },
     label: null,         // the Activity "label this prompt" form
+    profileTester: { prompt: '', results: null, busy: false },
   };
 
   /* ---------------------------------------------------------------------------------------------
@@ -392,7 +393,7 @@
       <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th>${labels ? '<th></th>' : ''}</tr>
       ${entries.map((e) => `<tr title="${h(e.detail || '')}">
         <td class="nowrap small">${h(when(e.timestamp))}</td>
-        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}</div></td>
+        <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}${e.profile ? ' · <span class="badge accent" title="Routing profile">' + h(e.profile) + '</span>' : ''}${e.project ? ' · <span class="mono" title="Project">' + h(e.project) + '</span>' : ''}${e.signals ? ' · <span class="badge warn" title="Kept local because the conversation contains this">local: ' + h(e.signals) + '</span>' : ''}</div></td>
         <td><span class="tier">T${e.tier}</span></td>
         <td class="small">${h(e.reason)}${e.cached ? ' <span class="badge" title="Reused a recent decision: no embedding call">cached</span>' : ''}</td>
         <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
@@ -405,10 +406,11 @@
 
   views.activity = () => {
     const f = state.activityFilter;
-    const entries = state.activity.filter((e) => f === 'all' || (f === 'failed' ? e.outcome === 'failed' : f === 'degraded' ? e.degraded : f === 'tools' ? e.hasTools : true));
+    const entries = state.activity.filter((e) => f === 'all' || (f === 'failed' ? e.outcome === 'failed' : f === 'degraded' ? e.degraded : f === 'tools' ? e.hasTools : f.startsWith('profile:') ? e.profile === f.slice(8) : true));
+    const profiles = [...new Set(state.activity.map((e) => e.profile).filter(Boolean).concat(Object.keys((state.config && state.config.Profiles) || {})))];
     return `
       <div class="section-head"><h1>Activity</h1><span class="muted">The last ${state.activity.length} routed requests (newest first).</span><span class="spacer"></span>
-        <select id="activity-filter" style="width:150px">${['all', 'failed', 'degraded', 'tools'].map((x) => `<option value="${x}" ${x === f ? 'selected' : ''}>${x}</option>`).join('')}</select>
+        <select id="activity-filter" style="width:150px">${['all', 'failed', 'degraded', 'tools'].map((x) => `<option value="${x}" ${x === f ? 'selected' : ''}>${x}</option>`).join('')}${profiles.map((x) => `<option value="profile:${h(x)}" ${'profile:' + x === f ? 'selected' : ''}>profile ${h(x)}</option>`).join('')}</select>
         <label class="check"><input type="checkbox" id="auto-refresh" ${state.autoRefresh ? 'checked' : ''}> auto-refresh</label>
         <button class="btn small" data-action="refresh">Refresh</button></div>
       ${state.label ? labelForm() : ''}
@@ -523,6 +525,7 @@
             <label class="field"><span class="name">Cache read cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheReadCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheReadCostPerMillionTokens ?? ''}" placeholder="input price"><span class="hint">Prompt-cache reads, if the provider prices them differently.</span></label>
             <label class="field"><span class="name">Cache write cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheWriteCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheWriteCostPerMillionTokens ?? ''}" placeholder="input price"></label>
             <label class="field"><span class="name">Priority</span><input type="number" data-bind="Models.${i}.Priority" data-kind="number" value="${m.Priority || 0}"><span class="hint">Lower is preferred; breaks ties.</span></label>
+            <label class="field"><span class="name">Active hours</span><input type="text" data-bind="Models.${i}.ActiveHours" data-kind="nulltext" value="${h(m.ActiveHours || '')}" placeholder="always (e.g. 08:00-18:00)"><span class="hint">Outside them the model is not tried. Time zone: Routing rules.</span></label>
             <label class="field wide"><span class="name">Description</span><input type="text" data-bind="Models.${i}.Description" data-kind="nulltext" value="${h(m.Description || '')}"></label>
             <label class="check wide"><input type="checkbox" data-bind="Models.${i}.IsLocal" data-kind="bool" ${m.IsLocal ? 'checked' : ''}> Local: prompts stay on this machine (required to serve local-only routes)</label>
           </div>
@@ -563,6 +566,7 @@
               <label class="field"><span class="name">Executable</span><input type="text" data-bind="${p}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="preset default (claude / copilot / codex)"><span class="hint">Started directly, never through a shell. On Windows use the .exe.</span></label>
               <label class="field"><span class="name">Tool calling</span><select data-bind="${p}.ToolCalling">${['None', 'Prompted'].map((x) => `<option ${x === (c.ToolCalling || 'None') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Prompted lets agentic clients (Claude Code) use this CLI: tools are described in the prompt and tool calls parsed from the reply.</span></label>
               <label class="field"><span class="name">Max concurrency</span><input type="number" min="1" data-bind="${p}.MaxConcurrency" data-kind="number" value="${c.MaxConcurrency || 2}"></label>
+              <label class="field"><span class="name">Max queue</span><input type="number" min="0" data-bind="${p}.MaxQueue" data-kind="number" data-nullable="1" value="${c.MaxQueue ?? ''}" placeholder="always wait"><span class="hint">When this many requests are already waiting, the next one goes to another model.</span></label>
               <label class="field"><span class="name">Max argument length</span><input type="number" min="100" data-bind="${p}.MaxArgumentLength" data-kind="number" value="${c.MaxArgumentLength || 24000}"><span class="hint">Longer prompts go on stdin.</span></label>
               <label class="field"><span class="name">Timeout (hh:mm:ss)</span><input type="text" data-bind="${p}.Timeout" value="${h(c.Timeout || '00:00:00')}" placeholder="00:05:00"><span class="hint">Time to first output; 00:00:00 = default (5 min).</span></label>
               ${(c.Preset || 'Custom') === 'Custom' ? `<label class="field"><span class="name">Prompt input</span><select data-bind="${p}.PromptInput">${['Stdin', 'Argument'].map((x) => `<option ${x === (c.PromptInput || 'Stdin') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>` : ''}
@@ -611,6 +615,7 @@
         <label class="field"><span class="name">Max attempts</span><input type="number" min="1" data-bind="Selection.MaxAttempts" data-kind="number" value="${sel.MaxAttempts || 3}"></label>
         <label class="field"><span class="name">Quota cooldown</span><input type="text" data-bind="Selection.QuotaCooldown" value="${h(sel.QuotaCooldown || '00:15:00')}"></label>
         <label class="field"><span class="name">Failure cooldown</span><input type="text" data-bind="Selection.FailureCooldown" value="${h(sel.FailureCooldown || '00:00:30')}"></label>
+        <label class="field"><span class="name">Time zone</span><input type="text" data-bind="Selection.TimeZone" data-kind="nulltext" value="${h(sel.TimeZone || '')}" placeholder="this machine's"><span class="hint">For model active hours (IANA id, e.g. Europe/Amsterdam).</span></label>
         <label class="field"><span class="name">Estimated output tokens</span><input type="number" min="0" data-bind="Selection.EstimatedOutputTokens" data-kind="number" value="${sel.EstimatedOutputTokens == null ? 512 : sel.EstimatedOutputTokens}"><span class="hint">For cost estimates and context-window checks.</span></label>
         <label class="check wide"><input type="checkbox" data-bind="Selection.AllowBelowRequiredTier" data-kind="bool" ${sel.AllowBelowRequiredTier !== false ? 'checked' : ''}> Allow below required tier: degrade to the best available model instead of failing</label>
       </div></div>
@@ -796,7 +801,7 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
         <div class="card stat"><span class="value">${d.referenceModel ? usd(t.referenceCostUsd - t.costUsd) : '–'}</span><span class="label">${d.referenceModel ? 'saved compared with sending everything to ' + h(d.referenceModel) : 'set Usage → reference model to estimate savings'}</span></div>
       </div>
       ${d.budgets.length ? `<div class="card section"><div class="card-head"><h2>Budgets</h2><span class="muted small">A spent budget's models are not tried until it resets.</span></div><table>${d.budgets.map(budgetRow).join('')}</table></div>` : ''}
-      <div class="card section"><div class="card-head"><h2>By ${h(u.by)}</h2><span class="spacer"></span>${seg('by', [['model', 'Model'], ['connector', 'Connector'], ['route', 'Route'], ['client', 'Client'], ['day', 'Day']])}</div>
+      <div class="card section"><div class="card-head"><h2>By ${h(u.by)}</h2><span class="spacer"></span>${seg('by', [['model', 'Model'], ['connector', 'Connector'], ['route', 'Route'], ['client', 'Client'], ['profile', 'Profile'], ['day', 'Day']])}</div>
         <table><tr><th>${h(u.by)}</th><th>Requests</th><th>Input</th><th>Output</th><th>Cached</th><th>Cost</th><th style="width:30%"></th></tr>
         ${d.groups.map((g) => { const tk = g.totals.inputTokens + g.totals.outputTokens + g.totals.cacheReadTokens + g.totals.cacheWriteTokens; const share = byCost ? g.totals.costUsd / max : tk / maxTok; return `<tr><td>${h(g.key)}</td><td class="num">${int(g.totals.requests)}</td><td class="num">${int(g.totals.inputTokens)}</td><td class="num">${int(g.totals.outputTokens)}</td><td class="num">${int(g.totals.cacheReadTokens + g.totals.cacheWriteTokens)}</td><td class="num">${usd(g.totals.costUsd)}</td><td><div class="bar" title="${byCost ? 'share of cost' : 'share of tokens'}"><i style="width:${Math.round(share * 100)}%"></i></div></td></tr>`; }).join('') || '<tr><td colspan="7" class="muted small">Nothing recorded in this window. Usage appears once backends report tokens (streamed OpenAI pass-through replies only when the client asks for <code>stream_options.include_usage</code>).</td></tr>'}
         </table></div>
@@ -806,15 +811,16 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
         <label class="field"><span class="name">Time zone for periods</span><input type="text" data-bind="Usage.TimeZone" data-kind="nulltext" value="${h((state.config.Usage || {}).TimeZone || '')}" placeholder="this machine's"></label>
       </div>
       <h3 style="margin-top:14px">Budgets</h3>
-      <table><tr><th>Name</th><th>Model</th><th>or connector</th><th>Period</th><th>Max tokens</th><th>Max USD</th><th></th></tr>
+      <table><tr><th>Name</th><th>Model</th><th>or connector</th><th>or profile</th><th>Period</th><th>Max tokens</th><th>Max USD</th><th></th></tr>
         ${((state.config.Usage || {}).Budgets || []).map((b, i) => `<tr>
           <td><input type="text" data-bind="Usage.Budgets.${i}.Name" value="${h(b.Name || '')}"></td>
           <td><select data-bind="Usage.Budgets.${i}.Model" data-kind="nulltext"><option value=""></option>${(state.config.Models || []).map((m) => `<option ${m.Name === b.Model ? 'selected' : ''}>${h(m.Name)}</option>`).join('')}</select></td>
           <td><select data-bind="Usage.Budgets.${i}.Connector" data-kind="nulltext"><option value=""></option>${connectorNames().map((c) => `<option ${c === b.Connector ? 'selected' : ''}>${h(c)}</option>`).join('')}</select></td>
+          <td><select data-bind="Usage.Budgets.${i}.Profile" data-kind="nulltext"><option value=""></option>${Object.keys(state.config.Profiles || {}).map((x) => `<option ${x === b.Profile ? 'selected' : ''}>${h(x)}</option>`).join('')}</select></td>
           <td><select data-bind="Usage.Budgets.${i}.Period">${['Day', 'Week', 'Month'].map((p) => `<option ${p === (b.Period || 'Day') ? 'selected' : ''}>${p}</option>`).join('')}</select></td>
           <td><input type="number" min="0" data-bind="Usage.Budgets.${i}.MaxTokens" data-kind="number" data-nullable="1" value="${b.MaxTokens ?? ''}"></td>
           <td><input type="number" min="0" step="0.01" data-bind="Usage.Budgets.${i}.MaxCostUsd" data-kind="float" data-nullable="1" value="${b.MaxCostUsd ?? ''}"></td>
-          <td><button class="btn ghost small" data-action="budget-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted small">No budgets.</td></tr>'}
+          <td><button class="btn ghost small" data-action="budget-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted small">No budgets.</td></tr>'}
       </table>
       <div class="inline" style="margin-top:8px"><button class="btn small" data-action="budget-add">Add budget</button></div>
       </div>`;
@@ -938,6 +944,79 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       ${ev.report ? evaluationResults(ev.report) : ''}
       ${healthCard()}
       ${compareCard()}`;
+  };
+
+  /* Profiles: named routing policies, how requests pick one, and a tester that compares them for one prompt. */
+  const STRATEGY_OPTIONS = (value) => `<option value="" ${value ? '' : 'selected'}>(configured)</option>` + STRATEGIES.map((x) => `<option ${x === value ? 'selected' : ''}>${x}</option>`).join('');
+  const tierSelect = (bind, value, blank) => `<select data-bind="${bind}" data-kind="number" data-nullable="1"><option value="" ${value == null ? 'selected' : ''}>${blank}</option>${tiers().map((t) => `<option value="${t.Level}" ${t.Level === value ? 'selected' : ''}>${t.Level} · ${h(t.Name)}</option>`).join('')}</select>`;
+
+  function profileTesterCard() {
+    const t = state.profileTester;
+    const rows = (t.results || []).map((r) => `<tr><td>${r.profile ? `<span class="badge accent">${h(r.profile)}</span>` : '<span class="muted">none</span>'}</td>
+      ${r.error ? `<td colspan="3" class="small"><span class="badge danger">error</span> ${h(r.error)}</td>` : `<td><span class="tier">T${r.plan.requiredTier}</span>${r.plan.localOnly ? ' <span class="badge warn">local only</span>' : ''}</td><td class="small">${h(r.plan.reason)}</td>
+      <td class="small">${r.plan.models.map((m, i) => `${i ? ' → ' : ''}<b>${h(m.model)}</b>`).join('') || '<span class="badge danger">no model</span>'}</td>`}</tr>`).join('');
+    return `<div class="card section"><div class="card-head"><h2>What would each profile do?</h2><span class="muted small">Routes the prompt under every profile without calling a model.</span></div>
+      <div class="inline"><input type="text" id="profile-prompt" data-state="profileTester.prompt" value="${h(t.prompt)}" placeholder="design a multi-tenant billing system" style="flex:1"><button class="btn primary small" data-action="profiles-compare" ${t.busy ? 'disabled' : ''}>${t.busy ? 'Routing…' : 'Compare'}</button></div>
+      ${t.results ? `<table style="margin-top:10px"><tr><th>Profile</th><th>Tier</th><th>Reason</th><th>Models, in order</th></tr>${rows}</table>` : ''}</div>`;
+  }
+
+  views.profiles = () => {
+    const c = state.config; const m = c.Middleware || {};
+    const profiles = c.Profiles || {};
+    const names = Object.keys(profiles);
+    const profileOptions = (value, blank) => (blank ? `<option value="">${blank}</option>` : '') + names.map((x) => `<option ${x === value ? 'selected' : ''}>${h(x)}</option>`).join('');
+    const catalog = (c.Models || []).map((x) => x.Name).join(', ');
+    const rules = m.ProfileRules || [];
+    const virtuals = Object.entries(m.VirtualModels || {});
+    const when = m.LocalOnlyWhen || {};
+    return `
+      <div class="section-head"><h1>Profiles</h1><span class="muted">Policy beyond the prompt text: which models a context may use, how aggressive routing is, what must stay on this machine.</span><span class="spacer"></span><button class="btn primary small" data-action="profile-add">Add profile</button></div>
+      ${names.map((name) => {
+        const pr = profiles[name]; const key = 'profile:' + name; const p = `Profiles.${name}`;
+        return `<div class="item ${state.open.has(key) ? 'open' : ''}" data-key="${key}">
+          <div class="item-head" data-action="toggle" data-key="${key}"><span class="chev">▶</span><span class="title">${h(name)}</span>
+            <span class="meta">${pr.LocalOnly ? '<span class="badge warn">local only</span>' : ''}${pr.Strategy ? `<span class="badge">${h(pr.Strategy)}</span>` : ''}${pr.MinTier != null ? `<span>tier ≥ ${pr.MinTier}</span>` : ''}${pr.MaxTier != null ? `<span>tier ≤ ${pr.MaxTier}</span>` : ''}${(pr.AllowedModels || []).length ? `<span>${pr.AllowedModels.length} allowed</span>` : ''}${(pr.DeniedModels || []).length + (pr.DeniedConnectors || []).length ? `<span>${(pr.DeniedModels || []).length + (pr.DeniedConnectors || []).length} denied</span>` : ''}</span>
+            <span class="spacer"></span><span class="muted small">${h(pr.Description || '')}</span></div>
+          <div class="item-body"><div class="form-grid">
+            <label class="field"><span class="name">Name</span><input type="text" data-action-input="profile-rename" data-name="${h(name)}" value="${h(name)}"><span class="hint">Rules, virtual models, client mappings and budgets follow a rename.</span></label>
+            <label class="field wide"><span class="name">Description</span><input type="text" data-bind="${p}.Description" data-kind="nulltext" value="${h(pr.Description || '')}"></label>
+            <label class="field"><span class="name">Strategy</span><select data-bind="${p}.Strategy" data-kind="nulltext">${STRATEGY_OPTIONS(pr.Strategy)}</select></label>
+            <label class="field"><span class="name">Minimum tier</span>${tierSelect(p + '.MinTier', pr.MinTier, '(none)')}</label>
+            <label class="field"><span class="name">Maximum tier</span>${tierSelect(p + '.MaxTier', pr.MaxTier, '(none)')}<span class="hint">Caps the requirement, so cheaper models are acceptable.</span></label>
+            <label class="field"><span class="name">Allowed models</span><input type="text" data-bind="${p}.AllowedModels" data-kind="csv" value="${h(csv(pr.AllowedModels))}" placeholder="all"><span class="hint">Names or globs (api-*). Catalog: ${h(catalog)}</span></label>
+            <label class="field"><span class="name">Denied models</span><input type="text" data-bind="${p}.DeniedModels" data-kind="csv" value="${h(csv(pr.DeniedModels))}"></label>
+            <label class="field"><span class="name">Allowed connectors</span><input type="text" data-bind="${p}.AllowedConnectors" data-kind="csv" value="${h(csv(pr.AllowedConnectors))}" placeholder="all"></label>
+            <label class="field"><span class="name">Denied connectors</span><input type="text" data-bind="${p}.DeniedConnectors" data-kind="csv" value="${h(csv(pr.DeniedConnectors))}"></label>
+            <label class="check wide"><input type="checkbox" data-bind="${p}.LocalOnly" data-kind="bool" ${pr.LocalOnly ? 'checked' : ''}> Local only: only models marked <i>local</i> answer, even on failover</label>
+          </div><div class="row-actions" style="margin-top:10px"><button class="btn danger small" data-action="profile-remove" data-name="${h(name)}">Remove</button></div></div></div>`;
+      }).join('') || '<div class="card muted">No profiles. Every request is routed by the prompt alone.</div>'}
+      ${profileTesterCard()}
+      <div class="card section"><div class="card-head"><h2>How a request picks a profile</h2><span class="muted small">First match wins: the gateway key's profile (enforced), the header, the model name, the rules.</span></div><div class="form-grid">
+        <label class="field"><span class="name">Profile header</span><input type="text" data-bind="Middleware.ProfileHeader" value="${h(m.ProfileHeader || 'X-Router-Profile')}"></label>
+        <label class="field"><span class="name">Project header</span><input type="text" data-bind="Middleware.ProjectHeader" value="${h(m.ProjectHeader || 'X-Router-Project')}"><span class="hint">Without it: Anthropic <code>metadata.user_id</code> or OpenAI <code>user</code>.</span></label>
+        <label class="field wide"><span class="name">Gateway client → profile (client=profile, one per line)</span><textarea data-bind="Middleware.ClientProfiles" data-kind="kv" rows="2" placeholder="laptop=private">${h(kv(m.ClientProfiles))}</textarea><span class="hint">Clients are the names under Gateway keys. A client cannot leave its profile.</span></label>
+      </div>
+      <h3 style="margin-top:12px">Rules</h3>
+      <table><tr><th>Profile</th><th>Clients</th><th>Projects (globs)</th><th>Offers a tool</th><th>Offers none of</th><th></th></tr>
+        ${rules.map((r, i) => `<tr><td><select data-bind="Middleware.ProfileRules.${i}.Profile">${profileOptions(r.Profile)}</select></td>
+          <td><input type="text" data-bind="Middleware.ProfileRules.${i}.Clients" data-kind="csv" value="${h(csv(r.Clients))}" placeholder="any"></td>
+          <td><input type="text" data-bind="Middleware.ProfileRules.${i}.Projects" data-kind="csv" value="${h(csv(r.Projects))}" placeholder="any"></td>
+          <td><input type="text" data-bind="Middleware.ProfileRules.${i}.ToolsInclude" data-kind="csv" value="${h(csv(r.ToolsInclude))}" placeholder="any, e.g. Bash"></td>
+          <td><input type="text" data-bind="Middleware.ProfileRules.${i}.ToolsExclude" data-kind="csv" value="${h(csv(r.ToolsExclude))}"></td>
+          <td><button class="btn ghost small" data-action="rule-profile-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted small">No rules.</td></tr>'}
+      </table><div class="inline" style="margin-top:8px"><button class="btn small" data-action="rule-profile-add" ${names.length ? '' : 'disabled title="Add a profile first"'}>Add rule</button></div>
+      <h3 style="margin-top:12px">Virtual models</h3><p class="muted small">Model names clients can pick (listed by <code>/v1/models</code>). <code>auto@profile</code> works for every profile too.</p>
+      <table><tr><th>Name</th><th>Profile</th><th>Strategy</th><th>Description</th><th></th></tr>
+        ${virtuals.map(([n, v], i) => `<tr><td><input type="text" data-action-input="virtual-rename" data-name="${h(n)}" value="${h(n)}"></td>
+          <td><select data-bind="Middleware.VirtualModels.${n}.Profile" data-kind="nulltext">${profileOptions(v.Profile, '(none)')}</select></td>
+          <td><select data-bind="Middleware.VirtualModels.${n}.Strategy" data-kind="nulltext">${STRATEGY_OPTIONS(v.Strategy)}</select></td>
+          <td><input type="text" data-bind="Middleware.VirtualModels.${n}.Description" data-kind="nulltext" value="${h(v.Description || '')}"></td>
+          <td><button class="btn ghost small" data-action="virtual-remove" data-name="${h(n)}">remove</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted small">No virtual models.</td></tr>'}
+      </table><div class="inline" style="margin-top:8px"><button class="btn small" data-action="virtual-add">Add virtual model</button></div>
+      <h3 style="margin-top:12px">Keep local when the conversation contains…</h3>
+      <label class="check"><input type="checkbox" data-bind="Middleware.LocalOnlyWhen.Secrets" data-kind="bool" ${when.Secrets ? 'checked' : ''}> something that looks like a credential (API keys, private keys, JWTs)</label>
+      <label class="check"><input type="checkbox" data-bind="Middleware.LocalOnlyWhen.FilePaths" data-kind="bool" ${when.FilePaths ? 'checked' : ''}> an absolute file path <span class="muted small">(agents mention paths on almost every turn)</span></label>
+      </div>`;
   };
 
   views.json = () => `
@@ -1138,6 +1217,29 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       toast(done.length ? 'Saved to ' + done.join('; ') + '.' : 'Nothing to save.', 'ok');
     },
 
+    'profile-add'() {
+      state.config.Profiles = state.config.Profiles || {};
+      let name = 'profile'; let n = 1; while (state.config.Profiles[name]) name = 'profile-' + (++n);
+      state.config.Profiles[name] = { AllowedModels: [], DeniedModels: [], AllowedConnectors: [], DeniedConnectors: [], Strategy: null, MinTier: null, MaxTier: null, LocalOnly: false, Description: null };
+      state.open.add('profile:' + name); render();
+    },
+    'profile-remove'(el) { delete state.config.Profiles[el.dataset.name]; render(); },
+    'rule-profile-add'() { const m = state.config.Middleware; (m.ProfileRules = m.ProfileRules || []).push({ Profile: Object.keys(state.config.Profiles)[0], Clients: [], Projects: [], ToolsInclude: [], ToolsExclude: [] }); render(); },
+    'rule-profile-remove'(el) { state.config.Middleware.ProfileRules.splice(+el.dataset.index, 1); render(); },
+    'virtual-add'() { const m = state.config.Middleware; m.VirtualModels = m.VirtualModels || {}; let name = 'fast'; let n = 1; while (m.VirtualModels[name]) name = 'model-' + (++n); m.VirtualModels[name] = { Profile: null, Strategy: 'CheapestCapable', Description: null }; render(); },
+    'virtual-remove'(el) { delete state.config.Middleware.VirtualModels[el.dataset.name]; render(); },
+    async 'profiles-compare'() {
+      const t = state.profileTester; const prompt = (t.prompt || '').trim();
+      if (!prompt) { toast('Type a prompt first.', 'danger'); return; }
+      if (isDirty()) toast('The tester uses the applied configuration: apply your changes to test them.');
+      t.busy = true; render();
+      const profiles = [null, ...Object.keys((state.status && state.config.Profiles) || {})];
+      t.results = await Promise.all(profiles.map(async (profile) => {
+        try { return { profile, plan: await api('POST', '/classify', { prompt, profile }) }; } catch (e) { return { profile, error: e.message }; }
+      }));
+      t.busy = false; render();
+    },
+
     async 'tester-classify'() {
       readTester();
       state.tester.busy = true; state.tester.reply = null; render();
@@ -1231,6 +1333,22 @@ curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -
       state.config.Connectors = Object.fromEntries(entries);
       (state.config.Models || []).forEach((m) => { if ((m.Connector || '').toLowerCase() === from.toLowerCase()) m.Connector = to; });
       if (state.open.has('conn:' + from)) { state.open.delete('conn:' + from); state.open.add('conn:' + to); }
+      render();
+    } else if (el.dataset.actionInput === 'profile-rename') {
+      const from = el.dataset.name; const to = el.value.trim();
+      if (!to || to === from || state.config.Profiles[to] || /[@.]/.test(to)) { el.value = from; return; }
+      state.config.Profiles = Object.fromEntries(Object.entries(state.config.Profiles).map(([k, v]) => [k === from ? to : k, v]));
+      const m = state.config.Middleware;
+      Object.keys(m.ClientProfiles || {}).forEach((k) => { if (m.ClientProfiles[k] === from) m.ClientProfiles[k] = to; });
+      (m.ProfileRules || []).forEach((r) => { if (r.Profile === from) r.Profile = to; });
+      Object.values(m.VirtualModels || {}).forEach((v) => { if (v.Profile === from) v.Profile = to; });
+      ((state.config.Usage || {}).Budgets || []).forEach((b) => { if (b.Profile === from) b.Profile = to; });
+      if (state.open.has('profile:' + from)) { state.open.delete('profile:' + from); state.open.add('profile:' + to); }
+      render();
+    } else if (el.dataset.actionInput === 'virtual-rename') {
+      const from = el.dataset.name; const to = el.value.trim(); const v = state.config.Middleware.VirtualModels;
+      if (!to || to === from || v[to] || /[@.]/.test(to)) { el.value = from; return; }
+      state.config.Middleware.VirtualModels = Object.fromEntries(Object.entries(v).map(([k, x]) => [k === from ? to : k, x]));
       render();
     } else if (el.id === 'activity-filter') { state.activityFilter = el.value; render(); }
     else if (el.id === 'auto-refresh') { state.autoRefresh = el.checked; }

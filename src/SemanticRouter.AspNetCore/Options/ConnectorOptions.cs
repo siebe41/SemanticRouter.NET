@@ -156,6 +156,13 @@ public sealed class ConnectorOptions
     public int MaxConcurrency { get; set; } = 2;
 
     /// <summary>
+    /// CLI only: when this many requests are already waiting for a free process, the next one goes to another model
+    /// instead of queueing (a long queue on a subscription CLI is slower than a different model). <see langword="null"/>:
+    /// always wait.
+    /// </summary>
+    public int? MaxQueue { get; set; }
+
+    /// <summary>
     /// CLI: serve requests from other machines. Default <see langword="false"/>: a CLI connector signed in with your
     /// personal subscription only answers requests that originate on this machine, and remote callers fall through to
     /// the next model. See <c>docs/TERMS.md</c> before changing this.

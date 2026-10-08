@@ -116,6 +116,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             {
                 errors.Add($"Connector '{name}' Timeout must not be negative.");
             }
+
+            if (connector.MaxQueue is < 0)
+            {
+                errors.Add($"Connector '{name}' MaxQueue must not be negative.");
+            }
         }
 
         foreach (ModelDefinition model in Models.Where(m => m.Enabled && !string.IsNullOrWhiteSpace(m.Connector)))
@@ -148,6 +153,36 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             errors.Add("Middleware:MaxRequestBodyBytes must be positive.");
         }
 
+        foreach ((string client, string profile) in Middleware.ClientProfiles)
+        {
+            if (!Profiles.ContainsKey(profile))
+            {
+                errors.Add($"Middleware:ClientProfiles:{client} names profile '{profile}', which is not configured.");
+            }
+        }
+
+        foreach (ProfileRule rule in Middleware.ProfileRules)
+        {
+            if (!Profiles.ContainsKey(rule.Profile))
+            {
+                errors.Add($"Middleware:ProfileRules name profile '{rule.Profile}', which is not configured.");
+            }
+        }
+
+        foreach ((string name, VirtualModel model) in Middleware.VirtualModels)
+        {
+            if (name.StartsWith(ModelAliases.Auto, StringComparison.OrdinalIgnoreCase) || name.Contains('@', StringComparison.Ordinal)
+                || Models.Any(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add($"Virtual model '{name}' must not start with 'auto', contain '@' or reuse a catalog model's name.");
+            }
+
+            if (model.Profile is { Length: > 0 } profile && !Profiles.ContainsKey(profile))
+            {
+                errors.Add($"Virtual model '{name}' names profile '{profile}', which is not configured.");
+            }
+        }
+
         if (Middleware.RetryEscalation.Enabled && Middleware.RetryEscalation.Window <= TimeSpan.Zero)
         {
             errors.Add("Middleware:RetryEscalation:Window must be positive.");
@@ -173,9 +208,14 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 errors.Add("Usage:Budgets entries must have a Name.");
             }
 
-            if (string.IsNullOrWhiteSpace(budget.Model) == string.IsNullOrWhiteSpace(budget.Connector))
+            int targets = new[] { budget.Model, budget.Connector, budget.Profile }.Count(t => !string.IsNullOrWhiteSpace(t));
+            if (targets != 1)
             {
-                errors.Add($"{label} must name exactly one of Model or Connector.");
+                errors.Add($"{label} must name exactly one of Model, Connector or Profile.");
+            }
+            else if (!string.IsNullOrWhiteSpace(budget.Profile) && !Profiles.ContainsKey(budget.Profile))
+            {
+                errors.Add($"{label} covers profile '{budget.Profile}', which is not configured.");
             }
             else if (!string.IsNullOrWhiteSpace(budget.Connector) && !Connectors.ContainsKey(budget.Connector))
             {

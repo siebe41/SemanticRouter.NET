@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter;
 using SemanticRouter.AspNetCore;
 
@@ -36,13 +37,18 @@ public static class PromptRouterApplicationBuilderExtensions
                 }
 
                 (SelectionStrategy? strategy, string? requestedModel) = ModelAliases.Resolve(request.Model);
+                string? profile = request.Profile is { Length: > 0 } named ? named : null;
+                if (profile is not null && !router.Profiles.ContainsKey(profile))
+                {
+                    return Results.Problem($"Unknown routing profile '{profile}'.", statusCode: StatusCodes.Status400BadRequest);
+                }
 
                 // Reuse the middleware's plan when it already routed this exact prompt.
                 RoutingPlan plan =
                     context.Features.Get<IPromptRoutingFeature>() is { } feature && feature.Prompt == request.Prompt
                         ? feature.Plan
                         : await router.RouteAsync(
-                            new PromptRoutingRequest { Prompt = request.Prompt, Strategy = strategy, RequestedModel = requestedModel },
+                            new PromptRoutingRequest { Prompt = request.Prompt, Strategy = strategy, RequestedModel = requestedModel, Profile = profile },
                             context.RequestAborted).ConfigureAwait(false);
 
                 return Results.Ok(PromptClassificationResponse.From(plan));
@@ -82,10 +88,15 @@ public static class PromptRouterApplicationBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        return endpoints.MapGet(pattern, (IPromptRouter router, IModelHealth health) =>
+        return endpoints.MapGet(pattern, (IPromptRouter router, IModelHealth health, IServiceProvider services) =>
             {
                 IReadOnlyDictionary<string, DateTimeOffset> cooldowns = health.GetCooldowns();
-                var data = ModelAliases.All
+                RouterConfiguration? configuration = services.GetService<RouterRuntimeProvider>()?.Current.Configuration;
+                IEnumerable<(string Id, string Description)> virtualModels = configuration is null ? [] :
+                    configuration.Middleware.VirtualModels
+                        .Select(v => (v.Key, v.Value.Description ?? $"Routes{(v.Value.Profile is { } p ? $" under profile '{p}'" : string.Empty)}{(v.Value.Strategy is { } s ? $" with {s}" : string.Empty)}."))
+                        .Concat(configuration.Profiles.Select(p => ($"{ModelAliases.Auto}@{p.Key}", p.Value.Description ?? $"Routes automatically under profile '{p.Key}'.")));
+                var data = ModelAliases.All.Concat(virtualModels)
                     .Select(a => new RouterModelInfo(a.Id, "model", "semantic-router", null, null, a.Description, null))
                     .Concat(router.Models.Where(m => m.Enabled).Select(m => new RouterModelInfo(
                         m.Name, "model", m.Connector, m.Tier, m.IsLocal, m.Description,
@@ -104,8 +115,9 @@ public sealed record TokenCountResponse([property: System.Text.Json.Serializatio
 
 /// <summary>Request body for the classification endpoint.</summary>
 /// <param name="Prompt">The prompt to route.</param>
-/// <param name="Model">Optional model or alias, as a chat client would send it.</param>
-public sealed record ClassifyPromptRequest(string Prompt, string? Model = null);
+/// <param name="Model">Optional model or alias, as a chat client would send it (<c>auto@profile</c> and virtual models included).</param>
+/// <param name="Profile">Optional routing profile to route under.</param>
+public sealed record ClassifyPromptRequest(string Prompt, string? Model = null, string? Profile = null);
 
 /// <summary>An entry in <c>GET /v1/models</c>.</summary>
 public sealed record RouterModelInfo(
@@ -133,7 +145,8 @@ public sealed record PromptClassificationResponse(
     double ElapsedMilliseconds,
     ComplexityAnalysis Complexity,
     IReadOnlyList<PromptClassificationResponse.RouteCandidate> Routes,
-    IReadOnlyList<PromptClassificationResponse.ModelChoice> Models)
+    IReadOnlyList<PromptClassificationResponse.ModelChoice> Models,
+    string? Profile = null)
 {
     /// <summary>A scored route.</summary>
     public sealed record RouteCandidate(string Route, int Tier, float Similarity);
@@ -147,7 +160,7 @@ public sealed record PromptClassificationResponse(
         ArgumentNullException.ThrowIfNull(plan);
         PromptClassificationResult result = plan.Classification;
         return new(
-            result.RequiredTier,
+            plan.Requirements.RequiredTier,
             result.Reason,
             result.RouteName,
             result.Similarity,
@@ -156,6 +169,7 @@ public sealed record PromptClassificationResponse(
             Math.Round(result.Elapsed.TotalMilliseconds, 3),
             result.Complexity,
             result.TopScores.Select(s => new RouteCandidate(s.Route.Name, s.Route.Tier, s.Similarity)).ToArray(),
-            plan.Candidates.Select(c => new ModelChoice(c.Model.Name, c.Model.Connector, c.Model.Tier, c.EstimatedCost, c.MeetsRequiredTier)).ToArray());
+            plan.Candidates.Select(c => new ModelChoice(c.Model.Name, c.Model.Connector, c.Model.Tier, c.EstimatedCost, c.MeetsRequiredTier)).ToArray(),
+            plan.Requirements.Profile);
     }
 }
