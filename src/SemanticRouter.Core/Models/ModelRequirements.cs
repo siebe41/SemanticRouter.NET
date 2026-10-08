@@ -17,6 +17,9 @@ public sealed record ModelRequirements
 
     /// <summary>Overrides <see cref="ModelSelectionOptions.Strategy"/> for this request.</summary>
     public SelectionStrategy? Strategy { get; init; }
+
+    /// <summary>The <see cref="SemanticRouterOptions.Profiles"/> entry the request was routed under, if any.</summary>
+    public string? Profile { get; init; }
 }
 
 /// <summary>A model eligible to serve a request, in the order it should be tried.</summary>

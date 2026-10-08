@@ -33,6 +33,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     private readonly string[] _removedEnvironment;
     private readonly SecretRedactor _redactor;
     private readonly PromptRouterMetrics? _metrics;
+    private int _waiting; // requests waiting for a free process, for MaxQueue
 
     public CliChatConnector(
         string name,
@@ -89,6 +90,13 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             return ConnectorResult.Failed(ModelFailureKind.Unavailable, $"'{_executable}' is a script: {problem}");
         }
 
+        int waiting = Interlocked.Increment(ref _waiting);
+        if (_options.MaxQueue is { } maxQueue && _gate.CurrentCount == 0 && waiting > maxQueue)
+        {
+            Interlocked.Decrement(ref _waiting);
+            return ConnectorResult.Skipped($"{waiting - 1} request(s) are already waiting for this CLI (MaxQueue {maxQueue})");
+        }
+
         _metrics?.CliQueued(Name, 1);
         try
         {
@@ -97,6 +105,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         finally
         {
             _metrics?.CliQueued(Name, -1);
+            Interlocked.Decrement(ref _waiting);
         }
 
         _metrics?.CliActive(Name, 1);

@@ -15,9 +15,11 @@ namespace SemanticRouter.AspNetCore;
 /// <param name="CacheWriteTokens">Input tokens written to the prompt cache.</param>
 /// <param name="CostUsd">Cost at the model's configured prices.</param>
 /// <param name="ReferenceCostUsd">Cost at the reference model's prices (<see cref="UsageOptions.ReferenceModel"/>), or <see cref="CostUsd"/>.</param>
+/// <param name="Profile">The routing profile the request was routed under, if any.</param>
 public sealed record UsageRecord(
     DateTimeOffset Timestamp, string Model, string Connector, string? Route, string? Client, bool IsLocal,
-    long InputTokens, long OutputTokens, long CacheReadTokens, long CacheWriteTokens, decimal CostUsd, decimal ReferenceCostUsd);
+    long InputTokens, long OutputTokens, long CacheReadTokens, long CacheWriteTokens, decimal CostUsd, decimal ReferenceCostUsd,
+    string? Profile = null);
 
 /// <summary>Usage added up.</summary>
 public sealed record UsageTotals(
@@ -59,6 +61,9 @@ public enum UsageGrouping
 
     /// <summary>By gateway client.</summary>
     Client = 4,
+
+    /// <summary>By routing profile.</summary>
+    Profile = 5,
 }
 
 /// <summary>One group of a usage summary.</summary>
@@ -70,8 +75,8 @@ public interface IUsageLedger
     /// <summary>Records a served request. Must not throw for storage problems.</summary>
     void Record(UsageRecord record);
 
-    /// <summary>Totals between <paramref name="since"/> (inclusive) and <paramref name="until"/> (exclusive), optionally for one model or connector.</summary>
-    UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null);
+    /// <summary>Totals between <paramref name="since"/> (inclusive) and <paramref name="until"/> (exclusive), optionally for one model, connector or profile.</summary>
+    UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null);
 
     /// <summary>Totals per group between <paramref name="since"/> and <paramref name="until"/>, largest cost first.</summary>
     IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null);
@@ -100,14 +105,15 @@ public sealed class InMemoryUsageLedger : IUsageLedger
     }
 
     /// <inheritdoc />
-    public UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null)
+    public UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null)
     {
         lock (_gate)
         {
             return _records
                 .Where(r => r.Timestamp >= since && r.Timestamp < until
                             && (model is null || string.Equals(r.Model, model, StringComparison.OrdinalIgnoreCase))
-                            && (connector is null || string.Equals(r.Connector, connector, StringComparison.OrdinalIgnoreCase)))
+                            && (connector is null || string.Equals(r.Connector, connector, StringComparison.OrdinalIgnoreCase))
+                            && (profile is null || string.Equals(r.Profile, profile, StringComparison.OrdinalIgnoreCase)))
                 .Aggregate(UsageTotals.Zero, (total, r) => total.Add(r));
         }
     }
@@ -149,6 +155,7 @@ public static class UsageSummaries
             UsageGrouping.Connector => record.Connector,
             UsageGrouping.Route => record.Route ?? "(no route)",
             UsageGrouping.Client => record.Client ?? "(no key)",
+            UsageGrouping.Profile => record.Profile ?? "(no profile)",
             _ => TimeZoneInfo.ConvertTime(record.Timestamp, zone).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
         };
     }

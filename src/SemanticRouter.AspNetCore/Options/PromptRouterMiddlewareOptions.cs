@@ -101,6 +101,35 @@ public sealed class PromptRouterMiddlewareOptions
     /// </summary>
     public RetryEscalationOptions RetryEscalation { get; set; } = new();
 
+    /// <summary>The request header that names a routing profile (<c>SemanticRouter:Profiles</c>). Default <c>X-Router-Profile</c>.</summary>
+    public string ProfileHeader { get; set; } = "X-Router-Profile";
+
+    /// <summary>
+    /// The request header that carries a project label for <see cref="ProfileRules"/> and the activity log. Default
+    /// <c>X-Router-Project</c>. Without it, the Anthropic <c>metadata.user_id</c> or OpenAI <c>user</c> field is used.
+    /// </summary>
+    public string ProjectHeader { get; set; } = "X-Router-Project";
+
+    /// <summary>
+    /// Gateway client (a <see cref="GatewayKeys"/> name) → the profile its requests always use. A client cannot leave its
+    /// profile with a header or model name.
+    /// </summary>
+    public IDictionary<string, string> ClientProfiles { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Pick a profile from the request when none is named: the first rule whose conditions all hold applies.
+    /// </summary>
+    public IList<ProfileRule> ProfileRules { get; } = new List<ProfileRule>();
+
+    /// <summary>
+    /// Model names clients can pick that stand for a profile and a strategy, e.g. <c>"private": { "Profile": "private" }</c>
+    /// or <c>"fast": { "Strategy": "CheapestCapable" }</c>. Listed by <c>GET /v1/models</c>, so chat UIs offer them.
+    /// </summary>
+    public IDictionary<string, VirtualModel> VirtualModels { get; } = new Dictionary<string, VirtualModel>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Content that keeps a request on local models whatever its profile.</summary>
+    public LocalOnlySignals LocalOnlyWhen { get; set; } = new();
+
     /// <summary>
     /// Ignore <c>&lt;system-reminder&gt;</c> blocks that agentic clients inject into user messages when classifying,
     /// so routing reflects what the person asked. Default true.
@@ -154,4 +183,52 @@ public sealed class RetryEscalationOptions
 
     /// <summary>How soon after an answer a repeat counts as a retry. Default 2 minutes.</summary>
     public TimeSpan Window { get; set; } = TimeSpan.FromMinutes(2);
+}
+
+/// <summary>Picks a profile from what the request looks like (<see cref="PromptRouterMiddlewareOptions.ProfileRules"/>).</summary>
+public sealed class ProfileRule
+{
+    /// <summary>The profile to use when the rule matches.</summary>
+    public string Profile { get; set; } = string.Empty;
+
+    /// <summary>When not empty, the gateway client must be one of these.</summary>
+    public IList<string> Clients { get; } = new List<string>();
+
+    /// <summary>When not empty, the project label must match one of these (<c>*</c> globs).</summary>
+    public IList<string> Projects { get; } = new List<string>();
+
+    /// <summary>When not empty, the request must offer a tool matching one of these (<c>*</c> globs), e.g. <c>Bash</c>.</summary>
+    public IList<string> ToolsInclude { get; } = new List<string>();
+
+    /// <summary>The request must offer no tool matching these.</summary>
+    public IList<string> ToolsExclude { get; } = new List<string>();
+}
+
+/// <summary>A model name that stands for a profile and a strategy (<see cref="PromptRouterMiddlewareOptions.VirtualModels"/>).</summary>
+public sealed class VirtualModel
+{
+    /// <summary>The profile to route under, if any.</summary>
+    public string? Profile { get; set; }
+
+    /// <summary>The selection strategy, if any.</summary>
+    public SelectionStrategy? Strategy { get; set; }
+
+    /// <summary>Shown in <c>GET /v1/models</c>.</summary>
+    public string? Description { get; set; }
+}
+
+/// <summary>Content signals that force a request onto local models (<see cref="PromptRouterMiddlewareOptions.LocalOnlyWhen"/>).</summary>
+public sealed class LocalOnlySignals
+{
+    /// <summary>
+    /// The conversation contains something that looks like a credential: an API key (<c>sk-…</c>, <c>ghp_…</c>,
+    /// <c>AKIA…</c>, <c>xoxb-…</c>), a private key block or a JWT. Default <see langword="false"/>.
+    /// </summary>
+    public bool Secrets { get; set; }
+
+    /// <summary>
+    /// The conversation contains an absolute file path. Agents mention paths on almost every turn, so this keeps whole
+    /// coding sessions local. Default <see langword="false"/>.
+    /// </summary>
+    public bool FilePaths { get; set; }
 }

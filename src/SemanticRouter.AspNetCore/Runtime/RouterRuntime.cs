@@ -487,6 +487,8 @@ internal sealed class RuntimeRouterFacade(RouterRuntimeProvider runtime) : IProm
 {
     public IReadOnlyList<ModelDefinition> Models => runtime.Current.Router.Models;
 
+    public IReadOnlyDictionary<string, RoutingProfile> Profiles => runtime.Current.Router.Profiles;
+
     public ValueTask<RoutingPlan> RouteAsync(PromptRoutingRequest request, CancellationToken cancellationToken = default) =>
         runtime.Current.Router.RouteAsync(request, cancellationToken);
 

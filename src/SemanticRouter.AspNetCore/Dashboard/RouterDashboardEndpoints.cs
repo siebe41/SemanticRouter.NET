@@ -252,9 +252,16 @@ public static class RouterDashboardEndpoints
             }
 
             RouterRuntime runtime = provider.Current;
-            (SelectionStrategy? strategy, string? requestedModel) = ModelAliases.Resolve(PromptRoutingMiddleware.MapModel(runtime, request.Model));
+            ProfileSelection.ModelChoice choice = ProfileSelection.ResolveModel(runtime, request.Model);
+            string? profile = request.Profile is { Length: > 0 } named ? named : choice.Profile;
+            if (profile is not null && !runtime.Configuration.Profiles.ContainsKey(profile))
+            {
+                return Results.Problem($"Unknown routing profile '{profile}'.", statusCode: StatusCodes.Status400BadRequest);
+            }
+
             RoutingPlan plan = await runtime.Router.RouteAsync(
-                new PromptRoutingRequest { Prompt = request.Prompt, Strategy = strategy, RequestedModel = requestedModel }, cancellationToken).ConfigureAwait(false);
+                new PromptRoutingRequest { Prompt = request.Prompt, Strategy = choice.Strategy, RequestedModel = choice.RequestedModel, Profile = profile },
+                cancellationToken).ConfigureAwait(false);
             return Results.Ok(PromptClassificationResponse.From(plan));
         });
 

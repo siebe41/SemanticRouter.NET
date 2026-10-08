@@ -21,7 +21,9 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - It routes with a real embedding model and no server: an ONNX model runs in-process and is downloaded on first use, and recent decisions are cached.
 
-What it is not yet: a router that knows who is asking. Routing profiles are next.
+- It knows who is asking: routing profiles per client, project or tool set narrow the models a request may use, and a conversation that contains a credential can be kept on this machine.
+
+What it is not yet: fast on subscription CLIs for agentic turns, or connected through the vendors' own SDKs. Those are next.
 
 ## What done looks like
 
