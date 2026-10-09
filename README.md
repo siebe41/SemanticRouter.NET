@@ -122,6 +122,7 @@ These combine with a noisy-OR, `1 − Π(1 − weightᵢ·signalᵢ)`, so a sing
 | Complexity ≥ `ComplexityShortCircuitThreshold` *(skipped while any route is local-only)* | tier from complexity alone, **no embedding call** | `ComplexityShortCircuit` |
 | Request names a catalog model | that model only | `ModelOverride` |
 | Classifier failed and `FailOpen` is on | `FallbackTier` | `ClassifierFailure` |
+| The conversation needed a higher tier on recent turns, e.g. "ok, go ahead" in the middle of a task (`Middleware:Conversation`, on by default) | the conversation's floor, which decays as it moves on to simpler work | `ConversationFloor` |
 | The same client repeats a prompt soon after it was answered (`Middleware:RetryEscalation`, off by default) | one tier above the model that answered | `RetryEscalation` |
 
 The request itself adds requirements. If it defines `tools`, the model must declare `tools`. If it contains images, the model must declare `vision`. The size of the whole conversation, including tool definitions, is checked against each model's `ContextWindow`.
@@ -445,6 +446,8 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:ResponsesPathPrefixes[]` | `/v1/responses` | Paths carrying OpenAI Responses bodies (Codex CLI). Only the path itself is routed; `/v1/responses/{id}` is not. |
 | `Middleware:ModelAliases` | `{}` | Glob → alias/model map for client model names: `"*haiku*": "auto:cheapest"`. Catalog names and `auto:*` are never remapped; unmatched names route as `auto`. |
 | `Middleware:PinToolCallingTurns` | `true` | Requests carrying tool results go to the model that issued the tool calls. |
+| `Middleware:Conversation:Enabled` | `true` | Route by the conversation: keep the tier recent turns needed and stay on the model that answered. See [docs/routing-quality.md](docs/routing-quality.md#conversations). |
+| `Middleware:Conversation:DecayTurns` / `IdleTimeout` / `ShortFollowUpLength` / `StickToModel` | `3` / `00:30:00` / `60` / `true` | Simpler turns before the floor drops a tier; how long an idle conversation is remembered; the length (characters) below which a message is a follow-up that keeps the full floor; whether to prefer the previous model. |
 | `Middleware:RetryEscalation:Enabled` / `Window` | `false` / `00:02:00` | A prompt repeated by the same client within the window goes one tier up. See [docs/routing-quality.md](docs/routing-quality.md#retry-escalation). |
 | `Middleware:StripSystemReminders` | `true` | Ignore `<system-reminder>` blocks when classifying. |
 | `Middleware:MaxRequestBodyBytes` | `8388608` | Larger bodies get 413. Agentic clients send 100 KB+ requests. |

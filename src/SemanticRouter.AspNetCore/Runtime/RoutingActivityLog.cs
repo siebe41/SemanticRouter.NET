@@ -45,6 +45,12 @@ public sealed class RoutingActivityEntry
     /// <summary>Whether the request continued a tool-calling turn.</summary>
     public bool ToolContinuation { get; init; }
 
+    /// <summary>A short hash identifying the conversation (conversation routing); never prompt text.</summary>
+    public string? Conversation { get; init; }
+
+    /// <summary>The planned model is the conversation's previous model, kept ahead of the ranking.</summary>
+    public bool Sticky { get; init; }
+
     /// <summary>Whether only local models may serve it.</summary>
     public bool LocalOnly { get; init; }
 

@@ -101,6 +101,13 @@ public sealed class PromptRouterMiddlewareOptions
     /// </summary>
     public RetryEscalationOptions RetryEscalation { get; set; } = new();
 
+    /// <summary>
+    /// Route by the conversation, not only its latest message: keep the tier a conversation needed on recent turns, so
+    /// a short follow-up ("ok, go ahead") does not drop a task to a weaker model, and stay on the same model while it
+    /// fits. On by default.
+    /// </summary>
+    public ConversationRoutingOptions Conversation { get; set; } = new();
+
     /// <summary>The request header that names a routing profile (<c>SemanticRouter:Profiles</c>). Default <c>X-Router-Profile</c>.</summary>
     public string ProfileHeader { get; set; } = "X-Router-Profile";
 
@@ -183,6 +190,38 @@ public sealed class RetryEscalationOptions
 
     /// <summary>How soon after an answer a repeat counts as a retry. Default 2 minutes.</summary>
     public TimeSpan Window { get; set; } = TimeSpan.FromMinutes(2);
+}
+
+/// <summary>
+/// Conversation-aware routing (<see cref="PromptRouterMiddlewareOptions.Conversation"/>). A conversation is recognised
+/// by a hash of the client, the system prompt and the first user message, which chat clients resend on every turn; no
+/// prompt text is kept. State is in memory and capped.
+/// </summary>
+public sealed class ConversationRoutingOptions
+{
+    /// <summary>Turns conversation routing on. Default <see langword="true"/>.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// How many turns that need less than the conversation's peak tier it takes for the floor to drop one tier, so a
+    /// conversation that moved on to simpler work gets cheaper models again. Short follow-ups do not count. Default 3.
+    /// </summary>
+    public int DecayTurns { get; set; } = 3;
+
+    /// <summary>A conversation without a turn for this long is forgotten. Default 30 minutes.</summary>
+    public TimeSpan IdleTimeout { get; set; } = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// A message this short (in characters, without code blocks) is a follow-up such as "yes", "continue" or "try
+    /// again": it keeps the conversation's full floor instead of being classified on its own. Default 60.
+    /// </summary>
+    public int ShortFollowUpLength { get; set; } = 60;
+
+    /// <summary>
+    /// Prefer the model that answered the previous turn while it is available and on the required tier: answers stay
+    /// coherent and prompt caches keep working. Default <see langword="true"/>.
+    /// </summary>
+    public bool StickToModel { get; set; } = true;
 }
 
 /// <summary>Picks a profile from what the request looks like (<see cref="PromptRouterMiddlewareOptions.ProfileRules"/>).</summary>

@@ -27,6 +27,7 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly MemoryExposureLog _exposure;
     private readonly IToolCallAffinity? _affinity;
     private readonly RetryTracker? _retries;
+    private readonly ConversationTracker? _conversations;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -39,7 +40,8 @@ internal sealed partial class PromptRoutingMiddleware
         MemoryExposureLog exposure,
         ILogger<PromptRoutingMiddleware> logger,
         IToolCallAffinity? affinity = null,
-        RetryTracker? retries = null)
+        RetryTracker? retries = null,
+        ConversationTracker? conversations = null)
     {
         _next = next;
         _runtime = runtime;
@@ -50,6 +52,7 @@ internal sealed partial class PromptRoutingMiddleware
         _exposure = exposure;
         _affinity = affinity;
         _retries = retries;
+        _conversations = conversations;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -162,8 +165,25 @@ internal sealed partial class PromptRoutingMiddleware
             ? _retries!.MinimumTier(retryClient, prompt, retry.Window, runtime.Router.Models.Where(m => m.Enabled).Select(m => m.Tier).DefaultIfEmpty(0).Max())
             : null;
 
+        // Route by the conversation: keep the tier recent turns needed and the model that answered them. Not for
+        // tool-result turns (pinned above), explicit models, or a client's own cheap side tasks (auto:cheapest).
+        ConversationRoutingOptions conversation = options.Conversation;
+        string? conversationKey = conversation.Enabled && _conversations is not null && strategy != SelectionStrategy.CheapestCapable
+            ? ConversationTracker.Identify(retryClient, chat)
+            : null;
+        bool classifiedTurn = requestedModel is null && !chat.IsToolResultContinuation;
+
+        // Only a request that carries an earlier answer continues a conversation; a first turn routes as it always did
+        // (two separate conversations can open with the same message).
+        bool firstTurn = !chat.Messages.Any(m => m.Role == "assistant");
+        ConversationContext conversationContext = conversationKey is not null && classifiedTurn && !firstTurn
+            ? _conversations!.Lookup(conversationKey, prompt, conversation)
+            : default;
+
         var routingRequest = new PromptRoutingRequest
         {
+            ConversationFloor = conversationContext.Floor,
+            PreferredModel = conversationContext.PreferredModel,
             MinimumTier = minimumTier,
             Profile = profile.Profile,
             LocalOnly = profile.LocalOnly,
@@ -214,6 +234,8 @@ internal sealed partial class PromptRoutingMiddleware
             LocalOnly = plan.Requirements.LocalOnly,
             EstimatedInputTokens = chat.EstimatedInputTokens,
             PlannedModel = plan.Candidates.Count > 0 ? plan.Candidates[0].Model.Name : null,
+            Conversation = conversationKey?[..12],
+            Sticky = plan.Sticky,
             ClassificationMilliseconds = Math.Round(result.Elapsed.TotalMilliseconds, 2),
             Memory = memory,
         });
@@ -249,10 +271,24 @@ internal sealed partial class PromptRoutingMiddleware
             routeSpan?.SetStatus(ActivityStatusCode.Error, "no model available");
         }
 
-        if (retryable && (entry.ServedBy ?? (options.Mode == PromptRouterMode.Annotate ? entry.PlannedModel : null)) is { } answeredBy
+        string? answeredBy = entry.ServedBy ?? (options.Mode == PromptRouterMode.Annotate ? entry.PlannedModel : null);
+        if (retryable && answeredBy is not null
             && runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, answeredBy, StringComparison.OrdinalIgnoreCase)) is { } answering)
         {
             _retries!.Answered(retryClient, prompt, answering.Tier, retry.Window);
+        }
+
+        if (conversationKey is not null && answeredBy is not null)
+        {
+            if (classifiedTurn)
+            {
+                _conversations!.Record(
+                    conversationKey, result.RequiredTier, result.Reason == RoutingReason.ConversationFloor, conversationContext.FollowUp, firstTurn, answeredBy, conversation);
+            }
+            else
+            {
+                _conversations!.Touch(conversationKey, answeredBy, conversation);
+            }
         }
 
         RecordMemoryExposure(runtime, entry);
@@ -518,6 +554,11 @@ internal sealed partial class PromptRoutingMiddleware
         if (plan.Requirements.LocalOnly)
         {
             headers[prefix + "-Local-Only"] = "true";
+        }
+
+        if (plan.Sticky)
+        {
+            headers[prefix + "-Sticky"] = "true";
         }
     }
 
