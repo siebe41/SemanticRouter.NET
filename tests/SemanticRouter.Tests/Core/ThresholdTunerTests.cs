@@ -113,6 +113,19 @@ public class ThresholdTunerTests
     }
 
     [Fact]
+    public async Task Each_automatic_label_can_carry_its_own_weight()
+    {
+        EvaluationCase[] confirmed = [new(At("what is the weather in paris", 0.30f), 3)];
+        EvaluationCase[] two = [new(At("hiya", 0.705f), 1), new(At("howdy", 0.705f), 1)];
+
+        ThresholdTuning implicitOnly = await TuneAsync(Configuration(0.72f), confirmed, two, new ThresholdTuningOptions { AutomaticWeight = 0.4 });
+        ThresholdTuning judged = await TuneAsync(Configuration(0.72f), confirmed, two, new ThresholdTuningOptions { AutomaticWeight = 0.4, AutomaticWeights = [0.75, 0.4] });
+
+        implicitOnly.Steps.Should().BeEmpty("two labels at 0.4 weigh 0.8, below the minimum gain of 1");
+        judged.Steps.Should().ContainSingle().Which.Gain.Should().BeApproximately(1.15, 1e-9, "a judged label (0.75) and an implicit one (0.4)");
+    }
+
+    [Fact]
     public async Task A_route_threshold_moves_on_its_own_and_frozen_settings_stay()
     {
         // The default is right for reasoning; only small talk needs a lower bar.

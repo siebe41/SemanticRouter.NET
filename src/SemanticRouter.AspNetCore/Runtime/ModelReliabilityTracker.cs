@@ -42,7 +42,7 @@ internal sealed class ModelReliabilityTracker : IModelReliability
 {
     private const string Tools = "tools";
     private static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(1);
-    private static readonly HashSet<FeedbackKind> Counted = [FeedbackKind.Retried, FeedbackKind.Corrected, FeedbackKind.ToolErrors, FeedbackKind.EmptyReply];
+    private static readonly HashSet<FeedbackKind> Counted = [FeedbackKind.Retried, FeedbackKind.Corrected, FeedbackKind.ToolErrors, FeedbackKind.EmptyReply, FeedbackKind.Judged];
 
     private readonly IServiceProvider _services;
     private readonly RoutingActivityLog _activity;
@@ -282,6 +282,7 @@ internal sealed class ModelReliabilityTracker : IModelReliability
         FeedbackKind.Retried => "retried",
         FeedbackKind.Corrected => "corrected",
         FeedbackKind.ToolErrors => "with tool errors",
+        FeedbackKind.Judged => "graded low by the judge",
         _ => count == 1 ? "empty reply" : "empty replies",
     };
 

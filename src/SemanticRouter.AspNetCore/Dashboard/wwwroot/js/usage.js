@@ -30,7 +30,7 @@ export const budgetRow = (b) => {
     <td class="small">${b.percent}% ${b.exceeded ? '<span class="badge danger">spent</span>' : b.warning ? '<span class="badge warn">near limit</span>' : '<span class="badge ok">ok</span>'}<div class="faint">${h(limits)}</div></td>
     <td class="small muted">resets ${h(new Date(b.periodEnd).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</td></tr>`;
 };
-const FEEDBACK_KINDS = [['Retried', 'Retried'], ['Corrected', 'Corrected'], ['Overridden', 'Overridden'], ['ToolErrors', 'Tool errors'], ['EmptyReply', 'Empty']];
+const FEEDBACK_KINDS = [['Retried', 'Retried'], ['Corrected', 'Corrected'], ['Overridden', 'Overridden'], ['ToolErrors', 'Tool errors'], ['EmptyReply', 'Empty'], ['Judged', 'Graded low']];
 
 /* Signs a model was chosen too low (retries, corrections, callouts, failing tools), per route and per model. */
 function feedbackCard(f) {

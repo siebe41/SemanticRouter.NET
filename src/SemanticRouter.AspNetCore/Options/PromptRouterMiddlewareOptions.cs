@@ -134,6 +134,12 @@ public sealed class PromptRouterMiddlewareOptions
     /// </summary>
     public HousekeepingOptions Housekeeping { get; set; } = new();
 
+    /// <summary>
+    /// The optional judge: a model, preferably local, that grades a small sample of cheap models' answers. A low grade
+    /// becomes feedback the router learns from. Off by default.
+    /// </summary>
+    public JudgeOptions Judge { get; set; } = new();
+
     /// <summary>The request header that names a routing profile (<c>SemanticRouter:Profiles</c>). Default <c>X-Router-Profile</c>.</summary>
     public string ProfileHeader { get; set; } = "X-Router-Profile";
 
@@ -323,6 +329,37 @@ public sealed class HousekeepingOptions
     /// the system prompt, for another client's wording.
     /// </summary>
     public IList<string> Patterns { get; } = new List<string>();
+}
+
+/// <summary>
+/// The judge (<see cref="PromptRouterMiddlewareOptions.Judge"/>): a share of the answers from models of tier
+/// <see cref="MaxTier"/> or below is graded by <see cref="Model"/> after the client has its reply. A grade of
+/// <see cref="FailingGrade"/> or lower is <see cref="FeedbackKind.Judged"/> feedback: the decision needed a tier more.
+/// Only decisions the router made itself are graded, at most <see cref="DailyLimit"/> a day, and never a local-only
+/// request by a judge that is not local. The judge's calls are served like any other (budgets, usage, cost).
+/// </summary>
+public sealed class JudgeOptions
+{
+    /// <summary>Turns it on. Default <see langword="false"/>.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>The catalog model that grades. A local one costs nothing and may grade local-only requests.</summary>
+    public string? Model { get; set; }
+
+    /// <summary>The share of eligible answers graded. Default 0.02 (2%).</summary>
+    public double SampleRate { get; set; } = 0.02;
+
+    /// <summary>Answers from models of this tier or below are graded. Default 2.</summary>
+    public int MaxTier { get; set; } = 2;
+
+    /// <summary>The most answers graded in a day (UTC). Default 100.</summary>
+    public int DailyLimit { get; set; } = 100;
+
+    /// <summary>Grades (1 to 5) at or below this count as failing. Default 2.</summary>
+    public int FailingGrade { get; set; } = 2;
+
+    /// <summary>The most characters of the request and of the answer sent to the judge. Default 6000 each.</summary>
+    public int MaxCharacters { get; set; } = 6000;
 }
 
 /// <summary>Picks a profile from what the request looks like (<see cref="PromptRouterMiddlewareOptions.ProfileRules"/>).</summary>

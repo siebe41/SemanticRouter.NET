@@ -241,6 +241,24 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
+        JudgeOptions judge = Middleware.Judge;
+        if (judge.Enabled)
+        {
+            if (string.IsNullOrWhiteSpace(judge.Model))
+            {
+                errors.Add("Middleware:Judge:Model must name the catalog model that grades answers.");
+            }
+            else if (!Models.Any(m => string.Equals(m.Name, judge.Model, StringComparison.OrdinalIgnoreCase)))
+            {
+                errors.Add($"Middleware:Judge:Model names '{judge.Model}', which is not in the model catalog.");
+            }
+
+            if (!(judge.SampleRate is >= 0 and <= 1) || judge.DailyLimit < 0 || judge.FailingGrade is < 1 or > 4 || judge.MaxCharacters < 100)
+            {
+                errors.Add("Middleware:Judge needs a SampleRate between 0 and 1, a DailyLimit of 0 or more, a FailingGrade from 1 to 4 and MaxCharacters of at least 100.");
+            }
+        }
+
         if (Middleware.RetryEscalation.Enabled && Middleware.RetryEscalation.Window <= TimeSpan.Zero)
         {
             errors.Add("Middleware:RetryEscalation:Window must be positive.");

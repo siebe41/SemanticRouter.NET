@@ -93,6 +93,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<IPromptExtractor, RuntimeExtractorFacade>();
         services.TryAddSingleton<ChatConnectorRegistry>();
         services.TryAddSingleton<PromptDispatcher>();
+        services.TryAddSingleton<AnswerJudge>();
         services.AddHostedService<SemanticRouterWarmupService>();
         services.AddHostedService<TuningService>();
 

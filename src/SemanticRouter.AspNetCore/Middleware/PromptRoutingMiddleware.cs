@@ -30,6 +30,7 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly ConversationTracker? _conversations;
     private readonly RoutingFeedbackLog? _feedback;
     private readonly RouterTuner? _tuner;
+    private readonly AnswerJudge? _judge;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -45,7 +46,8 @@ internal sealed partial class PromptRoutingMiddleware
         RetryTracker? retries = null,
         ConversationTracker? conversations = null,
         RoutingFeedbackLog? feedback = null,
-        RouterTuner? tuner = null)
+        RouterTuner? tuner = null,
+        AnswerJudge? judge = null)
     {
         _next = next;
         _runtime = runtime;
@@ -59,6 +61,7 @@ internal sealed partial class PromptRoutingMiddleware
         _conversations = conversations;
         _feedback = feedback;
         _tuner = tuner;
+        _judge = judge;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -350,9 +353,29 @@ internal sealed partial class PromptRoutingMiddleware
             context.Response.Headers[options.HeaderPrefix + "-Id"] = entry.Id.ToString(CultureInfo.InvariantCulture);
         }
 
+        // A sample of the answers cheap models give to decisions the router made itself is graded (the judge): keep a copy.
+        bool automatic = requestedModel is null && !explicitTurn;
+        Stream responseBody = context.Response.Body;
+        AnswerCapture? answer = options.Mode == PromptRouterMode.Dispatch && _judge is not null && classifiedTurn && clientTurn is null
+            && _judge.Sample(runtime, plan, automatic)
+            ? new AnswerCapture(responseBody, AnswerJudge.CaptureLimit)
+            : null;
+
         using (_logger.BeginScope(new Dictionary<string, object> { ["RouteRequestId"] = entry.Id }))
         {
-            if (options.Mode == PromptRouterMode.Dispatch)
+            if (answer is not null)
+            {
+                context.Response.Body = answer;
+                try
+                {
+                    await _dispatcher.DispatchAsync(context, runtime, plan, chat, bodyBytes, entry).ConfigureAwait(false);
+                }
+                finally
+                {
+                    context.Response.Body = responseBody;
+                }
+            }
+            else if (options.Mode == PromptRouterMode.Dispatch)
             {
                 await _dispatcher.DispatchAsync(context, runtime, plan, chat, bodyBytes, entry).ConfigureAwait(false);
             }
@@ -371,7 +394,6 @@ internal sealed partial class PromptRoutingMiddleware
         }
 
         string? answeredBy = entry.ServedBy ?? (options.Mode == PromptRouterMode.Annotate ? entry.PlannedModel : null);
-        bool automatic = requestedModel is null && !explicitTurn;
         if (retryable && answeredBy is not null
             && runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, answeredBy, StringComparison.OrdinalIgnoreCase)) is { } answering)
         {
@@ -410,6 +432,13 @@ internal sealed partial class PromptRoutingMiddleware
 
         RecordMemoryExposure(runtime, entry);
         _activity.Complete(entry);
+        if (answer is not null)
+        {
+            using (answer)
+            {
+                _judge!.Enqueue(runtime, entry, prompt, protocol, answer, highestTier);
+            }
+        }
     }
 
     /// <summary>

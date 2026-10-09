@@ -114,7 +114,7 @@ export function renderActivityTable(entries, labels) {
       <td><span class="tier">T${e.tier}</span></td>
       <td class="small">${h(e.reason)}${e.cached ? ' <span class="badge" title="Reused a recent decision: no embedding call">cached</span>' : ''}${learnedBadge(e)}</td>
       <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
-      <td class="small">${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.servedBy ? `<b>${h(e.servedBy)}</b>${e.attempt > 1 ? ` <span class="badge warn">try ${e.attempt}</span>` : ''}${e.degraded ? ' <span class="badge warn">degraded</span>' : ''}` : `<span class="muted">${h(e.plannedModel || '—')}</span> <span class="faint">planned</span>`}${e.sticky ? ' <span class="badge" title="Stayed on the model that answered the conversation\'s last turn">sticky</span>' : ''}${e.callout ? ` <span class="badge accent" title="Chosen with an inline callout">${h(e.callout)}</span>` : ''}${unreliableBadge(e)}${feedbackBadges(e)}</td>
+      <td class="small">${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.servedBy ? `<b>${h(e.servedBy)}</b>${e.attempt > 1 ? ` <span class="badge warn">try ${e.attempt}</span>` : ''}${e.degraded ? ' <span class="badge warn">degraded</span>' : ''}` : `<span class="muted">${h(e.plannedModel || '—')}</span> <span class="faint">planned</span>`}${e.sticky ? ' <span class="badge" title="Stayed on the model that answered the conversation\'s last turn">sticky</span>' : ''}${e.callout ? ` <span class="badge accent" title="Chosen with an inline callout">${h(e.callout)}</span>` : ''}${unreliableBadge(e)}${feedbackBadges(e)}${gradeBadge(e)}</td>
       <td class="num small">${e.totalMilliseconds != null ? num(e.totalMilliseconds, 0) : num(e.classificationMilliseconds, 1)}${e.timeToFirstByteMilliseconds != null && e.totalMilliseconds != null ? `<div class="faint" title="Time to the first byte of the reply">first ${num(e.timeToFirstByteMilliseconds, 0)}</div>` : ''}</td>
       ${labels ? `<td>${e.toolContinuation ? '' : `<button class="btn ghost small" data-action="label-open" data-id="${e.id}" title="Say which tier this prompt should have had">Label</button>`}</td>` : ''}
     </tr>`).join('')}
@@ -127,11 +127,20 @@ const FEEDBACK = {
   Overridden: ['overridden', 'The next message chose a model with a callout'],
   ToolErrors: ['tool errors', 'Tool calls kept failing, or the model wrote malformed tool calls'],
   EmptyReply: ['empty reply', 'The model answered with nothing'],
+  Judged: ['graded low', 'The judge graded this answer low'],
 };
 
 /* Signs, noticed afterwards, that this decision was not good enough. */
 export function feedbackBadges(e) {
-  return ((state.feedback || {})[e.id] || []).map((k) => { const [label, title] = FEEDBACK[k] || [k, k]; return ` <span class="badge warn" title="${h(title)}">${h(label)}</span>`; }).join('');
+  return ((state.feedback || {})[e.id] || []).filter((k) => !(k === 'Judged' && e.grade != null)).map((k) => { const [label, title] = FEEDBACK[k] || [k, k]; return ` <span class="badge warn" title="${h(title)}">${h(label)}</span>`; }).join('');
+}
+
+/* The judge's grade of a sampled answer (Middleware:Judge): 1 wrong … 5 excellent. */
+export function gradeBadge(e) {
+  if (e.grade == null) return '';
+  const judge = (state.config && state.config.Middleware && state.config.Middleware.Judge) || {};
+  const failing = e.grade <= (judge.FailingGrade || 2);
+  return ` <span class="badge ${failing ? 'warn' : e.grade >= 4 ? 'ok' : ''}" title="${h('Graded by the judge' + (e.gradeNote ? ': ' + e.gradeNote : '') + (failing ? '. Learned from as a sign this needed a tier more.' : ''))}">graded ${e.grade}/5</span>`;
 }
 
 export function memoryBadge(e) {
@@ -143,12 +152,18 @@ export function memoryBadge(e) {
   return ` <a href="#/memory" class="badge ${cloud && text ? 'signal' : 'info'}" title="${h(title)}">${notes.length} note${notes.length === 1 ? '' : 's'}${cloud ? ' → cloud' : ''}</a>`;
 }
 
+function judgeNote() {
+  const j = state.config && state.config.Middleware && state.config.Middleware.Judge;
+  if (!j || !j.Enabled || !j.Model) return '';
+  return ` The judge (<span class="mono">${h(j.Model)}</span>) grades ${+(j.SampleRate * 100).toFixed(1)}% of the answers from tier ${j.MaxTier} and below, at most ${j.DailyLimit} a day.`;
+}
+
 views.activity = () => {
   const f = state.activityFilter;
   const entries = state.activity.filter((e) => f === 'all' || (f === 'failed' ? e.outcome === 'failed' : f === 'degraded' ? e.degraded : f === 'tools' ? e.hasTools : f.startsWith('profile:') ? e.profile === f.slice(8) : true));
   const profiles = [...new Set(state.activity.map((e) => e.profile).filter(Boolean).concat(Object.keys((state.config && state.config.Profiles) || {})))];
   return `
-    <div class="section-head"><h1>Activity</h1><span class="muted">The last ${state.activity.length} routed requests (newest first).</span><span class="spacer"></span>
+    <div class="section-head"><h1>Activity</h1><span class="muted">The last ${state.activity.length} routed requests (newest first).${judgeNote()}</span><span class="spacer"></span>
       <select id="activity-filter" aria-label="Show" style="width:150px">${['all', 'failed', 'degraded', 'tools'].map((x) => `<option value="${x}" ${x === f ? 'selected' : ''}>${x}</option>`).join('')}${profiles.map((x) => `<option value="profile:${h(x)}" ${'profile:' + x === f ? 'selected' : ''}>profile ${h(x)}</option>`).join('')}</select>
       <label class="check"><input type="checkbox" id="auto-refresh" ${state.autoRefresh ? 'checked' : ''}> auto-refresh</label>
       <button class="btn small" data-action="refresh">Refresh</button></div>

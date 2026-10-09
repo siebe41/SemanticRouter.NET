@@ -138,6 +138,12 @@ public sealed class RoutingActivityEntry
     /// <summary>The W3C trace id of the request, for finding it in a tracing backend.</summary>
     public string? TraceId { get; set; }
 
+    /// <summary>The judge's grade of the answer, 1 (wrong) to 5 (excellent), when it was graded (<see cref="JudgeOptions"/>).</summary>
+    public int? Grade { get; set; }
+
+    /// <summary>The model that graded the answer and its reason, e.g. <c>qwen3-32b: misses the second question</c>.</summary>
+    public string? GradeNote { get; set; }
+
     /// <summary>
     /// The models the request was sent to, in order (Dispatch mode). Failed attempts are included: the backend may have
     /// received the request before it failed.
@@ -155,7 +161,10 @@ public sealed class RoutingActivityEntry
 /// </summary>
 public interface IRoutingActivityStore
 {
-    /// <summary>Stores a finished entry. Must not throw for storage problems: log them and carry on.</summary>
+    /// <summary>
+    /// Stores a finished entry, or replaces it when it is stored again (<see cref="RoutingActivityLog.Revise"/>). Must not
+    /// throw for storage problems: log them and carry on.
+    /// </summary>
     void Append(RoutingActivityEntry entry);
 
     /// <summary>The newest entries first, at most <paramref name="limit"/>.</summary>
@@ -247,6 +256,17 @@ public sealed class RoutingActivityLog
     /// <see cref="Updated"/> for live views.
     /// </summary>
     public void Complete(RoutingActivityEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        _store?.Append(entry);
+        Updated?.Invoke(entry);
+    }
+
+    /// <summary>
+    /// Stores a finished entry again after something was learned about it later (the judge's grade), and raises
+    /// <see cref="Updated"/>.
+    /// </summary>
+    public void Revise(RoutingActivityEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
         _store?.Append(entry);
