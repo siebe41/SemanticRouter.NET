@@ -128,6 +128,49 @@ internal sealed class ConversationTracker
         }
     }
 
+    /// <summary>The conversation's last decision (not counting tool-loop turns), for feedback on it; <see langword="null"/> when unknown or idle.</summary>
+    public DecisionRecord? Last(string key, ConversationRoutingOptions options)
+    {
+        if (!_conversations.TryGetValue(key, out State? state))
+        {
+            return null;
+        }
+
+        lock (state)
+        {
+            return _time.GetUtcNow() - state.At > options.IdleTimeout ? null : state.Last;
+        }
+    }
+
+    /// <summary>Remembers the conversation's latest decision (a classified or explicit turn).</summary>
+    public void Decided(string key, DecisionRecord decision)
+    {
+        DateTimeOffset now = _time.GetUtcNow();
+        State state = _conversations.GetOrAdd(key, _ => new State { At = now });
+        lock (state)
+        {
+            (state.Last, state.ToolErrorTurns, state.At) = (decision, 0, now);
+        }
+    }
+
+    /// <summary>
+    /// Counts consecutive tool-loop turns that brought back failed tool calls; returns the count so far (0 after a turn
+    /// without errors).
+    /// </summary>
+    public int ToolTurn(string key, bool failed)
+    {
+        if (!_conversations.TryGetValue(key, out State? state))
+        {
+            return 0;
+        }
+
+        lock (state)
+        {
+            state.ToolErrorTurns = failed ? state.ToolErrorTurns + 1 : 0;
+            return state.ToolErrorTurns;
+        }
+    }
+
     /// <summary>Keeps a conversation alive and on its model during turns that are not classified (tool loops, explicit models).</summary>
     public void Touch(string key, string? model, ConversationRoutingOptions options)
     {
@@ -165,6 +208,8 @@ internal sealed class ConversationTracker
         public int TurnsBelow;
         public string? Model;
         public Callout? Choice;
+        public DecisionRecord? Last;
+        public int ToolErrorTurns;
         public DateTimeOffset At;
     }
 }

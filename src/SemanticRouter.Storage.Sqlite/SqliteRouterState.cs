@@ -55,6 +55,7 @@ public static class SqliteStateBuilderExtensions
         services.Replace(ServiceDescriptor.Singleton<ICooldownStore, SqliteCooldownStore>());
         services.Replace(ServiceDescriptor.Singleton<IToolCallAffinity, SqliteToolCallAffinity>());
         services.Replace(ServiceDescriptor.Singleton<IRoutingActivityStore, SqliteActivityStore>());
+        services.Replace(ServiceDescriptor.Singleton<IRoutingFeedbackStore, SqliteFeedbackStore>());
         services.Replace(ServiceDescriptor.Singleton<IRouterConfigurationHistory, SqliteConfigurationHistory>());
         services.Replace(ServiceDescriptor.Singleton<IUsageLedger, SqliteUsageLedger>());
         return builder;
@@ -200,6 +201,8 @@ internal sealed partial class SqliteRouterDatabase
             CREATE INDEX IF NOT EXISTS affinity_created ON affinity (created_ticks);
             CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY, timestamp_ticks INTEGER NOT NULL, entry TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS activity_timestamp ON activity (timestamp_ticks);
+            CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, timestamp_ticks INTEGER NOT NULL, entry_id INTEGER NOT NULL, item TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS feedback_timestamp ON feedback (timestamp_ticks);
             CREATE TABLE IF NOT EXISTS usage (
                 timestamp_ticks INTEGER NOT NULL, model TEXT NOT NULL, connector TEXT NOT NULL, route TEXT, client TEXT,
                 is_local INTEGER NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL, cache_read INTEGER NOT NULL,
@@ -353,6 +356,58 @@ internal sealed class SqliteToolCallAffinity(SqliteRouterDatabase database) : IT
 }
 
 /// <summary>The activity log on disk, capped by count and age.</summary>
+/// <summary>Feedback about routing decisions on disk, kept as long as the activity it is about.</summary>
+internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRoutingFeedbackStore
+{
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private int _writes;
+
+    public void Add(RoutingFeedback feedback)
+    {
+        ArgumentNullException.ThrowIfNull(feedback);
+        bool prune = Interlocked.Increment(ref _writes) % 100 == 0;
+        database.Run("saving feedback", connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "INSERT OR REPLACE INTO feedback (id, timestamp_ticks, entry_id, item) VALUES ($id, $ts, $entry, $item);",
+                ("$id", feedback.Id), ("$ts", feedback.Timestamp.UtcTicks), ("$entry", feedback.EntryId), ("$item", JsonSerializer.Serialize(feedback, Json)));
+            command.ExecuteNonQuery();
+            if (prune)
+            {
+                using SqliteCommand old = SqliteRouterDatabase.Command(
+                    connection, "DELETE FROM feedback WHERE timestamp_ticks < $oldest;",
+                    ("$oldest", (database.Time.GetUtcNow() - database.Options.ActivityMaxAge).UtcTicks));
+                old.ExecuteNonQuery();
+            }
+        });
+    }
+
+    public IReadOnlyList<RoutingFeedback> Recent(int limit) => Read(
+        "SELECT item FROM feedback ORDER BY id DESC LIMIT $limit;", ("$limit", Math.Max(0, limit)));
+
+    public IReadOnlyList<RoutingFeedback> Between(DateTimeOffset since, DateTimeOffset until, int limit) => Read(
+        "SELECT item FROM feedback WHERE timestamp_ticks >= $since AND timestamp_ticks < $until ORDER BY id LIMIT $limit;",
+        ("$since", since.UtcTicks), ("$until", until.UtcTicks), ("$limit", Math.Max(0, limit)));
+
+    private IReadOnlyList<RoutingFeedback> Read(string sql, params (string Name, object? Value)[] parameters) =>
+        database.Run<IReadOnlyList<RoutingFeedback>>("reading feedback", [], connection =>
+        {
+            var items = new List<RoutingFeedback>();
+            using SqliteCommand command = SqliteRouterDatabase.Command(connection, sql, parameters);
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                if (JsonSerializer.Deserialize<RoutingFeedback>(reader.GetString(0), Json) is { } item)
+                {
+                    items.Add(item);
+                }
+            }
+
+            return items;
+        });
+}
+
 internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRoutingActivityStore
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);

@@ -199,6 +199,25 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void Feedback_survives_a_restart()
+    {
+        var log = new RoutingFeedbackLog(store: new SqliteFeedbackStore(Open()));
+        DateTimeOffset now = _time.GetUtcNow();
+        log.Add(new RoutingFeedback { Timestamp = now, EntryId = 7, Kind = FeedbackKind.Retried, Route = "smalltalk", Model = "local", Tier = 1, NeededTier = 2 }).Should().BeTrue();
+        log.Add(new RoutingFeedback { Timestamp = now, EntryId = 7, Kind = FeedbackKind.Retried }).Should().BeFalse("one per decision and kind");
+        log.Add(new RoutingFeedback { Timestamp = now, EntryId = 8, Kind = FeedbackKind.Corrected, Tier = 2, NeededTier = 3 });
+
+        var reopened = new RoutingFeedbackLog(store: new SqliteFeedbackStore(Open()));
+
+        reopened.Recent().Select(f => (f.Id, f.EntryId, f.Kind)).Should().Equal((2L, 8L, FeedbackKind.Corrected), (1L, 7L, FeedbackKind.Retried));
+        reopened.Recent()[1].Should().Match<RoutingFeedback>(f => f.Route == "smalltalk" && f.NeededTier == 2);
+        reopened.Between(now.AddMinutes(-1), now.AddMinutes(1)).Should().HaveCount(2);
+        reopened.Add(new RoutingFeedback { Timestamp = now, EntryId = 8, Kind = FeedbackKind.Corrected }).Should().BeFalse("the reopened log knows what was recorded");
+        reopened.Add(new RoutingFeedback { Timestamp = now, EntryId = 9, Kind = FeedbackKind.Overridden }).Should().BeTrue();
+        reopened.Recent()[0].Id.Should().Be(3, "ids continue after a restart");
+    }
+
+    [Fact]
     public void A_corrupt_database_falls_back_to_memory_with_a_warning()
     {
         File.WriteAllBytes(DbPath, Encoding.UTF8.GetBytes(new string('x', 4096)));

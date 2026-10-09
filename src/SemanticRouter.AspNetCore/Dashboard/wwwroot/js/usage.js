@@ -7,7 +7,15 @@ import { render } from './shell.js';
 export async function loadUsage() {
   if (state.usage.loading) return;
   state.usage.loading = true;
-  try { state.usage.data = await api('GET', `/usage?window=${state.usage.window}&by=${state.usage.by}`); } catch (e) { toast(e.message, 'danger'); }
+  const days = { day: 1, week: 7, month: 30, '7d': 7, '30d': 30 }[state.usage.window] || 7;
+  try {
+    const [usage, feedback] = await Promise.all([
+      api('GET', `/usage?window=${state.usage.window}&by=${state.usage.by}`),
+      api('GET', `/feedback/summary?days=${days}`).catch(() => null),
+    ]);
+    state.usage.data = usage;
+    state.usage.feedback = feedback;
+  } catch (e) { toast(e.message, 'danger'); }
   state.usage.loading = false;
   if (state.view === 'usage') render();
 }
@@ -22,6 +30,18 @@ export const budgetRow = (b) => {
     <td class="small">${b.percent}% ${b.exceeded ? '<span class="badge danger">spent</span>' : b.warning ? '<span class="badge warn">near limit</span>' : '<span class="badge ok">ok</span>'}<div class="faint">${h(limits)}</div></td>
     <td class="small muted">resets ${h(new Date(b.periodEnd).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }))}</td></tr>`;
 };
+const FEEDBACK_KINDS = [['Retried', 'Retried'], ['Corrected', 'Corrected'], ['Overridden', 'Overridden'], ['ToolErrors', 'Tool errors'], ['EmptyReply', 'Empty']];
+
+/* Signs a model was chosen too low (retries, corrections, callouts, failing tools), per route and per model. */
+function feedbackCard(f) {
+  if (!f) return '';
+  const rows = (groups) => groups.map((g) => `<tr><td>${h(g.key)}</td><td class="num">${int(g.decisions)}</td><td class="num">${int(g.withFeedback)}</td><td class="num">${pct(g.rate)}</td>${FEEDBACK_KINDS.map(([k]) => `<td class="num">${int((g.byKind || {})[k])}</td>`).join('')}</tr>`).join('');
+  const head = (what) => `<tr><th>${what}</th><th>Decisions</th><th>With feedback</th><th>Rate</th>${FEEDBACK_KINDS.map(([, label]) => `<th>${label}</th>`).join('')}</tr>`;
+  return `<div class="card section"><div class="card-head"><h2>Feedback</h2><span class="muted small">Signs a decision was not good enough: the prompt sent again, the answer corrected, a model chosen with a callout, failing tool calls. ${int(f.feedback)} of ${int(f.decisions)} decisions.</span></div>
+    ${f.decisions ? `<div class="table-wrap"><table>${head('Route')}${rows(f.byRoute)}</table></div><div class="table-wrap" style="margin-top:12px"><table>${head('Model')}${rows(f.byModel)}</table></div>` : '<div class="muted small">No decisions in this window yet.</div>'}
+  </div>`;
+}
+
 views.usage = () => {
   const u = state.usage; const d = u.data;
   if (!d) { loadUsage(); return '<div class="section-head"><h1>Usage</h1></div><div class="muted">Loading…</div>'; }
@@ -37,6 +57,7 @@ views.usage = () => {
       <div class="card stat"><span class="value">${usd(t.costUsd)}</span><span class="label">at catalog prices (subscriptions and local models count as 0)</span></div>
       <div class="card stat"><span class="value">${d.referenceModel ? usd(t.referenceCostUsd - t.costUsd) : '–'}</span><span class="label">${d.referenceModel ? 'saved compared with sending everything to ' + h(d.referenceModel) : 'set Usage → reference model to estimate savings'}</span></div>
     </div>
+    ${feedbackCard(u.feedback)}
     ${d.budgets.length ? `<div class="card section"><div class="card-head"><h2>Budgets</h2><span class="muted small">A spent budget's models are not tried until it resets.</span></div><table>${d.budgets.map(budgetRow).join('')}</table></div>` : ''}
     <div class="card section"><div class="card-head"><h2>By ${h(u.by)}</h2><span class="spacer"></span>${seg('by', [['model', 'Model'], ['connector', 'Connector'], ['route', 'Route'], ['client', 'Client'], ['profile', 'Profile'], ['day', 'Day']])}</div>
       <table><tr><th>${h(u.by)}</th><th>Requests</th><th>Input</th><th>Output</th><th>Cached</th><th>Cost</th><th style="width:30%"></th></tr>

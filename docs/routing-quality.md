@@ -80,6 +80,23 @@ A conversation is recognised by a hash of the client, the system prompt and the 
 "Middleware": { "Conversation": { "Enabled": true, "DecayTurns": 3, "IdleTimeout": "00:30:00", "ShortFollowUpLength": 60, "StickToModel": true } }
 ```
 
+## Feedback
+
+Labels on the Evaluate page improve routing only when someone adds them. The router also notices on its own when a decision was probably not good enough, and records that with the decision (`Middleware:Feedback`, on by default):
+
+| Feedback | Noticed when | About |
+|---|---|---|
+| **Retried** | The same client sends the same prompt again within `RetryEscalation:Window` (2 minutes) of the answer, whether or not retry escalation is on. | The answer. |
+| **Corrected** | The next message in the conversation starts like a correction: "that's wrong", "no, I meant…", "it still doesn't compile", "you forgot…", "try again", or a short message saying it is still failing. English phrases only, for now. | The previous turn. |
+| **Overridden** | The next message chooses a model or tier with a [callout](clients.md#telling-the-router-what-you-want). | The previous turn. |
+| **Tool errors** | Tool results come back marked as errors on two tool turns in a row (the Anthropic protocol carries the flag), or the model writes malformed tool calls. | The turn running the task, or the turn itself. |
+| **Empty reply** | The model answers with no output tokens. | The turn itself. |
+
+- Only decisions the router made are judged. A turn for which you chose the model (a callout, a catalog model name) is not the router's mistake.
+- Each feedback item carries an automatic label: the decision needed at least one tier more (for an override, the tier you asked for). Automatic tuning ([#45](https://github.com/siebe41/SemanticRouter.NET/issues/45)) will learn from these.
+- **Where to see it:** badges on the Activity page next to each decision, and a Feedback table on the Usage page with the share of decisions that received feedback, per route and per model. A route or model with a high share is where routing goes wrong.
+- No prompt text is kept: feedback records the decision, route, model, tier and a short reason, in memory and in the state database when there is one (kept as long as activity).
+
 ## Retry escalation
 
 When a client sends the same prompt again shortly after it was answered, the answer was often not good enough. With `Middleware:RetryEscalation:Enabled`, such a retry goes to a model at least one tier above the one that answered. The header and the activity entry show `RetryEscalation` as the reason.
