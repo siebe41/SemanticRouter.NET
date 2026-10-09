@@ -2,6 +2,7 @@
 import { lineDiff } from './config.js';
 import { $, api, connectorNames, h, isDirty, lineupFor, setPath, state, tiers, toast } from './core.js';
 import { loadTuning } from './learned.js';
+import { loadReliability } from './reliability.js';
 import { graph, loadMemory, updateMemorySide } from './memory.js';
 import { refreshStatus, render, setConfig } from './shell.js';
 
@@ -80,6 +81,10 @@ export const actions = {
     state.history.diff = null;
     state.history.versions = (await api('GET', '/config/history?limit=100')).versions;
     await refreshStatus(); render(); toast(`Rolled back to version ${el.dataset.id}.`, 'ok');
+  },
+  async 'reliability-reset'(el) {
+    await api('POST', '/reliability/reset', { model: el.dataset.model, route: el.dataset.route || null, capability: el.dataset.capability || null });
+    state.reliability = null; await loadReliability(); render(); toast(`${el.dataset.model} is offered again, with a fresh count.`, 'ok');
   },
   async 'tuning-run'() {
     const run = await api('POST', '/tuning/run');

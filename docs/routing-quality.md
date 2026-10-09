@@ -137,6 +137,31 @@ Calibration finds better thresholds, but someone has to run it and apply the res
 
 Changes and state are kept in the state database when there is one (the tool has one by default), otherwise in memory.
 
+## Model reliability
+
+A model's tier says how capable it is, not how it does on your work. A small local model can be fine for chat and keep failing at agentic coding (malformed tool calls, empty replies). The router keeps score from [feedback](#feedback) and stops sending a model the work it keeps failing at (`Middleware:Reliability`, on by default):
+
+- **What counts:**
+  - each turn a model answered for the router (not explicit choices), per route and for turns with tools;
+  - a turn counts as failed when it drew feedback: retried, corrected, tool errors or an empty reply. Feedback on a tool-result turn counts against the turn that started the task.
+  - It counts over the last `Window` (7 days).
+- **When a model is left out of some work:** all of these hold:
+  - it has at least `MinimumTurns` (10) turns on that work;
+  - at least `MaxFailureRate` (30%) of them drew feedback;
+  - it is `PeerMargin` (15 points) worse than the other models with enough turns on the same work, when there are any.
+- **What happens then:**
+  - it is skipped for that route (or for requests with tools) like a cooled-down model, for `Period` (1 day);
+  - it still serves its other work;
+  - it is used anyway when no other model could serve the request.
+- **Afterwards:** it is offered again with a fresh count, so a model that improves (or a fixed prompt template) comes back.
+- **Never:** a model is never left out of every route it can serve, and a model you chose (a catalog name, a callout, a tool loop finishing on its model) is never skipped.
+- **Where you see it:**
+  - **Models page:** a Reliability card with each model's share of turns with feedback per route and with tools, the models left out ("left out until …: 7 of 20 turns drew feedback (5 with tool errors, 2 retried); other models 10%") and an **Offer again** button. The model's row says "not used for route agentic-coding".
+  - **Activity:** a decision that skipped a model carries "skipped *model*".
+  - **Response header:** `X-Prompt-Route-Unreliable`.
+
+The figures are kept in memory and recomputed from the activity log at most once a minute; after a restart they are computed again from the stored activity.
+
 ## Retry escalation
 
 When a client sends the same prompt again shortly after it was answered, the answer was often not good enough. With `Middleware:RetryEscalation:Enabled`, such a retry goes to a model at least one tier above the one that answered. The header and the activity entry show `RetryEscalation` as the reason.
@@ -170,6 +195,8 @@ It is off by default: a client that legitimately repeats a prompt (a "regenerate
 | `POST api/tuning/changes/{id}/apply`, `…/dismiss` | Apply or turn down a suggestion. |
 | `POST api/tuning/undo-all` | Undo every applied change in one configuration version. |
 | `POST api/tuning/pause`, `POST api/tuning/resume` | Pause or resume learning. |
+| `GET api/reliability` | Each model's turns and share with feedback per route and with tools, the share of the other models on the same work, and the models left out (`excludedSince`, `excludedUntil`, `detail`). |
+| `POST api/reliability/reset` | `{"model": "…", "route": "…"}` (or `"capability": "tools"`, or neither for everything): offer the model again with a fresh count. |
 
 Changing the set, adding utterances, comparing providers and every tuning action (run, undo, apply, dismiss, pause) need the admin role. Evaluating, route health and reading what tuning learned are open to the read-only role.
 

@@ -50,7 +50,7 @@ Three front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/mode
 - [Building and testing](#building-and-testing)
 - [Roadmap](#roadmap)
 
-Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md) (pointing Claude Code, Codex and SDKs at the router), [dashboard.md](docs/dashboard.md) (the UI and admin API), [memory.md](docs/memory.md) (the memory map and what you share with which model), [routing-quality.md](docs/routing-quality.md) (evaluation sets, threshold calibration, automatic tuning, route health and retry escalation), [routing-profiles.md](docs/routing-profiles.md) (policy per project, client or content), [providers.md](docs/providers.md) (connector setup per provider), [architecture.md](docs/architecture.md) (how a request flows, hot reload, extension points), [roadmap.md](docs/roadmap.md) (where the project is going) and [TERMS.md](docs/TERMS.md) (why the subscription CLI connectors are designed the way they are, and where the lines are).
+Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md) (pointing Claude Code, Codex and SDKs at the router), [dashboard.md](docs/dashboard.md) (the UI and admin API), [memory.md](docs/memory.md) (the memory map and what you share with which model), [routing-quality.md](docs/routing-quality.md) (evaluation sets, threshold calibration, automatic tuning, model reliability, route health and retry escalation), [routing-profiles.md](docs/routing-profiles.md) (policy per project, client or content), [providers.md](docs/providers.md) (connector setup per provider), [architecture.md](docs/architecture.md) (how a request flows, hot reload, extension points), [roadmap.md](docs/roadmap.md) (where the project is going) and [TERMS.md](docs/TERMS.md) (why the subscription CLI connectors are designed the way they are, and where the lines are).
 
 ---
 
@@ -452,6 +452,8 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Tuning:FeedbackWeight` / `FeedbackDays` | `0.5` / `30` | How much a prompt labelled by feedback counts next to one you labelled, and how far back feedback is used. |
 | `Tuning:Utterances` / `MaxUtterancesPerRoute` / `LocalOnlyUtterances` | `true` / `2` / `false` | Add labelled prompts a route misses as its utterances, how many per route per run, and whether local-only prompts may be added. |
 | `Tuning:HoldDays` / `StrongerEvidence` | `30` / `2` | How long an undone change is left alone, and how much stronger the evidence must be to suggest it again sooner. |
+| `Middleware:Reliability:Enabled` | `true` | Leave a model out of the work it keeps failing at (a route, or requests with tools) for a while. See [docs/routing-quality.md](docs/routing-quality.md#model-reliability). |
+| `Middleware:Reliability:Window` / `MinimumTurns` / `MaxFailureRate` / `PeerMargin` / `Period` | `7.00:00:00` / `10` / `0.3` / `0.15` / `1.00:00:00` | How far back turns count, the turns needed before judging, the share with feedback that counts as unreliable, how much worse than the other models it must be, and how long it is left out. |
 | `Middleware:Callouts:Enabled` / `Names` | `true` / `{}` | Inline callouts: a message starting with `@opus`, `@local`, `@best`, `@tier3`, a catalog model name or one of your `Names` routes as asked for the rest of the conversation, until `@auto`. See [docs/clients.md](docs/clients.md#telling-the-router-what-you-want). |
 | `Middleware:PinToolCallingTurns` | `true` | Requests carrying tool results go to the model that issued the tool calls. |
 | `Middleware:Conversation:Enabled` | `true` | Route by the conversation: keep the tier recent turns needed and stay on the model that answered. See [docs/routing-quality.md](docs/routing-quality.md#conversations). |
@@ -459,7 +461,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:RetryEscalation:Enabled` / `Window` | `false` / `00:02:00` | A prompt repeated by the same client within the window goes one tier up. See [docs/routing-quality.md](docs/routing-quality.md#retry-escalation). |
 | `Middleware:StripSystemReminders` | `true` | Ignore `<system-reminder>` blocks when classifying. |
 | `Middleware:MaxRequestBodyBytes` | `8388608` | Larger bodies get 413. Agentic clients send 100 KB+ requests. |
-| `Middleware:EmitResponseHeaders` / `HeaderPrefix` | `true` / `X-Prompt-Route` | `X-Prompt-Route`, `-Tier`, `-Reason`, `-Similarity`, `-Complexity`, `-Model`, `-Connector`, `-Attempt`, `-Degraded`, `-Budget`, `-Dropped`, `-Profile`, `-Local-Only`. |
+| `Middleware:EmitResponseHeaders` / `HeaderPrefix` | `true` / `X-Prompt-Route` | `X-Prompt-Route`, `-Tier`, `-Reason`, `-Similarity`, `-Complexity`, `-Model`, `-Connector`, `-Attempt`, `-Degraded`, `-Budget`, `-Dropped`, `-Profile`, `-Local-Only`, `-Unreliable`. |
 | `Middleware:FailOpen` | `true` | Route with `FallbackTier` if classification fails. |
 | `Middleware:MessageSelection` | `LastUserMessage` | Which messages are classified. |
 | `Usage:ReferenceModel`, `Usage:TimeZone`, `Usage:WarnAtPercent` | –, local, `80` | Yardstick for "saved by routing", the zone budget periods follow, and when to warn. |

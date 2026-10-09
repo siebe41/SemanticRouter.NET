@@ -317,6 +317,7 @@ internal sealed partial class PromptRoutingMiddleware
             Conversation = conversationKey?[..12],
             Callout = calloutNote,
             Sticky = plan.Sticky,
+            Unreliable = plan.Unreliable.Count > 0 ? string.Join(", ", plan.Unreliable) : null,
             Learned = learned?.Id,
             LearnedNote = learned is null ? null : $"learned {learned.Timestamp.ToString("d MMM", CultureInfo.InvariantCulture)}: {learned.Summary}",
             ClassificationMilliseconds = Math.Round(result.Elapsed.TotalMilliseconds, 2),
@@ -727,6 +728,11 @@ internal sealed partial class PromptRoutingMiddleware
         if (plan.Sticky)
         {
             headers[prefix + "-Sticky"] = "true";
+        }
+
+        if (plan.Unreliable.Count > 0 && string.Join(", ", plan.Unreliable) is { } unreliable && unreliable.All(char.IsAscii))
+        {
+            headers[prefix + "-Unreliable"] = unreliable;
         }
     }
 
