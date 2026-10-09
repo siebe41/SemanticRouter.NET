@@ -345,7 +345,11 @@ public sealed class DesktopTests : IDisposable
                 (await http.GetAsync(new Uri($"http://127.0.0.1:{port}/router/"))).StatusCode.Should().Be(HttpStatusCode.OK);
             }
 
-            File.ReadAllText(RouterLog.FileIn(directory)).Should().Contain($"is listening on http://127.0.0.1:{port}");
+            // The router still writes to its log: share it, as Windows refuses a reader that would lock writers out.
+            using (var log = new StreamReader(new FileStream(RouterLog.FileIn(directory), FileMode.Open, FileAccess.Read, FileShare.ReadWrite)))
+            {
+                (await log.ReadToEndAsync()).Should().Contain($"is listening on http://127.0.0.1:{port}");
+            }
 
             // The way a service manager stops it: SIGTERM, or on Windows the stop event.
             if (OperatingSystem.IsWindows())
