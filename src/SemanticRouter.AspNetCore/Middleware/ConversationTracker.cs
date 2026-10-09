@@ -71,15 +71,15 @@ internal sealed class ConversationTracker
     /// <summary>
     /// Records a routed turn: the tier it required (after any floor), whether the floor raised it, and the model that
     /// answered. A turn that needed less than the conversation's peak counts towards lowering the floor, unless it was
-    /// a short follow-up. A first turn starts the conversation afresh.
+    /// a short follow-up.
     /// </summary>
-    public void Record(string key, int requiredTier, bool raisedByFloor, bool followUp, bool firstTurn, string? model, ConversationRoutingOptions options)
+    public void Record(string key, int requiredTier, bool raisedByFloor, bool followUp, string? model, ConversationRoutingOptions options)
     {
         DateTimeOffset now = _time.GetUtcNow();
         State state = _conversations.GetOrAdd(key, _ => new State { Peak = requiredTier, At = now });
         lock (state)
         {
-            if (firstTurn || now - state.At > options.IdleTimeout)
+            if (now - state.At > options.IdleTimeout)
             {
                 (state.Peak, state.TurnsBelow) = (requiredTier, 0);
             }
@@ -97,6 +97,35 @@ internal sealed class ConversationTracker
         }
 
         Prune(now, options.IdleTimeout);
+    }
+
+    /// <summary>Forgets a conversation: a first turn starts it afresh (another conversation may have opened the same way).</summary>
+    public void Forget(string key) => _conversations.TryRemove(key, out _);
+
+    /// <summary>The callout the conversation chose earlier and that still holds, or <see langword="null"/>.</summary>
+    public Callout? Choice(string key, ConversationRoutingOptions options)
+    {
+        if (!_conversations.TryGetValue(key, out State? state))
+        {
+            return null;
+        }
+
+        lock (state)
+        {
+            return _time.GetUtcNow() - state.At > options.IdleTimeout ? null : state.Choice;
+        }
+    }
+
+    /// <summary>Remembers (or, with <see langword="null"/>, clears) the conversation's callout for its next turns.</summary>
+    public void Choose(string key, Callout? choice)
+    {
+        DateTimeOffset now = _time.GetUtcNow();
+        State state = _conversations.GetOrAdd(key, _ => new State { At = now });
+        lock (state)
+        {
+            state.Choice = choice;
+            state.At = now;
+        }
     }
 
     /// <summary>Keeps a conversation alive and on its model during turns that are not classified (tool loops, explicit models).</summary>
@@ -135,6 +164,7 @@ internal sealed class ConversationTracker
         public int Peak;
         public int TurnsBelow;
         public string? Model;
+        public Callout? Choice;
         public DateTimeOffset At;
     }
 }

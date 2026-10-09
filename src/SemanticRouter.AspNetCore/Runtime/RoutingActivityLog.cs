@@ -48,6 +48,9 @@ public sealed class RoutingActivityEntry
     /// <summary>A short hash identifying the conversation (conversation routing); never prompt text.</summary>
     public string? Conversation { get; init; }
 
+    /// <summary>The inline callout that decided this request (<c>@opus</c>…), and whether it was made earlier in the conversation.</summary>
+    public string? Callout { get; init; }
+
     /// <summary>The planned model is the conversation's previous model, kept ahead of the ranking.</summary>
     public bool Sticky { get; init; }
 

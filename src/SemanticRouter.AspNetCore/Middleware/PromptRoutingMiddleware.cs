@@ -134,6 +134,17 @@ internal sealed partial class PromptRoutingMiddleware
             return;
         }
 
+        // An inline callout ("@opus …") routes as the person asked. The tag is taken out of every user message before
+        // the request goes on, so the model never sees it; the body is only rewritten when there is one.
+        Callout? callout = options.Callouts.Enabled && Callouts.LeadingTag(prompt) is { } tag ? Callouts.Resolve(tag, runtime) : null;
+        if (options.Callouts.Enabled && Callouts.Strip(bodyBytes, protocol, runtime) is { } stripped
+            && TryParse(context, runtime, protocol, stripped, out string strippedPrompt, out ChatCompletionRequest strippedChat, out IReadOnlyList<MemoryReference> strippedMemory))
+        {
+            bodyBytes = stripped;
+            context.Request.Body = new MemoryStream(stripped, writable: false);
+            (prompt, chat, memory) = (strippedPrompt, strippedChat, strippedMemory);
+        }
+
         long started = Stopwatch.GetTimestamp();
         ProfileSelection.ModelChoice modelChoice = ProfileSelection.ResolveModel(runtime, chat.Model);
         SelectionStrategy? strategy = modelChoice.Strategy;
@@ -153,30 +164,63 @@ internal sealed partial class PromptRoutingMiddleware
             requestedModel = null;
         }
 
+        // The conversation this request continues: for its floor and model (conversation routing) and for a callout
+        // made earlier in it. Not for a client's own cheap side tasks (auto:cheapest, e.g. Claude Code's Haiku calls).
+        ConversationRoutingOptions conversation = options.Conversation;
+        string retryClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
+        string? conversationKey = (conversation.Enabled || options.Callouts.Enabled) && _conversations is not null
+            && modelChoice.Strategy != SelectionStrategy.CheapestCapable
+            ? ConversationTracker.Identify(retryClient, chat)
+            : null;
+
+        // Only a request that carries an earlier answer continues a conversation; a first turn starts it afresh (two
+        // separate conversations can open with the same message).
+        bool firstTurn = !chat.Messages.Any(m => m.Role == "assistant");
+        if (conversationKey is not null && firstTurn)
+        {
+            _conversations!.Forget(conversationKey);
+        }
+
+        // Explicit beats automatic: this turn's callout, or one made earlier in the conversation, until "@auto".
+        Callout? choice = callout;
+        bool remembered = false;
+        if (conversationKey is not null && options.Callouts.Enabled)
+        {
+            if (callout is not null)
+            {
+                _conversations!.Choose(conversationKey, callout.Clear ? null : callout);
+            }
+            else if (_conversations!.Choice(conversationKey, conversation) is { } earlier)
+            {
+                (choice, remembered) = (earlier, true);
+            }
+        }
+
+        bool explicitTurn = choice is { Clear: false };
+        if (choice is { Clear: false, Model: { } calloutModel })
+        {
+            (requestedModel, strategy) = (calloutModel, null);
+        }
+        else if (choice is { Clear: false, Strategy: { } calloutStrategy })
+        {
+            strategy = calloutStrategy;
+        }
+
         string? affinityModel = options.PinToolCallingTurns && chat.IsToolResultContinuation && requestedModel is null
             ? _affinity?.Lookup(chat.AnsweredToolUseIds)
             : null;
 
         // A prompt the same client repeats soon after it was answered goes one tier up (when enabled).
         RetryEscalationOptions retry = options.RetryEscalation;
-        string retryClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
         bool retryable = retry.Enabled && _retries is not null && requestedModel is null && !chat.IsToolResultContinuation;
         int? minimumTier = retryable
             ? _retries!.MinimumTier(retryClient, prompt, retry.Window, runtime.Router.Models.Where(m => m.Enabled).Select(m => m.Tier).DefaultIfEmpty(0).Max())
             : null;
 
         // Route by the conversation: keep the tier recent turns needed and the model that answered them. Not for
-        // tool-result turns (pinned above), explicit models, or a client's own cheap side tasks (auto:cheapest).
-        ConversationRoutingOptions conversation = options.Conversation;
-        string? conversationKey = conversation.Enabled && _conversations is not null && strategy != SelectionStrategy.CheapestCapable
-            ? ConversationTracker.Identify(retryClient, chat)
-            : null;
+        // tool-result turns (pinned above), explicit choices, or a conversation's first turn.
         bool classifiedTurn = requestedModel is null && !chat.IsToolResultContinuation;
-
-        // Only a request that carries an earlier answer continues a conversation; a first turn routes as it always did
-        // (two separate conversations can open with the same message).
-        bool firstTurn = !chat.Messages.Any(m => m.Role == "assistant");
-        ConversationContext conversationContext = conversationKey is not null && classifiedTurn && !firstTurn
+        ConversationContext conversationContext = conversation.Enabled && conversationKey is not null && classifiedTurn && !explicitTurn && !firstTurn
             ? _conversations!.Lookup(conversationKey, prompt, conversation)
             : default;
 
@@ -185,8 +229,9 @@ internal sealed partial class PromptRoutingMiddleware
             ConversationFloor = conversationContext.Floor,
             PreferredModel = conversationContext.PreferredModel,
             MinimumTier = minimumTier,
+            ExplicitTier = explicitTurn ? choice!.Tier : null,
             Profile = profile.Profile,
-            LocalOnly = profile.LocalOnly,
+            LocalOnly = profile.LocalOnly || choice is { Clear: false, Local: true },
             Prompt = prompt,
             EstimatedInputTokens = chat.EstimatedInputTokens,
             AdditionalCapabilities = ImpliedCapabilities(chat),
@@ -196,12 +241,34 @@ internal sealed partial class PromptRoutingMiddleware
         };
 
         RoutingPlan plan = await RouteAsync(runtime, routingRequest, options.FailOpen, context.RequestAborted).ConfigureAwait(false);
+        string? calloutNote = callout is { Clear: true } ? callout.Tag : null;
+        if (explicitTurn)
+        {
+            calloutNote = choice!.Tag + (remembered ? " (earlier in the conversation)" : string.Empty);
+            if (choice.Model is not null)
+            {
+                if (plan.Classification.Reason == RoutingReason.ModelOverride)
+                {
+                    plan = plan with { Classification = plan.Classification with { Reason = RoutingReason.ExplicitCallout } };
+                }
+                else
+                {
+                    // The routing profile does not allow that model, so it was routed automatically.
+                    calloutNote += " (not allowed here; routed automatically)";
+                }
+            }
+        }
+
         PromptClassificationResult result = plan.Classification;
 
         context.Features.Set<IPromptRoutingFeature>(new PromptRoutingFeature(prompt, plan));
         if (options.EmitResponseHeaders)
         {
             WriteHeaders(context.Response.Headers, options.HeaderPrefix, plan);
+            if (calloutNote is not null && calloutNote.All(char.IsAscii))
+            {
+                context.Response.Headers[options.HeaderPrefix + "-Callout"] = calloutNote;
+            }
         }
 
         _metrics.RecordDecision(result);
@@ -235,6 +302,7 @@ internal sealed partial class PromptRoutingMiddleware
             EstimatedInputTokens = chat.EstimatedInputTokens,
             PlannedModel = plan.Candidates.Count > 0 ? plan.Candidates[0].Model.Name : null,
             Conversation = conversationKey?[..12],
+            Callout = calloutNote,
             Sticky = plan.Sticky,
             ClassificationMilliseconds = Math.Round(result.Elapsed.TotalMilliseconds, 2),
             Memory = memory,
@@ -283,7 +351,7 @@ internal sealed partial class PromptRoutingMiddleware
             if (classifiedTurn)
             {
                 _conversations!.Record(
-                    conversationKey, result.RequiredTier, result.Reason == RoutingReason.ConversationFloor, conversationContext.FollowUp, firstTurn, answeredBy, conversation);
+                    conversationKey, result.RequiredTier, result.Reason == RoutingReason.ConversationFloor, conversationContext.FollowUp, answeredBy, conversation);
             }
             else
             {

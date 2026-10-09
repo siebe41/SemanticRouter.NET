@@ -202,7 +202,7 @@ public sealed class ConversationRoutingTests : RouterHostTest
         var tracker = new ConversationTracker(time);
         var options = new ConversationRoutingOptions();
 
-        tracker.Record("c", 4, raisedByFloor: false, followUp: false, firstTurn: true, "cloud", options);
+        tracker.Record("c", 4, raisedByFloor: false, followUp: false, "cloud", options);
         for (int i = 0; i < 4; i++)
         {
             time.Advance(TimeSpan.FromMinutes(10));

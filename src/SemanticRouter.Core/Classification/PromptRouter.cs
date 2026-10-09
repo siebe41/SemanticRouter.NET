@@ -41,6 +41,12 @@ public sealed record PromptRoutingRequest
     public int? ConversationFloor { get; init; }
 
     /// <summary>
+    /// A tier the person asked for (an inline <c>@tier3</c>): it replaces the classified tier, up or down, over every
+    /// floor; the reason becomes <see cref="RoutingReason.ExplicitCallout"/>.
+    /// </summary>
+    public int? ExplicitTier { get; init; }
+
+    /// <summary>
     /// The model that answered this conversation's last turn. It is tried first while it is available and exactly on
     /// the required tier, so a conversation stays on one model (coherent answers, prompt-cache hits) until it needs a
     /// stronger one or can make do with a cheaper one (<see cref="RoutingPlan.Sticky"/>).
@@ -171,6 +177,11 @@ public sealed class PromptRouter : IPromptRouter
             if (request.MinimumTier is { } floor && floor > classification.RequiredTier)
             {
                 classification = classification with { RequiredTier = floor, Reason = RoutingReason.RetryEscalation };
+            }
+
+            if (request.ExplicitTier is { } asked)
+            {
+                classification = classification with { RequiredTier = asked, Reason = RoutingReason.ExplicitCallout };
             }
 
             classify?.SetTag("semantic_router.tier", classification.RequiredTier);

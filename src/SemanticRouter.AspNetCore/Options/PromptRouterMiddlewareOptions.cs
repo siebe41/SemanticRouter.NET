@@ -84,7 +84,7 @@ public sealed class PromptRouterMiddlewareOptions
     /// <summary>
     /// Maps the model names clients send to routing aliases or catalog models, so tools keep their own model
     /// settings and the router still decides. Keys are case-insensitive globs (<c>*</c> matches anything), e.g.
-    /// <c>"*haiku*": "auto:cheapest"</c>, <c>"*opus*": "auto:best"</c>, <c>"gpt-*": "auto"</c>. Names that match no
+    /// <c>"*haiku*": "auto:cheapest"</c>, <c>"*opus*": "family:opus"</c> (the catalog's Opus model, else the most capable), <c>"gpt-*": "auto"</c>. Names that match no
     /// pattern and no catalog model are routed as <c>auto</c>.
     /// </summary>
     public IDictionary<string, string> ModelAliases { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -107,6 +107,13 @@ public sealed class PromptRouterMiddlewareOptions
     /// fits. On by default.
     /// </summary>
     public ConversationRoutingOptions Conversation { get; set; } = new();
+
+    /// <summary>
+    /// Inline callouts: a message that starts with <c>@opus</c>, <c>@local</c>, <c>@best</c>, <c>@tier3</c> or a
+    /// catalog model name routes as asked, and the choice holds for the rest of the conversation until <c>@auto</c>.
+    /// On by default.
+    /// </summary>
+    public CalloutOptions Callouts { get; set; } = new();
 
     /// <summary>The request header that names a routing profile (<c>SemanticRouter:Profiles</c>). Default <c>X-Router-Profile</c>.</summary>
     public string ProfileHeader { get; set; } = "X-Router-Profile";
@@ -222,6 +229,25 @@ public sealed class ConversationRoutingOptions
     /// coherent and prompt caches keep working. Default <see langword="true"/>.
     /// </summary>
     public bool StickToModel { get; set; } = true;
+}
+
+/// <summary>
+/// Inline callouts (<see cref="PromptRouterMiddlewareOptions.Callouts"/>). A message that starts with a tag routes as
+/// the tag asks, over the router's own judgement; the tag is removed before the request is forwarded. Built in:
+/// <c>@auto</c> (back to automatic), <c>@best</c>, <c>@cheap</c>, <c>@priority</c>, <c>@local</c>, <c>@tier1</c> to
+/// <c>@tier9</c>, a catalog model name, and a model family (<c>@opus</c>, <c>@qwen</c>: the most capable catalog model
+/// whose name or model id contains it). A tag that is none of these is left in the message.
+/// </summary>
+public sealed class CalloutOptions
+{
+    /// <summary>Turns inline callouts on. Default <see langword="true"/>.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Your own short names, e.g. <c>"fast": "lmstudio-small"</c>, <c>"deep": "family:opus"</c>, <c>"private":
+    /// "local"</c>. A target is a catalog model, <c>auto:…</c>, <c>family:…</c>, <c>tierN</c> or <c>local</c>.
+    /// </summary>
+    public IDictionary<string, string> Names { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>Picks a profile from what the request looks like (<see cref="PromptRouterMiddlewareOptions.ProfileRules"/>).</summary>
