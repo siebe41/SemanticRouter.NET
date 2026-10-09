@@ -40,6 +40,12 @@ public sealed class TuningOptions
     /// <summary>How much a prompt labelled from feedback counts next to one labelled by hand (1). Default 0.5.</summary>
     public double FeedbackWeight { get; set; } = 0.5;
 
+    /// <summary>
+    /// How much a prompt labelled only by the judge's low grade (<see cref="JudgeOptions"/>) counts. Default 0.75: a
+    /// grade reads the answer, so it says more than a retry, but less than a label set by hand.
+    /// </summary>
+    public double JudgeWeight { get; set; } = 0.75;
+
     /// <summary>Feedback from the last this many days is learned from. Default 30.</summary>
     public int FeedbackDays { get; set; } = 30;
 
@@ -93,6 +99,11 @@ public sealed class TuningOptions
         if (!(FeedbackWeight >= 0 && FeedbackWeight <= 1))
         {
             yield return "Tuning:FeedbackWeight must be between 0 and 1.";
+        }
+
+        if (!(JudgeWeight >= 0 && JudgeWeight <= 1))
+        {
+            yield return "Tuning:JudgeWeight must be between 0 and 1.";
         }
 
         if (FeedbackDays < 1)

@@ -167,7 +167,12 @@ internal sealed partial class RouterTuner : IDisposable
         var evaluator = new RoutingEvaluator(runtime.EmbeddingProvider, runtime.Configuration);
         PreparedEvaluation prepared = await evaluator.PrepareAsync([.. confirmed, .. automatic], cancellationToken).ConfigureAwait(false);
         var tuner = new ThresholdTuner(evaluator);
-        var limits = new ThresholdTuningOptions { MaxStep = options.MaxStep, AutomaticWeight = options.FeedbackWeight };
+        var limits = new ThresholdTuningOptions
+        {
+            MaxStep = options.MaxStep,
+            AutomaticWeight = options.FeedbackWeight,
+            AutomaticWeights = [.. automatic.Select(c => Weight(kinds.TryGetValue(c.Prompt, out HashSet<FeedbackKind>? seen) ? seen : [], options))],
+        };
         ThresholdTuning planned = tuner.Tune(prepared, confirmed.Count, limits);
 
         var dispositions = planned.Steps.ToDictionary(
@@ -227,7 +232,7 @@ internal sealed partial class RouterTuner : IDisposable
         IReadOnlyList<EvaluationCase> confirmed, TuningOptions options, DateTimeOffset now)
     {
         var kinds = new Dictionary<string, HashSet<FeedbackKind>>(StringComparer.Ordinal);
-        if (options.FeedbackWeight <= 0)
+        if (options.FeedbackWeight <= 0 && options.JudgeWeight <= 0)
         {
             return ([], kinds);
         }
@@ -245,6 +250,7 @@ internal sealed partial class RouterTuner : IDisposable
         foreach (RoutingFeedback item in feedback)
         {
             if (item.NeededTier is not { } tier
+                || (item.Kind == FeedbackKind.Judged ? options.JudgeWeight : options.FeedbackWeight) <= 0
                 || !entries.TryGetValue(item.EntryId, out RoutingActivityEntry? entry)
                 || entry.ToolContinuation
                 || string.IsNullOrWhiteSpace(entry.PromptPreview)
@@ -262,6 +268,17 @@ internal sealed partial class RouterTuner : IDisposable
         }
 
         return (needed.Select(n => new EvaluationCase(n.Key, n.Value.Tier) { LocalOnly = n.Value.LocalOnly, Note = "from feedback" }).ToArray(), kinds);
+    }
+
+    /// <summary>
+    /// A prompt labelled only by the judge counts at <see cref="TuningOptions.JudgeWeight"/>, one with other feedback at
+    /// <see cref="TuningOptions.FeedbackWeight"/>, one with both at the higher of the two.
+    /// </summary>
+    private static double Weight(HashSet<FeedbackKind> kinds, TuningOptions options)
+    {
+        bool judged = kinds.Contains(FeedbackKind.Judged);
+        bool other = kinds.Count > (judged ? 1 : 0);
+        return judged && other ? Math.Max(options.JudgeWeight, options.FeedbackWeight) : judged ? options.JudgeWeight : options.FeedbackWeight;
     }
 
     private static TuningChange ThresholdChange(ThresholdStep step, TuningOptions options, Evidence evidence, DateTimeOffset now)
@@ -327,6 +344,7 @@ internal sealed partial class RouterTuner : IDisposable
         FeedbackKind.Corrected => "corrected",
         FeedbackKind.Overridden => "overridden with a callout",
         FeedbackKind.ToolErrors => "tool errors",
+        FeedbackKind.Judged => "graded low by the judge",
         _ => "empty replies",
     };
 

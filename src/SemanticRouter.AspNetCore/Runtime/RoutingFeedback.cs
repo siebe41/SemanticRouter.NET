@@ -20,6 +20,9 @@ public enum FeedbackKind
 
     /// <summary>The model answered with nothing (no output tokens).</summary>
     EmptyReply,
+
+    /// <summary>The judge (<see cref="JudgeOptions"/>) graded the answer low.</summary>
+    Judged,
 }
 
 /// <summary>

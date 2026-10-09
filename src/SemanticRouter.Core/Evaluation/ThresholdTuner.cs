@@ -47,6 +47,12 @@ public sealed class ThresholdTuningOptions
     /// <summary>How much an automatically labelled prompt counts next to a confirmed one (1).</summary>
     public double AutomaticWeight { get; set; } = 0.5;
 
+    /// <summary>
+    /// Each automatically labelled prompt's own weight, in the order of the automatic cases; overrides
+    /// <see cref="AutomaticWeight"/> where given.
+    /// </summary>
+    public IReadOnlyList<double>? AutomaticWeights { get; set; }
+
     /// <summary>The weighted number of prompts the calibrated thresholds must gain before anything moves.</summary>
     public double MinimumGain { get; set; } = 1;
 
@@ -111,7 +117,9 @@ public sealed class ThresholdTuner
         var weights = new double[prepared.Cases.Count];
         for (int i = 0; i < weights.Length; i++)
         {
-            weights[i] = i < confirmedCount ? 1 : options.AutomaticWeight;
+            weights[i] = i < confirmedCount ? 1
+                : options.AutomaticWeights is { } each && i - confirmedCount < each.Count ? each[i - confirmedCount]
+                : options.AutomaticWeight;
         }
 
         Func<string?, bool> canChange = options.CanChange ?? (_ => true);

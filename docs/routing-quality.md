@@ -91,17 +91,35 @@ Labels on the Evaluate page improve routing only when someone adds them. The rou
 | **Overridden** | The next message chooses a model or tier with a [callout](clients.md#telling-the-router-what-you-want). | The previous turn. |
 | **Tool errors** | Tool results come back marked as errors on two tool turns in a row (the Anthropic protocol carries the flag), or the model writes malformed tool calls. | The turn running the task, or the turn itself. |
 | **Empty reply** | The model answers with no output tokens. | The turn itself. |
+| **Graded low** | The optional [judge](#the-judge) grades the answer `FailingGrade` (2) or lower. | The turn itself. |
 
 - Only decisions the router made are judged. A turn for which you chose the model (a callout, a catalog model name) is not the router's mistake.
 - Each feedback item carries an automatic label: the decision needed at least one tier more (for an override, the tier you asked for). [Automatic tuning](#automatic-tuning) learns from these.
 - **Where to see it:** badges on the Activity page next to each decision, and a Feedback table on the Usage page with the share of decisions that received feedback, per route and per model. A route or model with a high share is where routing goes wrong.
 - No prompt text is kept: feedback records the decision, route, model, tier and a short reason, in memory and in the state database when there is one (kept as long as activity).
 
+## The judge
+
+Retries and corrections only show the answers people pushed back on. An optional judge reads a small sample of cheap answers itself (`Middleware:Judge`, off by default):
+
+```json
+"Middleware": { "Judge": { "Enabled": true, "Model": "qwen3-32b" } }
+```
+
+- **What is graded:** `SampleRate` (2%) of the answers from models of tier `MaxTier` (2) or below, to decisions the router made itself. Not explicit choices, client side requests, tool-result turns, or answers that only call tools. At most `DailyLimit` (100) a day (UTC).
+- **How:** after the client has its reply, `Model` (a catalog model) gets the request and the answer, each cut to `MaxCharacters` (6000), and grades it from 1 (wrong) to 5 (excellent). Grading runs in the background, one answer at a time, so it never slows a reply.
+- **What a low grade does:** a grade of `FailingGrade` (2) or lower is **graded low** feedback: the decision needed one tier more. [Automatic tuning](#automatic-tuning) counts such a prompt at `Tuning:JudgeWeight` (0.75), between implicit feedback (0.5) and your own labels (1), and [model reliability](#model-reliability) counts it as a failed turn.
+- **Privacy:** a local-only request is never sent to a judge that is not local. With a local judge, nothing leaves the machine. A cloud judge does see the sampled requests and answers that are not local-only.
+- **Cost:** the judge's calls are served like any other: budgets apply, and they show on the Usage page under route and client `(judge)`. A local judge costs nothing.
+- **Where you see it:** a **graded 4/5** badge on the Activity entry, with the judge's reason in its tooltip; the API has it as `grade` and `gradeNote`. The Activity page says when the judge is on.
+
+Pick a judge stronger than the models it grades; grading its own answers is skipped.
+
 ## Automatic tuning
 
 Calibration finds better thresholds, but someone has to run it and apply the result. Automatic tuning does that by itself, in small steps, and shows every change it makes so you can undo it (`Tuning`, on by default):
 
-- **What it learns from:** the evaluation set (prompts you labelled), and prompts labelled by [feedback](#feedback) in the last `FeedbackDays` (30). A prompt labelled by feedback counts at `FeedbackWeight` (0.5) of a hand-labelled one. Only activity previews that hold the whole prompt (160 characters or fewer) become labels, and a prompt in the evaluation set keeps your label.
+- **What it learns from:** the evaluation set (prompts you labelled), and prompts labelled by [feedback](#feedback) in the last `FeedbackDays` (30). A prompt labelled by feedback counts at `FeedbackWeight` (0.5) of a hand-labelled one; one labelled only by the [judge](#the-judge) at `JudgeWeight` (0.75). Only activity previews that hold the whole prompt (160 characters or fewer) become labels, and a prompt in the evaluation set keeps your label.
 - **Thresholds:** it calibrates the default threshold and each route's own threshold, then moves each one at most `MaxStep` (0.02) per run toward that value, so a big correction takes several days. A route that follows the default stays on it unless its own threshold helps.
 - **Utterances:** a prompt in the evaluation set that is labelled with a route but misses it is added to that route as an example, at most `MaxUtterancesPerRoute` (2) per route per run. Prompts labelled local-only are never added unless `LocalOnlyUtterances` is on, because utterances are part of the configuration.
 - **Only when it is safe:**
@@ -143,7 +161,7 @@ A model's tier says how capable it is, not how it does on your work. A small loc
 
 - **What counts:**
   - each turn a model answered for the router (not explicit choices), per route and for turns with tools;
-  - a turn counts as failed when it drew feedback: retried, corrected, tool errors or an empty reply. Feedback on a tool-result turn counts against the turn that started the task.
+  - a turn counts as failed when it drew feedback: retried, corrected, tool errors, an empty reply or graded low by the [judge](#the-judge). Feedback on a tool-result turn counts against the turn that started the task.
   - It counts over the last `Window` (7 days).
 - **When a model is left out of some work:** all of these hold:
   - it has at least `MinimumTurns` (10) turns on that work;

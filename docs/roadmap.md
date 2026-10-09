@@ -107,7 +107,7 @@ Tracked in [#40](https://github.com/siebe41/SemanticRouter.NET/issues/40): point
 | [#44](https://github.com/siebe41/SemanticRouter.NET/issues/44) | Track model reliability per kind of work | Done: per route and for tool use, left out for a period, never an explicit choice. |
 | [#46](https://github.com/siebe41/SemanticRouter.NET/issues/46) | Model-family priors: tiers and capabilities from a curated table | Done: built-in table, `model-families.json` override. |
 | [#47](https://github.com/siebe41/SemanticRouter.NET/issues/47) | Default routes and evaluation prompts for agentic clients | Done: client side requests recognised, a continuation route, an 88-prompt evaluation set gated in CI. |
-| [#48](https://github.com/siebe41/SemanticRouter.NET/issues/48) | Optional local judge that grades a sample of cheap answers | |
+| [#48](https://github.com/siebe41/SemanticRouter.NET/issues/48) | Optional local judge that grades a sample of cheap answers | Done: off by default; sampled, capped per day, never a local-only request to a cloud judge; low grades are feedback. |
 | [#49](https://github.com/siebe41/SemanticRouter.NET/issues/49) | Weekly digest; notify only when a decision is needed | Notifications for large learned changes. |
 
 ### Continuous
