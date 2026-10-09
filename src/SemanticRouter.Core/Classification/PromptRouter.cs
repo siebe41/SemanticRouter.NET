@@ -62,6 +62,12 @@ public sealed record PromptRoutingRequest
 
     /// <summary>Only local models may serve this request, whatever the classification says (e.g. it contains a secret).</summary>
     public bool LocalOnly { get; init; }
+
+    /// <summary>
+    /// A decision made before routing (a recognised client side request): the classifier and the conversation floor
+    /// are skipped and the models are ranked for it.
+    /// </summary>
+    public PromptClassificationResult? Classification { get; init; }
 }
 
 /// <summary>The routing outcome: requirements, and the models to try in order.</summary>
@@ -109,6 +115,7 @@ public sealed class PromptRouter : IPromptRouter
     private readonly IModelReliability? _reliability;
     private readonly ModelDefinition[] _models;
     private readonly Dictionary<string, RoutingProfile> _profiles;
+    private readonly HashSet<string> _followConversation;
     private readonly TimeZoneInfo _zone;
     private readonly TimeProvider _time;
 
@@ -130,6 +137,7 @@ public sealed class PromptRouter : IPromptRouter
         _reliability = reliability;
         _models = options.Models.ToArray();
         _profiles = new Dictionary<string, RoutingProfile>(options.Profiles, StringComparer.OrdinalIgnoreCase);
+        _followConversation = new HashSet<string>(options.Routes.Where(r => r.FollowsConversation).Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
         _zone = options.Selection.EffectiveTimeZone;
         _time = time ?? TimeProvider.System;
     }
@@ -172,12 +180,19 @@ public sealed class PromptRouter : IPromptRouter
             return plan with { Candidates = [first, .. plan.Candidates.Where(c => c.Model != pinned)] };
         }
 
+        if (request.Classification is { } decided)
+        {
+            return Plan(decided, request with { EstimatedInputTokens = request.EstimatedInputTokens ?? TokenEstimator.Estimate(request.Prompt) });
+        }
+
         PromptClassificationResult classification;
         using (System.Diagnostics.Activity? classify = RouterTelemetry.Source.StartActivity("semantic_router.classify"))
         {
             classification = await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false);
-            if (request.ConversationFloor is { } conversation && conversation > classification.RequiredTier)
+            if (request.ConversationFloor is { } conversation
+                && (conversation > classification.RequiredTier || (classification.RouteName is { } route && _followConversation.Contains(route) && classification.Reason == RoutingReason.SemanticMatch)))
             {
+                // Up to the floor; and down to it for a route that only carries the conversation on ("go ahead").
                 classification = classification with { RequiredTier = conversation, Reason = RoutingReason.ConversationFloor };
             }
 

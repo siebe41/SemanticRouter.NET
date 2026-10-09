@@ -127,6 +127,13 @@ public sealed class PromptRouterMiddlewareOptions
     /// </summary>
     public ReliabilityOptions Reliability { get; set; } = new();
 
+    /// <summary>
+    /// Recognise the requests agentic clients make for themselves (session titles, topic checks, compaction summaries,
+    /// warm-up pings, command checks) and send them to a small model; send a session resumed from a compaction summary
+    /// to the tier of the work it continues. On by default.
+    /// </summary>
+    public HousekeepingOptions Housekeeping { get; set; } = new();
+
     /// <summary>The request header that names a routing profile (<c>SemanticRouter:Profiles</c>). Default <c>X-Router-Profile</c>.</summary>
     public string ProfileHeader { get; set; } = "X-Router-Profile";
 
@@ -297,6 +304,25 @@ public sealed class ReliabilityOptions
 
     /// <summary>How long it is left out before it is offered again, with a fresh count. Default 1 day.</summary>
     public TimeSpan Period { get; set; } = TimeSpan.FromDays(1);
+}
+
+/// <summary>Client side requests (<see cref="PromptRouterMiddlewareOptions.Housekeeping"/>).</summary>
+public sealed class HousekeepingOptions
+{
+    /// <summary>Turns it on. Default <see langword="true"/>.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>The tier side requests get. Default 1.</summary>
+    public int Tier { get; set; } = 1;
+
+    /// <summary>The tier a session resumed from a compaction summary gets: the agentic work it continues. Default 4.</summary>
+    public int ResumedTier { get; set; } = 4;
+
+    /// <summary>
+    /// More side requests to recognise: regular expressions (case-insensitive) matched on the latest user message and
+    /// the system prompt, for another client's wording.
+    /// </summary>
+    public IList<string> Patterns { get; } = new List<string>();
 }
 
 /// <summary>Picks a profile from what the request looks like (<see cref="PromptRouterMiddlewareOptions.ProfileRules"/>).</summary>

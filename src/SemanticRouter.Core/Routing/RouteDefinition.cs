@@ -46,6 +46,13 @@ public sealed class RouteDefinition
     /// </summary>
     public bool LocalOnly { get; set; }
 
+    /// <summary>
+    /// Prompts that match this route say nothing about difficulty ("go ahead", "continue"): in a conversation, they
+    /// take the conversation's tier, down as well as up (<see cref="PromptRoutingRequest.ConversationFloor"/>), and
+    /// <see cref="Tier"/> applies only when there is none. Default <see langword="false"/>.
+    /// </summary>
+    public bool FollowsConversation { get; set; }
+
     /// <summary>Optional free-form description for documentation and diagnostics.</summary>
     public string? Description { get; set; }
 

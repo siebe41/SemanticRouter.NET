@@ -145,19 +145,28 @@ public sealed class OnnxEmbeddingTests : IDisposable
         first.ToArray().Should().Equal(second.ToArray());
     }
 
-    [Fact]
-    public async Task With_no_embedding_server_the_onnx_model_routes_the_sample_prompts_to_their_tiers()
+    /// <summary>
+    /// The shipped evaluation set (chat and agentic-client turns) against the template routes, with each ONNX model at
+    /// the threshold <c>init</c> sets for it: CI fails if routing out of the box regresses below 90%.
+    /// </summary>
+    [Theory]
+    [InlineData("all-MiniLM-L6-v2")]
+    [InlineData("bge-small-en-v1.5")]
+    public async Task With_no_embedding_server_the_onnx_model_routes_the_sample_prompts_to_their_tiers(string name)
     {
         RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
-        OnnxModelInfo model = OnnxEmbeddingModels.Find(null)!;
+        OnnxModelInfo model = OnnxEmbeddingModels.Find(name)!;
         template.DefaultSimilarityThreshold = model.SuggestedThreshold;
         using OnnxEmbeddingProviderFactory factory = RealFactory();
-        IEmbeddingProvider embeddings = factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx });
+        IEmbeddingProvider embeddings = factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx, Model = name });
         var evaluator = new RoutingEvaluator(embeddings, template);
+        IReadOnlyList<EvaluationCase> cases = EvaluationSet.Parse(RouterHost.EvaluationTemplate());
 
-        EvaluationReport report = await evaluator.EvaluateAsync(EvaluationSet.Parse(RouterHost.EvaluationTemplate()));
+        EvaluationReport report = await evaluator.EvaluateAsync(cases);
 
+        cases.Should().HaveCountGreaterThanOrEqualTo(80);
         report.Accuracy.Should().BeGreaterThanOrEqualTo(0.9, string.Join("; ", report.Misroutes.Select(m => $"{m.Case.Prompt}: {m.ActualTier}")));
         report.PerTier.Should().OnlyContain(t => t.Accuracy >= 0.75);
+        report.TooLow.Should().BeLessThanOrEqualTo(report.Total / 10, "few prompts may go to a weaker model than they need");
     }
 }
