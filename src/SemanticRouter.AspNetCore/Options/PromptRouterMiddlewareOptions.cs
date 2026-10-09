@@ -121,6 +121,12 @@ public sealed class PromptRouterMiddlewareOptions
     /// </summary>
     public FeedbackOptions Feedback { get; set; } = new();
 
+    /// <summary>
+    /// Track how often each model's answers draw feedback, per route and for tool use, and stop offering a model for the
+    /// kind of work it keeps failing at, for a while. On by default.
+    /// </summary>
+    public ReliabilityOptions Reliability { get; set; } = new();
+
     /// <summary>The request header that names a routing profile (<c>SemanticRouter:Profiles</c>). Default <c>X-Router-Profile</c>.</summary>
     public string ProfileHeader { get; set; } = "X-Router-Profile";
 
@@ -265,6 +271,32 @@ public sealed class FeedbackOptions
 {
     /// <summary>Turns feedback on. Default <see langword="true"/>.</summary>
     public bool Enabled { get; set; } = true;
+}
+
+/// <summary>
+/// Model reliability per kind of work (<see cref="PromptRouterMiddlewareOptions.Reliability"/>): a model whose turns on a
+/// route, or with tools, draw feedback (retried, corrected, tool errors, empty replies) far more often than its peers'
+/// is not offered for that work for <see cref="Period"/>, then tried again. Explicit choices are never overridden.
+/// </summary>
+public sealed class ReliabilityOptions
+{
+    /// <summary>Turns it on. Default <see langword="true"/>.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>How far back turns and feedback count. Default 7 days.</summary>
+    public TimeSpan Window { get; set; } = TimeSpan.FromDays(7);
+
+    /// <summary>Turns a model needs on a kind of work before it can be judged on it. Default 10.</summary>
+    public int MinimumTurns { get; set; } = 10;
+
+    /// <summary>The share of turns with feedback above which a model counts as unreliable for that work. Default 0.3.</summary>
+    public double MaxFailureRate { get; set; } = 0.3;
+
+    /// <summary>How far above its peers' share (models with enough turns on the same work) it must also be. Default 0.15.</summary>
+    public double PeerMargin { get; set; } = 0.15;
+
+    /// <summary>How long it is left out before it is offered again, with a fresh count. Default 1 day.</summary>
+    public TimeSpan Period { get; set; } = TimeSpan.FromDays(1);
 }
 
 /// <summary>Picks a profile from what the request looks like (<see cref="PromptRouterMiddlewareOptions.ProfileRules"/>).</summary>

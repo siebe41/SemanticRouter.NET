@@ -69,6 +69,8 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<IToolCallAffinity, ToolCallAffinity>();
         services.TryAddSingleton<RoutingActivityLog>();
         services.TryAddSingleton<RoutingFeedbackLog>();
+        services.TryAddSingleton<ModelReliabilityTracker>();
+        services.TryAddSingleton<IModelReliability>(sp => sp.GetRequiredService<ModelReliabilityTracker>());
         services.TryAddSingleton<IEvaluationSetStore>(sp =>
             sp.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store
                 ? new JsonLinesEvaluationSetStore(EvaluationSetFileNextTo(store.Location))

@@ -139,6 +139,7 @@ export function render() {
 export function route() {
   const hash = location.hash.replace(/^#\/?/, '') || 'overview';
   state.view = views[hash] ? hash : 'overview';
+  if (state.view === 'models') state.reliability = null; // fresh figures each visit
   render();
   window.scrollTo(0, 0);
 }

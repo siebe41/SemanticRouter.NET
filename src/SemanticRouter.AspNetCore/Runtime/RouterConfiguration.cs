@@ -216,6 +216,13 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             errors.Add("Middleware:Conversation needs DecayTurns of at least 1, a positive IdleTimeout and a ShortFollowUpLength of 0 or more.");
         }
 
+        ReliabilityOptions reliability = Middleware.Reliability;
+        if (reliability.Enabled && (reliability.Window <= TimeSpan.Zero || reliability.Period <= TimeSpan.Zero || reliability.MinimumTurns < 1
+            || !(reliability.MaxFailureRate is > 0 and <= 1) || !(reliability.PeerMargin >= 0)))
+        {
+            errors.Add("Middleware:Reliability needs a positive Window and Period, MinimumTurns of at least 1, a MaxFailureRate above 0 and at most 1, and a PeerMargin of 0 or more.");
+        }
+
         if (Middleware.RetryEscalation.Enabled && Middleware.RetryEscalation.Window <= TimeSpan.Zero)
         {
             errors.Add("Middleware:RetryEscalation:Window must be positive.");

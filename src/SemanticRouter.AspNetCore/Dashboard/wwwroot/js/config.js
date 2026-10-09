@@ -1,4 +1,5 @@
 /* Semantic Router dashboard: Configuration pages: tiers, routes, models, connectors, routing rules, embeddings, gateway, clients, history. */
+import { reliabilityBadges, reliabilityCard } from './reliability.js';
 import { CAPABILITY_HINTS, CONNECTOR_TYPES, MESSAGE_SELECTION, PRESETS, SCORING, STRATEGIES, connectorNames, csv, h, isReference, kv, lineupFor, lines, readOnly, state, tiers, views } from './core.js';
 
 views.tiers = () => {
@@ -72,7 +73,7 @@ const modelItem = (m, i) => {
     <div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
       <span class="chev">▶</span><span class="title">${h(m.Name || '(unnamed)')}</span>
       <span class="meta"><span class="tier">T${m.Tier}</span><span class="mono">${h(m.Model || '')}</span><span>via ${h(m.Connector)}${conn ? ` <span class="faint">(${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? '/' + h(conn.Preset || 'Custom') : ''})</span>` : ' <span class="badge danger">unknown connector</span>'}</span>
-      ${m.IsLocal ? '<span class="badge info">local</span>' : ''}${free ? '<span class="badge ok">free</span>' : `<span class="badge">$${m.InputCostPerMillionTokens}/$${m.OutputCostPerMillionTokens} per M</span>`}${(m.Capabilities || []).map((c) => `<span class="badge">${h(c)}</span>`).join('')}</span>
+      ${m.IsLocal ? '<span class="badge info">local</span>' : ''}${reliabilityBadges(m.Name)}${free ? '<span class="badge ok">free</span>' : `<span class="badge">$${m.InputCostPerMillionTokens}/$${m.OutputCostPerMillionTokens} per M</span>`}${(m.Capabilities || []).map((c) => `<span class="badge">${h(c)}</span>`).join('')}</span>
       <span class="spacer"></span><label class="check" onclick="event.stopPropagation()"><input type="checkbox" data-bind="Models.${i}.Enabled" data-kind="bool" ${m.Enabled !== false ? 'checked' : ''}> enabled</label>
     </div>
     <div class="item-body"><div class="form-grid">
@@ -140,6 +141,7 @@ views.models = () => {
   const byTier = (a, b) => (a.m.Tier - b.m.Tier) || String(a.m.Name).localeCompare(String(b.m.Name));
   return `
     <div class="section-head"><h1>Models</h1><span class="muted">The catalog the router chooses from, by connector. <b>Discover models</b> lists what a provider offers and suggests a tier for each.</span><span class="spacer"></span><button class="btn primary small" data-action="model-add">Add model</button></div>
+    ${reliabilityCard()}
     ${groups.map((connector) => {
       const conn = state.config.Connectors[connector];
       const own = models.map((m, i) => ({ m, i })).filter((x) => (x.m.Connector || '').toLowerCase() === (connector || '').toLowerCase()).sort(byTier);

@@ -54,6 +54,9 @@ public sealed class RoutingActivityEntry
     /// <summary>The planned model is the conversation's previous model, kept ahead of the ranking.</summary>
     public bool Sticky { get; init; }
 
+    /// <summary>Models left out of this decision as unreliable for this kind of work (route or tools), comma-separated.</summary>
+    public string? Unreliable { get; init; }
+
     /// <summary>The learned change (automatic tuning) that routed this decision differently, when there is one.</summary>
     public long? Learned { get; init; }
 

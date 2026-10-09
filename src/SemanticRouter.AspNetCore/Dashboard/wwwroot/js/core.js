@@ -36,6 +36,8 @@ export const state = {
   activityFilter: 'all',
   tuning: null,          // GET api/tuning (Router learned)
   learnedFilter: 'active',
+  reliability: null,     // GET api/reliability (Models page)
+  reliabilityLoading: false,
   autoRefresh: true,
   session: { role: null, tokenRequired: false, tokensConfigured: false },
   stream: null,          // the EventSource for api/events

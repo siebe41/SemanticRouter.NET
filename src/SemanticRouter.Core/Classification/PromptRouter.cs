@@ -75,6 +75,9 @@ public sealed record RoutingPlan(
 {
     /// <summary>The first candidate is the conversation's previous model (<see cref="PromptRoutingRequest.PreferredModel"/>), moved ahead of the ranking.</summary>
     public bool Sticky { get; init; }
+
+    /// <summary>Models left out because <see cref="IModelReliability"/> says they are unreliable for this kind of work.</summary>
+    public IReadOnlyList<string> Unreliable { get; init; } = [];
 }
 
 /// <summary>Routes a prompt to an ordered list of catalog models.</summary>
@@ -95,13 +98,15 @@ public interface IPromptRouter
 
 /// <summary>
 /// Default <see cref="IPromptRouter"/>: <see cref="IPromptClassifier"/> decides the requirements,
-/// <see cref="IModelSelector"/> ranks the catalog, and <see cref="IModelHealth"/> skips models in cooldown.
+/// <see cref="IModelSelector"/> ranks the catalog, <see cref="IModelHealth"/> skips models in cooldown, and an optional
+/// <see cref="IModelReliability"/> skips models for the kinds of work they keep failing at.
 /// </summary>
 public sealed class PromptRouter : IPromptRouter
 {
     private readonly IPromptClassifier _classifier;
     private readonly IModelSelector _selector;
     private readonly IModelHealth _health;
+    private readonly IModelReliability? _reliability;
     private readonly ModelDefinition[] _models;
     private readonly Dictionary<string, RoutingProfile> _profiles;
     private readonly TimeZoneInfo _zone;
@@ -113,7 +118,8 @@ public sealed class PromptRouter : IPromptRouter
         SemanticRouterOptions options,
         IModelSelector? selector = null,
         IModelHealth? health = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        IModelReliability? reliability = null)
     {
         ArgumentNullException.ThrowIfNull(classifier);
         ArgumentNullException.ThrowIfNull(options);
@@ -121,6 +127,7 @@ public sealed class PromptRouter : IPromptRouter
         _classifier = classifier;
         _selector = selector ?? new DefaultModelSelector(options.Selection);
         _health = health ?? new ModelHealthTracker(options.Selection);
+        _reliability = reliability;
         _models = options.Models.ToArray();
         _profiles = new Dictionary<string, RoutingProfile>(options.Profiles, StringComparer.OrdinalIgnoreCase);
         _zone = options.Selection.EffectiveTimeZone;
@@ -223,6 +230,20 @@ public sealed class PromptRouter : IPromptRouter
         Func<ModelDefinition, bool> usable = Usable(request, profile);
         ModelDefinition[] models = _models.Where(usable).ToArray();
         IReadOnlyList<ModelCandidate> candidates = _selector.RankCandidates(requirements, models, _health.IsAvailable);
+        IReadOnlyList<string> unreliable = [];
+        if (_reliability is not null && candidates.Count > 0)
+        {
+            // Models that keep failing at this kind of work are left out, unless nothing else could serve it.
+            string? route = classification.RouteName;
+            IReadOnlyList<string> capabilities = requirements.RequiredCapabilities;
+            ModelCandidate[] reliable = [.. candidates.Where(c => _reliability.IsReliable(c.Model, route, capabilities))];
+            if (reliable.Length > 0 && reliable.Length < candidates.Count)
+            {
+                unreliable = [.. candidates.Where(c => !reliable.Contains(c)).Select(c => c.Model.Name)];
+                candidates = reliable;
+            }
+        }
+
         if (candidates.Count == 0)
         {
             // Everything that qualifies is cooling down: trying a cooled-down model beats failing outright.
@@ -238,11 +259,12 @@ public sealed class PromptRouter : IPromptRouter
             && previous.Model.Tier <= requirements.RequiredTier
             && _health.IsAvailable(previous.Model))
         {
-            return new RoutingPlan(classification, requirements, [previous, .. candidates.Where(c => c != previous)]) { Sticky = true };
+            return new RoutingPlan(classification, requirements, [previous, .. candidates.Where(c => c != previous)]) { Sticky = true, Unreliable = unreliable };
         }
 
         return new RoutingPlan(classification, requirements, candidates)
         {
+            Unreliable = unreliable,
             Sticky = request.PreferredModel is { } same && candidates.Count > 0 && string.Equals(candidates[0].Model.Name, same, StringComparison.OrdinalIgnoreCase),
         };
     }

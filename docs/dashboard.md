@@ -86,6 +86,7 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `GET api/feedback?limit=200` | Recent feedback about routing decisions, newest first. |
 | `GET api/feedback/summary?days=7` | Decisions and feedback per route and per model, with the share that received feedback. |
 | `GET api/tuning`, `POST api/tuning/run`, `POST api/tuning/changes/{id}/undo` … | [Automatic tuning](routing-quality.md#automatic-tuning): what the router learned, why, and undo. |
+| `GET api/reliability`, `POST api/reliability/reset` | [Model reliability](routing-quality.md#model-reliability) per route and with tools, and offering a left-out model again. |
 | `GET api/activity/series?window=1h\|24h\|7d\|30d` | Counts, mix and latency percentiles per bucket. |
 | `GET api/activity/export?format=csv\|jsonl&prompts=false&since=&until=` | Download activity; prompt previews only with `prompts=true`. |
 | `GET api/usage?window=day\|week\|month\|7d\|30d&by=model\|connector\|route\|client\|day` | Usage totals and groups, the reference model and every budget's state. |
