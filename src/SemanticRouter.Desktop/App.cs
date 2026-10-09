@@ -19,12 +19,15 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(5) };
     private static readonly TimeSpan DigestEvery = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan UpdateEvery = TimeSpan.FromHours(12);
 
     private readonly string _directory = options.Host.ConfigurationDirectory;
     private readonly SignInLaunch? _signIn = SignInLaunch.ForThisMachine();
     private DesktopPreferences _preferences = DesktopPreferences.Load(options.Host.ConfigurationDirectory);
     private DesktopRouter _router = null!;
     private RouterService _service = null!;
+    private DesktopUpdater _updater = null!;
+    private bool _restartForUpdate;
     private bool _switching;
     private WindowIcon _icon = null!;
     private DashboardWindow? _window;
@@ -46,6 +49,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private NativeMenuItem _learned = null!;
     private NativeMenuItem _week = null!;
     private NativeMenuItem _needs = null!;
+    private NativeMenuItem _update = null!;
+    private NativeMenuItem _checkUpdates = null!;
 
     public override void Initialize()
     {
@@ -68,7 +73,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
 
         _router = new DesktopRouter(options.Host, log);
         _router.Changed += () => Dispatcher.UIThread.Post(OnRouterChanged);
-        _service = new RouterService(ServicePlatform.ForThisMachine(options.Host), options.Host, Environment.ProcessPath!, Environment.GetEnvironmentVariable);
+        _service = new RouterService(ServicePlatform.ForThisMachine(options.Host), options.Host, Installation.Executable(Environment.GetEnvironmentVariable), Environment.GetEnvironmentVariable);
+        _updater = DesktopUpdater.Create(options.Host, Environment.GetEnvironmentVariable, log);
         TrayIcon.SetIcons(this, [BuildTray()]);
         instance.Listen(command => Dispatcher.UIThread.Post(() =>
         {
@@ -90,6 +96,18 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             _ = RefreshDigestAsync();
         };
         poll.Start();
+
+        // An installed app looks for an update a minute after it starts, then twice a day.
+        var updates = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+        updates.Tick += (_, _) =>
+        {
+            updates.Interval = UpdateEvery;
+            _ = CheckForUpdatesAsync();
+        };
+        if (_updater.Installed)
+        {
+            updates.Start();
+        }
 
         _openWhenReady = !options.Background;
         if (!options.Background && !_preferences.Welcomed)
@@ -114,6 +132,20 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _week.Click += (_, _) => OpenDashboard("#/overview");
         _needs = new NativeMenuItem { IsVisible = false };
         _needs.Click += (_, _) => OpenDashboard(_digest.NeedsLink);
+        _update = new NativeMenuItem { IsVisible = false };
+        _update.Click += (_, _) =>
+        {
+            _restartForUpdate = true;
+            _ = QuitAsync();
+        };
+        _checkUpdates = new NativeMenuItem("Check for updates") { ToggleType = MenuItemToggleType.CheckBox, IsVisible = _updater.Installed };
+        _checkUpdates.Click += (_, _) =>
+        {
+            _preferences = _preferences with { CheckForUpdates = !_preferences.CheckForUpdates };
+            _preferences.Save(_directory);
+            UpdateMenu();
+            _ = CheckForUpdatesAsync();
+        };
         _status = new NativeMenuItem(_router.Status) { IsEnabled = false };
         _problem = new NativeMenuItem { IsEnabled = false, IsVisible = false };
         _restart = new NativeMenuItem("Restart router");
@@ -146,7 +178,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         {
             Icon = _icon,
             ToolTipText = "SemanticRouter",
-            Menu = [open, _needs, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, logs, configuration, new NativeMenuItemSeparator(), about, quit],
+            Menu = [open, _needs, _update, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, _checkUpdates, logs, configuration, new NativeMenuItemSeparator(), about, quit],
         };
         tray.Clicked += (_, _) => OpenDashboard();
         UpdateMenu();
@@ -186,6 +218,9 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _week.Header = _digest.Week ?? string.Empty;
         _week.IsVisible = _digest.Week is not null;
         _needs.Header = _digest.NeedsLine ?? string.Empty;
+        _update.Header = _updater.Ready is { } ready ? $"Restart to update to {ready}" : string.Empty;
+        _update.IsVisible = _updater.Ready is not null;
+        _checkUpdates.IsChecked = _preferences.CheckForUpdates;
         _needs.IsVisible = _digest.NeedsLine is not null;
         if (_tray is not null)
         {
@@ -231,6 +266,20 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             _digest = digest;
             UpdateMenu();
         });
+    }
+
+    /// <summary>Looks for an update and downloads it, when the app is installed and the preference allows.</summary>
+    private async Task CheckForUpdatesAsync()
+    {
+        if (!_updater.Installed || !_preferences.CheckForUpdates || _updater.Ready is not null)
+        {
+            return;
+        }
+
+        if (await _updater.CheckAsync() is not null)
+        {
+            Dispatcher.UIThread.Post(UpdateMenu);
+        }
     }
 
     /// <summary>The preference, unless the app window cannot work on this machine.</summary>
@@ -386,7 +435,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             }
             else
             {
-                _signIn.Enable(Environment.ProcessPath!, SignInLaunch.Arguments(_directory));
+                _signIn.Enable(Installation.Executable(Environment.GetEnvironmentVariable), SignInLaunch.Arguments(_directory));
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -409,6 +458,9 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _window?.CloseForGood();
         await _router.DisposeAsync();
         instance.Dispose();
+
+        // A downloaded update is applied as the app exits (the background service stopped and started around it).
+        await _updater.ApplyOnExitAsync(_restartForUpdate);
         (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
     }
 }

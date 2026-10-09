@@ -23,6 +23,9 @@ internal sealed record DesktopPreferences
     /// <summary>Whether the welcome window (background service, start at sign-in) has been shown.</summary>
     public bool Welcomed { get; init; }
 
+    /// <summary>Whether an installed app looks for updates (at start and twice a day). Default on.</summary>
+    public bool CheckForUpdates { get; init; } = true;
+
     /// <summary>Where the dashboard window was when it was last hidden.</summary>
     public WindowPlacement? Window { get; init; }
 

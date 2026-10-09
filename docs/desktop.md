@@ -6,15 +6,42 @@
 
 ## Install
 
-Download the archive for your machine from the [releases](https://github.com/siebe41/SemanticRouter.NET/releases). It is self-contained: no .NET installation is needed.
+Download the installer for your machine from the [releases](https://github.com/siebe41/SemanticRouter.NET/releases). It is self-contained: no .NET installation is needed, and no administrator rights.
+
+| Platform | Installer | What it does |
+|---|---|---|
+| Windows 10/11 | `SemanticRouter-win-x64-Setup.exe` | Installs for you only, into `%LOCALAPPDATA%\SemanticRouter`, adds a Start menu entry, and starts the app. Remove it in **Settings → Apps**. |
+| macOS 12+ | `SemanticRouter-osx-arm64-Setup.pkg` (Apple silicon) or `osx-x64` (Intel) | Installs `SemanticRouter.app` into Applications (or your own Applications folder) and starts it. |
+| Linux | `SemanticRouter-linux-x64.AppImage` | One file: make it executable (`chmod +x`) and run it, from wherever you keep it. See [Linux](#linux) for the tray and the app window. |
+
+The first start is the same as from the archives: the [welcome window](#using-it) offers the background service and start at sign-in.
+
+**The installers are not signed yet** (certificates cost money; see [#50](https://github.com/siebe41/SemanticRouter.NET/issues/50)). On Windows, SmartScreen says "Windows protected your PC": choose **More info → Run anyway**. On macOS, if the installer is blocked, right-click it and choose **Open**, or allow it under **System Settings → Privacy & Security**.
+
+### Updates
+
+An installed app updates itself from GitHub Releases. It looks a minute after it starts and then twice a day, and downloads a new version in the background (only the changes when it can). The tray menu then offers **Restart to update to …**; otherwise the update is applied the next time you quit the app. When the background service runs, it is stopped for the update and started again with the new version, with the same configuration directory and options. **Check for updates** in the tray menu turns the checks off (kept in `desktop.json`).
+
+From a script: `SemanticRouter --update` applies an available update and exits (0 when up to date or updating).
+
+### Uninstall
+
+- **Windows:** **Settings → Apps → SemanticRouter → Uninstall** (or `%LOCALAPPDATA%\SemanticRouter\Update.exe uninstall`). It removes the background service and the app's sign-in entry first, then the program and the Start menu entry.
+- **macOS and Linux** have no uninstaller: turn off **Keep the router running in the background** and **Start at sign-in** in the tray menu (or run `SemanticRouter --uninstall-service`), quit, then delete `SemanticRouter.app` or the AppImage.
+
+The configuration directory (your configuration, the state database, the logs) stays; delete it yourself if you no longer want it (see [the tool's docs](host.md) for where it is).
+
+### The archives
+
+The releases also have the plain archives, for people who prefer them. They do not update themselves.
 
 | Platform | Download | Then |
 |---|---|---|
 | Windows 10/11 | `SemanticRouter-<version>-win-x64.zip` (or `win-arm64`) | Unzip anywhere, for example `%LOCALAPPDATA%\Programs\SemanticRouter`, and run `SemanticRouter.exe`. |
 | macOS 12+ | `SemanticRouter-<version>-osx-arm64.zip` (Apple silicon) or `osx-x64` (Intel) | Move `SemanticRouter.app` to Applications. The app is not signed yet: the first time, right-click it and choose **Open**, or run `xattr -dr com.apple.quarantine /Applications/SemanticRouter.app`. |
-| Linux | `SemanticRouter-<version>-linux-x64.tar.gz` (or `linux-arm64`) | Unpack, for example to `~/.local/opt/SemanticRouter`, and run `SemanticRouter`. See [Linux](#linux) for the tray and the app window. |
+| Linux | `SemanticRouter-<version>-linux-x64.tar.gz` (or `linux-arm64`) | Unpack, for example to `~/.local/opt/SemanticRouter`, and run `SemanticRouter`. |
 
-To build it yourself: `dotnet run --project src/SemanticRouter.Desktop`, or `deploy/package-desktop.sh <rid> <version> <dir>` for the same archives the release makes. On Windows, `deploy\update-windows.ps1` pulls, rebuilds and reinstalls the tool, the background service and the app in one go (`-InstallService` the first time; `Get-Help .\deploy\update-windows.ps1` for the options).
+To build it yourself: `dotnet run --project src/SemanticRouter.Desktop`, `deploy/package-desktop.sh <rid> <version> <dir>` for the same archives the release makes, or `deploy/package-installer.sh <rid> <version> <dir>` for an installer (needs `dotnet tool install -g vpk`; the macOS installer must be built on macOS). On Windows, `deploy\update-windows.ps1` pulls, rebuilds and reinstalls the tool, the background service and the app in one go (`-InstallService` the first time; `Get-Help .\deploy\update-windows.ps1` for the options).
 
 ## Using it
 
@@ -29,12 +56,14 @@ The tray menu:
 | **Open dashboard** | Opens the dashboard where you chose (below). |
 | **Needs a decision: …** | Shown when something needs you (a connector down, a subscription that keeps hitting its limit, …); opens the page to decide on. See [notices](dashboard.md#digest-and-notifications). |
 | **This week: 1,234 prompts · 62% local · saved $4.10** | The [digest](dashboard.md#digest-and-notifications) of the last 7 days; opens the Overview. |
+| **Restart to update to …** | Shown when an update has been downloaded; see [Updates](#updates). |
 | **Router learned N things this week** | Shown when [automatic tuning](routing-quality.md#automatic-tuning) applied changes in the last 7 days; opens the Router learned page. |
 | Status line | Where the router listens, whether it is the app's own or one already running, or why it could not start. |
 | **Restart router** | Restarts the router: the background service's, or the app's own (for example after it failed to start). |
 | **Open the dashboard in** → **App window** / **Web browser** | Your choice of where the dashboard opens, remembered in `desktop.json`. The app window uses the platform's own web view (WebView2, WebKit, WebKitGTK or WPE WebKit); links that leave the router open in your browser. |
 | **Keep the router running in the background** | The background service on or off; see [below](#the-app-and-the-background-service). |
 | **Start at sign-in** | Shows the app in the tray whenever you sign in. The router itself starts at sign-in through the background service. |
+| **Check for updates** | Installed app only: whether it looks for updates. |
 | **Show the log**, **Show the configuration folder** | The router's log (`logs/semantic-router.log`) and its files. |
 | **About SemanticRouter** | The version, and links to the GitHub repository, the documentation, issues, releases and the licence. |
 | **Quit SemanticRouter** | Stops the app's router and quits. |

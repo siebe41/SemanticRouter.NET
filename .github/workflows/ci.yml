@@ -103,6 +103,81 @@ jobs:
             tests/dashboard-e2e/playwright-report
             tests/dashboard-e2e/test-results
 
+  # The Windows installer: installs 1.0.0 per user, sets up the background service and sign-in entry, updates to 1.0.1
+  # from a local feed, uninstalls, and checks nothing is left behind (tests/installer/windows.ps1).
+  installer-windows:
+    name: installer (windows)
+    runs-on: windows-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      AVALONIA_TELEMETRY_OPTOUT: 1
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Install vpk
+        shell: bash
+        run: |
+          dotnet tool install -g vpk --version 1.2.161
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Package 1.0.0 and 1.0.1
+        shell: bash
+        run: |
+          deploy/package-installer.sh win-x64 1.0.0 installers
+          cp installers/SemanticRouter-win-x64-Setup.exe SemanticRouter-1.0.0-Setup.exe
+          deploy/package-installer.sh win-x64 1.0.1 installers
+
+      - name: Install, update and uninstall
+        shell: pwsh
+        run: tests/installer/windows.ps1 -Setup SemanticRouter-1.0.0-Setup.exe -Feed installers
+
+      - name: Logs on failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem $env:LOCALAPPDATA\SemanticRouter -Recurse -ErrorAction SilentlyContinue | Select-Object -First 50 FullName
+          Get-Content $env:APPDATA\semantic-router\logs\semantic-router.log -Tail 60 -ErrorAction SilentlyContinue
+          Get-ChildItem $env:TEMP -Filter 'velopack*.log' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 80 }
+          Get-ChildItem $env:LOCALAPPDATA\SemanticRouter -Filter '*.log' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 80 }
+
+  # The macOS installer (.pkg) can only be built on macOS: build it, so the release does not find out first.
+  installer-macos:
+    name: installer (macos)
+    runs-on: macos-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      AVALONIA_TELEMETRY_OPTOUT: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install vpk
+        run: |
+          dotnet tool install -g vpk --version 1.2.161
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Package
+        run: |
+          deploy/package-installer.sh osx-arm64 1.0.0 installers
+          ls -l installers
+          test -s installers/SemanticRouter-osx-arm64-Setup.pkg
+
   container:
     name: container image
     runs-on: ubuntu-latest

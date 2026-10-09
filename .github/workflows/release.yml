@@ -2,7 +2,8 @@ name: Release
 
 # Push a tag such as v0.2.0 to publish the NuGet packages (library, ASP.NET Core integration and the
 # `semantic-router` dotnet tool), the container image (ghcr.io/<owner>/semantic-router) and the desktop app
-# (self-contained downloads for Windows, macOS and Linux, attached to the GitHub release).
+# (self-contained downloads for Windows, macOS and Linux, and the installers with their update feeds, attached to the
+# GitHub release).
 on:
   push:
     tags: [ 'v*' ]
@@ -93,3 +94,67 @@ jobs:
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
           gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
+
+  # The installers (Velopack): Windows Setup.exe and Linux AppImage are built here, the macOS .pkg on macOS (below).
+  # Each platform is a channel with its own update feed; the previous release's package is fetched for a delta update.
+  installers:
+    needs: desktop
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      AVALONIA_TELEMETRY_OPTOUT: 1
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install vpk and the AppImage tools
+        run: |
+          sudo apt-get install -y --no-install-recommends squashfs-tools zstd
+          dotnet tool install -g vpk --version 1.2.161
+
+      - name: Package and attach
+        run: |
+          for rid in win-x64 linux-x64; do
+            deploy/package-installer.sh "$rid" "${GITHUB_REF_NAME#v}" "installers/$rid"
+            vpk "[${rid%%-*}]" upload github --outputDir "installers/$rid" --channel "$rid" \
+              --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
+          done
+
+  installer-macos:
+    needs: desktop
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      AVALONIA_TELEMETRY_OPTOUT: 1
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install vpk
+        run: dotnet tool install -g vpk --version 1.2.161
+
+      # Unsigned: macOS asks to confirm the first start (docs/desktop.md). Signing and notarizing need an Apple
+      # Developer account (--signAppIdentity, --signInstallIdentity, --notaryProfile).
+      - name: Package and attach
+        run: |
+          for rid in osx-arm64 osx-x64; do
+            deploy/package-installer.sh "$rid" "${GITHUB_REF_NAME#v}" "installers/$rid"
+            vpk upload github --outputDir "installers/$rid" --channel "$rid" \
+              --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
+          done

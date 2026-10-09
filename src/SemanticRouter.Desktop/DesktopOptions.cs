@@ -7,11 +7,13 @@ namespace SemanticRouter.Desktop;
 /// <c>--SemanticRouter:…</c>) plus <c>--background</c> (start in the tray without opening the dashboard, as at
 /// sign-in), <c>--quit</c> (ask the running app to quit), <c>--headless</c> (run only the router, with no window or
 /// tray: what the background service runs), and <c>--install-service</c> / <c>--uninstall-service</c> (set the
-/// background service up or remove it without the tray, for scripts and installers).
+/// background service up or remove it without the tray, for scripts and installers), <c>--update</c> (apply an
+/// available update and exit) and <c>--resume-service</c> (start the background service again, after an update).
 /// </summary>
-internal sealed record DesktopOptions(HostSettings Host, bool Background, bool Quit, bool Headless = false, string? ServiceAction = null)
+internal sealed record DesktopOptions(
+    HostSettings Host, bool Background, bool Quit, bool Headless = false, string? ServiceAction = null, bool Update = false, bool ResumeService = false)
 {
-    private static readonly string[] Flags = ["--background", "--quit", "--headless", "--install-service", "--uninstall-service"];
+    private static readonly string[] Flags = ["--background", "--quit", "--headless", "--install-service", "--uninstall-service", "--update", DesktopUpdater.ResumeService];
 
     public static DesktopOptions Parse(IReadOnlyList<string> args, Func<string, string?>? environment = null)
     {
@@ -23,6 +25,6 @@ internal sealed record DesktopOptions(HostSettings Host, bool Background, bool Q
             host = host with { Error = $"The desktop app takes options, not the '{host.Command}' command; use the semantic-router tool for that." };
         }
 
-        return new DesktopOptions(host, background, quit, headless, serviceAction);
+        return new DesktopOptions(host, background, quit, headless, serviceAction, args.Contains("--update"), args.Contains(DesktopUpdater.ResumeService));
     }
 }
