@@ -9,8 +9,12 @@ namespace SemanticRouter.Desktop;
 /// </summary>
 internal static class DesktopNotifier
 {
-    // Windows shows toasts only for a registered app id; PowerShell's is always there.
-    private const string WindowsAppId = @"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe";
+    // Windows shows toasts only for a registered app id: the installer's Start menu entry carries the app's own; for the
+    // zip download, PowerShell's, which is always there.
+    private const string InstalledAppId = "velopack.SemanticRouter";
+    private const string PowerShellAppId = @"{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe";
+
+    private static string WindowsAppId => File.Exists(Path.Combine(AppContext.BaseDirectory, "..", "Update.exe")) ? InstalledAppId : PowerShellAppId;
 
     private const string WindowsScript =
         "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null;" +

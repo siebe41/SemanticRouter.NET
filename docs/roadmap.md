@@ -92,7 +92,7 @@ The order follows dependencies: install and trust first, then visibility (which 
 | Issue | Goal | Notes |
 |---|---|---|
 | — | Background service per user (`semantic-router service`) | Done: systemd user unit, launchd agent, Windows sign-in entry. |
-| — | Desktop app: tray or menu-bar icon, the dashboard in a native window or the browser, start at sign-in | Done ([desktop.md](desktop.md)): wraps the existing dashboard in the platform web view (WebView2, WKWebView, WebKitGTK, WPE) and hosts the router in-process or uses the running service. The app can also own the background service (`SemanticRouter --headless`), offered on first start. Still to do: exercise it on Windows and macOS, sign and notarize the macOS app, installers. |
+| — | Desktop app: tray or menu-bar icon, the dashboard in a native window or the browser, start at sign-in | Done ([desktop.md](desktop.md)): wraps the existing dashboard in the platform web view (WebView2, WKWebView, WebKitGTK, WPE) and hosts the router in-process or uses the running service. The app can also own the background service (`SemanticRouter --headless`), offered on first start. Installers ([#50](https://github.com/siebe41/SemanticRouter.NET/issues/50)): a per-user Windows `Setup.exe`, a macOS `.pkg` and a Linux AppImage with built-in updates, install, update and uninstall exercised on Windows in CI. Still to do: sign the Windows installer and notarize the macOS app. |
 
 ### 6. Set it and forget it
 

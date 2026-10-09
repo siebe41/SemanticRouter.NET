@@ -26,6 +26,7 @@
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Avalonia.Controls.WebView" />
+    <PackageReference Include="Velopack" />
   </ItemGroup>
 
   <ItemGroup>

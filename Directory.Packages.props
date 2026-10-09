@@ -21,6 +21,8 @@
     <PackageVersion Include="Avalonia.Desktop" Version="12.1.3" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.3" />
     <PackageVersion Include="Avalonia.Controls.WebView" Version="12.1.0" />
+    <!-- Installers and updates (Setup.exe, .pkg, AppImage), from GitHub Releases. -->
+    <PackageVersion Include="Velopack" Version="1.2.161" />
   </ItemGroup>
   <ItemGroup>
     <!-- Test-only dependencies. The Core library ships with zero package references. -->
