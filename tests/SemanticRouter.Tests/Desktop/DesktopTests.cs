@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Xml.Linq;
+using Microsoft.Extensions.Logging;
 using SemanticRouter.Desktop;
 using SemanticRouter.Host;
 
@@ -239,6 +241,199 @@ public sealed class DesktopTests : IDisposable
         await blocked.StartAsync();
         blocked.State.Should().Be(RouterState.Failed);
         blocked.Status.Should().Contain("address is in use");
+    }
+
+    [Fact]
+    public void Options_take_headless_and_the_service_actions()
+    {
+        DesktopOptions headless = DesktopOptions.Parse(["--headless", "--config-dir", _directory, "--urls", "http://localhost:6000"], _ => null);
+        headless.Headless.Should().BeTrue();
+        headless.Host.Error.Should().BeNull();
+        headless.Host.HostArguments.Should().Equal("--urls", "http://localhost:6000");
+
+        DesktopOptions.Parse(["--install-service"], _ => null).ServiceAction.Should().Be("install");
+        DesktopOptions.Parse(["--uninstall-service"], _ => null).ServiceAction.Should().Be("uninstall");
+        DesktopOptions.Parse([], _ => null).Should().Match<DesktopOptions>(o => !o.Headless && o.ServiceAction == null);
+    }
+
+    [Fact]
+    public void The_service_runs_the_app_headless_and_windows_starts_it_directly()
+    {
+        HostSettings host = HostSettings.Parse(["--config-dir", _directory, "--urls", "http://localhost:6000"], _ => null);
+        ServiceDefinition desktop = ServiceDefinition.ForDesktop(host, @"C:\Program Files\SemanticRouter\SemanticRouter.exe", n => n == "PATH" ? "/bin" : null);
+
+        desktop.Windowless.Should().BeTrue();
+        desktop.Arguments.Should().Equal("--headless", "--config-dir", _directory, "--urls", "http://localhost:6000");
+        desktop.Environment.Should().ContainKey("PATH");
+
+        // No console program in between, so no console window flashes at sign-in.
+        WindowsSignInService.SignInCommand(desktop).Should().Be(
+            WindowsCommandLine.Join([@"C:\Program Files\SemanticRouter\SemanticRouter.exe", "--headless", "--config-dir", _directory, "--urls", "http://localhost:6000"]));
+        new SystemdUserService(_directory, (_, _) => Task.FromResult(new ProcessResult(0, string.Empty))).Render(desktop)
+            .Should().Contain("\"--headless\" \"--config-dir\"");
+
+        // The tool still goes through `service start`, which starts the router without a console and returns.
+        ServiceDefinition tool = ServiceDefinition.ForTool(host, @"C:\tools\semantic-router.exe", "unused.dll", _ => null);
+        tool.Windowless.Should().BeFalse();
+        WindowsSignInService.SignInCommand(tool).Should().Contain("service start --no-wait");
+    }
+
+    [Fact]
+    public async Task Waiting_for_a_start_ignores_a_router_from_before_and_gives_up_in_time()
+    {
+        string directory = Path.Combine(_directory, "wait");
+        Directory.CreateDirectory(directory);
+        DateTimeOffset requested = DateTimeOffset.UtcNow;
+        new RouterInstance(Environment.ProcessId, ["http://localhost:6000"], requested.AddMinutes(-5), "1.0.0").Write(directory);
+
+        (await RouterInstance.WaitForStartAsync(directory, requested, TimeSpan.FromMilliseconds(400))).Should().BeNull("that record is from before");
+
+        Task<RouterInstance?> waiting = RouterInstance.WaitForStartAsync(directory, requested, TimeSpan.FromSeconds(10));
+        await Task.Delay(300);
+        new RouterInstance(Environment.ProcessId, ["http://localhost:6001"], DateTimeOffset.UtcNow, "1.0.0").Write(directory);
+        (await waiting)!.Urls.Should().Equal("http://localhost:6001");
+    }
+
+    [Fact]
+    public async Task Turning_the_background_service_on_hands_the_port_to_it_and_off_takes_it_back()
+    {
+        string directory = Path.Combine(_directory, "service");
+        HostSettings host = HostSettings.Parse(["--config-dir", directory, "--urls", $"http://127.0.0.1:{FreePort()}", "--SemanticRouter:Embeddings:Provider=Hashing", "--Logging:LogLevel:Default=Warning"], _ => null);
+        await using var platform = new InProcessServicePlatform(host);
+        var service = new RouterService(platform, host, "/opt/SemanticRouter/SemanticRouter", n => n == "PATH" ? "/usr/bin" : null) { StartTimeout = TimeSpan.FromSeconds(20) };
+        await using var router = new DesktopRouter(host, TextWriter.Null, attachWait: TimeSpan.FromSeconds(2));
+
+        await router.StartAsync();
+        router.State.Should().Be(RouterState.Hosting, router.Status);
+        service.IsOn.Should().BeFalse();
+
+        (await service.TurnOnAsync(router)).Should().BeNull();
+        service.IsOn.Should().BeTrue();
+        router.State.Should().Be(RouterState.Attached, "the app now shows the service's router");
+        platform.Installed!.Arguments.Should().StartWith(["--headless", "--config-dir"]);
+        platform.Installed.Program.Should().Be("/opt/SemanticRouter/SemanticRouter");
+
+        (await service.RestartAsync(router)).Should().BeNull();
+        router.State.Should().Be(RouterState.Attached);
+
+        (await service.TurnOffAsync(router)).Should().BeNull();
+        service.IsOn.Should().BeFalse();
+        router.State.Should().Be(RouterState.Hosting, "the app runs the router itself again");
+    }
+
+    [Fact]
+    public async Task Headless_runs_only_the_router_logs_to_its_file_and_stops_cleanly()
+    {
+        string app = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "SemanticRouter.exe" : "SemanticRouter");
+        string directory = Path.Combine(_directory, "headless");
+        int port = FreePort();
+        var start = new ProcessStartInfo(app) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string argument in new[] { "--headless", "--config-dir", directory, "--urls", $"http://127.0.0.1:{port}", "--SemanticRouter:Embeddings:Provider=Hashing" })
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(start)!;
+        try
+        {
+            RouterInstance? instance = await RouterInstance.WaitForStartAsync(directory, DateTimeOffset.UtcNow.AddSeconds(-5), TimeSpan.FromSeconds(60));
+            instance.Should().NotBeNull("the headless router records itself once it listens");
+            instance!.ProcessId.Should().Be(process.Id);
+
+            using (var http = new HttpClient())
+            {
+                (await http.GetAsync(new Uri($"http://127.0.0.1:{port}/router/"))).StatusCode.Should().Be(HttpStatusCode.OK);
+            }
+
+            // The router still writes to its log: share it, as Windows refuses a reader that would lock writers out.
+            using (var log = new StreamReader(new FileStream(RouterLog.FileIn(directory), FileMode.Open, FileAccess.Read, FileShare.ReadWrite)))
+            {
+                (await log.ReadToEndAsync()).Should().Contain($"is listening on http://127.0.0.1:{port}");
+            }
+
+            // The way a service manager stops it: SIGTERM, or on Windows the stop event.
+            if (OperatingSystem.IsWindows())
+            {
+                instance.RequestStop().Should().BeTrue();
+            }
+            else
+            {
+                using Process kill = Process.Start("kill", ["-TERM", process.Id.ToString(System.Globalization.CultureInfo.InvariantCulture)])!;
+                await kill.WaitForExitAsync();
+            }
+
+            using var exited = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await process.WaitForExitAsync(exited.Token);
+            process.ExitCode.Should().Be(0);
+            File.Exists(RouterInstance.PathIn(directory)).Should().BeFalse("a clean stop removes the record");
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+    }
+
+    /// <summary>A service manager that runs the router in this process, so the hand-over can be tested without one.</summary>
+    private sealed class InProcessServicePlatform(HostSettings host) : ServicePlatform, IAsyncDisposable
+    {
+        private RunningRouter? _router;
+
+        public ServiceDefinition? Installed { get; private set; }
+
+        public override string Kind => "in-process service";
+
+        public override string Location => "memory";
+
+        public override string LogHint => "the test output";
+
+        public override string EnvironmentAdvice => string.Empty;
+
+        public override bool IsInstalled() => Installed is not null;
+
+        public override string Render(ServiceDefinition definition) => string.Empty;
+
+        public override async Task<ServiceOutcome> InstallAsync(ServiceDefinition definition)
+        {
+            Installed = definition;
+            return await StartAsync();
+        }
+
+        public override async Task<ServiceOutcome> UninstallAsync()
+        {
+            await StopAsync();
+            Installed = null;
+            return ServiceOutcome.Ok();
+        }
+
+        public override async Task<ServiceOutcome> StartAsync()
+        {
+            _router ??= await RouterHost.StartAsync(host, TextWriter.Null, b => b.Logging.ClearProviders());
+            return _router is null ? ServiceOutcome.Failed("address in use") : ServiceOutcome.Ok();
+        }
+
+        public override async Task<ServiceOutcome> StopAsync()
+        {
+            if (_router is { } router)
+            {
+                _router = null;
+                await router.DisposeAsync();
+            }
+
+            return ServiceOutcome.Ok();
+        }
+
+        public override async Task<ServiceOutcome> RestartAsync()
+        {
+            await StopAsync();
+            return await StartAsync();
+        }
+
+        public override Task<string> StatusAsync() => Task.FromResult("in process");
+
+        public ValueTask DisposeAsync() => new(StopAsync());
     }
 
     private static async Task<bool> SendWhenListeningAsync(SingleInstance client, string command)

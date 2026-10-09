@@ -20,6 +20,9 @@ internal sealed record DesktopPreferences
 
     public DashboardSurface OpenDashboardIn { get; init; } = DashboardSurface.Window;
 
+    /// <summary>Whether the welcome window (background service, start at sign-in) has been shown.</summary>
+    public bool Welcomed { get; init; }
+
     /// <summary>Where the dashboard window was when it was last hidden.</summary>
     public WindowPlacement? Window { get; init; }
 

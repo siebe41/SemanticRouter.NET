@@ -142,18 +142,10 @@ internal static partial class ServiceCommand
     private static async Task<int> WaitForRouterAsync(
         HostSettings settings, TextWriter output, ServicePlatform platform, DateTimeOffset requested, TimeSpan timeout)
     {
-        // The instance file stores whole milliseconds, and the clocks are the same machine's.
-        DateTimeOffset since = requested.AddSeconds(-1);
-        var waited = Stopwatch.StartNew();
-        while (waited.Elapsed < timeout)
+        if (await RouterInstance.WaitForStartAsync(settings.ConfigurationDirectory, requested, timeout).ConfigureAwait(false) is { } instance)
         {
-            if (RouterInstance.ReadRunning(settings.ConfigurationDirectory) is { } instance && instance.StartedAt >= since)
-            {
-                await WriteRunningAsync(output, instance).ConfigureAwait(false);
-                return 0;
-            }
-
-            await Task.Delay(250).ConfigureAwait(false);
+            await WriteRunningAsync(output, instance).ConfigureAwait(false);
+            return 0;
         }
 
         await output.WriteLineAsync(
@@ -212,8 +204,20 @@ internal sealed record ServiceDefinition
     public static readonly IReadOnlyList<string> CarriedVariables =
         ["PATH", "DOTNET_ROOT", "DOTNET_ROOT_X64", "DOTNET_ROOT_ARM64", HostSettings.KeysVariable];
 
-    /// <summary>The executable: the tool's own launcher, or <c>dotnet</c> when it runs as <c>dotnet semantic-router.dll</c>.</summary>
+    /// <summary>
+    /// The executable: the tool's own launcher, <c>dotnet</c> when it runs as <c>dotnet semantic-router.dll</c>, or the
+    /// desktop app.
+    /// </summary>
     public required string Program { get; init; }
+
+    /// <summary>What makes the program run the router: <c>run</c> for the tool, <c>--headless</c> for the desktop app.</summary>
+    public IReadOnlyList<string> RunCommand { get; init; } = ["run"];
+
+    /// <summary>
+    /// The program opens no console window (the desktop app is a GUI program), so Windows can start it at sign-in
+    /// directly instead of through <c>semantic-router service start</c>.
+    /// </summary>
+    public bool Windowless { get; init; }
 
     /// <summary>Arguments the executable needs before any command (the assembly, for <c>dotnet</c>).</summary>
     public IReadOnlyList<string> ProgramArguments { get; init; } = [];
@@ -227,7 +231,7 @@ internal sealed record ServiceDefinition
     public IReadOnlyDictionary<string, string> Environment { get; init; } = new Dictionary<string, string>();
 
     /// <summary>Everything after <see cref="Program"/> to run the router.</summary>
-    public IReadOnlyList<string> Arguments => [.. ProgramArguments, .. Command("run"), .. HostArguments];
+    public IReadOnlyList<string> Arguments => [.. Command([.. RunCommand]), .. HostArguments];
 
     /// <summary>Everything after <see cref="Program"/> for another command on the same configuration directory.</summary>
     public IReadOnlyList<string> Command(params string[] command) =>
@@ -248,12 +252,25 @@ internal sealed record ServiceDefinition
             ProgramArguments = viaDotnet ? [assemblyPath] : [],
             ConfigurationDirectory = settings.ConfigurationDirectory,
             HostArguments = settings.HostArguments,
-            Environment = CarriedVariables
-                .Select(name => (name, value: environment(name)))
-                .Where(v => !string.IsNullOrEmpty(v.value))
-                .ToDictionary(v => v.name, v => v.value!, StringComparer.Ordinal),
+            Environment = Carried(environment),
         };
     }
+
+    /// <summary>The desktop app as the service: <c>SemanticRouter --headless</c>, the router without a window or tray.</summary>
+    public static ServiceDefinition ForDesktop(HostSettings settings, string executable, Func<string, string?> environment) => new()
+    {
+        Program = executable,
+        RunCommand = ["--headless"],
+        Windowless = true,
+        ConfigurationDirectory = settings.ConfigurationDirectory,
+        HostArguments = settings.HostArguments,
+        Environment = Carried(environment),
+    };
+
+    private static Dictionary<string, string> Carried(Func<string, string?> environment) => CarriedVariables
+        .Select(name => (name, value: environment(name)))
+        .Where(v => !string.IsNullOrEmpty(v.value))
+        .ToDictionary(v => v.name, v => v.value!, StringComparer.Ordinal);
 }
 
 /// <summary>What happened when a service manager was asked to do something.</summary>

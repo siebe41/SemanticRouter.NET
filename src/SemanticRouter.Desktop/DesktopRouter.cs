@@ -120,6 +120,13 @@ internal sealed class DesktopRouter(HostSettings settings, TextWriter log, TimeS
         }
     }
 
+    /// <summary>Stops the app's own router, if it runs one, so another (the background service) can take the port.</summary>
+    public async Task ReleaseAsync()
+    {
+        await StopOwnRouterAsync();
+        Set(RouterState.Starting);
+    }
+
     /// <summary>Starts the in-app router again (after it stopped or failed); an attached router is not the app's to restart.</summary>
     public async Task RestartAsync()
     {

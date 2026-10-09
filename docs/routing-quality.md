@@ -59,6 +59,27 @@ The closest route pairs (centroid similarity and the share of ambiguous utteranc
 
 **Compare embedding models** runs the set with another provider, such as Ollama's `nomic-embed-text` against the in-process hashing provider. Each side is shown at the current threshold and at its own recommended threshold. Nothing is applied. The API key can be a `${env:…}` or `${secret:…}` reference; `***` means the current key. This makes an outbound call to the endpoint you give, so it needs the admin role.
 
+## Conversations
+
+The classifier looks at the latest message, but a conversation is more than that. In the middle of a task, "ok, go ahead" or "continue" looks like small talk on its own, and would hand the task to a small model. With `Middleware:Conversation` (on by default) the router routes by the conversation:
+
+- **A floor.** It remembers the highest tier a conversation needed recently, and a new turn needs at least that. The header and the activity entry show `ConversationFloor` when the floor raised the tier.
+- **Short follow-ups keep the full floor.** A message of up to `ShortFollowUpLength` characters (default 60, without code blocks), such as "yes", "try again" or "looks good, commit it", is not classified on its own.
+- **It decays.** Every `DecayTurns` turns (default 3) that need less than the conversation's peak lower the floor by one tier, so a conversation that moved on to simpler work gets cheaper models again. A harder turn raises the peak at once. After `IdleTimeout` (default 30 minutes) without a turn, the conversation is forgotten.
+- **It sticks to a model.** While the model that answered the last turn is available and exactly on the required tier, it is tried first (`X-Prompt-Route-Sticky: true`, and **sticky** on the Activity page): answers stay coherent and the provider's prompt cache keeps working.
+
+What it leaves alone:
+
+- **A conversation's first turn** routes exactly as before. A request continues a conversation only when it carries an earlier answer, so two conversations that open with the same message do not share anything.
+- **Requests for a specific catalog model** and **tool-result turns** (which stay on the model that issued the calls).
+- **A client's own cheap side tasks.** Claude Code sends titles, summaries and other housekeeping under a Haiku model name, which `ModelAliases` maps to `auto:cheapest`; those are not raised.
+
+A conversation is recognised by a hash of the client, the system prompt and the first user message, which chat clients resend on every turn. No prompt text is kept, the state is in memory, and the activity log shows only a short prefix of the hash. Clients that send only the newest message (relying on a server-side history) start a new conversation on each turn, so they are routed per message as before.
+
+```jsonc
+"Middleware": { "Conversation": { "Enabled": true, "DecayTurns": 3, "IdleTimeout": "00:30:00", "ShortFollowUpLength": 60, "StickToModel": true } }
+```
+
 ## Retry escalation
 
 When a client sends the same prompt again shortly after it was answered, the answer was often not good enough. With `Middleware:RetryEscalation:Enabled`, such a retry goes to a model at least one tier above the one that answered. The header and the activity entry show `RetryEscalation` as the reason.

@@ -119,7 +119,7 @@
     "ModelAliases": {
       "*haiku*": "auto:cheapest",
       "*sonnet*": "auto",
-      "*opus*": "auto:best",
+      "*opus*": "family:opus",
       "claude-*": "auto",
       "gpt-*": "auto"
     },

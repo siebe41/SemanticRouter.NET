@@ -29,6 +29,24 @@ internal static class RouterLog
         return synchronized;
     }
 
+    /// <summary>
+    /// Runs the router with no console to write to (started in the background, or headless by a service manager):
+    /// the banner, the logs and a crash all go to the log file.
+    /// </summary>
+    public static async Task<int> RunAsync(HostSettings settings)
+    {
+        await using TextWriter log = RedirectConsole(settings.ConfigurationDirectory);
+        try
+        {
+            return await RouterHost.RunAsync(settings, log, Configure).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await log.WriteLineAsync($"The router stopped: {ex}").ConfigureAwait(false);
+            return 1;
+        }
+    }
+
     /// <summary>A file has no clock and shows no colours: time-stamped, plain console log lines.</summary>
     public static void Configure(WebApplicationBuilder builder) =>
         builder.Logging.AddSimpleConsole(options =>

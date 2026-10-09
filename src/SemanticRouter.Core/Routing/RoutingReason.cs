@@ -44,4 +44,16 @@ public enum RoutingReason
     /// required tier was raised above the one that answered it (<see cref="PromptRoutingRequest.MinimumTier"/>).
     /// </summary>
     RetryEscalation = 9,
+
+    /// <summary>
+    /// The conversation needed a higher tier on recent turns (a short follow-up such as "ok, go ahead" in the middle
+    /// of a task), so the required tier was kept at that floor (<see cref="PromptRoutingRequest.ConversationFloor"/>).
+    /// </summary>
+    ConversationFloor = 10,
+
+    /// <summary>
+    /// The person asked for it with an inline callout (<c>@opus</c>, <c>@tier2</c>…), in this turn or earlier in the
+    /// conversation, so their choice was used instead of the router's.
+    /// </summary>
+    ExplicitCallout = 11,
 }

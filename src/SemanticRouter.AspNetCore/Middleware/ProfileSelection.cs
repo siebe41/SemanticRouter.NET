@@ -39,6 +39,13 @@ internal static partial class ProfileSelection
         }
 
         (SelectionStrategy? strategy, string? requested) = ModelAliases.Resolve(PromptRoutingMiddleware.MapModel(runtime, name));
+        if (requested is not null && requested.StartsWith(ModelFamilies.Prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            // "family:opus": the catalog's Opus model when it has one, otherwise the most capable model available.
+            requested = ModelFamilies.Resolve(runtime.Router.Models, requested[ModelFamilies.Prefix.Length..])?.Name;
+            strategy = requested is null ? SelectionStrategy.MostCapable : null;
+        }
+
         return new ModelChoice(strategy ?? virtualStrategy, requested, profile);
     }
 

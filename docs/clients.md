@@ -30,7 +30,9 @@ What happens to the different kinds of requests Claude Code sends:
 
 | Claude Code sends… | The router… |
 |---|---|
-| its model name (`claude-sonnet-…`, `/model opus`, `haiku` for side tasks) | maps it through `Middleware:ModelAliases` (sample: `*haiku*` → `auto:cheapest`, `*opus*` → `auto:best`, otherwise `auto`). Unknown names route as `auto`. |
+| its model name (`claude-sonnet-…`, `/model opus`, `haiku` for side tasks) | maps it through `Middleware:ModelAliases` (sample: `*haiku*` → `auto:cheapest`, `*opus*` → `family:opus`, the catalog's Opus model or else the most capable, otherwise `auto`). Its default Sonnet name therefore means "router decides". Unknown names route as `auto`. |
+| a follow-up such as "ok, go ahead" in the middle of a task | keeps the conversation's tier and model ([conversation routing](routing-quality.md#conversations)), so the task does not drop to a small model. |
+| a message starting with `@opus`, `@local`, `@best`… | routes as the tag asks, for that turn and the rest of the conversation ([below](#telling-the-router-what-you-want)). |
 | a turn **with tools** (every main-loop turn) | requires the `tools` capability. Candidates: HTTP models that declare `tools` (a local coder model, an API-key model) and CLI connectors with `ToolCalling: Prompted` (below). |
 | **tool results** (the loop continuing) | pins the request to the model that issued the tool calls (`X-Prompt-Route-Reason: ConversationAffinity`), so one turn is never split across models. If that model is cooling down, it is classified normally. |
 | `<system-reminder>` blocks inside user messages | ignores them when classifying (`Middleware:StripSystemReminders`). |
@@ -53,6 +55,30 @@ Context size matters: a Claude Code turn is 15–30k tokens of system prompt, to
 ### Checking what happened
 
 Every response carries routing headers (`X-Prompt-Route`, `-Tier`, `-Reason`, `-Model`, `-Connector`, `-Attempt`, `-Degraded`, and `-Dropped` when the backend could not carry a request feature), the console logs each decision, and the dashboard's **Activity** page lists every routed turn with its prompt preview, tier, route and the model that answered.
+
+## Telling the router what you want
+
+The router decides by itself; you only need this when you really want something specific. Start a message with a tag, in any client:
+
+| Tag | Routes to |
+|---|---|
+| `@opus`, `@sonnet`, `@qwen`… | A model family: the most capable catalog model whose name or model id contains it. |
+| `@claude-opus` (any catalog model name) | That model. |
+| `@best`, `@cheap`, `@priority` | The most capable model, the cheapest that fits, or your priority order. |
+| `@tier3` (`@tier1` to `@tier9`) | That tier, up or down, whatever the prompt looks like. |
+| `@local` | Local models only: the conversation does not leave the machine. |
+| `@auto` | Back to automatic routing. |
+
+```text
+@opus why does this deadlock when I call .Result?
+```
+
+- **The tag never reaches the model.** It is taken out of the request (from every user message, since clients resend the history) before it is forwarded.
+- **It holds for the conversation.** The next turns without a tag stay on your choice until you write `@auto` or another tag. The header `X-Prompt-Route-Callout` and the Activity page show `@opus (earlier in the conversation)`.
+- **Only a tag at the very start counts**, after anything the client injects (Claude Code's `<system-reminder>` blocks). A tag that is not one of these (`@src/Program.cs`, a file mention) is left in the message. A message that is nothing but a tag keeps it, so the model has something to answer.
+- **Your own names:** `Middleware:Callouts:Names`, e.g. `"deep": "family:opus"`, `"fast": "lmstudio-small"`, `"private": "local"`; then write `@deep`.
+- **Policy still applies.** A routing profile that does not allow the model wins (the header says "not allowed here; routed automatically"), and a profile or secret detection that keeps a conversation local still does. A model callout skips classification, so a local-only *route* does not apply to it: use `@local` for that.
+- Switch it off with `Middleware:Callouts:Enabled: false`.
 
 ## OpenAI SDKs and everything with a base URL
 

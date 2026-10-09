@@ -373,9 +373,13 @@ internal sealed class WindowsSignInService : ServicePlatform
         {JsonSerializer.Serialize(Stored.From(definition), Json)}
         """;
 
-    /// <summary>The registry value: start the background router for this configuration directory and return.</summary>
-    internal static string SignInCommand(ServiceDefinition definition) =>
-        WindowsCommandLine.Join([definition.Program, .. definition.Command("service", "start", "--no-wait")]);
+    /// <summary>
+    /// The registry value. A program without a console window (the desktop app) runs the router itself; the console
+    /// tool goes through <c>service start</c>, which starts the router without a console and returns.
+    /// </summary>
+    internal static string SignInCommand(ServiceDefinition definition) => definition.Windowless
+        ? WindowsCommandLine.Join([definition.Program, .. definition.Arguments])
+        : WindowsCommandLine.Join([definition.Program, .. definition.Command("service", "start", "--no-wait")]);
 
     public override async Task<ServiceOutcome> InstallAsync(ServiceDefinition definition)
     {
@@ -498,19 +502,7 @@ internal sealed class WindowsSignInService : ServicePlatform
         ReadValue() is { } command ? $"starts at sign-in: {command}" : "not set to start at sign-in");
 
     /// <summary>The background router: no console, so the banner and the logs go to <see cref="RouterLog"/>.</summary>
-    public static async Task<int> RunDetachedAsync(HostSettings settings)
-    {
-        await using TextWriter log = RouterLog.RedirectConsole(settings.ConfigurationDirectory);
-        try
-        {
-            return await RouterHost.RunAsync(settings, log, RouterLog.Configure).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            await log.WriteLineAsync($"The router stopped: {ex}").ConfigureAwait(false);
-            return 1;
-        }
-    }
+    public static Task<int> RunDetachedAsync(HostSettings settings) => RouterLog.RunAsync(settings);
 
     private string? ReadValue()
     {

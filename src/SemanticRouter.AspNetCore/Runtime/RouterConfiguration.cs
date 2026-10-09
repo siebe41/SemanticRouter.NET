@@ -192,6 +192,12 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
+        ConversationRoutingOptions conversation = Middleware.Conversation;
+        if (conversation.Enabled && (conversation.DecayTurns < 1 || conversation.IdleTimeout <= TimeSpan.Zero || conversation.ShortFollowUpLength < 0))
+        {
+            errors.Add("Middleware:Conversation needs DecayTurns of at least 1, a positive IdleTimeout and a ShortFollowUpLength of 0 or more.");
+        }
+
         if (Middleware.RetryEscalation.Enabled && Middleware.RetryEscalation.Window <= TimeSpan.Zero)
         {
             errors.Add("Middleware:RetryEscalation:Window must be positive.");

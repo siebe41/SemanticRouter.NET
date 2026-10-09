@@ -36,6 +36,31 @@ internal sealed record RouterInstance(int ProcessId, IReadOnlyList<string> Urls,
     public static RouterInstance? ReadRunning(string configurationDirectory) =>
         Read(configurationDirectory) is { } instance && instance.IsAlive() ? instance : null;
 
+    /// <summary>
+    /// Waits until a router started after <paramref name="requested"/> has recorded itself, or <see langword="null"/>
+    /// after <paramref name="timeout"/>. A record from before (a router that is shutting down) does not count.
+    /// </summary>
+    public static async Task<RouterInstance?> WaitForStartAsync(string configurationDirectory, DateTimeOffset requested, TimeSpan timeout)
+    {
+        // The record stores whole milliseconds, and the clocks are the same machine's.
+        DateTimeOffset since = requested.AddSeconds(-1);
+        var waited = Stopwatch.StartNew();
+        while (true)
+        {
+            if (ReadRunning(configurationDirectory) is { } instance && instance.StartedAt >= since)
+            {
+                return instance;
+            }
+
+            if (waited.Elapsed >= timeout)
+            {
+                return null;
+            }
+
+            await Task.Delay(250).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Removes the file if it still describes this process (another instance may have replaced it).</summary>
     public static void Remove(string configurationDirectory, int processId)
     {

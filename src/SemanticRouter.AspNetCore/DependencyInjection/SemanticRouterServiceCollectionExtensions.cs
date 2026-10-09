@@ -72,6 +72,7 @@ public static class SemanticRouterServiceCollectionExtensions
                 ? new JsonLinesEvaluationSetStore(EvaluationSetFileNextTo(store.Location))
                 : new InMemoryEvaluationSetStore());
         services.TryAddSingleton<RetryTracker>();
+        services.TryAddSingleton<ConversationTracker>();
         services.TryAddSingleton<MemoryExposureLog>();
         services.TryAddSingleton<MemoryIndex>();
         services.TryAddSingleton<PromptRouterMetrics>();

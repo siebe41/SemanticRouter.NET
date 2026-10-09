@@ -35,6 +35,25 @@ public sealed record PromptRoutingRequest
     public int? MinimumTier { get; init; }
 
     /// <summary>
+    /// The tier this conversation needed on recent turns. The classified tier is raised to it, so a short follow-up
+    /// does not drop a task to a weaker model; the reason then becomes <see cref="RoutingReason.ConversationFloor"/>.
+    /// </summary>
+    public int? ConversationFloor { get; init; }
+
+    /// <summary>
+    /// A tier the person asked for (an inline <c>@tier3</c>): it replaces the classified tier, up or down, over every
+    /// floor; the reason becomes <see cref="RoutingReason.ExplicitCallout"/>.
+    /// </summary>
+    public int? ExplicitTier { get; init; }
+
+    /// <summary>
+    /// The model that answered this conversation's last turn. It is tried first while it is available and exactly on
+    /// the required tier, so a conversation stays on one model (coherent answers, prompt-cache hits) until it needs a
+    /// stronger one or can make do with a cheaper one (<see cref="RoutingPlan.Sticky"/>).
+    /// </summary>
+    public string? PreferredModel { get; init; }
+
+    /// <summary>
     /// The <see cref="SemanticRouterOptions.Profiles"/> entry to route under: it narrows the models, clamps the tier and can
     /// keep the request local. An explicit model it does not allow is ignored (the request is routed as <c>auto</c>).
     /// </summary>
@@ -52,7 +71,11 @@ public sealed record PromptRoutingRequest
 public sealed record RoutingPlan(
     PromptClassificationResult Classification,
     ModelRequirements Requirements,
-    IReadOnlyList<ModelCandidate> Candidates);
+    IReadOnlyList<ModelCandidate> Candidates)
+{
+    /// <summary>The first candidate is the conversation's previous model (<see cref="PromptRoutingRequest.PreferredModel"/>), moved ahead of the ranking.</summary>
+    public bool Sticky { get; init; }
+}
 
 /// <summary>Routes a prompt to an ordered list of catalog models.</summary>
 public interface IPromptRouter
@@ -146,9 +169,19 @@ public sealed class PromptRouter : IPromptRouter
         using (System.Diagnostics.Activity? classify = RouterTelemetry.Source.StartActivity("semantic_router.classify"))
         {
             classification = await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false);
+            if (request.ConversationFloor is { } conversation && conversation > classification.RequiredTier)
+            {
+                classification = classification with { RequiredTier = conversation, Reason = RoutingReason.ConversationFloor };
+            }
+
             if (request.MinimumTier is { } floor && floor > classification.RequiredTier)
             {
                 classification = classification with { RequiredTier = floor, Reason = RoutingReason.RetryEscalation };
+            }
+
+            if (request.ExplicitTier is { } asked)
+            {
+                classification = classification with { RequiredTier = asked, Reason = RoutingReason.ExplicitCallout };
             }
 
             classify?.SetTag("semantic_router.tier", classification.RequiredTier);
@@ -196,7 +229,22 @@ public sealed class PromptRouter : IPromptRouter
             candidates = _selector.RankCandidates(requirements, models);
         }
 
-        return new RoutingPlan(classification, requirements, candidates);
+        // Stay on the conversation's model while it is exactly what the turn needs: available, and on the required
+        // tier (not above it, so a conversation that no longer needs it moves to a cheaper model).
+        if (request.PreferredModel is { } preferred
+            && candidates.FirstOrDefault(c => string.Equals(c.Model.Name, preferred, StringComparison.OrdinalIgnoreCase)) is { } previous
+            && previous != candidates[0]
+            && previous.MeetsRequiredTier
+            && previous.Model.Tier <= requirements.RequiredTier
+            && _health.IsAvailable(previous.Model))
+        {
+            return new RoutingPlan(classification, requirements, [previous, .. candidates.Where(c => c != previous)]) { Sticky = true };
+        }
+
+        return new RoutingPlan(classification, requirements, candidates)
+        {
+            Sticky = request.PreferredModel is { } same && candidates.Count > 0 && string.Equals(candidates[0].Model.Name, same, StringComparison.OrdinalIgnoreCase),
+        };
     }
 
     private RoutingProfile? ProfileOf(PromptRoutingRequest request) =>
