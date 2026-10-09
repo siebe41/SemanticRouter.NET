@@ -1,6 +1,7 @@
 /* Semantic Router dashboard: Actions behind data-action buttons, and applying configuration. */
 import { lineDiff } from './config.js';
 import { $, api, connectorNames, h, isDirty, lineupFor, setPath, state, tiers, toast } from './core.js';
+import { loadTuning } from './learned.js';
 import { graph, loadMemory, updateMemorySide } from './memory.js';
 import { refreshStatus, render, setConfig } from './shell.js';
 
@@ -80,6 +81,23 @@ export const actions = {
     state.history.versions = (await api('GET', '/config/history?limit=100')).versions;
     await refreshStatus(); render(); toast(`Rolled back to version ${el.dataset.id}.`, 'ok');
   },
+  async 'tuning-run'() {
+    const run = await api('POST', '/tuning/run');
+    await afterTuning(); toast(run.result, run.changes.length ? 'ok' : undefined);
+  },
+  async 'tuning-undo'(el) {
+    const c = await api('POST', `/tuning/changes/${el.dataset.id}/undo`);
+    await afterTuning(); toast(`Undone: ${c.summary}. It is not made again for a while.`, 'ok');
+  },
+  async 'tuning-apply'(el) { const c = await api('POST', `/tuning/changes/${el.dataset.id}/apply`); await afterTuning(); toast(`Applied: ${c.summary}.`, 'ok'); },
+  async 'tuning-dismiss'(el) { await api('POST', `/tuning/changes/${el.dataset.id}/dismiss`); await afterTuning(); },
+  async 'tuning-undo-all'() {
+    if (!confirm('Undo every change the router learned? Each setting goes back to what it was before; nothing is learned for those settings for a while.')) return;
+    const r = await api('POST', '/tuning/undo-all');
+    await afterTuning(); toast(`Undid ${r.undone} change${r.undone === 1 ? '' : 's'}${r.skipped.length ? '; left ' + r.skipped.join(', ') : ''}.`, 'ok');
+  },
+  async 'tuning-pause'() { await api('POST', '/tuning/pause'); await afterTuning(); toast('Learning paused.', 'ok'); },
+  async 'tuning-resume'() { await api('POST', '/tuning/resume'); await afterTuning(); toast('Learning resumed.', 'ok'); },
   async 'reset-health'() { await api('POST', '/health/reset'); await refreshStatus(); toast('Cooldowns cleared.', 'ok'); },
 
   'tiers-customize'() { state.config.Tiers = tiers().map((t) => ({ Level: t.Level, Name: t.Name, Description: t.Description || null })); render(); },
@@ -312,4 +330,13 @@ export async function applyConfig(persist) {
     render();
     toast('Not applied: ' + state.errors.length + ' problem(s).', 'danger');
   }
+}
+
+/* A learned change was applied or undone: the configuration changed too. */
+async function afterTuning() {
+  // An unsaved draft is kept (Apply would then overwrite the learned change, which the diff shows).
+  if (!isDirty()) setConfig(await api('GET', '/config'));
+  await loadTuning();
+  await refreshStatus();
+  render();
 }

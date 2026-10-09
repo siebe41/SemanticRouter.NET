@@ -17,7 +17,7 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - It has a Responses API front door for Codex. Thinking, structured output and serial tool calls cross protocols, and what a backend cannot carry is reported in the `X-Prompt-Route-Dropped` header.
 
-- Routing can be measured and tuned on your own prompts: evaluation sets, threshold calibration, route health, labelling activity entries, and optional retry escalation.
+- Routing can be measured and tuned on your own prompts: evaluation sets, threshold calibration, route health, labelling activity entries, and optional retry escalation. It routes by the conversation rather than the last message, honours explicit choices (`@opus`, `/model opus`), notices when a decision was not good enough, and tunes its thresholds and utterances from that by itself, with every change shown and undoable.
 
 - It routes with a real embedding model and no server: an ONNX model runs in-process and is downloaded on first use, and recent decisions are cached.
 
@@ -93,6 +93,22 @@ The order follows dependencies: install and trust first, then visibility (which 
 |---|---|---|
 | — | Background service per user (`semantic-router service`) | Done: systemd user unit, launchd agent, Windows sign-in entry. |
 | — | Desktop app: tray or menu-bar icon, the dashboard in a native window or the browser, start at sign-in | Done ([desktop.md](desktop.md)): wraps the existing dashboard in the platform web view (WebView2, WKWebView, WebKitGTK, WPE) and hosts the router in-process or uses the running service. The app can also own the background service (`SemanticRouter --headless`), offered on first start. Still to do: exercise it on Windows and macOS, sign and notarize the macOS app, installers. |
+
+### 6. Set it and forget it
+
+Tracked in [#40](https://github.com/siebe41/SemanticRouter.NET/issues/40): point a client at the router once and keep getting good results without touching it.
+
+| Issue | Goal | Notes |
+|---|---|---|
+| [#41](https://github.com/siebe41/SemanticRouter.NET/issues/41) | Route by the conversation, not only its latest message | Done. |
+| [#42](https://github.com/siebe41/SemanticRouter.NET/issues/42) | Explicit model choices win, and only explicit ones | Done: inline callouts and `family:` aliases. |
+| [#43](https://github.com/siebe41/SemanticRouter.NET/issues/43) | Record implicit outcome signals per routing decision | Done. |
+| [#45](https://github.com/siebe41/SemanticRouter.NET/issues/45) | Tune thresholds and utterances automatically, within guardrails | Done: applied with every change shown and undoable. |
+| [#44](https://github.com/siebe41/SemanticRouter.NET/issues/44) | Track model reliability per kind of work | |
+| [#46](https://github.com/siebe41/SemanticRouter.NET/issues/46) | Model-family priors: tiers and capabilities from a curated table | |
+| [#47](https://github.com/siebe41/SemanticRouter.NET/issues/47) | Default routes and evaluation prompts for agentic clients | |
+| [#48](https://github.com/siebe41/SemanticRouter.NET/issues/48) | Optional local judge that grades a sample of cheap answers | |
+| [#49](https://github.com/siebe41/SemanticRouter.NET/issues/49) | Weekly digest; notify only when a decision is needed | Notifications for large learned changes. |
 
 ### Continuous
 

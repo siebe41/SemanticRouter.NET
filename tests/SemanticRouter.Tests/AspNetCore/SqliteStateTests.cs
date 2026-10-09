@@ -218,6 +218,24 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void Learned_changes_and_the_tuning_state_survive_a_restart()
+    {
+        var store = new SqliteTuningStore(Open());
+        DateTimeOffset now = _time.GetUtcNow();
+        store.Save(new TuningChange { Id = 1, Timestamp = now, Kind = TuningChangeKind.DefaultThreshold, OldValue = 0.8f, NewValue = 0.78f, Why = "because", State = TuningChangeState.Applied, Version = 4 });
+        store.Save(new TuningChange { Id = 2, Timestamp = now, Kind = TuningChangeKind.Utterance, Route = "code", Utterance = "fix the build", State = TuningChangeState.Suggested });
+        store.Save(new TuningChange { Id = 1, Timestamp = now, Kind = TuningChangeKind.DefaultThreshold, OldValue = 0.8f, NewValue = 0.78f, Why = "because", State = TuningChangeState.Undone, UndoneAt = now });
+        store.SaveState(new TuningState { Paused = true, LastRun = now, LastLabelCount = 12, LastResult = "1 change applied" });
+
+        var reopened = new SqliteTuningStore(Open());
+
+        reopened.Changes().Select(c => (c.Id, c.Kind, c.State)).Should().Equal(
+            (1L, TuningChangeKind.DefaultThreshold, TuningChangeState.Undone), (2L, TuningChangeKind.Utterance, TuningChangeState.Suggested));
+        reopened.Changes()[0].Should().Match<TuningChange>(c => c.NewValue == 0.78f && c.UndoneAt == now && c.Why == "because");
+        reopened.LoadState().Should().Be(new TuningState { Paused = true, LastRun = now, LastLabelCount = 12, LastResult = "1 change applied" });
+    }
+
+    [Fact]
     public void A_corrupt_database_falls_back_to_memory_with_a_warning()
     {
         File.WriteAllBytes(DbPath, Encoding.UTF8.GetBytes(new string('x', 4096)));

@@ -155,6 +155,9 @@ public sealed class RoutingEvaluator
 
     private readonly IEmbeddingProvider _embeddings;
     private readonly SemanticRouterOptions _options;
+
+    /// <summary>The configuration being evaluated.</summary>
+    internal SemanticRouterOptions Options => _options;
     private readonly IComplexityAnalyzer _complexity;
     private readonly RouteDefinition[] _routes;
     private readonly bool _hasLocalOnlyRoutes;
@@ -332,13 +335,13 @@ public sealed class RoutingEvaluator
         return new CalibrationPoint(threshold, correct, tooLow, tooHigh, prepared.Cases.Count);
     }
 
-    private static Func<RouteDefinition, float> ThresholdFunction(float fallback, IReadOnlyDictionary<string, float?>? routes) =>
+    internal static Func<RouteDefinition, float> ThresholdFunction(float fallback, IReadOnlyDictionary<string, float?>? routes) =>
         routes is null
             ? route => route.SimilarityThreshold ?? fallback
             : route => routes.TryGetValue(route.Name, out float? own) ? own ?? fallback : route.SimilarityThreshold ?? fallback;
 
     /// <summary>Decides one prompt the way <see cref="SemanticPromptClassifier"/> does.</summary>
-    private EvaluationResult Decide(PreparedEvaluation prepared, int index, DefaultRouteSelector selector)
+    internal EvaluationResult Decide(PreparedEvaluation prepared, int index, DefaultRouteSelector selector)
     {
         EvaluationCase item = prepared.Cases[index];
         ComplexityAnalysis complexity = prepared.Complexity[index];

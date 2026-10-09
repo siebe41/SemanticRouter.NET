@@ -57,6 +57,7 @@ public static class SqliteStateBuilderExtensions
         services.Replace(ServiceDescriptor.Singleton<IRoutingActivityStore, SqliteActivityStore>());
         services.Replace(ServiceDescriptor.Singleton<IRoutingFeedbackStore, SqliteFeedbackStore>());
         services.Replace(ServiceDescriptor.Singleton<IRouterConfigurationHistory, SqliteConfigurationHistory>());
+        services.Replace(ServiceDescriptor.Singleton<ITuningStore, SqliteTuningStore>());
         services.Replace(ServiceDescriptor.Singleton<IUsageLedger, SqliteUsageLedger>());
         return builder;
     }
@@ -203,6 +204,7 @@ internal sealed partial class SqliteRouterDatabase
             CREATE INDEX IF NOT EXISTS activity_timestamp ON activity (timestamp_ticks);
             CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, timestamp_ticks INTEGER NOT NULL, entry_id INTEGER NOT NULL, item TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS feedback_timestamp ON feedback (timestamp_ticks);
+            CREATE TABLE IF NOT EXISTS tuning_changes (id INTEGER PRIMARY KEY, item TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS usage (
                 timestamp_ticks INTEGER NOT NULL, model TEXT NOT NULL, connector TEXT NOT NULL, route TEXT, client TEXT,
                 is_local INTEGER NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL, cache_read INTEGER NOT NULL,
@@ -355,7 +357,6 @@ internal sealed class SqliteToolCallAffinity(SqliteRouterDatabase database) : IT
     }
 }
 
-/// <summary>The activity log on disk, capped by count and age.</summary>
 /// <summary>Feedback about routing decisions on disk, kept as long as the activity it is about.</summary>
 internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRoutingFeedbackStore
 {
@@ -408,6 +409,81 @@ internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRout
         });
 }
 
+/// <summary>
+/// What automatic tuning learned, and its state (paused, last run), on disk. Read from memory; a database that fails
+/// leaves the changes in memory for this run.
+/// </summary>
+internal sealed class SqliteTuningStore : ITuningStore
+{
+    private const string StateKey = "tuning_state";
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private readonly SqliteRouterDatabase _database;
+    private readonly InMemoryTuningStore _memory = new();
+
+    public SqliteTuningStore(SqliteRouterDatabase database)
+    {
+        _database = database;
+        IReadOnlyList<TuningChange> changes = database.Run<IReadOnlyList<TuningChange>>("reading learned changes", [], connection =>
+        {
+            var items = new List<TuningChange>();
+            using SqliteCommand command = SqliteRouterDatabase.Command(connection, "SELECT item FROM tuning_changes ORDER BY id;");
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                if (JsonSerializer.Deserialize<TuningChange>(reader.GetString(0), Json) is { } item)
+                {
+                    items.Add(item);
+                }
+            }
+
+            return items;
+        });
+        foreach (TuningChange change in changes)
+        {
+            _memory.Save(change);
+        }
+
+        string? state = database.Run<string?>("reading the tuning state", null, connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(connection, "SELECT value FROM meta WHERE key = $key;", ("$key", StateKey));
+            return command.ExecuteScalar() as string;
+        });
+        if (state is not null && JsonSerializer.Deserialize<TuningState>(state, Json) is { } loaded)
+        {
+            _memory.SaveState(loaded);
+        }
+    }
+
+    public IReadOnlyList<TuningChange> Changes() => _memory.Changes();
+
+    public void Save(TuningChange change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        _memory.Save(change);
+        _database.Run("saving a learned change", connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection, "INSERT OR REPLACE INTO tuning_changes (id, item) VALUES ($id, $item);", ("$id", change.Id), ("$item", JsonSerializer.Serialize(change, Json)));
+            command.ExecuteNonQuery();
+        });
+    }
+
+    public TuningState LoadState() => _memory.LoadState();
+
+    public void SaveState(TuningState state)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        _memory.SaveState(state);
+        _database.Run("saving the tuning state", connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection, "INSERT OR REPLACE INTO meta (key, value) VALUES ($key, $value);", ("$key", StateKey), ("$value", JsonSerializer.Serialize(state, Json)));
+            command.ExecuteNonQuery();
+        });
+    }
+}
+
+/// <summary>The activity log on disk, capped by count and age.</summary>
 internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRoutingActivityStore
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);

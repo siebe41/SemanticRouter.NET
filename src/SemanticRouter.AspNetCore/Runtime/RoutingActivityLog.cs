@@ -54,6 +54,12 @@ public sealed class RoutingActivityEntry
     /// <summary>The planned model is the conversation's previous model, kept ahead of the ranking.</summary>
     public bool Sticky { get; init; }
 
+    /// <summary>The learned change (automatic tuning) that routed this decision differently, when there is one.</summary>
+    public long? Learned { get; init; }
+
+    /// <summary>What <see cref="Learned"/> changed, e.g. "learned 3 Oct: threshold of complex-code 0.52 → 0.48".</summary>
+    public string? LearnedNote { get; init; }
+
     /// <summary>Whether only local models may serve it.</summary>
     public bool LocalOnly { get; init; }
 

@@ -47,6 +47,9 @@ internal sealed class RouterRuntime : IDisposable
 
     public required int Version { get; init; }
 
+    /// <summary>The configuration history entry recorded when this runtime was applied, when there is one.</summary>
+    public long? HistoryVersion { get; set; }
+
     public required DateTimeOffset CreatedAt { get; init; }
 
     public required RouterConfigurationSource Source { get; init; }
@@ -162,7 +165,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                         _services.GetRequiredService<IOptions<EmbeddingProviderOptions>>().Value,
                         _services.GetRequiredService<IOptions<PromptRouterMiddlewareOptions>>().Value,
                         _services.GetService<IOptions<UsageOptions>>()?.Value ?? new UsageOptions(),
-                        _services.GetService<IOptions<MemoryOptions>>()?.Value);
+                        _services.GetService<IOptions<MemoryOptions>>()?.Value,
+                        _services.GetService<IOptions<TuningOptions>>()?.Value);
                 }
             }
 
@@ -223,7 +227,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                 _store.Save(document);
             }
 
-            Record(document, source, actor, persist && _store is not null ? note : string.Join("; ", new[] { note, "not saved" }.Where(n => n is not null)));
+            runtime.HistoryVersion = Record(document, source, actor, persist && _store is not null ? note : string.Join("; ", new[] { note, "not saved" }.Where(n => n is not null)));
 
             previous = _current;
             _current = runtime;
@@ -264,15 +268,16 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         }
     }
 
-    private void Record(RouterConfiguration document, string source, string? actor, string? note)
+    private long? Record(RouterConfiguration document, string source, string? actor, string? note)
     {
         try
         {
-            _history?.Record(document, source, actor, string.IsNullOrEmpty(note) ? null : note);
+            return _history?.Record(document, source, actor, string.IsNullOrEmpty(note) ? null : note);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
         {
             LogHistoryFailed(_logger, ex);
+            return null;
         }
     }
 

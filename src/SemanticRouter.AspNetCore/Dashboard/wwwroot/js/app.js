@@ -5,6 +5,7 @@ import './config.js';
 import './usage.js';
 import './evaluate.js';
 import './profiles.js';
+import './learned.js';
 import { actions } from './actions.js';
 import { $, api, h, isDirty, readInput, setPath, showSignIn, state, toast } from './core.js';
 import { connectStream } from './live.js';

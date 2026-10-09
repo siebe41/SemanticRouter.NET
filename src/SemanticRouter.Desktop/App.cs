@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -16,6 +17,9 @@ namespace SemanticRouter.Desktop;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "The router is disposed by QuitAsync; Avalonia never disposes an Application.")]
 internal sealed class App(DesktopOptions options, SingleInstance instance, TextWriter log) : Application
 {
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(5) };
+    private static readonly TimeSpan LearnedEvery = TimeSpan.FromMinutes(1);
+
     private readonly string _directory = options.Host.ConfigurationDirectory;
     private readonly SignInLaunch? _signIn = SignInLaunch.ForThisMachine();
     private DesktopPreferences _preferences = DesktopPreferences.Load(options.Host.ConfigurationDirectory);
@@ -27,6 +31,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private AboutWindow? _about;
     private bool _openWhenReady;
     private bool _quitting;
+    private int _learnedThisWeek;
+    private DateTimeOffset _learnedChecked;
 
     private NativeMenuItem _status = null!;
     private NativeMenuItem _problem = null!;
@@ -35,6 +41,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private NativeMenuItem _inWindow = null!;
     private NativeMenuItem _inBrowser = null!;
     private NativeMenuItem _atSignIn = null!;
+    private NativeMenuItem _learned = null!;
 
     public override void Initialize()
     {
@@ -73,7 +80,11 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
 
         // A background service may start, stop or restart while the app runs; follow it.
         var poll = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-        poll.Tick += (_, _) => _router.Refresh();
+        poll.Tick += (_, _) =>
+        {
+            _router.Refresh();
+            _ = RefreshLearnedAsync();
+        };
         poll.Start();
 
         _openWhenReady = !options.Background;
@@ -93,6 +104,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     {
         var open = new NativeMenuItem("Open dashboard");
         open.Click += (_, _) => OpenDashboard();
+        _learned = new NativeMenuItem { IsVisible = false };
+        _learned.Click += (_, _) => OpenDashboard("#/learned");
         _status = new NativeMenuItem(_router.Status) { IsEnabled = false };
         _problem = new NativeMenuItem { IsEnabled = false, IsVisible = false };
         _restart = new NativeMenuItem("Restart router");
@@ -125,7 +138,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         {
             Icon = _icon,
             ToolTipText = "SemanticRouter",
-            Menu = [open, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, logs, configuration, new NativeMenuItemSeparator(), about, quit],
+            Menu = [open, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, logs, configuration, new NativeMenuItemSeparator(), about, quit],
         };
         tray.Clicked += (_, _) => OpenDashboard();
         UpdateMenu();
@@ -160,12 +173,43 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _inWindow.IsChecked = surface == DashboardSurface.Window;
         _inBrowser.IsChecked = surface == DashboardSurface.Browser;
         _atSignIn.IsChecked = _signIn?.IsEnabled() == true;
+        _learned.Header = $"Router learned {_learnedThisWeek} thing{(_learnedThisWeek == 1 ? string.Empty : "s")} this week";
+        _learned.IsVisible = _learnedThisWeek > 0;
+    }
+
+    /// <summary>Asks the router how many changes automatic tuning applied this week (once a minute), for the menu.</summary>
+    private async Task RefreshLearnedAsync()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (_router.Url is not { } url || now - _learnedChecked < LearnedEvery)
+        {
+            return;
+        }
+
+        _learnedChecked = now;
+        int count;
+        try
+        {
+            using JsonDocument tuning = JsonDocument.Parse(await Http.GetStringAsync(new Uri(url + "/router/api/tuning?limit=1")).ConfigureAwait(false));
+            count = tuning.RootElement.GetProperty("thisWeek").GetInt32();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            // An older router, or a dashboard that wants a token from this machine too: no count.
+            count = 0;
+        }
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            _learnedThisWeek = count;
+            UpdateMenu();
+        });
     }
 
     /// <summary>The preference, unless the app window cannot work on this machine.</summary>
     private DashboardSurface EffectiveSurface => Shell.WebViewAvailable ? _preferences.OpenDashboardIn : DashboardSurface.Browser;
 
-    private void OpenDashboard()
+    private void OpenDashboard(string? page = null)
     {
         if (_router.Url is not { } url)
         {
@@ -178,7 +222,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             return;
         }
 
-        var dashboard = new Uri(url + "/router");
+        var dashboard = new Uri(url + "/router" + page);
         if (EffectiveSurface == DashboardSurface.Browser)
         {
             Shell.Open(dashboard.AbsoluteUri);
