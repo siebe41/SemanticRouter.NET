@@ -25,6 +25,12 @@ public sealed record ModelLineupEntry(DiscoveredModel Model)
 
     /// <summary>The tier of <see cref="InCatalog"/>.</summary>
     public int? InCatalogTier { get; init; }
+
+    /// <summary>Where the suggested tier came from: <c>family</c> (the model-family table), <c>size</c> or <c>name</c>.</summary>
+    public string TierFrom { get; init; } = "name";
+
+    /// <summary>The model family it was recognised as, when it was.</summary>
+    public string? Family { get; init; }
 }
 
 /// <summary>Everything a connector offers, for the dashboard's lineup and <c>semantic-router models</c>.</summary>
@@ -49,13 +55,20 @@ public sealed record ModelLineupReport(string Connector, ConnectorType Type)
 
     /// <summary>What <see cref="Loading"/> means for routing.</summary>
     public string? LoadingNote { get; init; }
+
+    /// <summary>The model-family table the suggestions used (<see cref="ModelFamilyTable.Source"/>).</summary>
+    public string? Families { get; init; }
+
+    /// <summary>Why the local model-family table was not (fully) used, when it was not.</summary>
+    public string? FamiliesWarning { get; init; }
 }
 
 /// <summary>
 /// Turns what a connector offers into catalog suggestions, so a provider's whole lineup can be added at once and each
-/// model put on the right tier: Claude's Haiku, Sonnet, Opus and Fable on four rungs; local models by size, with
-/// <c>code</c>, <c>tools</c> and <c>vision</c> from the server's own report or the model's family; loaded models
-/// preferred when the server loads the others on demand.
+/// model put on the right tier: Claude's Haiku, Sonnet, Opus and Fable on four rungs; other known families from the
+/// <see cref="ModelFamilyTable"/>; the rest of the local models by size, with <c>code</c>, <c>tools</c> and
+/// <c>vision</c> from the server's own report or the model's family; loaded models preferred when the server loads the
+/// others on demand.
 /// </summary>
 /// <remarks>Suggestions are a starting point: prices and model families change, and the dashboard lets every field be edited before adding.</remarks>
 public static partial class ModelLineup
@@ -134,7 +147,8 @@ public static partial class ModelLineup
             throw new KeyNotFoundException($"Connector '{connector}' is not configured.");
         }
 
-        var report = new ModelLineupReport(connector, options.Type);
+        ModelFamilyTable families = ModelFamilyTable.Load(LocalFamilyFile(services));
+        var report = new ModelLineupReport(connector, options.Type) { Families = families.Source, FamiliesWarning = families.Warning };
         if (runtime.Connectors.TryGet(connector, out IChatConnector? live) && live is IModelDiscovery discovery)
         {
             try
@@ -146,7 +160,7 @@ public static partial class ModelLineup
                 {
                     Ok = true,
                     Note = found.Count == 0 ? "The provider listed no models." : null,
-                    Entries = Suggest(connector, options, found.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, runtime.Resolved.Models),
+                    Entries = Suggest(connector, options, found.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, runtime.Resolved.Models, families),
                 };
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException or TimeoutException or OperationCanceledException
@@ -167,7 +181,7 @@ public static partial class ModelLineup
                 Note = ids.Count > 0
                     ? "A CLI has no model list to ask; these are the names its preset accepts. Any other model id the CLI knows works too."
                     : "A custom CLI has no model list to ask; add models by the names it accepts.",
-                Entries = Suggest(connector, options, ids.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, runtime.Resolved.Models),
+                Entries = Suggest(connector, options, ids.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, runtime.Resolved.Models, families),
             };
         }
 
@@ -186,16 +200,28 @@ public static partial class ModelLineup
             Server = probe.Server,
             Loading = probe.Loading,
             LoadingNote = probe.LoadingNote,
-            Entries = Suggest(connector, options, probe.Details, probe.Loading, runtime.Resolved.Models),
+            Entries = Suggest(connector, options, probe.Details, probe.Loading, runtime.Resolved.Models, families),
         };
     }
+
+    /// <summary>The local model-family table: registered with <c>UseModelFamilyFile</c>, else next to the configuration file.</summary>
+    private static string? LocalFamilyFile(IServiceProvider services) =>
+        services.GetService<ModelFamilyFile>()?.Path
+        ?? (services.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store ? ModelFamilyTable.FileNextTo(store.Location) : null);
 
     /// <summary>
     /// Suggests a catalog entry for each model, with names unique against <paramref name="catalog"/> and each other,
     /// and marks the models the catalog already has (same connector, same model id).
     /// </summary>
+    /// <param name="connectorName">The connector's name.</param>
+    /// <param name="connector">The connector's settings.</param>
+    /// <param name="models">What it offers.</param>
+    /// <param name="loading">Whether the server loads models on demand.</param>
+    /// <param name="catalog">The catalog as it is.</param>
+    /// <param name="families">The model-family table; the built-in one when <see langword="null"/>.</param>
     public static IReadOnlyList<ModelLineupEntry> Suggest(
-        string connectorName, ConnectorOptions connector, IReadOnlyList<DiscoveredModel> models, ModelLoading loading, IEnumerable<ModelDefinition> catalog)
+        string connectorName, ConnectorOptions connector, IReadOnlyList<DiscoveredModel> models, ModelLoading loading, IEnumerable<ModelDefinition> catalog,
+        ModelFamilyTable? families = null)
     {
         ArgumentNullException.ThrowIfNull(models);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -203,7 +229,7 @@ public static partial class ModelLineup
         var taken = new HashSet<string>(existing.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
         return models.Select(model =>
         {
-            ModelLineupEntry entry = Suggest(connectorName, connector, model, loading, taken);
+            ModelLineupEntry entry = Suggest(connectorName, connector, model, loading, taken, families);
             ModelDefinition? inCatalog = existing.FirstOrDefault(m => string.Equals(m.Connector, connectorName, StringComparison.OrdinalIgnoreCase)
                                                                       && string.Equals(m.Model ?? string.Empty, model.Id, StringComparison.OrdinalIgnoreCase));
             return entry with { InCatalog = inCatalog?.Name, InCatalogTier = inCatalog?.Tier, Recommended = entry.Recommended && inCatalog is null };
@@ -211,7 +237,14 @@ public static partial class ModelLineup
     }
 
     /// <summary>Suggests a catalog entry for one model. Its name is added to <paramref name="takenNames"/>.</summary>
-    public static ModelLineupEntry Suggest(string connectorName, ConnectorOptions connector, DiscoveredModel model, ModelLoading loading, ISet<string> takenNames)
+    /// <param name="connectorName">The connector's name.</param>
+    /// <param name="connector">The connector's settings.</param>
+    /// <param name="model">What the server reported.</param>
+    /// <param name="loading">Whether the server loads models on demand.</param>
+    /// <param name="takenNames">Catalog names in use.</param>
+    /// <param name="families">The model-family table; the built-in one when <see langword="null"/>.</param>
+    public static ModelLineupEntry Suggest(
+        string connectorName, ConnectorOptions connector, DiscoveredModel model, ModelLoading loading, ISet<string> takenNames, ModelFamilyTable? families = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectorName);
         ArgumentNullException.ThrowIfNull(connector);
@@ -238,6 +271,9 @@ public static partial class ModelLineup
         var reasons = new List<string>();
         var capabilities = new List<string> { "chat" };
         bool recommended;
+        string tierFrom = "name";
+        string? familyName = null;
+        ModelFamily? known = (families ?? ModelFamilyTable.BuiltIn).Find(id);
 
         if (ClaudeFamily().Match(lower) is { Success: true } claude)
         {
@@ -255,16 +291,18 @@ public static partial class ModelLineup
             }
 
             reasons.Add($"{family} → tier {tier}");
+            tierFrom = "family";
+            familyName = family.Split(':')[0];
             string normalized = lower.Replace('.', '-'); // Copilot writes claude-sonnet-5.5
-            (string Prefix, int Context, decimal Input, decimal Output)[] known = AnthropicModels.Where(m => normalized.StartsWith(m.Prefix, StringComparison.Ordinal)).Take(1).ToArray();
+            (string Prefix, int Context, decimal Input, decimal Output)[] listed = AnthropicModels.Where(m => normalized.StartsWith(m.Prefix, StringComparison.Ordinal)).Take(1).ToArray();
             if (connector.Preset == CliPreset.ClaudeCode && connector.Type == ConnectorType.Cli)
             {
                 suggestion.ContextWindow = 200_000;
                 reasons.Add("context 200K, the conservative assumption for Claude Code; raise it if your plan has 1M");
             }
-            else if (connector.Type == ConnectorType.Anthropic && known.Length == 1)
+            else if (connector.Type == ConnectorType.Anthropic && listed.Length == 1)
             {
-                (_, int context, decimal input, decimal output) = known[0];
+                (_, int context, decimal input, decimal output) = listed[0];
                 suggestion.ContextWindow = model.MaxContextLength ?? context;
                 suggestion.InputCostPerMillionTokens = input;
                 suggestion.OutputCostPerMillionTokens = output;
@@ -287,34 +325,54 @@ public static partial class ModelLineup
         {
             double? size = model.ParametersBillions ?? ConnectorProbe.ParametersFromId(id);
             bool coder = CoderNames.Any(lower.Contains);
-            suggestion.Tier = size switch
+            int bySize = size switch
             {
                 null => coder ? 2 : 1,
                 <= 9.5 => 1,
                 <= 35 => 2,
                 _ => 3,
             };
-            reasons.Add(size is { } b
-                ? $"{b.ToString("0.#", CultureInfo.InvariantCulture)}B parameters → tier {suggestion.Tier}"
-                : $"size unknown → tier {suggestion.Tier}; raise it for a large model");
-            if (coder)
+            string sizeText = size is { } b ? $"{b.ToString("0.#", CultureInfo.InvariantCulture)}B parameters" : "size unknown";
+            if (known is not null && FamilyTier(known, size, bySize) is { } fromTable)
+            {
+                suggestion.Tier = fromTable;
+                tierFrom = "family";
+                familyName = known.Family;
+                reasons.Add($"{known.Family} (model-family table), {sizeText} → tier {fromTable}");
+            }
+            else
+            {
+                suggestion.Tier = bySize;
+                tierFrom = "size";
+                familyName = known?.Family;
+                reasons.Add(size is not null ? $"{sizeText} → tier {bySize}" : $"size unknown → tier {bySize}; raise it for a large model");
+            }
+
+            // The family table knows the family's capabilities; without it, the model's name is the hint.
+            bool Has(string capability) => known?.Capabilities.Contains(capability, StringComparer.OrdinalIgnoreCase) == true;
+            if (coder || Has("code"))
             {
                 capabilities.Add("code");
             }
 
-            if (model.Capabilities.Contains("tools") || ToolCallingFamilies.Any(lower.Contains))
+            if (model.Capabilities.Contains("tools") || (known is null ? ToolCallingFamilies.Any(lower.Contains) : Has("tools")))
             {
                 capabilities.Add("tools");
             }
 
-            if (carriesImages && (model.Kind == DiscoveredModelKind.Vision || model.Capabilities.Contains("vision") || VisionNames.Any(lower.Contains)))
+            if (carriesImages && (model.Kind == DiscoveredModelKind.Vision || model.Capabilities.Contains("vision") || VisionNames.Any(lower.Contains) || Has("vision")))
             {
                 capabilities.Add("vision");
             }
 
-            if (model.Capabilities.Contains("reasoning") || ReasoningNames.Any(lower.Contains))
+            if (model.Capabilities.Contains("reasoning") || ReasoningNames.Any(lower.Contains) || Has("reasoning"))
             {
                 capabilities.Add("reasoning");
+            }
+
+            if (known is not null)
+            {
+                ApplyLimits(known, size, capabilities, reasons);
             }
 
             if (model.Loaded is not null)
@@ -355,15 +413,34 @@ public static partial class ModelLineup
         }
         else
         {
-            suggestion.Tier = SmallModel().IsMatch(lower) ? 2 : 3;
+            int byName = SmallModel().IsMatch(lower) ? 2 : 3;
+            double? size = model.ParametersBillions ?? ConnectorProbe.ParametersFromId(id);
             capabilities.Add("code");
             if (carriesTools)
             {
                 capabilities.Add("tools");
             }
 
+            if (known is not null && (FamilyTier(known, size, byName) ?? byName) is int fromTable)
+            {
+                suggestion.Tier = fromTable;
+                tierFrom = "family";
+                familyName = known.Family;
+                reasons.Add($"{known.Family} (model-family table) → tier {fromTable}");
+                foreach (string capability in known.Capabilities.Where(c => c != "vision" || carriesImages).Where(c => c != "tools" || carriesTools))
+                {
+                    capabilities.Add(capability);
+                }
+
+                ApplyLimits(known, size, capabilities, reasons);
+            }
+            else
+            {
+                suggestion.Tier = byName;
+                reasons.Add(byName == 2 ? "a small (\"mini\") model → tier 2" : "family not recognised → tier 3; review it");
+            }
+
             suggestion.ContextWindow = model.MaxContextLength ?? 0;
-            reasons.Add(suggestion.Tier == 2 ? "a small (\"mini\") model → tier 2" : "family not recognised → tier 3; review it");
             if (localAddress && model.Remote == true)
             {
                 reasons.Add("not local: the server forwards it to a cloud service");
@@ -373,7 +450,7 @@ public static partial class ModelLineup
                 reasons.Add("set its prices: 0 makes it look free");
             }
 
-            recommended = false;
+            recommended = subscription && known is not null;
         }
 
         foreach (string capability in capabilities.Distinct(StringComparer.Ordinal))
@@ -383,7 +460,55 @@ public static partial class ModelLineup
 
         suggestion.Name = UniqueName(NameFor(connectorName, id), takenNames);
         suggestion.Description = Describe(id, connectorName, model, local, subscription);
-        return new ModelLineupEntry(model) { Suggestion = suggestion, Reason = string.Join("; ", reasons) + ".", Recommended = recommended };
+        return new ModelLineupEntry(model)
+        {
+            Suggestion = suggestion,
+            Reason = string.Join("; ", reasons) + ".",
+            Recommended = recommended,
+            TierFrom = tierFrom,
+            Family = familyName,
+        };
+    }
+
+    /// <summary>
+    /// The tier the family table gives: its fixed tier, its band for the size, or the size rule's tier adjusted;
+    /// <see langword="null"/> when the table has nothing to say about the tier (only capabilities or notes).
+    /// </summary>
+    private static int? FamilyTier(ModelFamily family, double? size, int fallback)
+    {
+        if (family.Tier is { } tier)
+        {
+            return tier;
+        }
+
+        if (size is { } billions && family.Bands.Count > 0)
+        {
+            return (family.Bands.FirstOrDefault(b => b.UpTo is null || billions <= b.UpTo) ?? family.Bands[^1]).Tier;
+        }
+
+        return family.Adjust != 0 ? Math.Max(1, fallback + family.Adjust) : null;
+    }
+
+    /// <summary>The family's limits: capabilities it lacks, and tool calls that are only reliable from a size; its notes.</summary>
+    private static void ApplyLimits(ModelFamily family, double? size, List<string> capabilities, List<string> reasons)
+    {
+        foreach (string without in family.Without)
+        {
+            if (capabilities.RemoveAll(c => string.Equals(c, without, StringComparison.OrdinalIgnoreCase)) > 0)
+            {
+                reasons.Add($"no {without}: {family.Family} does not have it");
+            }
+        }
+
+        if (family.ToolsFrom is { } from && size is { } billions && billions < from && capabilities.Remove("tools"))
+        {
+            reasons.Add($"no tools: {family.Family} tool calls are unreliable below {from.ToString("0.#", CultureInfo.InvariantCulture)}B");
+        }
+
+        if (family.Notes is { Length: > 0 } notes)
+        {
+            reasons.Add(notes.TrimEnd('.'));
+        }
     }
 
     /// <summary>

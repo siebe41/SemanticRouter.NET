@@ -29,7 +29,7 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - It runs in the background as a per-user service (`semantic-router service install`: systemd, launchd or a Windows sign-in entry), so no terminal has to stay open, or as a desktop app with a tray icon and the dashboard in its own window or the browser.
 
-- A provider's whole lineup can be discovered and tiered at once (dashboard and `semantic-router models`): Claude's four families on four rungs, every local model by size, with LM Studio's and Ollama's load state and on-demand loading taken into account.
+- A provider's whole lineup can be discovered and tiered at once (dashboard and `semantic-router models`): Claude's four families on four rungs, other known families from a model-family table you can extend, the rest of the local models by size, with LM Studio's and Ollama's load state and on-demand loading taken into account.
 
 ## What done looks like
 
@@ -105,7 +105,7 @@ Tracked in [#40](https://github.com/siebe41/SemanticRouter.NET/issues/40): point
 | [#43](https://github.com/siebe41/SemanticRouter.NET/issues/43) | Record implicit outcome signals per routing decision | Done. |
 | [#45](https://github.com/siebe41/SemanticRouter.NET/issues/45) | Tune thresholds and utterances automatically, within guardrails | Done: applied with every change shown and undoable. |
 | [#44](https://github.com/siebe41/SemanticRouter.NET/issues/44) | Track model reliability per kind of work | Done: per route and for tool use, left out for a period, never an explicit choice. |
-| [#46](https://github.com/siebe41/SemanticRouter.NET/issues/46) | Model-family priors: tiers and capabilities from a curated table | |
+| [#46](https://github.com/siebe41/SemanticRouter.NET/issues/46) | Model-family priors: tiers and capabilities from a curated table | Done: built-in table, `model-families.json` override. |
 | [#47](https://github.com/siebe41/SemanticRouter.NET/issues/47) | Default routes and evaluation prompts for agentic clients | |
 | [#48](https://github.com/siebe41/SemanticRouter.NET/issues/48) | Optional local judge that grades a sample of cheap answers | |
 | [#49](https://github.com/siebe41/SemanticRouter.NET/issues/49) | Weekly digest; notify only when a decision is needed | Notifications for large learned changes. |

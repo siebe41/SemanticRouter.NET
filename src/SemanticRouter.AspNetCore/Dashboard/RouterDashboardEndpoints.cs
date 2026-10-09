@@ -742,8 +742,11 @@ public static partial class RouterDashboardEndpoints
     /// <param name="Loading">Whether the server loads models on demand (<c>OnDemand</c>), only serves loaded ones (<c>LoadedOnly</c>), or does not say.</param>
     /// <param name="LoadingNote">What that means for routing.</param>
     /// <param name="Lineup">Every model found, with the suggested catalog entry.</param>
+    /// <param name="Families">The model-family table the suggestions used.</param>
+    /// <param name="FamiliesWarning">Why the local model-family table was not (fully) used.</param>
     public sealed record DiscoverResponse(
-        IReadOnlyList<string> Models, string? Note, string? Server, ModelLoading Loading, string? LoadingNote, IReadOnlyList<LineupModel> Lineup)
+        IReadOnlyList<string> Models, string? Note, string? Server, ModelLoading Loading, string? LoadingNote, IReadOnlyList<LineupModel> Lineup,
+        string? Families = null, string? FamiliesWarning = null)
     {
         internal static DiscoverResponse From(ModelLineupReport report) => new(
             report.Entries.Where(e => e.Model.Listed).Select(e => e.Model.Id).ToArray(),
@@ -753,7 +756,13 @@ public static partial class RouterDashboardEndpoints
             report.LoadingNote,
             report.Entries.Select(e => new LineupModel(
                 e.Model.Id, e.Model.Kind, e.Model.Listed, e.Model.Loaded, e.Model.LoadedContextLength ?? e.Model.MaxContextLength, e.Model.ParametersBillions,
-                e.Model.Capabilities, e.InCatalog, e.Recommended, e.Reason, e.Suggestion is null ? null : ModelLineup.ToConfigurationJson(e.Suggestion))).ToArray());
+                e.Model.Capabilities, e.InCatalog, e.Recommended, e.Reason, e.Suggestion is null ? null : ModelLineup.ToConfigurationJson(e.Suggestion))
+            {
+                TierFrom = e.Suggestion is null ? null : e.TierFrom,
+                Family = e.Family,
+            }).ToArray(),
+            report.Families,
+            report.FamiliesWarning);
     }
 
     /// <summary>One model of a <see cref="DiscoverResponse"/>.</summary>
@@ -770,7 +779,14 @@ public static partial class RouterDashboardEndpoints
     /// <param name="Suggestion">The suggested catalog entry, in the configuration document's shape; <see langword="null"/> for embedding models.</param>
     public sealed record LineupModel(
         string Id, DiscoveredModelKind Kind, bool Listed, bool? Loaded, int? ContextLength, double? ParametersBillions, IReadOnlyList<string> Capabilities,
-        string? InCatalog, bool Recommended, string Reason, JsonElement? Suggestion);
+        string? InCatalog, bool Recommended, string Reason, JsonElement? Suggestion)
+    {
+        /// <summary>Where the suggested tier came from: <c>family</c> (the model-family table), <c>size</c> or <c>name</c>.</summary>
+        public string? TierFrom { get; init; }
+
+        /// <summary>The model family it was recognised as.</summary>
+        public string? Family { get; init; }
+    }
 
     /// <summary>The themes the picker offers.</summary>
     /// <param name="Directory">Where theme files are read from, if anywhere.</param>

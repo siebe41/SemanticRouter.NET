@@ -48,6 +48,11 @@ internal static class ModelsCommand
         }
 
         await output.WriteLineAsync().ConfigureAwait(false);
+        if (reports[0].Families is { } families)
+        {
+            await output.WriteLineAsync($"Tiers come from the model-family table ({families}) where a family is known, else from the size or name.").ConfigureAwait(false);
+        }
+
         await output.WriteLineAsync("Add models on the dashboard: Models → Discover models fills in these suggestions, and every field can be changed before adding.").ConfigureAwait(false);
         return 0;
     }
@@ -64,6 +69,11 @@ internal static class ModelsCommand
         if (report.LoadingNote is not null)
         {
             await output.WriteLineAsync("  " + report.LoadingNote).ConfigureAwait(false);
+        }
+
+        if (report.FamiliesWarning is not null)
+        {
+            await output.WriteLineAsync("  " + report.FamiliesWarning).ConfigureAwait(false);
         }
 
         if (report.Entries.Count == 0)
@@ -83,7 +93,7 @@ internal static class ModelsCommand
             string catalog = entry.InCatalog is { } existing
                 ? $"{existing} (T{entry.InCatalogTier?.ToString(CultureInfo.InvariantCulture)})"
                 : entry.Suggestion is { } s
-                    ? $"+ {s.Name} T{s.Tier.ToString(CultureInfo.InvariantCulture)} {string.Join(",", s.Capabilities)}{(s.Enabled ? string.Empty : " (disabled)")}"
+                    ? $"+ {s.Name} T{s.Tier.ToString(CultureInfo.InvariantCulture)} ({entry.TierFrom}) {string.Join(",", s.Capabilities)}{(s.Enabled ? string.Empty : " (disabled)")}"
                     : entry.Reason;
             string id = model.Id.Length > width ? model.Id[..(width - 1)] + "…" : model.Id;
             await output.WriteLineAsync(

@@ -246,11 +246,33 @@ public sealed class HostTests : IDisposable
         string report = all.ToString();
         report.Should().Contain("lmstudio (OpenAICompatible, LM Studio)").And.Contain("just-in-time loading is off");
         report.Should().MatchRegex(@"qwen/qwen3-8b\s+loaded\s+32,768\s+8B\s+small \(T1\)");
-        report.Should().MatchRegex(@"qwen/qwen3-coder-30b\s+not served\s+262,144\s+30B\s+\+ lmstudio-qwen3-coder-30b T2 chat,code,tools \(disabled\)");
+        report.Should().MatchRegex(@"qwen/qwen3-coder-30b\s+not served\s+262,144\s+30B\s+\+ lmstudio-qwen3-coder-30b T2 \(family\) chat,code,tools \(disabled\)");
+        report.Should().Contain("Tiers come from the model-family table (built-in v1)");
         report.Should().MatchRegex(@"text-embedding-nomic-embed-text-v1.5\s+embedding");
         report.Should().Contain("claude-cli (Cli)").And.Contain("+ claude-opus T4");
         one.ToString().Should().Contain("claude-cli").And.NotContain("lmstudio");
         unknown.ToString().Should().Contain("'nope' is not configured");
+    }
+
+    [Fact]
+    public async Task Models_uses_a_model_family_table_in_the_configuration_directory()
+    {
+        var document = RouterConfiguration.FromJson(RouterHost.Template());
+        document.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
+        new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(document);
+        await File.WriteAllTextAsync(Path.Combine(_directory, "model-families.json"), """
+            { "families": [ { "family": "Qwen3 Coder", "match": ["qwen3-coder"], "tier": 3, "capabilities": ["code", "tools"] } ] }
+            """);
+        var output = new StringWriter();
+
+        (await ModelsCommand.RunAsync(HostSettings.Parse(["models", "--config-dir", _directory]), output, builder =>
+            builder.Services.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "lmstudio")
+                .ConfigurePrimaryHttpMessageHandler(() => LocalServers.LmStudio(justInTime: true)))).Should().Be(0, output.ToString());
+
+        string report = output.ToString();
+        report.Should().MatchRegex(@"\+ lmstudio-qwen3-coder-30b T3 \(family\)", "the local table wins over the built-in one");
+        report.Should().MatchRegex(@"\+ lmstudio-qwen3-8b T1 \(size\)", "Qwen3 has capabilities in the table but no tiers: the size decides");
+        report.Should().Contain("model-families.json (1 family)");
     }
 
     [Fact]

@@ -176,4 +176,92 @@ public sealed class ModelLineupTests : RouterHostTest
         claude.GetProperty("note").GetString().Should().Contain("no model list");
         missing.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
+
+    [Fact]
+    public async Task Known_families_get_their_table_tiers_and_capabilities_from_recorded_listings()
+    {
+        var ollama = new ConnectorOptions { BaseAddress = new Uri("http://localhost:11434") };
+        ConnectorProbeResult fromOllama = await ConnectorProbe.DiscoverAsync("ollama", ollama, new HttpClient(LocalServers.Ollama()), TimeSpan.FromSeconds(5));
+        ConnectorProbeResult fromLmStudio = await ConnectorProbe.DiscoverAsync("lmstudio", LmStudio, new HttpClient(LocalServers.LmStudio(justInTime: true)), TimeSpan.FromSeconds(5));
+        IReadOnlyList<ModelLineupEntry> o = ModelLineup.Suggest("ollama", ollama, fromOllama.Details, fromOllama.Loading, []);
+        IReadOnlyList<ModelLineupEntry> l = ModelLineup.Suggest("lmstudio", LmStudio, fromLmStudio.Details, fromLmStudio.Loading, []);
+
+        ModelLineupEntry llama = o.Single(e => e.Model.Id == "llama3.2:latest");
+        (llama.Family, llama.TierFrom, llama.Suggestion!.Tier).Should().Be(("Llama 3.2", "size", 1));
+        llama.Suggestion.Capabilities.Should().NotContain("tools", "Ollama reports tools, but a 3B Llama's tool calls are unreliable");
+        llama.Reason.Should().Contain("no tools: Llama 3.2 tool calls are unreliable below 7B");
+        ModelLineupEntry cloud = o.Single(e => e.Model.Id == "gpt-oss:120b-cloud");
+        (cloud.Family, cloud.TierFrom, cloud.Suggestion!.Tier).Should().Be(("gpt-oss", "family", 3));
+        cloud.Suggestion.Capabilities.Should().Contain("reasoning");
+        ModelLineupEntry coder = l.Single(e => e.Model.Id == "qwen/qwen3-coder-30b");
+        (coder.Family, coder.TierFrom, coder.Suggestion!.Tier).Should().Be(("Qwen3 Coder", "family", 2));
+        coder.Reason.Should().StartWith("Qwen3 Coder (model-family table), 30B parameters → tier 2");
+        l.Single(e => e.Model.Id == "qwen/qwen3-8b").Suggestion!.Capabilities.Should().Contain(["tools", "reasoning"]);
+        ModelLineupEntry gemma = l.Single(e => e.Model.Id == "google/gemma-3-12b");
+        (gemma.Family, gemma.TierFrom).Should().Be(("Gemma 3", "size"));
+        gemma.Suggestion!.Capabilities.Should().Contain("vision").And.NotContain("tools");
+    }
+
+    [Fact]
+    public void Unknown_models_fall_back_to_the_size_and_name_rules()
+    {
+        IReadOnlyList<ModelLineupEntry> local = Suggest("lmstudio", LmStudio, "acme/widget-13b", "acme/widget-coder");
+        IReadOnlyList<ModelLineupEntry> remote = Suggest("openrouter", new ConnectorOptions { BaseAddress = new Uri("https://openrouter.ai/api") }, "acme/omni-large", "acme/omni-mini");
+
+        local.Select(e => (e.Family, e.TierFrom, e.Suggestion!.Tier)).Should().Equal(((string?)null, "size", 2), ((string?)null, "size", 2));
+        remote.Select(e => (e.TierFrom, e.Suggestion!.Tier, e.Recommended)).Should().Equal(("name", 3, false), ("name", 2, false));
+        remote[0].Reason.Should().Contain("family not recognised");
+    }
+
+    [Fact]
+    public void Hosted_families_and_the_most_specific_pattern_win()
+    {
+        var gemini = new ConnectorOptions { BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/openai") };
+        IReadOnlyList<ModelLineupEntry> hosted = Suggest("gemini", gemini, "gemini-2.5-flash", "gemini-3-pro-preview");
+        ModelLineupEntry distill = Suggest("lmstudio", LmStudio, "deepseek-r1-distill-qwen-7b").Single();
+
+        hosted.Select(e => (e.Family, e.TierFrom, e.Suggestion!.Tier)).Should().Equal(("Gemini Flash", "family", 2), ("Gemini Pro", "family", 3));
+        hosted[1].Suggestion!.Capabilities.Should().Contain(["vision", "reasoning", "tools"]);
+        distill.Family.Should().Be("DeepSeek R1", "deepseek-r1 is longer than qwen");
+        distill.Suggestion!.Capabilities.Should().Contain("reasoning").And.NotContain("tools");
+    }
+
+    [Fact]
+    public void A_local_family_table_adds_and_replaces_families_and_a_broken_one_is_reported()
+    {
+        string directory = Directory.CreateTempSubdirectory("router-families-").FullName;
+        try
+        {
+            string file = Path.Combine(directory, ModelFamilyTable.FileName);
+            File.WriteAllText(file, """
+                // Comments are allowed.
+                { "families": [
+                  { "family": "Qwen3 Coder", "match": ["qwen3-coder"], "bands": [{ "upTo": 9.5, "tier": 2 }, { "tier": 3 }], "capabilities": ["code", "tools"] },
+                  { "family": "Acme Widget", "match": ["acme/widget*"], "tier": 4, "capabilities": ["code"], "notes": "Our own fine-tune." },
+                  { "family": "", "match": ["x"] }
+                ] }
+                """);
+
+            ModelFamilyTable table = ModelFamilyTable.Load(file);
+            IReadOnlyList<ModelLineupEntry> lineup = ModelLineup.Suggest(
+                "lmstudio", LmStudio, [new DiscoveredModel("qwen/qwen3-coder-30b"), new DiscoveredModel("acme/widget-13b")], ModelLoading.Unknown, [], table);
+
+            lineup.Select(e => (e.Family, e.Suggestion!.Tier)).Should().Equal(("Qwen3 Coder", 3), ("Acme Widget", 4));
+            lineup[1].Reason.Should().Contain("Our own fine-tune");
+            table.Families.Count(f => f.Family == "Qwen3 Coder").Should().Be(1, "the local entry replaces the built-in one");
+            table.Families.Should().Contain(f => f.Family == "Llama 3.2", "built-in families stay");
+            table.Source.Should().Contain(file).And.Contain("2 families");
+            table.Warning.Should().Contain("needs a name");
+            ModelFamilyTable.Load(Path.Combine(directory, "missing.json")).Should().BeSameAs(ModelFamilyTable.BuiltIn);
+
+            File.WriteAllText(file, "{ not json");
+            ModelFamilyTable broken = ModelFamilyTable.Load(file);
+            broken.Warning.Should().Contain("could not be read").And.Contain("using the built-in table");
+            broken.Find("qwen/qwen3-coder-30b")!.Bands.Should().HaveCount(3, "the built-in entry");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }
