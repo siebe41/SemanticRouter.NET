@@ -85,8 +85,10 @@ case "$rid" in
 </dict>
 </plist>
 PLIST
-    vpk ${directive[@]+"${directive[@]}"} pack "${common[@]}" --mainExe SemanticRouter --icon "$assets/icon.icns" \
-      --bundleId io.github.siebe41.semantic-router --plist "$work/Info.plist" --noPortable
+    # The plist names the bundle id and the icon, so the icon goes in under that name.
+    cp "$assets/icon.icns" "$work/SemanticRouter.icns"
+    vpk ${directive[@]+"${directive[@]}"} pack "${common[@]}" --mainExe SemanticRouter --icon "$work/SemanticRouter.icns" \
+      --plist "$work/Info.plist" --noPortable
     ;;
   *)
     echo "Unsupported runtime identifier: $rid" >&2
