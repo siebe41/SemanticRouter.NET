@@ -7,7 +7,7 @@ const { test: base, expect } = require('@playwright/test');
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'semantic-router.json'), 'utf8')
   .replace(/__STUB__/g, `http://127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`));
 
-const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'json'];
+const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'json'];
 const THEMES = ['machine-dark', 'machine-light', 'terminal'];
 
 // Every test fails if the page throws or logs an error. The web fonts are left out so that runs do not depend on a
@@ -179,6 +179,20 @@ test('the prompt tester classifies and sends a prompt through the gateway', asyn
   await expect(page.locator('.tester')).toContainText('local-small');
   await page.locator('[data-action="tester-send"]').click();
   await expect(page.locator('.tester')).toContainText('Hello from the stub backend.');
+});
+
+test('router learned runs tuning, pauses and resumes learning', async ({ page }) => {
+  await open(page, 'learned');
+  await expect(page.locator('#view')).toContainText('applies changes');
+  await page.locator('[data-action="tuning-run"]').click();
+  await expect(page.locator('#view')).toContainText('Waiting for labelled prompts');
+  await page.locator('[data-action="tuning-pause"]').click();
+  await expect(page.locator('#view .badge', { hasText: 'paused' })).toBeVisible();
+  await expect(page.locator('[data-action="tuning-run"]')).toBeDisabled();
+  await page.locator('[data-action="tuning-resume"]').click();
+  await expect(page.locator('#view')).toContainText('applies changes');
+  await open(page, 'overview');
+  await expect(page.locator('#view')).toContainText('Router learned');
 });
 
 test('the theme picker switches themes and remembers the choice', async ({ page }) => {

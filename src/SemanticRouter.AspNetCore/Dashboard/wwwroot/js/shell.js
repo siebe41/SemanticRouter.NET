@@ -1,5 +1,6 @@
 /* Semantic Router dashboard: Loading, the sidebar and top bar, themes, rendering and hash routing. */
 import { $, $$, api, banner, h, isDirty, PREFIX, readOnly, state, THEME_KEY, THEMES, views } from './core.js';
+import { loadTuning } from './learned.js';
 import { scheduleLive } from './live.js';
 import { graph, mounts, readPalette, unmount } from './memory.js';
 import { loadUsage } from './usage.js';
@@ -14,6 +15,7 @@ export async function loadAll() {
   setConfig(cfg);
   state.activity = activity.entries;
   state.feedback = activity.feedback || {};
+  await loadTuning();
   renderChrome();
   loadThemes();
 }
@@ -31,10 +33,11 @@ export async function refreshStatus() {
     state.status = status;
     state.activity = activity.entries;
     state.feedback = activity.feedback || {};
+    if (state.view === 'overview' || state.view === 'learned') await loadTuning();
     renderChrome();
     if (state.view === 'overview') { state.trends.data = null; }
     if (state.view === 'usage') { loadUsage(); }
-    if (state.view === 'overview' || (state.view === 'activity' && !state.label)) render();
+    if (state.view === 'overview' || state.view === 'learned' || (state.view === 'activity' && !state.label)) render();
     else if (state.view === 'live') scheduleLive();
   } catch (e) { /* keep the last known state */ }
 }

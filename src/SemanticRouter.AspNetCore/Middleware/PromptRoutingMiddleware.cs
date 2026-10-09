@@ -29,6 +29,7 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly RetryTracker? _retries;
     private readonly ConversationTracker? _conversations;
     private readonly RoutingFeedbackLog? _feedback;
+    private readonly RouterTuner? _tuner;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -43,7 +44,8 @@ internal sealed partial class PromptRoutingMiddleware
         IToolCallAffinity? affinity = null,
         RetryTracker? retries = null,
         ConversationTracker? conversations = null,
-        RoutingFeedbackLog? feedback = null)
+        RoutingFeedbackLog? feedback = null,
+        RouterTuner? tuner = null)
     {
         _next = next;
         _runtime = runtime;
@@ -56,6 +58,7 @@ internal sealed partial class PromptRoutingMiddleware
         _retries = retries;
         _conversations = conversations;
         _feedback = feedback;
+        _tuner = tuner;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -286,6 +289,7 @@ internal sealed partial class PromptRoutingMiddleware
             result.Similarity ?? float.NaN, result.Complexity.Score,
             plan.Candidates.Count > 0 ? plan.Candidates[0].Model.Name : "none", result.Elapsed.TotalMilliseconds);
 
+        TuningChange? learned = _tuner?.Explain(result);
         RoutingActivityEntry entry = _activity.Add(new RoutingActivityEntry
         {
             Id = _activity.Reserve(),
@@ -313,6 +317,8 @@ internal sealed partial class PromptRoutingMiddleware
             Conversation = conversationKey?[..12],
             Callout = calloutNote,
             Sticky = plan.Sticky,
+            Learned = learned?.Id,
+            LearnedNote = learned is null ? null : $"learned {learned.Timestamp.ToString("d MMM", CultureInfo.InvariantCulture)}: {learned.Summary}",
             ClassificationMilliseconds = Math.Round(result.Elapsed.TotalMilliseconds, 2),
             Memory = memory,
         });

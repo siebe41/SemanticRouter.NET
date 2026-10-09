@@ -93,9 +93,49 @@ Labels on the Evaluate page improve routing only when someone adds them. The rou
 | **Empty reply** | The model answers with no output tokens. | The turn itself. |
 
 - Only decisions the router made are judged. A turn for which you chose the model (a callout, a catalog model name) is not the router's mistake.
-- Each feedback item carries an automatic label: the decision needed at least one tier more (for an override, the tier you asked for). Automatic tuning ([#45](https://github.com/siebe41/SemanticRouter.NET/issues/45)) will learn from these.
+- Each feedback item carries an automatic label: the decision needed at least one tier more (for an override, the tier you asked for). [Automatic tuning](#automatic-tuning) learns from these.
 - **Where to see it:** badges on the Activity page next to each decision, and a Feedback table on the Usage page with the share of decisions that received feedback, per route and per model. A route or model with a high share is where routing goes wrong.
 - No prompt text is kept: feedback records the decision, route, model, tier and a short reason, in memory and in the state database when there is one (kept as long as activity).
+
+## Automatic tuning
+
+Calibration finds better thresholds, but someone has to run it and apply the result. Automatic tuning does that by itself, in small steps, and shows every change it makes so you can undo it (`Tuning`, on by default):
+
+- **What it learns from:** the evaluation set (prompts you labelled), and prompts labelled by [feedback](#feedback) in the last `FeedbackDays` (30). A prompt labelled by feedback counts at `FeedbackWeight` (0.5) of a hand-labelled one. Only activity previews that hold the whole prompt (160 characters or fewer) become labels, and a prompt in the evaluation set keeps your label.
+- **Thresholds:** it calibrates the default threshold and each route's own threshold, then moves each one at most `MaxStep` (0.02) per run toward that value, so a big correction takes several days. A route that follows the default stays on it unless its own threshold helps.
+- **Utterances:** a prompt in the evaluation set that is labelled with a route but misses it is added to that route as an example, at most `MaxUtterancesPerRoute` (2) per route per run. Prompts labelled local-only are never added unless `LocalOnlyUtterances` is on, because utterances are part of the configuration.
+- **Only when it is safe:**
+  - no hand-labelled prompt may route worse;
+  - no labelled prompt may route below the tier it needs;
+  - no local-only prompt may leave the machine;
+  - and it starts only once there are `MinimumPrompts` (20) labelled prompts.
+
+  An utterance must also leave every other labelled prompt routing as well as before.
+- **When:** every `Interval` (a day), and early once `NewLabels` (10) prompts were labelled since the last run. **Run now** on the dashboard runs it at once.
+- **Every change is its own configuration version** (source `auto-tune`), so the configuration history shows it with a diff and the reason, and rollback works as for any version.
+
+### Where you see it
+
+- **Router learned** (its own dashboard page, and a card on the Overview) lists each change with:
+  - what changed: the setting, the route, and the old and new value or the utterance;
+  - why: for example "At 0.48, 9 labelled prompts route to the tier they need that do not now (3 from the evaluation set, 6 from feedback: retried, corrected)";
+  - when, and the configuration version that applied it;
+  - its effect since: the share of decisions on what it touches that received feedback, before and after, and how many decisions it routed differently.
+- **On a decision:** an Activity entry that a learned threshold routed differently (it matched only because the threshold was lowered, or the reverse) carries a **learned** badge, with "learned 3 Oct: threshold of complex-code 0.52 → 0.48" in its tooltip. The API has it as `learned` and `learnedNote`.
+- **In the desktop app:** the tray menu shows "Router learned 2 things this week" and opens the page.
+
+### Undo
+
+- **Undo** puts back that one setting, not everything after it: later changes to other settings stay. Later steps of the same threshold go with it, since they built on it. If someone changed the setting since, undo refuses rather than overwrite that.
+- **An undone change is not made again** for `HoldDays` (30). Within that time it comes back only if the evidence is `StrongerEvidence` (2) times stronger, and then only as a suggestion. After the hold it also waits on the page as a suggestion rather than being applied. When the default threshold is held, the routes that follow it are left alone too, so the same effect does not return by another setting.
+- **Undo all** puts back every learned change in one configuration version, and **Pause learning** stops it until you resume. Each is one click.
+- `Tuning:Mode`: `Apply` (the default), `Suggest` (changes wait on the page for **Apply** or **Dismiss**; a dismissed one is held like an undone one) or `Off`.
+
+```jsonc
+"Tuning": { "Mode": "Apply", "Interval": "1.00:00:00", "MaxStep": 0.02, "MinimumPrompts": 20, "HoldDays": 30 }
+```
+
+Changes and state are kept in the state database when there is one (the tool has one by default), otherwise in memory.
 
 ## Retry escalation
 
@@ -123,10 +163,17 @@ It is off by default: a client that legitimately repeats a prompt (a "regenerate
 | `POST api/evaluate/compare` | `{"embeddings": {provider settings}, "text": optional set}`: both providers' reports and calibrations. |
 | `GET api/routes/health` | Findings and route pairs. |
 | `POST api/routes/{name}/utterances` | `{"utterance": "…", "tier": n}`: add an utterance (creating the route when `tier` is given) and apply. Returns how the utterance now classifies. |
+| `GET api/tuning` | Automatic tuning: `mode`, `paused`, `lastRun`, `nextRun`, `lastResult`, `thisWeek`, `suggestions`, and the `changes` newest first (each with `summary`, `why`, `examples`, `state`, `version` and `effect`). |
+| `GET api/tuning/changes?limit=100` | Just the changes. |
+| `POST api/tuning/run` | Run tuning now; returns what it did. |
+| `POST api/tuning/changes/{id}/undo` | Undo one change (409 when it is not applied, or its setting changed since). |
+| `POST api/tuning/changes/{id}/apply`, `…/dismiss` | Apply or turn down a suggestion. |
+| `POST api/tuning/undo-all` | Undo every applied change in one configuration version. |
+| `POST api/tuning/pause`, `POST api/tuning/resume` | Pause or resume learning. |
 
-Changing the set, adding utterances and comparing providers need the admin role. Evaluating and route health are open to the read-only role.
+Changing the set, adding utterances, comparing providers and every tuning action (run, undo, apply, dismiss, pause) need the admin role. Evaluating, route health and reading what tuning learned are open to the read-only role.
 
-From code, the same pieces are in `SemanticRouter.Core`: `EvaluationSet.Parse`, `RoutingEvaluator` (`PrepareAsync`, `Evaluate`, `Calibrate`) and `RouteHealthAnalyzer`.
+From code, the same pieces are in `SemanticRouter.Core`: `EvaluationSet.Parse`, `RoutingEvaluator` (`PrepareAsync`, `Evaluate`, `Calibrate`), `ThresholdTuner` (the bounded, guarded steps automatic tuning takes) and `RouteHealthAnalyzer`.
 
 ```csharp
 var evaluator = new RoutingEvaluator(embeddingProvider, options);

@@ -27,6 +27,7 @@ The tray menu:
 | Item | What it does |
 |---|---|
 | **Open dashboard** | Opens the dashboard where you chose (below). |
+| **Router learned N things this week** | Shown when [automatic tuning](routing-quality.md#automatic-tuning) applied changes in the last 7 days; opens the Router learned page. |
 | Status line | Where the router listens, whether it is the app's own or one already running, or why it could not start. |
 | **Restart router** | Restarts the router: the background service's, or the app's own (for example after it failed to start). |
 | **Open the dashboard in** → **App window** / **Web browser** | Your choice of where the dashboard opens, remembered in `desktop.json`. The app window uses the platform's own web view (WebView2, WebKit, WebKitGTK or WPE WebKit); links that leave the router open in your browser. |

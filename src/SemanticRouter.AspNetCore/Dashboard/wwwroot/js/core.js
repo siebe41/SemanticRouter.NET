@@ -34,6 +34,8 @@ export const state = {
   errors: null,
   tester: { prompt: '', model: 'auto', result: null, reply: null, busy: false },
   activityFilter: 'all',
+  tuning: null,          // GET api/tuning (Router learned)
+  learnedFilter: 'active',
   autoRefresh: true,
   session: { role: null, tokenRequired: false, tokensConfigured: false },
   stream: null,          // the EventSource for api/events

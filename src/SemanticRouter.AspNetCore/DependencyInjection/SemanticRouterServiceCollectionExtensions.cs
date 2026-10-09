@@ -28,6 +28,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.AddOptions<SemanticRouterConnectorsOptions>().Bind(configuration);
         services.AddOptions<UsageOptions>().Bind(configuration.GetSection("Usage"));
         services.AddOptions<MemoryOptions>().Bind(configuration.GetSection("Memory"));
+        services.AddOptions<TuningOptions>().Bind(configuration.GetSection("Tuning"));
         services.AddOptions<Microsoft.AspNetCore.Builder.RouterDashboardOptions>().Bind(configuration.GetSection("Dashboard"));
 
         return AddCore(services);
@@ -74,6 +75,8 @@ public static class SemanticRouterServiceCollectionExtensions
                 : new InMemoryEvaluationSetStore());
         services.TryAddSingleton<RetryTracker>();
         services.TryAddSingleton<ConversationTracker>();
+        services.TryAddSingleton<ITuningStore, InMemoryTuningStore>();
+        services.TryAddSingleton<RouterTuner>();
         services.TryAddSingleton<MemoryExposureLog>();
         services.TryAddSingleton<MemoryIndex>();
         services.TryAddSingleton<PromptRouterMetrics>();
@@ -89,6 +92,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<ChatConnectorRegistry>();
         services.TryAddSingleton<PromptDispatcher>();
         services.AddHostedService<SemanticRouterWarmupService>();
+        services.AddHostedService<TuningService>();
 
         // Connector clients time out per request (time to response headers), so streamed replies are never cut off.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<HttpClientFactoryOptions>, ConnectorHttpClientOptions>());

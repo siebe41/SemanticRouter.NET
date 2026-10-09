@@ -380,6 +380,7 @@ public static partial class RouterDashboardEndpoints
         });
 
         EvaluationApi.Map(api, ApiJson, Actor);
+        TuningApi.Map(api, ApiJson, Actor);
         return group;
     }
 

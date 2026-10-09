@@ -40,6 +40,9 @@ public sealed class RouterConfiguration : SemanticRouterOptions
     /// <summary>Memory sources the dashboard maps, and tracking of which notes reach which model.</summary>
     public MemoryOptions Memory { get; set; } = new();
 
+    /// <summary>Automatic tuning of thresholds and utterances.</summary>
+    public TuningOptions Tuning { get; set; } = new();
+
     /// <summary>Serializes a document (secrets included).</summary>
     public string ToJson() => JsonSerializer.Serialize(this, Json);
 
@@ -67,7 +70,17 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         EmbeddingProviderOptions embeddings,
         PromptRouterMiddlewareOptions middleware,
         UsageOptions usage,
-        MemoryOptions? memory = null)
+        MemoryOptions? memory = null) => Compose(routing, connectors, embeddings, middleware, usage, memory, tuning: null);
+
+    /// <summary>Builds a document from separately bound option objects, including the usage, memory and tuning sections.</summary>
+    public static RouterConfiguration Compose(
+        SemanticRouterOptions routing,
+        IReadOnlyDictionary<string, ConnectorOptions> connectors,
+        EmbeddingProviderOptions embeddings,
+        PromptRouterMiddlewareOptions middleware,
+        UsageOptions usage,
+        MemoryOptions? memory,
+        TuningOptions? tuning)
     {
         ArgumentNullException.ThrowIfNull(usage);
         ArgumentNullException.ThrowIfNull(routing);
@@ -88,6 +101,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         if (memory is not null)
         {
             document.Memory = JsonSerializer.Deserialize<MemoryOptions>(JsonSerializer.Serialize(memory, Json), Json)!;
+        }
+
+        if (tuning is not null)
+        {
+            document.Tuning = JsonSerializer.Deserialize<TuningOptions>(JsonSerializer.Serialize(tuning, Json), Json)!;
         }
 
         return document;
@@ -289,6 +307,8 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                     : $"Memory source '{source.Name}' needs a Path (the folder of notes).");
             }
         }
+
+        errors.AddRange(Tuning.GetValidationErrors());
 
         if (Memory.MinimumLineLength < 8)
         {
