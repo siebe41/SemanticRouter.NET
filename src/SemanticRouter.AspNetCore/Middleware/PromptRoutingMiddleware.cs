@@ -28,6 +28,7 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly IToolCallAffinity? _affinity;
     private readonly RetryTracker? _retries;
     private readonly ConversationTracker? _conversations;
+    private readonly RoutingFeedbackLog? _feedback;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -41,7 +42,8 @@ internal sealed partial class PromptRoutingMiddleware
         ILogger<PromptRoutingMiddleware> logger,
         IToolCallAffinity? affinity = null,
         RetryTracker? retries = null,
-        ConversationTracker? conversations = null)
+        ConversationTracker? conversations = null,
+        RoutingFeedbackLog? feedback = null)
     {
         _next = next;
         _runtime = runtime;
@@ -53,6 +55,7 @@ internal sealed partial class PromptRoutingMiddleware
         _affinity = affinity;
         _retries = retries;
         _conversations = conversations;
+        _feedback = feedback;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -167,8 +170,9 @@ internal sealed partial class PromptRoutingMiddleware
         // The conversation this request continues: for its floor and model (conversation routing) and for a callout
         // made earlier in it. Not for a client's own cheap side tasks (auto:cheapest, e.g. Claude Code's Haiku calls).
         ConversationRoutingOptions conversation = options.Conversation;
+        bool feedback = options.Feedback.Enabled && _feedback is not null;
         string retryClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
-        string? conversationKey = (conversation.Enabled || options.Callouts.Enabled) && _conversations is not null
+        string? conversationKey = (conversation.Enabled || options.Callouts.Enabled || feedback) && _conversations is not null
             && modelChoice.Strategy != SelectionStrategy.CheapestCapable
             ? ConversationTracker.Identify(retryClient, chat)
             : null;
@@ -181,6 +185,9 @@ internal sealed partial class PromptRoutingMiddleware
         {
             _conversations!.Forget(conversationKey);
         }
+
+        // The decision this turn may judge (feedback): the conversation's previous turn.
+        DecisionRecord? previousTurn = feedback && conversationKey is not null && !firstTurn ? _conversations!.Last(conversationKey, conversation) : null;
 
         // Explicit beats automatic: this turn's callout, or one made earlier in the conversation, until "@auto".
         Callout? choice = callout;
@@ -211,12 +218,13 @@ internal sealed partial class PromptRoutingMiddleware
             ? _affinity?.Lookup(chat.AnsweredToolUseIds)
             : null;
 
-        // A prompt the same client repeats soon after it was answered goes one tier up (when enabled).
+        // A prompt the same client repeats soon after it was answered: feedback on that answer, and one tier up when
+        // retry escalation is on.
         RetryEscalationOptions retry = options.RetryEscalation;
-        bool retryable = retry.Enabled && _retries is not null && requestedModel is null && !chat.IsToolResultContinuation;
-        int? minimumTier = retryable
-            ? _retries!.MinimumTier(retryClient, prompt, retry.Window, runtime.Router.Models.Where(m => m.Enabled).Select(m => m.Tier).DefaultIfEmpty(0).Max())
-            : null;
+        int highestTier = runtime.Router.Models.Where(m => m.Enabled).Select(m => m.Tier).DefaultIfEmpty(0).Max();
+        bool retryable = (retry.Enabled || feedback) && _retries is not null && requestedModel is null && !chat.IsToolResultContinuation;
+        DecisionRecord? retried = retryable ? _retries!.Previous(retryClient, prompt, retry.Window) : null;
+        int? minimumTier = retry.Enabled && retried is not null && retried.Tier < highestTier ? retried.Tier + 1 : null;
 
         // Route by the conversation: keep the tier recent turns needed and the model that answered them. Not for
         // tool-result turns (pinned above), explicit choices, or a conversation's first turn.
@@ -309,6 +317,11 @@ internal sealed partial class PromptRoutingMiddleware
             Memory = memory,
         });
 
+        if (feedback)
+        {
+            RecordFeedback(runtime, entry, client, chat, prompt, conversationKey, previousTurn, retried, callout, classifiedTurn, highestTier);
+        }
+
         routeSpan?.SetTag("semantic_router.request_id", entry.Id);
         routeSpan?.SetTag("semantic_router.tier", result.RequiredTier);
         routeSpan?.SetTag("semantic_router.reason", result.Reason.ToString());
@@ -341,10 +354,28 @@ internal sealed partial class PromptRoutingMiddleware
         }
 
         string? answeredBy = entry.ServedBy ?? (options.Mode == PromptRouterMode.Annotate ? entry.PlannedModel : null);
+        bool automatic = requestedModel is null && !explicitTurn;
         if (retryable && answeredBy is not null
             && runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, answeredBy, StringComparison.OrdinalIgnoreCase)) is { } answering)
         {
-            _retries!.Answered(retryClient, prompt, answering.Tier, retry.Window);
+            _retries!.Answered(retryClient, prompt, new DecisionRecord(entry.Id, answering.Tier, result.RouteName, answeredBy, automatic), retry.Window);
+        }
+
+        if (conversationKey is not null && answeredBy is not null && !chat.IsToolResultContinuation)
+        {
+            _conversations!.Decided(conversationKey, new DecisionRecord(entry.Id, result.RequiredTier, result.RouteName, answeredBy, automatic));
+        }
+
+        if (feedback && automatic && entry.Outcome == "served" && entry.OutputTokens == 0)
+        {
+            AddFeedback(entry, FeedbackKind.EmptyReply, new DecisionRecord(entry.Id, result.RequiredTier, result.RouteName, answeredBy, automatic),
+                client, Math.Min(result.RequiredTier + 1, Math.Max(highestTier, result.RequiredTier)), "no output tokens");
+        }
+
+        if (feedback && automatic && entry.Notes is { } notes && notes.Contains("malformed tool call", StringComparison.OrdinalIgnoreCase))
+        {
+            AddFeedback(entry, FeedbackKind.ToolErrors, new DecisionRecord(entry.Id, result.RequiredTier, result.RouteName, answeredBy, automatic),
+                client, Math.Min(result.RequiredTier + 1, Math.Max(highestTier, result.RequiredTier)), notes.Length <= 160 ? notes : notes[..160] + "…");
         }
 
         if (conversationKey is not null && answeredBy is not null)
@@ -363,6 +394,68 @@ internal sealed partial class PromptRoutingMiddleware
         RecordMemoryExposure(runtime, entry);
         _activity.Complete(entry);
     }
+
+    /// <summary>
+    /// Feedback this request gives on earlier decisions: a retry of an answered prompt, a correction of the previous
+    /// turn, a callout right after the router chose, or failing tool calls on consecutive tool turns. Only decisions the
+    /// router made itself are judged; an explicit choice is not the router's to learn from.
+    /// </summary>
+    private void RecordFeedback(
+        RouterRuntime runtime, RoutingActivityEntry entry, string? client, ChatCompletionRequest chat, string prompt, string? conversationKey,
+        DecisionRecord? previousTurn, DecisionRecord? retried, Callout? callout, bool classifiedTurn, int highestTier)
+    {
+        int Above(int tier) => Math.Min(tier + 1, Math.Max(highestTier, tier));
+
+        if (retried is { Automatic: true })
+        {
+            AddFeedback(entry, FeedbackKind.Retried, retried, client, Above(retried.Tier), $"sent again as request {entry.Id}");
+        }
+
+        if (previousTurn is not { Automatic: true })
+        {
+            return;
+        }
+
+        if (callout is { Clear: false })
+        {
+            int? asked = callout switch
+            {
+                { Model: { } model } => runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, model, StringComparison.OrdinalIgnoreCase))?.Tier,
+                { Tier: { } tier } => tier,
+                { Strategy: SelectionStrategy.MostCapable } => highestTier,
+                _ => null,
+            };
+            AddFeedback(entry, FeedbackKind.Overridden, previousTurn, client, asked > previousTurn.Tier ? asked : null, $"asked for {callout.Tag} in request {entry.Id}");
+        }
+        else if (classifiedTurn && callout is null && Corrections.Matches(prompt))
+        {
+            AddFeedback(entry, FeedbackKind.Corrected, previousTurn, client, Above(previousTurn.Tier), $"corrected in request {entry.Id}");
+        }
+
+        if (chat.IsToolResultContinuation && conversationKey is not null)
+        {
+            bool failed = chat.Turns.LastOrDefault(t => t.Role == "user")?.Blocks.Any(b => b is ToolResultBlock { IsError: true }) == true;
+            if (_conversations!.ToolTurn(conversationKey, failed) == 2)
+            {
+                AddFeedback(entry, FeedbackKind.ToolErrors, previousTurn, client, Above(previousTurn.Tier), "tool calls failed on 2 turns in a row");
+            }
+        }
+    }
+
+    private void AddFeedback(RoutingActivityEntry entry, FeedbackKind kind, DecisionRecord about, string? client, int? neededTier, string detail) =>
+        _feedback!.Add(new RoutingFeedback
+        {
+            Timestamp = entry.Timestamp,
+            EntryId = about.EntryId,
+            Kind = kind,
+            Conversation = entry.Conversation,
+            Client = client,
+            Route = about.Route,
+            Model = about.Model,
+            Tier = about.Tier,
+            NeededTier = neededTier,
+            Detail = detail,
+        });
 
     /// <summary>Counts the request's memory notes against every model it was sent to (Dispatch mode only: in Annotate mode the router does not know).</summary>
     private void RecordMemoryExposure(RouterRuntime runtime, RoutingActivityEntry entry)

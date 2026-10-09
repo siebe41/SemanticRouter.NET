@@ -13,6 +13,7 @@ export async function loadAll() {
   state.status = status;
   setConfig(cfg);
   state.activity = activity.entries;
+  state.feedback = activity.feedback || {};
   renderChrome();
   loadThemes();
 }
@@ -29,6 +30,7 @@ export async function refreshStatus() {
     const [status, activity] = await Promise.all([api('GET', '/status'), api('GET', '/activity?limit=200')]);
     state.status = status;
     state.activity = activity.entries;
+    state.feedback = activity.feedback || {};
     renderChrome();
     if (state.view === 'overview') { state.trends.data = null; }
     if (state.view === 'usage') { loadUsage(); }

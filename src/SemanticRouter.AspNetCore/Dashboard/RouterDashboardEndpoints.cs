@@ -233,8 +233,25 @@ public static partial class RouterDashboardEndpoints
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), $"Rolled back to version {id}.");
         }).WithMetadata(DashboardWriteMetadata.Instance);
 
-        api.MapGet("/activity", (RoutingActivityLog activity, int? limit, long? after) =>
-            Results.Json(new ActivityResponse(activity.Recent(limit ?? options.DefaultActivityLimit, after), activity.NextId - 1), ApiJson));
+        api.MapGet("/activity", (RoutingActivityLog activity, RoutingFeedbackLog feedback, int? limit, long? after) =>
+        {
+            IReadOnlyList<RoutingActivityEntry> entries = activity.Recent(limit ?? options.DefaultActivityLimit, after);
+            var ids = entries.Select(e => e.Id).ToHashSet();
+            Dictionary<long, IReadOnlyList<FeedbackKind>> kinds = feedback.Recent(5000)
+                .Where(f => ids.Contains(f.EntryId))
+                .GroupBy(f => f.EntryId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<FeedbackKind>)[.. g.Select(f => f.Kind).Distinct()]);
+            return Results.Json(new ActivityResponse(entries, activity.NextId - 1, kinds), ApiJson);
+        });
+
+        api.MapGet("/feedback", (RoutingFeedbackLog feedback, int? limit) =>
+            Results.Json(feedback.Recent(Math.Clamp(limit ?? 200, 1, 5000)), ApiJson));
+
+        api.MapGet("/feedback/summary", (RoutingActivityLog activity, RoutingFeedbackLog feedback, int? days) =>
+        {
+            DateTimeOffset until = DateTimeOffset.UtcNow, since = until.AddDays(-Math.Clamp(days ?? 7, 1, 90));
+            return Results.Json(FeedbackSummary.Build(activity.Between(since, until), feedback.Between(since, until), since, until), ApiJson);
+        });
 
         api.MapGet("/events", StreamEventsAsync);
 
@@ -684,7 +701,7 @@ public static partial class RouterDashboardEndpoints
     public sealed record HistoryResponse(IReadOnlyList<RouterConfigurationVersion> Versions);
 
     /// <summary>Recent routing activity.</summary>
-    public sealed record ActivityResponse(IReadOnlyList<RoutingActivityEntry> Entries, long Latest);
+    public sealed record ActivityResponse(IReadOnlyList<RoutingActivityEntry> Entries, long Latest, IReadOnlyDictionary<long, IReadOnlyList<FeedbackKind>> Feedback);
 
     /// <summary>The memory map: every note and link, and where notes have been sent.</summary>
     /// <param name="LoadedAt">When the sources were last scanned; <see langword="null"/> before the first scan.</param>

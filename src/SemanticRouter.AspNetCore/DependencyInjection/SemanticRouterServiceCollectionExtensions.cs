@@ -67,6 +67,7 @@ public static class SemanticRouterServiceCollectionExtensions
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BudgetGate>>()));
         services.TryAddSingleton<IToolCallAffinity, ToolCallAffinity>();
         services.TryAddSingleton<RoutingActivityLog>();
+        services.TryAddSingleton<RoutingFeedbackLog>();
         services.TryAddSingleton<IEvaluationSetStore>(sp =>
             sp.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store
                 ? new JsonLinesEvaluationSetStore(EvaluationSetFileNextTo(store.Location))

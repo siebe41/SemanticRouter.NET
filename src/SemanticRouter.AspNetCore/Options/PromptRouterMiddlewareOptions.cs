@@ -115,6 +115,12 @@ public sealed class PromptRouterMiddlewareOptions
     /// </summary>
     public CalloutOptions Callouts { get; set; } = new();
 
+    /// <summary>
+    /// Notice, after the fact, when a routing decision was not good enough (retried, corrected, overridden with a
+    /// callout, failing tool calls, an empty reply) and record it with the decision, without prompt text. On by default.
+    /// </summary>
+    public FeedbackOptions Feedback { get; set; } = new();
+
     /// <summary>The request header that names a routing profile (<c>SemanticRouter:Profiles</c>). Default <c>X-Router-Profile</c>.</summary>
     public string ProfileHeader { get; set; } = "X-Router-Profile";
 
@@ -248,6 +254,17 @@ public sealed class CalloutOptions
     /// "local"</c>. A target is a catalog model, <c>auto:…</c>, <c>family:…</c>, <c>tierN</c> or <c>local</c>.
     /// </summary>
     public IDictionary<string, string> Names { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// Outcome feedback (<see cref="PromptRouterMiddlewareOptions.Feedback"/>): signs that a routing decision was not good
+/// enough, each recorded with the decision it is about and the tier it implies the decision needed. Retries are
+/// recognised within <see cref="RetryEscalationOptions.Window"/>, whether or not retry escalation is on.
+/// </summary>
+public sealed class FeedbackOptions
+{
+    /// <summary>Turns feedback on. Default <see langword="true"/>.</summary>
+    public bool Enabled { get; set; } = true;
 }
 
 /// <summary>Picks a profile from what the request looks like (<see cref="PromptRouterMiddlewareOptions.ProfileRules"/>).</summary>
