@@ -33,7 +33,9 @@ internal static class InitCommand
         var notes = new List<string>();
         if (!settings.NoDetect)
         {
-            await DetectAsync(document, probes, notes, cancellationToken).ConfigureAwait(false);
+            // A model-family table in the configuration directory (from an earlier setup) is used here too.
+            ModelFamilyTable families = ModelFamilyTable.Load(ModelFamilyTable.FileNextTo(settings.ConfigurationFile));
+            await DetectAsync(document, probes, notes, cancellationToken, families).ConfigureAwait(false);
         }
 
         IReadOnlyList<string> errors = document.GetDocumentValidationErrors();
@@ -70,7 +72,7 @@ internal static class InitCommand
     }
 
     /// <summary>Adds connectors, models and embeddings for what is found. Notes say what was added and why.</summary>
-    internal static async Task DetectAsync(RouterConfiguration document, InitProbes probes, List<string> notes, CancellationToken cancellationToken)
+    internal static async Task DetectAsync(RouterConfiguration document, InitProbes probes, List<string> notes, CancellationToken cancellationToken, ModelFamilyTable? families = null)
     {
         string? embeddingModel = null;
         Uri? embeddingEndpoint = null;
@@ -90,9 +92,10 @@ internal static class InitCommand
                 continue;
             }
 
-            // Every chat model the server runs itself, each on the tier its size suggests; loaded ones preferred when
-            // the server loads the others on demand. Cloud models a local server forwards (Ollama's) are left out.
-            ModelLineupEntry[] lineup = ModelLineup.Suggest(name, connector, probe.Details, probe.Loading, document.Models)
+            // Every chat model the server runs itself, each on the tier its family (or else its size) suggests; loaded
+            // ones preferred when the server loads the others on demand. Cloud models a local server forwards (Ollama's)
+            // are left out.
+            ModelLineupEntry[] lineup = ModelLineup.Suggest(name, connector, probe.Details, probe.Loading, document.Models, families)
                 .Where(e => e.Suggestion is not null && e.Model.Listed)
                 .ToArray();
             ModelDefinition[] chat = lineup.Where(e => e.Model.Remote != true).Select(e => e.Suggestion!).ToArray();

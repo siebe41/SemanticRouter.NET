@@ -21,6 +21,7 @@
     <EmbeddedResource Include="Dashboard\wwwroot\*" LogicalName="dashboard/%(Filename)%(Extension)" />
     <!-- Native ES modules, served from /js/; no build step. -->
     <EmbeddedResource Include="Dashboard\wwwroot\js\*.js" LogicalName="dashboard/js/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Connectors\model-families.json" LogicalName="SemanticRouter.AspNetCore.model-families.json" />
   </ItemGroup>
 
   <ItemGroup>

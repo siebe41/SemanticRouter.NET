@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "families": [
+    { "family": "Qwen3 Coder", "match": ["qwen3-coder"], "bands": [{ "upTo": 9.5, "tier": 1 }, { "upTo": 40, "tier": 2 }, { "tier": 3 }], "capabilities": ["code", "tools"], "notes": "Trained for agentic coding; reliable tool calls." },
+    { "family": "Qwen3", "match": ["qwen3"], "capabilities": ["tools", "reasoning"], "toolsFrom": 4, "notes": "Has a thinking mode; tool calls are unreliable below 4B." },
+    { "family": "Qwen2.5 Coder", "match": ["qwen2.5-coder"], "capabilities": ["code", "tools"], "toolsFrom": 7 },
+    { "family": "Qwen2.5", "match": ["qwen2.5"], "capabilities": ["tools"], "toolsFrom": 7 },
+    { "family": "QwQ", "match": ["qwq"], "capabilities": ["reasoning"], "notes": "A reasoning model: slow, long answers; better for hard questions than for chat." },
+    { "family": "DeepSeek R1", "match": ["deepseek-r1", "r1-distill"], "capabilities": ["reasoning"], "without": ["tools"], "notes": "Distilled R1 models do not call tools." },
+    { "family": "DeepSeek V3", "match": ["deepseek-v3", "deepseek-chat"], "tier": 3, "capabilities": ["code", "tools"] },
+    { "family": "DeepSeek Coder", "match": ["deepseek-coder"], "capabilities": ["code"] },
+    { "family": "gpt-oss", "match": ["gpt-oss"], "bands": [{ "upTo": 40, "tier": 2 }, { "tier": 3 }], "capabilities": ["code", "tools", "reasoning"], "notes": "OpenAI's open-weight reasoning models; mixtures of experts, so faster than their size suggests." },
+    { "family": "Llama 3.3", "match": ["llama3.3", "llama-3.3"], "capabilities": ["tools"] },
+    { "family": "Llama 3.2", "match": ["llama3.2", "llama-3.2"], "capabilities": ["tools"], "toolsFrom": 7, "notes": "The small models (1B, 3B) are fine for chat and summaries; their tool calls are unreliable." },
+    { "family": "Llama 3.1", "match": ["llama3.1", "llama-3.1"], "capabilities": ["tools"], "toolsFrom": 7 },
+    { "family": "Llama 2", "match": ["llama2", "llama-2"], "adjust": -1, "without": ["tools"], "notes": "An older generation: a tier below what its size suggests." },
+    { "family": "Devstral", "match": ["devstral"], "capabilities": ["code", "tools"], "notes": "Built for agentic coding." },
+    { "family": "Codestral", "match": ["codestral"], "capabilities": ["code"] },
+    { "family": "Magistral", "match": ["magistral"], "capabilities": ["reasoning"] },
+    { "family": "Mistral Small", "match": ["mistral-small"], "capabilities": ["tools"] },
+    { "family": "Mistral Large", "match": ["mistral-large"], "tier": 3, "capabilities": ["code", "tools"] },
+    { "family": "Gemma 3", "match": ["gemma-3", "gemma3"], "without": ["tools"], "notes": "No native tool calling." },
+    { "family": "Phi-4 reasoning", "match": ["phi-4-reasoning", "phi4-reasoning"], "capabilities": ["reasoning"] },
+    { "family": "Phi-4", "match": ["phi-4", "phi4"], "notes": "Strong at reasoning and maths for its size." },
+    { "family": "Granite", "match": ["granite"], "capabilities": ["tools"] },
+    { "family": "GLM-4.5", "match": ["glm-4.5", "glm-4.6", "glm4.5", "glm4.6"], "capabilities": ["code", "tools", "reasoning"] },
+    { "family": "Gemini Flash", "match": ["gemini-*flash"], "tier": 2, "capabilities": ["code", "tools", "vision"] },
+    { "family": "Gemini Pro", "match": ["gemini-*pro"], "tier": 3, "capabilities": ["code", "tools", "vision", "reasoning"] }
+  ]
+}

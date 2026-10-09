@@ -96,6 +96,18 @@ public sealed class SemanticRouterBuilder
         return this;
     }
 
+    /// <summary>
+    /// Reads the local model-family table (families and tiers discovery uses before the size rule) from
+    /// <paramref name="path"/>. Without this, it is <c>model-families.json</c> next to the configuration file when
+    /// <see cref="UseConfigurationFile"/> is used; only the built-in table otherwise.
+    /// </summary>
+    public SemanticRouterBuilder UseModelFamilyFile(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Services.Replace(ServiceDescriptor.Singleton(new ModelFamilyFile(Path.GetFullPath(path))));
+        return this;
+    }
+
     /// <summary>Uses a custom <see cref="IRouterSecretStore"/> (a vault, the OS keychain) for <c>${secret:…}</c> references.</summary>
     public SemanticRouterBuilder UseSecretStore<TStore>()
         where TStore : class, IRouterSecretStore

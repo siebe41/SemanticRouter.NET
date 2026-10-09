@@ -114,7 +114,7 @@ export const lineupPanel = (connector) => {
     : !e.listed ? '<span class="badge warn" title="The server does not serve it until it is loaded">not served</span>'
     : e.loaded === true ? '<span class="badge ok">loaded</span>' : e.loaded === false ? '<span class="badge">not loaded</span>' : '');
   return `<div class="card lineup">${head}
-    ${l.loadingNote ? `<p class="muted small">${h(l.loadingNote)}</p>` : ''}${l.note ? `<p class="muted small">${h(l.note)}</p>` : ''}
+    ${l.loadingNote ? `<p class="muted small">${h(l.loadingNote)}</p>` : ''}${l.note ? `<p class="muted small">${h(l.note)}</p>` : ''}${l.familiesWarning ? `<p class="small" style="color:var(--warn)">${h(l.familiesWarning)}</p>` : ''}
     ${rows.length ? `<div class="table-wrap"><table class="compact lineup-table">
       <tr><th style="width:44px">${selectable.length ? `<button class="btn ghost small" data-action="lineup-all" data-index="${index}" aria-label="${selected === selectable.length ? 'Select none' : 'Select every model not in the catalog'}">${selected === selectable.length ? 'None' : 'All'}</button>` : ''}</th><th>Provider model</th><th>State</th><th>Size</th><th>Context</th><th>Catalog name</th><th>Tier</th><th>Capabilities</th></tr>
       ${rows.map((e, i) => {
@@ -128,11 +128,14 @@ export const lineupPanel = (connector) => {
           <td><input type="text" aria-label="Catalog name for ${h(e.id)}" data-state="${p}.suggestion.Name" value="${h(s.Name)}"></td>
           <td><select aria-label="Tier for ${h(e.id)}" data-state="${p}.suggestion.Tier" data-kind="number">${tierOptions(s.Tier)}</select></td>
           <td><input type="text" aria-label="Capabilities of ${h(e.id)}" data-state="${p}.suggestion.Capabilities" data-kind="csv" value="${h(csv(s.Capabilities))}"></td></tr>
-          <tr class="lineup-reason"><td></td><td colspan="7" class="small muted">${h(e.reason)}</td></tr>`;
+          <tr class="lineup-reason"><td></td><td colspan="7" class="small muted">${TIER_FROM[e.tierFrom] ? `<span class="badge" title="${h(l.families || '')}">${TIER_FROM[e.tierFrom]}</span> ` : ''}${h(e.reason)}</td></tr>`;
       }).join('')}</table></div>` : ''}
     ${selectable.length ? `<div class="row-actions" style="margin-top:10px"><button class="btn primary small" data-action="lineup-add" data-index="${index}" ${selected ? '' : 'disabled'}>Add ${selected} selected to the catalog</button><span class="muted small">Added to the draft; Apply to use them. Context, prices and the rest are on each model.</span></div>` : ''}
   </div>`;
 };
+
+/* Where a suggested tier came from. */
+const TIER_FROM = { family: 'tier from the family table', size: 'tier from the size', name: 'tier from the name' };
 
 views.models = () => {
   const models = state.config.Models || [];

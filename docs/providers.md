@@ -52,13 +52,14 @@ You don't have to type them in. **Discover models** on the dashboard's Models pa
 | Provider | Asked with | Suggested tier |
 |---|---|---|
 | Claude (Claude Code CLI, Anthropic API, Copilot) | the preset's names (`haiku`, `sonnet`, `opus`, `claude-fable-5-1`), `GET /v1/models`, or the Copilot SDK | by family, one rung each: Haiku **2**, Sonnet **3**, Opus **4**, Fable **5** |
-| LM Studio | `GET /v1/models` and `GET /api/v0/models` | by size: ≤ 9B **1**, ≤ 35B **2**, larger **3** |
-| Ollama | `GET /v1/models`, `/api/tags`, `/api/ps`, `POST /api/show` | by size, as above |
-| vLLM, llama.cpp, other OpenAI-compatible servers | `GET /v1/models` | by the size in the model id, as above |
-| Other APIs (OpenAI, Gemini, OpenRouter, …) | `GET /v1/models` | 2 for `mini`/`nano`/`lite`/`small` models, otherwise 3. Not ticked by default: review the tier and set the prices. |
+| LM Studio | `GET /v1/models` and `GET /api/v0/models` | from the [model-family table](#the-model-family-table) when it has a tier for the family, else by size: ≤ 9B **1**, ≤ 35B **2**, larger **3** |
+| Ollama | `GET /v1/models`, `/api/tags`, `/api/ps`, `POST /api/show` | family table, else by size, as above |
+| vLLM, llama.cpp, other OpenAI-compatible servers | `GET /v1/models` | family table, else by the size in the model id, as above |
+| Other APIs (OpenAI, Gemini, OpenRouter, …) | `GET /v1/models` | family table (Gemini Flash **2**, Gemini Pro **3**, …), else 2 for `mini`/`nano`/`lite`/`small` models, otherwise 3. Not ticked by default: review the tier and set the prices. |
 
 Each suggestion explains itself, and every field can be changed before it is added:
-- **Capabilities.** `code` for coder models; `tools`, `vision` and `reasoning` when the server reports them (LM Studio's `tool_use`, Ollama's `tools`, `vision` and `thinking`) or the family is known for them. `tools` is only claimed when the connector can carry tools: HTTP, Copilot, or a CLI with `ToolCalling: Prompted`.
+- **Where the tier came from.** `family` (the family table), `size` or `name`, shown next to each suggestion on the dashboard and after the tier in `semantic-router models` (`T2 (family)`).
+- **Capabilities.** `code` for coder models; `tools`, `vision` and `reasoning` when the server reports them (LM Studio's `tool_use`, Ollama's `tools`, `vision` and `thinking`) or the family table lists them. The table can also take a capability away: Gemma 3 has no native tool calling, distilled DeepSeek R1 models do not call tools, and a 3B Llama 3.2 gets no `tools` even when Ollama reports them, because its tool calls are unreliable below 7B. `tools` is only claimed when the connector can carry tools: HTTP, Copilot, or a CLI with `ToolCalling: Prompted`.
 - **Context.** For a local server that reports load state, the context the model is **loaded with**, not the most it supports: LM Studio and Ollama load models with their own default context unless told otherwise. A model that is not loaded gets `0` (unknown) and a note to set it. Claude Code models get 200K, the conservative assumption; raise it if your plan has 1M.
 - **Prices.** Anthropic API models get the list price; local models and subscriptions are free. Check prices before relying on them.
 - **Names.** The connector and the model id: `lmstudio-qwen3-8b`, `ollama-llama3.2`, `claude-sonnet`. Models already in the catalog are marked, not suggested again.
@@ -75,6 +76,39 @@ The Claude lineup through Claude Code, as `semantic-router init` writes it:
 ```
 
 With the default ladder, unmatched prompts (tier 3) go to Sonnet, the architecture and debugging routes (tier 4) to Opus, and Fable is used only when a prompt needs tier 5: `auto:best`, a tier-5 route, or [retry escalation](routing-quality.md). Fable starts disabled because not every plan includes it. If Opus is scarce on your plan, put Sonnet on tier 4 as well and give Opus `Priority` 1.
+
+### The model-family table
+
+Size is a weak guide on its own: a recent coder can beat an older, larger general model on code, and tool calling, vision and reasoning differ by family. Discovery and `semantic-router init` therefore look a model up in a table of families before falling back to the size rule. The table ships with the router (Qwen3, Qwen3 Coder, Qwen2.5, QwQ, DeepSeek, gpt-oss, Llama 3.x and 2, Devstral, Codestral, Magistral, Mistral, Gemma 3, Phi-4, Granite, GLM-4.5, Gemini, …). It is a starting point, not a benchmark: the suggestions stay editable, and the [reliability tracking](routing-quality.md#model-reliability) catches a model that does badly on your work.
+
+Add your own families, or change the built-in ones, in `model-families.json` in the configuration directory, next to `semantic-router.json` (`UseModelFamilyFile(path)` in your own host). It needs no restart: discovery reads it each time. A family in your file replaces the built-in family with the same name, and the others stay.
+
+```jsonc
+{
+  "families": [
+    // Matched against the model id in lower case, anywhere in it; * stands for anything. The longest match wins.
+    { "family": "Qwen3 Coder", "match": ["qwen3-coder"],
+      "bands": [ { "upTo": 9.5, "tier": 1 }, { "upTo": 40, "tier": 3 }, { "tier": 4 } ],  // tiers by size (billions of parameters)
+      "capabilities": ["code", "tools"] },
+    { "family": "Our fine-tune", "match": ["acme/widget*"], "tier": 3, "notes": "Trained on our codebase." },
+    { "family": "Llama 2", "match": ["llama2", "llama-2"], "adjust": -1, "without": ["tools"] }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `family` | Its name; shown with the suggestion. |
+| `match` | Patterns for the model id (lower case, anywhere, `*` for anything). The longest matching pattern of all families wins, so `qwen3-coder` beats `qwen3`. |
+| `tier` | A fixed tier, whatever the size (hosted models). |
+| `bands` | Tiers by size, smallest first: `upTo` (billions of parameters; leave it out on the last band) and `tier`. Used when the size is known and there is no `tier`. |
+| `adjust` | Added to the size rule's tier when there is neither `tier` nor `bands` (at least 1). |
+| `capabilities` | Capabilities the family has. |
+| `without` | Capabilities it does not have, even when the server reports them. |
+| `toolsFrom` | The size (billions) from which its tool calls are reliable; smaller models get no `tools`. |
+| `notes` | Shown with the suggestion. |
+
+A family without `tier`, `bands` or `adjust` leaves the tier to the size rule and only says what it can do. An entry that cannot be read is skipped with a warning on the dashboard and in `semantic-router models`; a file that cannot be read at all leaves the built-in table in use.
 
 ### Loading models on demand
 
