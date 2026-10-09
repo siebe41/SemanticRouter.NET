@@ -85,7 +85,7 @@ internal static class Program
     {
         string log = RouterLog.FileIn(options.Host.ConfigurationDirectory);
         Directory.CreateDirectory(Path.GetDirectoryName(log)!);
-        await using var writer = new StreamWriter(log, append: true);
+        await using StreamWriter writer = AppendTo(log);
         DesktopUpdater updater = DesktopUpdater.Create(options.Host, Environment.GetEnvironmentVariable, writer);
         string message;
         int code;
@@ -141,7 +141,15 @@ internal static class Program
         Console.WriteLine(message);
         string log = RouterLog.FileIn(options.Host.ConfigurationDirectory);
         Directory.CreateDirectory(Path.GetDirectoryName(log)!);
-        await File.AppendAllTextAsync(log, $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} {message}{Environment.NewLine}");
+        await using (StreamWriter writer = AppendTo(log))
+        {
+            await writer.WriteLineAsync($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} {message}");
+        }
+
         return ok ? 0 : 1;
     }
+
+    /// <summary>The router's log, shared with a router that is writing to it (the background service).</summary>
+    private static StreamWriter AppendTo(string log) =>
+        new(new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
 }

@@ -44,10 +44,11 @@ function Run-Value($name) { (Get-ItemProperty -Path $runKey -ErrorAction Silentl
 # outlives it, so neither `&` nor Start-Process -Wait fits. Returns the exit code; the output goes to the log.
 function Invoke-Program([string] $program, [string[]] $arguments, [int] $seconds = 120) {
     $out = New-TemporaryFile
-    $p = Start-Process -FilePath $program -ArgumentList $arguments -PassThru -NoNewWindow -RedirectStandardOutput $out.FullName
+    $err = New-TemporaryFile
+    $p = Start-Process -FilePath $program -ArgumentList $arguments -PassThru -NoNewWindow -RedirectStandardOutput $out.FullName -RedirectStandardError $err.FullName
     $null = $p.Handle # keeps the exit code readable after the process ends
     if (-not $p.WaitForExit($seconds * 1000)) { Fail "$program $arguments did not exit within $seconds s" }
-    Get-Content $out | Out-Host
+    Get-Content $out, $err | Out-Host
     $p.ExitCode
 }
 
