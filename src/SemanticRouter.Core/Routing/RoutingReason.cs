@@ -56,4 +56,16 @@ public enum RoutingReason
     /// conversation, so their choice was used instead of the router's.
     /// </summary>
     ExplicitCallout = 11,
+
+    /// <summary>
+    /// A side request the client makes for itself (a session title, a topic check, a summary for compaction, a warm-up
+    /// ping), recognised by its fixed wording: routed to a small model without classification.
+    /// </summary>
+    ClientHousekeeping = 12,
+
+    /// <summary>
+    /// A session the client resumed from a summary of an earlier one (after compaction): routed at the tier the
+    /// agentic work it continues needs, without classifying the summary.
+    /// </summary>
+    ResumedSession = 13,
 }

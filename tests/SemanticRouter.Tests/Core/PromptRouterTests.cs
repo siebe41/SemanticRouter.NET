@@ -112,4 +112,30 @@ public class PromptRouterTests
 
         plan.Candidates[0].Model.Should().BeSameAs(Cli);
     }
+
+    [Fact]
+    public async Task A_route_that_follows_the_conversation_takes_its_tier_down_as_well_as_up()
+    {
+        var classifier = new Mock<IPromptClassifier>();
+        classifier.Setup(c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PromptClassificationResult { RequiredTier = 3, Reason = RoutingReason.SemanticMatch, RouteName = "continuation", Complexity = new ComplexityAnalysis { EstimatedTokens = 3 } });
+        var options = new SemanticRouterOptions();
+        foreach (ModelDefinition model in new[] { Local, Cli, Api })
+        {
+            options.Models.Add(model);
+        }
+
+        RouteDefinition continuation = Route("continuation", 3, "go ahead");
+        continuation.FollowsConversation = true;
+        options.Routes.Add(continuation);
+        var router = new PromptRouter(classifier.Object, options);
+
+        RoutingPlan inEasyConversation = await router.RouteAsync(new PromptRoutingRequest { Prompt = "go ahead", ConversationFloor = 2 });
+        RoutingPlan inHardConversation = await router.RouteAsync(new PromptRoutingRequest { Prompt = "go ahead", ConversationFloor = 4 });
+        RoutingPlan alone = await router.RouteAsync(new PromptRoutingRequest { Prompt = "go ahead" });
+
+        (inEasyConversation.Classification.RequiredTier, inEasyConversation.Classification.Reason).Should().Be((2, RoutingReason.ConversationFloor));
+        inHardConversation.Classification.RequiredTier.Should().Be(4);
+        (alone.Classification.RequiredTier, alone.Classification.Reason).Should().Be((3, RoutingReason.SemanticMatch));
+    }
 }

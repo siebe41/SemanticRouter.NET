@@ -125,6 +125,8 @@ These combine with a noisy-OR, `1 − Π(1 − weightᵢ·signalᵢ)`, so a sing
 | Classifier failed and `FailOpen` is on | `FallbackTier` | `ClassifierFailure` |
 | The conversation needed a higher tier on recent turns, e.g. "ok, go ahead" in the middle of a task (`Middleware:Conversation`, on by default) | the conversation's floor, which decays as it moves on to simpler work | `ConversationFloor` |
 | The same client repeats a prompt soon after it was answered (`Middleware:RetryEscalation`, off by default) | one tier above the model that answered | `RetryEscalation` |
+| A request an agentic client makes for itself, recognised by its wording: a session title, a topic check, a compaction summary, a warm-up ping, a shell command check (`Middleware:Housekeeping`, on by default) | `Housekeeping:Tier` (1), **no embedding call** | `ClientHousekeeping` |
+| The first turn of a session the client resumed from a compaction summary ("This session is being continued from a previous conversation…") | `Housekeeping:ResumedTier` (4); later turns keep it as the conversation's floor | `ResumedSession` |
 
 The request itself adds requirements. If it defines `tools`, the model must declare `tools`. If it contains images, the model must declare `vision`. The size of the whole conversation, including tool definitions, is checked against each model's `ContextWindow`.
 
@@ -391,6 +393,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Utterances[]` | – | 5–20 diverse examples. |
 | `SimilarityThreshold` | `null` | Per-route override. |
 | `LocalOnly` | `false` | Only `IsLocal` models may answer, even on failover. |
+| `FollowsConversation` | `false` | Prompts that say nothing about difficulty ("go ahead", "continue"): in a conversation they take its tier, down as well as up; `Tier` applies only on a first turn. The sample's `continuation` route has it. |
 
 ### `Models[]`
 
@@ -454,6 +457,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Tuning:HoldDays` / `StrongerEvidence` | `30` / `2` | How long an undone change is left alone, and how much stronger the evidence must be to suggest it again sooner. |
 | `Middleware:Reliability:Enabled` | `true` | Leave a model out of the work it keeps failing at (a route, or requests with tools) for a while. See [docs/routing-quality.md](docs/routing-quality.md#model-reliability). |
 | `Middleware:Reliability:Window` / `MinimumTurns` / `MaxFailureRate` / `PeerMargin` / `Period` | `7.00:00:00` / `10` / `0.3` / `0.15` / `1.00:00:00` | How far back turns count, the turns needed before judging, the share with feedback that counts as unreliable, how much worse than the other models it must be, and how long it is left out. |
+| `Middleware:Housekeeping:Enabled` / `Tier` / `ResumedTier` / `Patterns` | `true` / `1` / `4` / `[]` | Recognise agentic clients' own requests (titles, topic checks, compaction, warm-ups, command checks) and route them to `Tier` without classifying; route a session resumed from a compaction summary to `ResumedTier`. `Patterns` adds regular expressions for other clients' wording. See [docs/clients.md](docs/clients.md). |
 | `Middleware:Callouts:Enabled` / `Names` | `true` / `{}` | Inline callouts: a message starting with `@opus`, `@local`, `@best`, `@tier3`, a catalog model name or one of your `Names` routes as asked for the rest of the conversation, until `@auto`. See [docs/clients.md](docs/clients.md#telling-the-router-what-you-want). |
 | `Middleware:PinToolCallingTurns` | `true` | Requests carrying tool results go to the model that issued the tool calls. |
 | `Middleware:Conversation:Enabled` | `true` | Route by the conversation: keep the tier recent turns needed and stay on the model that answered. See [docs/routing-quality.md](docs/routing-quality.md#conversations). |

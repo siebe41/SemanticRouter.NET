@@ -170,20 +170,29 @@ internal sealed partial class PromptRoutingMiddleware
             requestedModel = null;
         }
 
-        // The conversation this request continues: for its floor and model (conversation routing) and for a callout
-        // made earlier in it. Not for a client's own cheap side tasks (auto:cheapest, e.g. Claude Code's Haiku calls).
-        ConversationRoutingOptions conversation = options.Conversation;
-        bool feedback = options.Feedback.Enabled && _feedback is not null;
-        string retryClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
-        string? conversationKey = (conversation.Enabled || options.Callouts.Enabled || feedback) && _conversations is not null
-            && modelChoice.Strategy != SelectionStrategy.CheapestCapable
-            ? ConversationTracker.Identify(retryClient, chat)
-            : null;
-
         // Only a request that carries an earlier answer continues a conversation; a first turn starts it afresh (two
         // separate conversations can open with the same message).
         // An assistant turn may hold only tool calls (no text), so look at the turns, not the flattened messages.
         bool firstTurn = !chat.Turns.Any(t => t.Role == "assistant") && !chat.Messages.Any(m => m.Role == "assistant");
+
+        // A request the client makes for itself (a title, a compaction summary, a warm-up) by its fixed wording, or a
+        // session it resumed from a summary.
+        ClientTurnKind? clientTurn = options.Housekeeping.Enabled && requestedModel is null && !chat.IsToolResultContinuation
+            ? ClientTurns.Recognise(chat, prompt, firstTurn, options.Housekeeping)
+            : null;
+        bool housekeeping = clientTurn is { } turn && turn != ClientTurnKind.Resumed;
+
+        // The conversation this request continues: for its floor and model (conversation routing) and for a callout
+        // made earlier in it. Not for a client's own side tasks (auto:cheapest, e.g. Claude Code's Haiku calls, or a
+        // recognised title or compaction request).
+        ConversationRoutingOptions conversation = options.Conversation;
+        bool feedback = options.Feedback.Enabled && _feedback is not null;
+        string retryClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
+        string? conversationKey = (conversation.Enabled || options.Callouts.Enabled || feedback) && _conversations is not null
+            && modelChoice.Strategy != SelectionStrategy.CheapestCapable && !housekeeping
+            ? ConversationTracker.Identify(retryClient, chat)
+            : null;
+
         if (conversationKey is not null && firstTurn)
         {
             _conversations!.Forget(conversationKey);
@@ -225,7 +234,7 @@ internal sealed partial class PromptRoutingMiddleware
         // retry escalation is on.
         RetryEscalationOptions retry = options.RetryEscalation;
         int highestTier = runtime.Router.Models.Where(m => m.Enabled).Select(m => m.Tier).DefaultIfEmpty(0).Max();
-        bool retryable = (retry.Enabled || feedback) && _retries is not null && requestedModel is null && !chat.IsToolResultContinuation;
+        bool retryable = (retry.Enabled || feedback) && _retries is not null && requestedModel is null && !chat.IsToolResultContinuation && clientTurn is null;
         DecisionRecord? retried = retryable ? _retries!.Previous(retryClient, prompt, retry.Window) : null;
         int? minimumTier = retry.Enabled && retried is not null && retried.Tier < highestTier ? retried.Tier + 1 : null;
 
@@ -250,6 +259,7 @@ internal sealed partial class PromptRoutingMiddleware
             RequestedModel = requestedModel,
             Strategy = strategy,
             AffinityModel = affinityModel,
+            Classification = clientTurn is { } kind && !explicitTurn ? ClientTurns.Decide(kind, options.Housekeeping, chat.EstimatedInputTokens) : null,
         };
 
         RoutingPlan plan = await RouteAsync(runtime, routingRequest, options.FailOpen, context.RequestAborted).ConfigureAwait(false);

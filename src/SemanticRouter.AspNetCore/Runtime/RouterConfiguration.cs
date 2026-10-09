@@ -223,6 +223,24 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             errors.Add("Middleware:Reliability needs a positive Window and Period, MinimumTurns of at least 1, a MaxFailureRate above 0 and at most 1, and a PeerMargin of 0 or more.");
         }
 
+        HousekeepingOptions housekeeping = Middleware.Housekeeping;
+        if (housekeeping.Tier < 0 || housekeeping.ResumedTier < 0)
+        {
+            errors.Add("Middleware:Housekeeping Tier and ResumedTier must not be negative.");
+        }
+
+        foreach (string pattern in housekeeping.Patterns)
+        {
+            try
+            {
+                _ = new System.Text.RegularExpressions.Regex(pattern, System.Text.RegularExpressions.RegexOptions.None, TimeSpan.FromMilliseconds(100));
+            }
+            catch (ArgumentException ex)
+            {
+                errors.Add($"Middleware:Housekeeping:Patterns has an invalid regular expression '{pattern}': {ex.Message}");
+            }
+        }
+
         if (Middleware.RetryEscalation.Enabled && Middleware.RetryEscalation.Window <= TimeSpan.Zero)
         {
             errors.Add("Middleware:RetryEscalation:Window must be positive.");

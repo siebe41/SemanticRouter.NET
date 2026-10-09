@@ -35,7 +35,8 @@
       "Tier": 1,
       "Utterances": [
         "hi there", "hello, how are you?", "good morning", "thanks a lot",
-        "thank you for your help", "who are you?", "tell me a joke", "what can you do?"
+        "thank you for your help", "who are you?", "tell me a joke", "what can you do?",
+        "hey!", "is this a chatbot?", "see you later", "nice to meet you"
       ]
     },
     {
@@ -45,7 +46,8 @@
       "Utterances": [
         "summarize this text", "summarize this article in three bullet points", "give me a short summary of this email",
         "rewrite this paragraph to sound more professional", "fix the grammar and spelling in this sentence",
-        "translate this sentence to French", "make this message shorter", "rephrase this in simpler words"
+        "translate this sentence to French", "make this message shorter", "rephrase this in simpler words",
+        "shorten this text", "check this document for typos", "list the main points of this text", "turn this into a friendly email"
       ]
     },
     {
@@ -56,7 +58,8 @@
       "Utterances": [
         "write a regex that matches email addresses", "write a unit test for this function", "add a docstring to this method",
         "convert this json to yaml", "write a commit message for this diff", "rename this variable everywhere",
-        "write a bash one-liner to count lines in all files"
+        "write a bash one-liner to count lines in all files",
+        "write a small script that renames files", "add type annotations to this function", "write a sql query for this table", "what does this compiler error mean", "explain what this line of code does", "write a dockerfile for this app", "parse this string into an object", "write a shell script that backs up a folder"
       ]
     },
     {
@@ -67,7 +70,8 @@
         "design a scalable architecture for a multi-tenant SaaS platform",
         "compare the trade-offs between event sourcing and CRUD", "analyze this contract for legal risks",
         "prove that the square root of two is irrational", "explain step by step how to migrate a monolith to microservices",
-        "evaluate the security implications of this authentication flow"
+        "evaluate the security implications of this authentication flow",
+        "assess the risks of this migration plan", "how should we make this system highly available", "choose between these two architectures and justify the choice", "threat-model this feature", "prove this algorithm is correct", "design a strategy for disaster recovery"
       ]
     },
     {
@@ -78,7 +82,8 @@
       "Utterances": [
         "debug this race condition in my multithreaded code", "find the memory leak in this service",
         "refactor this legacy class to use dependency injection", "why does this async code deadlock",
-        "optimize this SQL query that is timing out", "review this pull request for bugs"
+        "optimize this SQL query that is timing out", "review this pull request for bugs",
+        "figure out why this service crashes in production", "this test fails intermittently on CI, find the cause", "find out why this process leaks memory under load", "make this endpoint faster", "split this huge class into smaller ones", "investigate why the cache serves stale data"
       ]
     },
     {
@@ -89,7 +94,8 @@
       "Utterances": [
         "implement this feature across the codebase", "add a new endpoint and wire it into the service",
         "fix the failing tests and make the build pass", "migrate this project to the new framework version",
-        "refactor the module and update every caller", "write the integration tests for this flow"
+        "refactor the module and update every caller", "write the integration tests for this flow",
+        "implement the feature described in this issue", "the build is broken, make it pass again", "replace this library with another one across the repository", "add pagination to this API and update its callers", "set up a CI pipeline for this repository", "add a feature flag and wire it through the app", "upgrade the dependencies and fix whatever breaks"
       ]
     },
     {
@@ -99,7 +105,19 @@
       "Utterances": [
         "write a short title for this conversation", "summarize the conversation so far",
         "describe what this command does in a few words", "suggest a commit message for these changes",
-        "is this a question or a command", "extract the file paths mentioned above"
+        "is this a question or a command", "extract the file paths mentioned above",
+        "generate a title for this session", "does this message start a new topic",
+        "write a summary of this session for the next agent"
+      ]
+    },
+    {
+      "Name": "continuation",
+      "Description": "Approvals and \"carry on\" turns in agentic work: they say nothing about difficulty, so in a conversation they take its tier (FollowsConversation); tier 3 otherwise.",
+      "Tier": 3,
+      "FollowsConversation": true,
+      "Utterances": [
+        "go ahead", "yes, proceed", "continue", "keep going", "approve the plan",
+        "looks good, do it", "continue from where you stopped", "carry on with the next step"
       ]
     }
   ],
