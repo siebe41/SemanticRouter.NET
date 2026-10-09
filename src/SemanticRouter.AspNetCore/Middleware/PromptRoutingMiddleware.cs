@@ -175,7 +175,8 @@ internal sealed partial class PromptRoutingMiddleware
 
         // Only a request that carries an earlier answer continues a conversation; a first turn starts it afresh (two
         // separate conversations can open with the same message).
-        bool firstTurn = !chat.Messages.Any(m => m.Role == "assistant");
+        // An assistant turn may hold only tool calls (no text), so look at the turns, not the flattened messages.
+        bool firstTurn = !chat.Turns.Any(t => t.Role == "assistant") && !chat.Messages.Any(m => m.Role == "assistant");
         if (conversationKey is not null && firstTurn)
         {
             _conversations!.Forget(conversationKey);

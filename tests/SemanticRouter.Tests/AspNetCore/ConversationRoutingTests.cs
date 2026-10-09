@@ -162,6 +162,25 @@ public sealed class ConversationRoutingTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_tool_loop_without_assistant_text_keeps_the_conversation_and_its_callout()
+    {
+        CloudHttp = StubHttpMessageHandler.Json("""{"id":"r","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}""");
+        HttpClient client = await StartDispatchAsync();
+        object toolUse = new { role = "assistant", content = new object[] { new { type = "tool_use", id = "t1", name = "Bash", input = new { command = "make" } } } };
+        object toolResult = new { role = "user", content = new object[] { new { type = "tool_result", tool_use_id = "t1", content = "ok" } } };
+        StringContent Anthropic(params object[] messages) =>
+            new(JsonSerializer.Serialize(new { model = "claude-sonnet-4-5", max_tokens = 100, system = "You are a coding agent.", messages }), Encoding.UTF8, "application/json");
+
+        // A task, then a tool loop whose assistant turns are tool calls only (no text), then a short follow-up.
+        await client.PostAsync("/v1/messages", Anthropic(new { role = "user", content = Task }));
+        await client.PostAsync("/v1/messages", Anthropic(new { role = "user", content = Task }, toolUse, toolResult));
+        HttpResponseMessage followUp = await client.PostAsync("/v1/messages", Anthropic(
+            new { role = "user", content = Task }, toolUse, toolResult, new { role = "assistant", content = "done" }, new { role = "user", content = "ok, go ahead" }));
+
+        (Header(followUp, "Reason"), Header(followUp, "Tier")).Should().Be(("ConversationFloor", "4"), "the tool loop continued the conversation, it did not start a new one");
+    }
+
+    [Fact]
     public async Task An_idle_conversation_is_forgotten()
     {
         var time = new ManualTimeProvider();
