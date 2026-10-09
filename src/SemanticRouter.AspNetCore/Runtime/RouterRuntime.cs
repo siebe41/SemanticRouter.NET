@@ -166,7 +166,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                         _services.GetRequiredService<IOptions<PromptRouterMiddlewareOptions>>().Value,
                         _services.GetService<IOptions<UsageOptions>>()?.Value ?? new UsageOptions(),
                         _services.GetService<IOptions<MemoryOptions>>()?.Value,
-                        _services.GetService<IOptions<TuningOptions>>()?.Value);
+                        _services.GetService<IOptions<TuningOptions>>()?.Value,
+                        _services.GetService<IOptions<NotificationOptions>>()?.Value);
                 }
             }
 

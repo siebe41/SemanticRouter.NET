@@ -2,6 +2,7 @@
 import { fmtMs, trendsCard } from './charts.js';
 import { tierOptions } from './config.js';
 import { h, num, readOnly, state, tierName, views, when } from './core.js';
+import { digestCard, noticesCard } from './digest.js';
 import { learnedBadge, learnedCard } from './learned.js';
 import { unreliableBadge } from './reliability.js';
 import { isLocalModel } from './live.js';
@@ -18,6 +19,8 @@ views.overview = () => {
 
   return `
     <div class="section-head"><h1>Overview</h1><span class="muted">What the router is doing right now.</span></div>
+    ${noticesCard()}
+    ${digestCard()}
     <div class="grid cols-4 section">
       <div class="card stat"><span class="value">${a.total}</span><span class="label">routed (last ${a.total >= 500 ? '500' : a.total})</span></div>
       <div class="card stat"><span class="value">${a.served}</span><span class="label">served · ${a.failed} failed · ${a.degraded} degraded</span></div>

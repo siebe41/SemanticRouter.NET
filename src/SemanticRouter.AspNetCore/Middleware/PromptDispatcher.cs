@@ -18,6 +18,7 @@ internal sealed partial class PromptDispatcher
     private readonly PromptRouterMetrics _metrics;
     private readonly IUsageLedger? _ledger;
     private readonly BudgetGate? _budgets;
+    private readonly ConnectorIncidents? _incidents;
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
 
@@ -27,13 +28,15 @@ internal sealed partial class PromptDispatcher
         ILogger<PromptDispatcher> logger,
         IUsageLedger? ledger = null,
         BudgetGate? budgets = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        ConnectorIncidents? incidents = null)
     {
         _health = health;
         _metrics = metrics;
         _logger = logger;
         _ledger = ledger;
         _budgets = budgets;
+        _incidents = incidents;
         _time = time ?? TimeProvider.System;
     }
 
@@ -171,6 +174,7 @@ internal sealed partial class PromptDispatcher
             {
                 case ConnectorOutcome.Completed:
                     _health.ReportSuccess(model);
+                    _incidents?.Served(connector.Name);
                     LogServed(_logger, model.Name, connector.Name, tried);
                     RecordUsage(runtime, model, connector.Name, capture.Usage, activity, plan.Requirements.Profile);
                     _metrics.RecordRequest(model.Name, connector.Name, "served", Stopwatch.GetElapsedTime(started));
@@ -202,6 +206,7 @@ internal sealed partial class PromptDispatcher
                     }
 
                     string failure = runtime.Redactor.Redact(result.Detail ?? "failed");
+                    _incidents?.Failed(connector.Name, result.FailureKind, failure);
                     LogFailover(_logger, model.Name, result.FailureKind, failure);
                     _metrics.RecordFailover(model.Name, result.FailureKind);
                     attempts.Add($"{model.Name}: {failure}");

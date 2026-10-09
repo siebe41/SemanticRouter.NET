@@ -43,6 +43,9 @@ public sealed class RouterConfiguration : SemanticRouterOptions
     /// <summary>Automatic tuning of thresholds and utterances.</summary>
     public TuningOptions Tuning { get; set; } = new();
 
+    /// <summary>When the router asks for a person's attention.</summary>
+    public NotificationOptions Notifications { get; set; } = new();
+
     /// <summary>Serializes a document (secrets included).</summary>
     public string ToJson() => JsonSerializer.Serialize(this, Json);
 
@@ -80,7 +83,18 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         PromptRouterMiddlewareOptions middleware,
         UsageOptions usage,
         MemoryOptions? memory,
-        TuningOptions? tuning)
+        TuningOptions? tuning) => Compose(routing, connectors, embeddings, middleware, usage, memory, tuning, notifications: null);
+
+    /// <summary>Builds a document from separately bound option objects, including the usage, memory, tuning and notification sections.</summary>
+    public static RouterConfiguration Compose(
+        SemanticRouterOptions routing,
+        IReadOnlyDictionary<string, ConnectorOptions> connectors,
+        EmbeddingProviderOptions embeddings,
+        PromptRouterMiddlewareOptions middleware,
+        UsageOptions usage,
+        MemoryOptions? memory,
+        TuningOptions? tuning,
+        NotificationOptions? notifications)
     {
         ArgumentNullException.ThrowIfNull(usage);
         ArgumentNullException.ThrowIfNull(routing);
@@ -106,6 +120,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         if (tuning is not null)
         {
             document.Tuning = JsonSerializer.Deserialize<TuningOptions>(JsonSerializer.Serialize(tuning, Json), Json)!;
+        }
+
+        if (notifications is not null)
+        {
+            document.Notifications = JsonSerializer.Deserialize<NotificationOptions>(JsonSerializer.Serialize(notifications, Json), Json)!;
         }
 
         return document;
@@ -352,6 +371,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         }
 
         errors.AddRange(Tuning.GetValidationErrors());
+        errors.AddRange(Notifications.GetValidationErrors());
 
         if (Memory.MinimumLineLength < 8)
         {

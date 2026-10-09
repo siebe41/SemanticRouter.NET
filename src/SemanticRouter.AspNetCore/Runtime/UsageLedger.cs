@@ -64,6 +64,9 @@ public enum UsageGrouping
 
     /// <summary>By routing profile.</summary>
     Profile = 5,
+
+    /// <summary>By where the model runs: <c>local</c> or <c>cloud</c>.</summary>
+    Location = 6,
 }
 
 /// <summary>One group of a usage summary.</summary>
@@ -156,6 +159,7 @@ public static class UsageSummaries
             UsageGrouping.Route => record.Route ?? "(no route)",
             UsageGrouping.Client => record.Client ?? "(no key)",
             UsageGrouping.Profile => record.Profile ?? "(no profile)",
+            UsageGrouping.Location => record.IsLocal ? "local" : "cloud",
             _ => TimeZoneInfo.ConvertTime(record.Timestamp, zone).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
         };
     }
