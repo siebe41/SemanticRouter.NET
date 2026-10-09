@@ -15,7 +15,7 @@ public static class SemanticRouterServiceCollectionExtensions
     /// <summary>
     /// Registers prompt routing, binding <see cref="SemanticRouterOptions"/> (routes, models, selection) from
     /// <paramref name="configuration"/> (typically <c>builder.Configuration.GetSection("SemanticRouter")</c>) along with
-    /// the <c>Connectors</c>, <c>Embeddings</c>, <c>Middleware</c>, <c>Usage</c>, <c>Memory</c> and <c>Dashboard</c> child sections.
+    /// the <c>Connectors</c>, <c>Embeddings</c>, <c>Middleware</c>, <c>Usage</c>, <c>Memory</c>, <c>Tuning</c>, <c>Notifications</c> and <c>Dashboard</c> child sections.
     /// </summary>
     public static SemanticRouterBuilder AddSemanticPromptRouting(this IServiceCollection services, IConfiguration configuration)
     {
@@ -29,6 +29,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.AddOptions<UsageOptions>().Bind(configuration.GetSection("Usage"));
         services.AddOptions<MemoryOptions>().Bind(configuration.GetSection("Memory"));
         services.AddOptions<TuningOptions>().Bind(configuration.GetSection("Tuning"));
+        services.AddOptions<NotificationOptions>().Bind(configuration.GetSection("Notifications"));
         services.AddOptions<Microsoft.AspNetCore.Builder.RouterDashboardOptions>().Bind(configuration.GetSection("Dashboard"));
 
         return AddCore(services);
@@ -92,10 +93,14 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<IEmbeddingProvider, RuntimeEmbeddingProviderFacade>();
         services.TryAddSingleton<IPromptExtractor, RuntimeExtractorFacade>();
         services.TryAddSingleton<ChatConnectorRegistry>();
+        services.TryAddSingleton<ConnectorIncidents>();
         services.TryAddSingleton<PromptDispatcher>();
         services.TryAddSingleton<AnswerJudge>();
         services.AddHostedService<SemanticRouterWarmupService>();
         services.AddHostedService<TuningService>();
+        services.TryAddSingleton<RouterNotices>();
+        services.TryAddSingleton<NoticeService>();
+        services.AddHostedService(sp => sp.GetRequiredService<NoticeService>());
 
         // Connector clients time out per request (time to response headers), so streamed replies are never cut off.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<HttpClientFactoryOptions>, ConnectorHttpClientOptions>());

@@ -82,6 +82,25 @@ internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time,
         return null;
     }
 
+    /// <summary>In how many of the budget's last <paramref name="periods"/> periods (the current one included) it was spent.</summary>
+    public int PeriodsSpent(BudgetDefinition budget, UsageOptions usage, int periods)
+    {
+        TimeZoneInfo zone = ZoneOf(usage);
+        DateTimeOffset at = time.GetUtcNow();
+        int spent = 0;
+        for (int i = 0; i < periods; i++)
+        {
+            (DateTimeOffset start, DateTimeOffset end) = PeriodOf(budget.Period, at, zone);
+            spent += Exceeded(budget, ledger.Total(start, end, NullIfEmpty(budget.Model), NullIfEmpty(budget.Connector), NullIfEmpty(budget.Profile))) ? 1 : 0;
+            at = start.AddTicks(-1);
+        }
+
+        return spent;
+    }
+
+    private static bool Exceeded(BudgetDefinition budget, UsageTotals spent) =>
+        (budget.MaxTokens is { } t && spent.TotalTokens >= t) || (budget.MaxCostUsd is { } c && spent.CostUsd >= c);
+
     public static bool Covers(BudgetDefinition budget, ModelDefinition model, string? profile = null) =>
         (budget.Model is { Length: > 0 } name && string.Equals(name, model.Name, StringComparison.OrdinalIgnoreCase))
         || (budget.Connector is { Length: > 0 } connector && string.Equals(connector, model.Connector, StringComparison.OrdinalIgnoreCase))
@@ -96,11 +115,11 @@ internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time,
         UsageTotals spent = ledger.Total(start, end, NullIfEmpty(budget.Model), NullIfEmpty(budget.Connector), NullIfEmpty(budget.Profile));
         double tokenShare = budget.MaxTokens is > 0 and { } maxTokens ? (double)spent.TotalTokens / maxTokens : 0;
         double costShare = budget.MaxCostUsd is > 0 and { } maxCost ? (double)(spent.CostUsd / maxCost) : 0;
-        bool exceeded = (budget.MaxTokens is { } t && spent.TotalTokens >= t) || (budget.MaxCostUsd is { } c && spent.CostUsd >= c);
+        bool exceeded = Exceeded(budget, spent);
         int percent = (int)Math.Floor(Math.Max(tokenShare, costShare) * 100);
         bool warning = !exceeded && percent >= usage.WarnAtPercent;
         var status = new BudgetStatus(
-            budget.Name, budget.Model is { Length: > 0 } m ? $"model {m}" : budget.Connector is { Length: > 0 } c2 ? $"connector {c2}" : $"profile {budget.Profile}", budget.Period, start, end,
+            budget.Name, budget.Model is { Length: > 0 } m ? $"model {m}" : budget.Connector is { Length: > 0 } c ? $"connector {c}" : $"profile {budget.Profile}", budget.Period, start, end,
             spent.TotalTokens, budget.MaxTokens, spent.CostUsd, budget.MaxCostUsd, percent, exceeded, warning);
 
         string key = budget.Name + (exceeded ? ":spent" : ":warn");

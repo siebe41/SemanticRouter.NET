@@ -18,7 +18,7 @@ namespace SemanticRouter.Desktop;
 internal sealed class App(DesktopOptions options, SingleInstance instance, TextWriter log) : Application
 {
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(5) };
-    private static readonly TimeSpan LearnedEvery = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan DigestEvery = TimeSpan.FromMinutes(1);
 
     private readonly string _directory = options.Host.ConfigurationDirectory;
     private readonly SignInLaunch? _signIn = SignInLaunch.ForThisMachine();
@@ -31,8 +31,10 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private AboutWindow? _about;
     private bool _openWhenReady;
     private bool _quitting;
-    private int _learnedThisWeek;
-    private DateTimeOffset _learnedChecked;
+    private TrayDigest _digest = TrayDigest.None;
+    private DateTimeOffset _digestChecked;
+    private readonly HashSet<string> _announced = new(StringComparer.Ordinal);
+    private TrayIcon? _tray;
 
     private NativeMenuItem _status = null!;
     private NativeMenuItem _problem = null!;
@@ -42,6 +44,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private NativeMenuItem _inBrowser = null!;
     private NativeMenuItem _atSignIn = null!;
     private NativeMenuItem _learned = null!;
+    private NativeMenuItem _week = null!;
+    private NativeMenuItem _needs = null!;
 
     public override void Initialize()
     {
@@ -83,7 +87,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         poll.Tick += (_, _) =>
         {
             _router.Refresh();
-            _ = RefreshLearnedAsync();
+            _ = RefreshDigestAsync();
         };
         poll.Start();
 
@@ -106,6 +110,10 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         open.Click += (_, _) => OpenDashboard();
         _learned = new NativeMenuItem { IsVisible = false };
         _learned.Click += (_, _) => OpenDashboard("#/learned");
+        _week = new NativeMenuItem { IsVisible = false };
+        _week.Click += (_, _) => OpenDashboard("#/overview");
+        _needs = new NativeMenuItem { IsVisible = false };
+        _needs.Click += (_, _) => OpenDashboard(_digest.NeedsLink);
         _status = new NativeMenuItem(_router.Status) { IsEnabled = false };
         _problem = new NativeMenuItem { IsEnabled = false, IsVisible = false };
         _restart = new NativeMenuItem("Restart router");
@@ -134,11 +142,11 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         var quit = new NativeMenuItem("Quit SemanticRouter");
         quit.Click += (_, _) => _ = QuitAsync();
 
-        var tray = new TrayIcon
+        var tray = _tray = new TrayIcon
         {
             Icon = _icon,
             ToolTipText = "SemanticRouter",
-            Menu = [open, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, logs, configuration, new NativeMenuItemSeparator(), about, quit],
+            Menu = [open, _needs, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, logs, configuration, new NativeMenuItemSeparator(), about, quit],
         };
         tray.Clicked += (_, _) => OpenDashboard();
         UpdateMenu();
@@ -173,35 +181,54 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _inWindow.IsChecked = surface == DashboardSurface.Window;
         _inBrowser.IsChecked = surface == DashboardSurface.Browser;
         _atSignIn.IsChecked = _signIn?.IsEnabled() == true;
-        _learned.Header = $"Router learned {_learnedThisWeek} thing{(_learnedThisWeek == 1 ? string.Empty : "s")} this week";
-        _learned.IsVisible = _learnedThisWeek > 0;
+        _learned.Header = $"Router learned {_digest.Learned} thing{(_digest.Learned == 1 ? string.Empty : "s")} this week";
+        _learned.IsVisible = _digest.Learned > 0;
+        _week.Header = _digest.Week ?? string.Empty;
+        _week.IsVisible = _digest.Week is not null;
+        _needs.Header = _digest.NeedsLine ?? string.Empty;
+        _needs.IsVisible = _digest.NeedsLine is not null;
+        if (_tray is not null)
+        {
+            _tray.ToolTipText = _digest.NeedsLine is { } needs ? "SemanticRouter: " + needs : "SemanticRouter";
+        }
     }
 
-    /// <summary>Asks the router how many changes automatic tuning applied this week (once a minute), for the menu.</summary>
-    private async Task RefreshLearnedAsync()
+    /// <summary>
+    /// Reads the router's digest (once a minute) for the menu: the week, what it learned, and what needs a decision. A
+    /// notice not seen before is shown as a system notification, unless notifications are off on the router.
+    /// </summary>
+    private async Task RefreshDigestAsync()
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        if (_router.Url is not { } url || now - _learnedChecked < LearnedEvery)
+        if (_router.Url is not { } url || now - _digestChecked < DigestEvery)
         {
             return;
         }
 
-        _learnedChecked = now;
-        int count;
+        _digestChecked = now;
+        TrayDigest digest;
         try
         {
-            using JsonDocument tuning = JsonDocument.Parse(await Http.GetStringAsync(new Uri(url + "/router/api/tuning?limit=1")).ConfigureAwait(false));
-            count = tuning.RootElement.GetProperty("thisWeek").GetInt32();
+            digest = TrayDigest.Parse(await Http.GetStringAsync(new Uri(url + "/router/api/digest")).ConfigureAwait(false));
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException or InvalidOperationException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
         {
-            // An older router, or a dashboard that wants a token from this machine too: no count.
-            count = 0;
+            // An older router, a dashboard that wants a token from this machine too, or a moment it did not answer:
+            // keep what the menu shows, so a notice is not announced again when it answers.
+            return;
         }
 
         Dispatcher.UIThread.Post(() =>
         {
-            _learnedThisWeek = count;
+            foreach (TrayNotice notice in digest.New(_announced))
+            {
+                DesktopNotifier.Show("SemanticRouter: " + notice.Title, notice.Detail);
+            }
+
+            // A notice that cleared may be announced again if it comes back.
+            _announced.IntersectWith(digest.Notices.Select(n => n.Key));
+            _announced.UnionWith(digest.Notices.Select(n => n.Key));
+            _digest = digest;
             UpdateMenu();
         });
     }

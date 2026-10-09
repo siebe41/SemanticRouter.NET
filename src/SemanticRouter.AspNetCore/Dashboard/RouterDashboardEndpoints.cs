@@ -302,15 +302,7 @@ public static partial class RouterDashboardEndpoints
         {
             UsageOptions usage = provider.Current.Configuration.Usage;
             TimeZoneInfo zone = BudgetGate.ZoneOf(usage);
-            DateTimeOffset now = DateTimeOffset.UtcNow;
-            (DateTimeOffset since, DateTimeOffset until) = window switch
-            {
-                "day" => BudgetGate.PeriodOf(BudgetPeriod.Day, now, zone),
-                "week" => BudgetGate.PeriodOf(BudgetPeriod.Week, now, zone),
-                "month" => BudgetGate.PeriodOf(BudgetPeriod.Month, now, zone),
-                "30d" => (now.AddDays(-30), now.AddMinutes(1)),
-                _ => (now.AddDays(-7), now.AddMinutes(1)),
-            };
+            (DateTimeOffset since, DateTimeOffset until) = UsageWindow(window, zone, DateTimeOffset.UtcNow);
             UsageGrouping grouping = Enum.TryParse(by, ignoreCase: true, out UsageGrouping parsed) ? parsed : UsageGrouping.Model;
             return Results.Json(new UsageResponse(
                 since, until, grouping, usage.ReferenceModel, ledger.Total(since, until), ledger.Summarize(since, until, grouping, zone), budgets.Status(usage)), ApiJson);
@@ -382,6 +374,7 @@ public static partial class RouterDashboardEndpoints
         EvaluationApi.Map(api, ApiJson, Actor);
         TuningApi.Map(api, ApiJson, Actor);
         ReliabilityApi.Map(api, ApiJson);
+        DigestApi.Map(api, ApiJson);
         return group;
     }
 
@@ -539,6 +532,19 @@ public static partial class RouterDashboardEndpoints
 
     [System.Text.RegularExpressions.GeneratedRegex("^[a-z0-9-]+\\.js$")]
     private static partial System.Text.RegularExpressions.Regex ModuleName();
+
+    /// <summary>
+    /// The period a usage window names (<c>day</c>, <c>week</c>, <c>month</c> in the budget time zone; <c>30d</c>; the last
+    /// 7 days otherwise), shared by the Usage page and the digest so they add up the same requests.
+    /// </summary>
+    internal static (DateTimeOffset Since, DateTimeOffset Until) UsageWindow(string? window, TimeZoneInfo zone, DateTimeOffset now) => window switch
+    {
+        "day" => BudgetGate.PeriodOf(BudgetPeriod.Day, now, zone),
+        "week" => BudgetGate.PeriodOf(BudgetPeriod.Week, now, zone),
+        "month" => BudgetGate.PeriodOf(BudgetPeriod.Month, now, zone),
+        "30d" => (now.AddDays(-30), now.AddMinutes(1)),
+        _ => (now.AddDays(-7), now.AddMinutes(1)),
+    };
 
     private static IResult Asset(HttpContext context, string name, string contentType, string prefix)
     {

@@ -18,6 +18,8 @@ builder.Services
 |---|---|
 | **Overview** | Counters, every model with its tier and health (ready, cooling down, disabled), the runtime (configuration version and source, store, embeddings state with the route index's size and warm-up time, classification-cache hit rate, gateway paths), served-by and required-tier charts, latency per connector (time to first byte p50/p95 and total p50 over the activity log), and **Try a prompt**: classify without calling a model, or send it through the gateway for real. |
 | **Live** | What is happening now, pushed over server-sent events: tiles for requests, the share answered locally, input tokens (reported by the backend, or estimated) to cloud and local models, and notes whose text went to the cloud; a **model router** graph from clients (named by gateway key, or by protocol) through the router to every model, with the edge that just carried a request animated; a feed of decisions with the notes each request carried; and a strip of the latest memory crossings. |
+| **Overview → Needs a decision** | Shown only when something needs you; see [Digest and notifications](#digest-and-notifications). |
+| **Overview → This week** | The [digest](#digest-and-notifications) of the last 7 days: prompts routed, the share served locally, cost and savings, decisions raised a tier, signs a decision fell short, and what the router learned. |
 | **Overview → Trends** | Requests per interval and p50/p95 latency over 1 hour, 24 hours, 7 or 30 days, with a table view. |
 | **Usage** | Tokens and cost by model, connector, route, client, profile or day; "saved by routing" against a reference model; budgets with their state; the usage settings and budget editor. |
 | **Activity** | The last 500 routed requests: prompt preview, protocol, tier, reason, route and similarity, the model that answered, attempt number, degraded flag, timing. Each entry shows its routing profile, project, the signals that kept it local, what the connector noted (a repaired or malformed tool call) and the time to the first byte under the total. Filter by failed, degraded, tool-bearing or profile. **Label** says which tier a prompt should have had: it adds the prompt to the evaluation set and, optionally, as an utterance to a route. |
@@ -35,6 +37,35 @@ builder.Services
 | **JSON** | The whole document as text (the same shape as the `SemanticRouter` section of `appsettings.json`): edit, download, compare with the application baseline, reset. **History** lists every applied version (when, what applied it, who), diffs any of them against the draft and rolls back to it. |
 
 ![The Live page](images/live.png)
+
+## Digest and notifications
+
+The router handles what it can on its own and asks for attention only when a person needs to decide something.
+
+**The digest** (Overview → **This week**, `GET api/digest`, and a line in the desktop app's tray menu) covers the last 7 days:
+
+- prompts routed and requests served;
+- the share served by local models;
+- cost, and the savings against `Usage:ReferenceModel` when it is set;
+- decisions raised a tier (complexity, an ambiguous match, a retry, the conversation's floor), degraded and failed requests;
+- signs a decision fell short ([feedback](routing-quality.md#feedback)) by kind;
+- the changes [automatic tuning](routing-quality.md#automatic-tuning) made, linked to the Router learned page, where each one can be undone.
+
+Its numbers are the Usage page's for the same window.
+
+**Notices** say what needs a decision. Each is listed under **Needs a decision** on the Overview, with a link to the page to decide on, and it clears on its own when the condition ends:
+
+| Notice | When |
+|---|---|
+| A subscription keeps hitting its usage limit | A connector hit its usage limit on `Notifications:LimitDays` (3) of the last 7 days. |
+| A budget keeps running out | A [budget](observability.md#budgets) was spent in 2 of its last 4 periods (days, weeks or months), the current one included. |
+| A model is unreliable for most of its work | [Model reliability](routing-quality.md#model-reliability) left it out of more than half of the kinds of work it does (routes, requests with tools). |
+| A connector is down | Every request to it has failed for `Notifications:ConnectorDownAfter` (1 hour). A usage limit does not count. |
+| Tuning wants a change it may not make | [Automatic tuning](routing-quality.md#automatic-tuning) has suggestions waiting: `Tuning:Mode` is `Suggest`, or a change someone undid came back with stronger evidence. |
+
+**Notifications:** when a notice appears, the [desktop app](desktop.md) shows a system notification and the service writes a warning to its log ("Needs a decision: …"). Each is announced once, and the log says when it clears. `Notifications:Enabled: false` is the one switch that silences both; the Overview still lists the notices.
+
+Connector failures and usage-limit hits are counted in memory, so a restart starts their count again.
 
 ## Apply, save, revert
 
@@ -89,7 +120,8 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `GET api/reliability`, `POST api/reliability/reset` | [Model reliability](routing-quality.md#model-reliability) per route and with tools, and offering a left-out model again. |
 | `GET api/activity/series?window=1h\|24h\|7d\|30d` | Counts, mix and latency percentiles per bucket. |
 | `GET api/activity/export?format=csv\|jsonl&prompts=false&since=&until=` | Download activity; prompt previews only with `prompts=true`. |
-| `GET api/usage?window=day\|week\|month\|7d\|30d&by=model\|connector\|route\|client\|day` | Usage totals and groups, the reference model and every budget's state. |
+| `GET api/usage?window=day\|week\|month\|7d\|30d&by=model\|connector\|route\|client\|profile\|location\|day` | Usage totals and groups (`location`: local or cloud), the reference model and every budget's state. |
+| `GET api/digest?window=…` | The [digest](#digest-and-notifications) for the same windows as `api/usage` (default the last 7 days), with `notices` (what needs a decision) and `notify`. |
 | `GET api/events` | Server-sent events for live views: `activity` when a request is routed and again when it finishes, and a keep-alive comment every 15 s. |
 | `GET api/memory` | The memory map and sharing counts ([memory.md](memory.md#api)). |
 | `POST api/memory/refresh` | Rescan the memory sources. |

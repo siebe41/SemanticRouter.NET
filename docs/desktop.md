@@ -27,6 +27,8 @@ The tray menu:
 | Item | What it does |
 |---|---|
 | **Open dashboard** | Opens the dashboard where you chose (below). |
+| **Needs a decision: …** | Shown when something needs you (a connector down, a subscription that keeps hitting its limit, …); opens the page to decide on. See [notices](dashboard.md#digest-and-notifications). |
+| **This week: 1,234 prompts · 62% local · saved $4.10** | The [digest](dashboard.md#digest-and-notifications) of the last 7 days; opens the Overview. |
 | **Router learned N things this week** | Shown when [automatic tuning](routing-quality.md#automatic-tuning) applied changes in the last 7 days; opens the Router learned page. |
 | Status line | Where the router listens, whether it is the app's own or one already running, or why it could not start. |
 | **Restart router** | Restarts the router: the background service's, or the app's own (for example after it failed to start). |
@@ -36,6 +38,8 @@ The tray menu:
 | **Show the log**, **Show the configuration folder** | The router's log (`logs/semantic-router.log`) and its files. |
 | **About SemanticRouter** | The version, and links to the GitHub repository, the documentation, issues, releases and the licence. |
 | **Quit SemanticRouter** | Stops the app's router and quits. |
+
+When something [needs a decision](dashboard.md#digest-and-notifications), the app also shows a system notification, once per notice (Notification Center on macOS, `notify-send` on Linux, a toast on Windows). `Notifications:Enabled: false` in the router's configuration turns them off.
 
 `SemanticRouter --quit` quits a running app from a script.
 
