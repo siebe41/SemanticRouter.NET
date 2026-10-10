@@ -4,7 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- SemanticRouter.Storage.Sqlite only. -->
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="9.0.20" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
   </ItemGroup>
   <ItemGroup>
     <!-- SemanticRouter.Embeddings.Onnx only. -->
