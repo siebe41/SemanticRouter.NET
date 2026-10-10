@@ -223,7 +223,7 @@ public sealed class SqliteStateTests : IDisposable
         new ConnectorIncidents(_time, new SqliteStateValues(Open())).Failing().Should().BeEmpty("serving again clears it, on disk too");
     }
 
-        [Fact]
+    [Fact]
     public void Feedback_survives_a_restart()
     {
         var log = new RoutingFeedbackLog(store: new SqliteFeedbackStore(Open()));
