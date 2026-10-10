@@ -131,12 +131,15 @@ public sealed class DesktopTests : IDisposable
 
         string copy = Path.Combine(icons, "semantic-router.png");
         File.Exists(copy).Should().BeTrue();
-        File.ReadAllText(fromImage.Location).Should().Contain("Icon=" + copy);
+        File.ReadAllText(fromImage.Location).Should().Contain("Icon=" + Escaped(copy));
 
         var installed = new XdgAutostartFile(Path.Combine(_directory, "autostart2"), Path.Combine(_directory, "icons2"), _ => null);
         installed.Enable("/opt/router/SemanticRouter", []);
-        File.ReadAllText(installed.Location).Should().Contain("Icon=" + Path.Combine(AppContext.BaseDirectory, "semantic-router.png"));
+        File.ReadAllText(installed.Location).Should().Contain("Icon=" + Escaped(Path.Combine(AppContext.BaseDirectory, "semantic-router.png")));
         Directory.Exists(Path.Combine(_directory, "icons2")).Should().BeFalse("an installed program's icon stays where it is");
+
+        // The desktop entry escapes backslashes (key-file string rules), which only Windows paths have.
+        static string Escaped(string path) => path.Replace("\\", "\\\\", StringComparison.Ordinal);
     }
 
     [Fact]
