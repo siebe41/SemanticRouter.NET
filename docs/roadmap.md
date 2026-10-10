@@ -124,7 +124,7 @@ Tracked in [#62](https://github.com/siebe41/SemanticRouter.NET/issues/62).
 | [#68](https://github.com/siebe41/SemanticRouter.NET/issues/68) | Measure how often the judge agrees with hand labels | |
 | [#69](https://github.com/siebe41/SemanticRouter.NET/issues/69) | Learn the cheapest good-enough model per route | |
 | [#70](https://github.com/siebe41/SemanticRouter.NET/issues/70) | Latency as a model selection factor | |
-| [#71](https://github.com/siebe41/SemanticRouter.NET/issues/71) | Send the digest and notices to a webhook | |
+| [#71](https://github.com/siebe41/SemanticRouter.NET/issues/71) | Send the digest and notices to a webhook | JSON, Slack-compatible and ntfy webhooks ([dashboard.md](dashboard.md#digest-and-notifications)). |
 | [#72](https://github.com/siebe41/SemanticRouter.NET/issues/72) | Client side-request wording as an updatable data file | |
 | [#73](https://github.com/siebe41/SemanticRouter.NET/issues/73) | Fuzz tests for protocol translation | |
 | [#74](https://github.com/siebe41/SemanticRouter.NET/issues/74) | Per-client rate limit for gateway keys | |
