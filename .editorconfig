@@ -14,6 +14,8 @@ indent_size = 2
 csharp_style_namespace_declarations = file_scoped:warning
 csharp_using_directive_placement = outside_namespace
 dotnet_sort_system_directives_first = true
+# A braced case block sits at the case label's indentation, as everywhere in the code.
+csharp_indent_case_contents_when_block = false
 
 # Library code should not capture a sync context.
 dotnet_diagnostic.CA2007.severity = warning

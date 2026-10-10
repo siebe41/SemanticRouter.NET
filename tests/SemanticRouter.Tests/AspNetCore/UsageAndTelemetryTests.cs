@@ -106,7 +106,9 @@ public sealed class UsageAndTelemetryTests : RouterHostTest
         HttpClient client = await StartDispatchAsync(
             services: s => s.Configure<SemanticRouterConnectorsOptions>(o => o.Connectors["anthropic-native"] = new ConnectorOptions
             {
-                Type = ConnectorType.Anthropic, BaseAddress = new Uri("https://api.anthropic.example"), ApiKey = "sk-ant-test",
+                Type = ConnectorType.Anthropic,
+                BaseAddress = new Uri("https://api.anthropic.example"),
+                ApiKey = "sk-ant-test",
             }),
             routing: o =>
             {

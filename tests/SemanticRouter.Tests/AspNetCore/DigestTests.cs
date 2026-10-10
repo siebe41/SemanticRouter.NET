@@ -293,7 +293,12 @@ public sealed class DigestTests : RouterHostTest
         HttpClient client = await StartDispatchAsync(s => s.Configure<NotificationOptions>(n => n.Enabled = false), t => t.Mode = TuningMode.Suggest);
         Services.GetRequiredService<ITuningStore>().Save(new TuningChange
         {
-            Id = 1, Timestamp = _time.GetUtcNow(), Kind = TuningChangeKind.DefaultThreshold, OldValue = 0.75f, NewValue = 0.73f, State = TuningChangeState.Suggested,
+            Id = 1,
+            Timestamp = _time.GetUtcNow(),
+            Kind = TuningChangeKind.DefaultThreshold,
+            OldValue = 0.75f,
+            NewValue = 0.73f,
+            State = TuningChangeState.Suggested,
         });
 
         string json = await client.GetStringAsync("/router/api/digest");
