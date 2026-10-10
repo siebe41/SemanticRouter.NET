@@ -36,8 +36,10 @@ ScaffoldingReadMe.txt
 # NuGet Symbol Packages
 *.snupkg
 
-# dotenv environment variables file
+# dotenv environment variables files
 .env
+.env.*
+!.env.example
 
 # Others
 ~$*
@@ -59,3 +61,18 @@ nunit-*.xml
 # Router configuration saved from the dashboard (may contain API keys), and its encrypted secret file
 semantic-router.json
 *.secrets.json
+
+# Router state (UseSqliteState defaults to semantic-router.db in the working directory). The activity log in it
+# holds prompt previews.
+*.db
+*.db-wal
+*.db-shm
+
+# Local secrets and settings that are never shared
+secrets.json
+appsettings.*.local.json
+*.pfx
+
+# Visual Studio user files
+*.user
+.vs/

@@ -157,7 +157,10 @@ public class HeuristicComplexityAnalyzerTests
     {
         var analyzer = new HeuristicComplexityAnalyzer(new ComplexityHeuristicsOptions
         {
-            LengthWeight = 0, CodeWeight = 0, StructureWeight = 0, ReasoningWeight = 0,
+            LengthWeight = 0,
+            CodeWeight = 0,
+            StructureWeight = 0,
+            ReasoningWeight = 0,
         });
 
         analyzer.Analyze("Analyze step by step:\n```\ncode();\n```").Score.Should().Be(0);

@@ -205,7 +205,11 @@ internal static class InitCommand
         // The CLI's own default model: Codex and Copilot change theirs often, so no model id is pinned.
         document.Models.Add(new ModelDefinition
         {
-            Name = executable, Connector = connector, Tier = 4, Priority = 2, Enabled = enabled,
+            Name = executable,
+            Connector = connector,
+            Tier = 4,
+            Priority = 2,
+            Enabled = enabled,
             Capabilities = { "chat", "code", "reasoning" },
             Description = description,
         });

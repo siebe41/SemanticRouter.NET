@@ -121,8 +121,14 @@ public sealed class SqliteStateTests : IDisposable
         var log = new RoutingActivityLog(store: store);
         RoutingActivityEntry first = log.Add(new RoutingActivityEntry
         {
-            Id = log.Reserve(), Timestamp = _time.GetUtcNow(), PromptPreview = "hello there", Tier = 2, Reason = RoutingReason.SemanticMatch,
-            Route = "smalltalk", Protocol = ChatProtocol.Anthropic, Client = "laptop",
+            Id = log.Reserve(),
+            Timestamp = _time.GetUtcNow(),
+            PromptPreview = "hello there",
+            Tier = 2,
+            Reason = RoutingReason.SemanticMatch,
+            Route = "smalltalk",
+            Protocol = ChatProtocol.Anthropic,
+            Client = "laptop",
         });
         first.ServedBy = "local";
         first.Outcome = "served";

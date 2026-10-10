@@ -4,11 +4,44 @@ on:
   push:
     branches: [ main ]
   pull_request:
+  # Weekly run on main so a newly published advisory against an existing dependency fails CI
+  # even when nobody has pushed.
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  secret-scan:
+    name: secret-scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: v8.30.1
+    steps:
+      # Full history: a key committed and then deleted in a later commit is still leaked.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      # Built from the Go module proxy at a pinned version; the Go checksum database verifies the
+      # source, so no third-party action or unverified binary download is involved.
+      - name: Install gitleaks
+        run: |
+          go install "github.com/zricethezav/gitleaks/v8@${GITLEAKS_VERSION}"
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # Findings are redacted in the log. A confirmed false positive goes in .gitleaksignore by its
+      # fingerprint (printed with each finding).
+      - name: Scan git history for secrets
+        run: gitleaks git --redact --verbose --no-banner .
+
   build-and-test:
     name: build-and-test (${{ matrix.os }})
     strategy:
@@ -16,6 +49,7 @@ jobs:
       matrix:
         os: [ ubuntu-latest, windows-latest, macos-latest ]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -23,26 +57,45 @@ jobs:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
       SEMANTIC_ROUTER_TEST_MODELS: ${{ github.workspace }}/.models
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ github.workspace }}/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
 
       # The ONNX embedding tests download two small models (57 MB) once and reuse them.
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ github.workspace }}/.models
           key: onnx-models-${{ hashFiles('src/SemanticRouter.Embeddings.Onnx/OnnxEmbeddingModels.cs') }}
 
       - name: Restore
         run: dotnet restore
+
+      # NuGet advisories for direct and transitive packages. The scheduled run catches advisories
+      # published after a dependency was added.
+      - name: Check for vulnerable packages
+        if: runner.os == 'Linux'
+        run: |
+          dotnet list package --vulnerable --include-transitive
+          vulnerable=$(dotnet list package --vulnerable --include-transitive --format json \
+            | jq -r '[.projects[].frameworks[]? | (.topLevelPackages[]?, .transitivePackages[]?) | .id] | unique | join(", ")')
+          if [ -n "$vulnerable" ]; then
+            echo "::error::Vulnerable NuGet packages: $vulnerable"
+            exit 1
+          fi
+
+      # Whitespace and code style per .editorconfig, so formatting drift is caught in review rather
+      # than fixed later in unrelated diffs. Run `dotnet format` locally to fix.
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        run: dotnet format --verify-no-changes --no-restore
 
       - name: Build
         run: dotnet build --no-restore --configuration Release
@@ -54,7 +107,7 @@ jobs:
         if: runner.os == 'Linux'
         run: dotnet pack --no-build --configuration Release --output artifacts
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: runner.os == 'Linux'
         with:
           name: packages
@@ -67,13 +120,13 @@ jobs:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -95,7 +148,7 @@ jobs:
         working-directory: tests/dashboard-e2e
         run: npx playwright test
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: dashboard-e2e-report
@@ -114,13 +167,13 @@ jobs:
       AVALONIA_TELEMETRY_OPTOUT: 1
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ github.workspace }}/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', 'global.json') }}
@@ -162,9 +215,9 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       AVALONIA_TELEMETRY_OPTOUT: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
         with:
           global-json-file: global.json
 
@@ -215,7 +268,7 @@ jobs:
     name: container image
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Build the image
         run: docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router:ci .

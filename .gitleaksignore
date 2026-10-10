@@ -1,0 +1,8 @@
+# Confirmed false positives, by the fingerprint gitleaks prints (commit:file:rule:line).
+# A real key is never ignored here: revoke it at the provider, then remove it.
+
+# Fake OpenAI-style key in a test that checks a credential in the prompt keeps the request local.
+c30150a37c639a4d642b661b5c8ca8e2d4455f1d:tests/SemanticRouter.Tests/AspNetCore/RoutingProfileGatewayTests.cs:generic-api-key:138
+
+# Throwaway admin token for the CI container smoke test; it only exists inside that container.
+99bca1248e4d636e44a7f7acbf3a141a462ed4f9:.github/workflows/ci.yml:curl-auth-header:67
