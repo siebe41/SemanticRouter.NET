@@ -188,7 +188,7 @@ public sealed class JudgeTests : RouterHostTest
         public void Save(string key, string value) => Values[key] = value;
     }
 
-        [Fact]
+    [Fact]
     public async Task A_local_only_request_is_never_sent_to_a_cloud_judge()
     {
         HttpClient client = await StartJudgedAsync(j => (j.Enabled, j.SampleRate, j.Model) = (true, 1, "cloud-judge"));
