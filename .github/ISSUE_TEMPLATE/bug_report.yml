@@ -1,0 +1,68 @@
+name: Bug report
+description: Something does not work as documented, crashes or gives an error.
+labels: [ "bug", "needs-triage" ]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Search the open issues first in case it is already known.
+
+        **Do not paste API keys, tokens, gateway keys or private prompt text.** Replace them with placeholders such as `<key>`. Security problems go through the Security tab ("Report a vulnerability"), not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps or requests that shows the problem.
+      placeholder: |
+        1. Start the router with ...
+        2. Send ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release, package version or commit.
+      placeholder: e.g. 0.2.0, or main at abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you run it
+      options:
+        - semantic-router dotnet tool
+        - Container image
+        - Desktop app
+        - NuGet packages in my own app
+        - Built from source
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: e.g. Windows 11, macOS 15, Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: The parts of the configuration involved, with every key and token replaced by a placeholder.
+      render: jsonc
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and error output
+      description: Log lines, error responses or stack traces. Check them for keys and prompt text before posting.
+      render: text

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/siebe41/SemanticRouter.NET/security/advisories/new
+    about: Report vulnerabilities privately through the Security tab ("Report a vulnerability"), not in a public issue. See SECURITY.md.

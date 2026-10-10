@@ -1,0 +1,98 @@
+name: Routed to the wrong tier
+description: A prompt went to a model that was too strong (wasted quota) or too weak (poor answer).
+title: "[Routing] "
+labels: [ "routing-quality", "needs-triage" ]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Reports like this are how the starting routes, utterances and thresholds get better. You do not need to read the code; what the router decided and what you expected is enough.
+
+        > [!WARNING]
+        > **Do not paste API keys, tokens, file contents, customer data or any prompt text you would not post publicly.** Issues are public and stay in the history. If the prompt is private, describe it or write a paraphrase that keeps its shape (length, code or not, the kind of question).
+
+        A local-only prompt that reached a non-local model is a security issue: report it through the Security tab ("Report a vulnerability"), not here.
+
+        The decision is in three places: the `X-Prompt-Route-*` response headers, the request's entry on the dashboard's **Activity** page, or `POST /semantic-router/classify` with the prompt.
+  - type: dropdown
+    id: direction
+    attributes:
+      label: What went wrong
+      options:
+        - "Too high: a stronger model than needed (wasted quota or cost)"
+        - "Too low: a weaker model than needed (poor or wrong answer)"
+        - Wrong route, right tier
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: The router's decision
+      description: Reason, tier, route and similarity, from the headers, the Activity entry or the classify endpoint. Paste them as they are.
+      placeholder: |
+        X-Prompt-Route-Reason: SemanticMatch
+        X-Prompt-Route-Tier: 4
+        X-Prompt-Route: complex-code
+        X-Prompt-Route-Similarity: 0.81
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: answered-by
+    attributes:
+      label: Model that answered
+      description: The `X-Prompt-Route-Model` header or the Activity entry's "served by".
+      placeholder: e.g. claude-code-opus
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What the prompt really needed
+      description: The tier or model you think it should have gone to, and why.
+      placeholder: e.g. Tier 2. It is a one-line rename; the local coder model answers it fine.
+    validations:
+      required: true
+  - type: input
+    id: embeddings
+    attributes:
+      label: Embedding provider, model and threshold
+      description: "`Embeddings:Provider` and `Model`, and `DefaultSimilarityThreshold` (or the route's own threshold)."
+      placeholder: e.g. Onnx, all-MiniLM-L6-v2, threshold 0.40
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: Client
+      options:
+        - Claude Code
+        - Codex
+        - GitHub Copilot
+        - OpenAI-compatible SDK or app
+        - Anthropic SDK or app
+        - curl or a script
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: prompt
+    attributes:
+      label: Prompt or paraphrase
+      description: "**No secrets or private text.** A paraphrase that keeps the length and shape is enough. Say whether it was the first message or a later turn, and whether tools were attached."
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: e.g. 0.2.0, or main at abc1234
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Before you submit
+      options:
+        - label: This report contains no keys, tokens or private prompt text.
+          required: true
