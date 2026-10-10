@@ -8,17 +8,19 @@ on:
   push:
     tags: [ 'v*' ]
 
+# Read-only by default; each job that publishes asks for the one extra permission it needs. Every publishing job runs
+# in the `release` environment, so the repository owner can require an approval (and restrict it to v* tags) under
+# Settings > Environments.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   packages:
     runs-on: ubuntu-latest
+    environment: release
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,12 +42,23 @@ jobs:
           name: packages
           path: artifacts/*.nupkg
 
+      # The key is only in this step's environment, not the test and pack steps'. Without it the push is skipped.
       - name: Push to NuGet
-        if: env.NUGET_API_KEY != ''
-        run: dotnet nuget push "artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::notice::NUGET_API_KEY is not set; skipping the NuGet push."
+            exit 0
+          fi
+          dotnet nuget push "artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
   image:
     runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -64,6 +77,7 @@ jobs:
 
   desktop:
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     env:
@@ -100,6 +114,7 @@ jobs:
   installers:
     needs: desktop
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     env:
@@ -131,6 +146,7 @@ jobs:
   installer-macos:
     needs: desktop
     runs-on: macos-latest
+    environment: release
     permissions:
       contents: write
     env:
