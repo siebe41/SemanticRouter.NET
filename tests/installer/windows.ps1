@@ -100,7 +100,11 @@ Wait-Until { (Router-Processes).Count -eq 0 } 30 'the background service to stop
 if (Run-Value 'SemanticRouter') { Fail 'The background service sign-in entry is still there' }
 if (Run-Value 'SemanticRouter Desktop') { Fail "The app's sign-in entry is still there" }
 if (Test-Path $shortcut) { Fail 'The Start menu entry is still there' }
-$left = @(Get-ChildItem -Recurse -Force $root -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer })
+# The uninstaller removes its own Update.exe a few seconds after it exits (a scheduled `rmdir`).
+function Files-Left { @(Get-ChildItem -Recurse -Force $root -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer }) }
+$deadline = (Get-Date).AddSeconds(30)
+while ((Files-Left).Count -gt 0 -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+$left = Files-Left
 if ($left.Count -gt 0) { $left | ForEach-Object { Write-Host "  left: $($_.FullName)" }; Fail "$($left.Count) file(s) left in $root" }
 if (-not (Test-Path $config)) { Fail "The configuration directory $config was removed; it should stay" }
 Write-Host 'Uninstalled: no service, sign-in entry or program files left; the configuration stays.'
