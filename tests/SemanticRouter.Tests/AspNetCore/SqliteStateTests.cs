@@ -199,6 +199,25 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void Connector_incidents_survive_a_restart()
+    {
+        var first = new ConnectorIncidents(_time, new SqliteStateValues(Open()));
+        first.Failed("lmstudio", ModelFailureKind.Unavailable, "connection refused");
+        DateTimeOffset since = _time.GetUtcNow();
+        first.Failed("claude", ModelFailureKind.QuotaExceeded, "limit reached");
+        _time.Advance(TimeSpan.FromDays(1));
+        first.Failed("claude", ModelFailureKind.QuotaExceeded, "limit reached again");
+
+        var restarted = new ConnectorIncidents(_time, new SqliteStateValues(Open()));
+
+        restarted.Failing().Should().Equal(("lmstudio", since, "connection refused"));
+        restarted.LimitDays().Should().Equal(("claude", 2, "limit reached again"));
+
+        restarted.Served("lmstudio");
+        new ConnectorIncidents(_time, new SqliteStateValues(Open())).Failing().Should().BeEmpty("serving again clears it, on disk too");
+    }
+
+        [Fact]
     public void Feedback_survives_a_restart()
     {
         var log = new RoutingFeedbackLog(store: new SqliteFeedbackStore(Open()));

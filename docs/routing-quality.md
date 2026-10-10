@@ -106,7 +106,7 @@ Retries and corrections only show the answers people pushed back on. An optional
 "Middleware": { "Judge": { "Enabled": true, "Model": "qwen3-32b" } }
 ```
 
-- **What is graded:** `SampleRate` (2%) of the answers from models of tier `MaxTier` (2) or below, to decisions the router made itself. Not explicit choices, client side requests, tool-result turns, or answers that only call tools. At most `DailyLimit` (100) a day (UTC).
+- **What is graded:** `SampleRate` (2%) of the answers from models of tier `MaxTier` (2) or below, to decisions the router made itself. Not explicit choices, client side requests, tool-result turns, or answers that only call tools. At most `DailyLimit` (100) a day (UTC), counted across restarts when there is a state database.
 - **How:** after the client has its reply, `Model` (a catalog model) gets the request and the answer, each cut to `MaxCharacters` (6000), and grades it from 1 (wrong) to 5 (excellent). Grading runs in the background, one answer at a time, so it never slows a reply.
 - **What a low grade does:** a grade of `FailingGrade` (2) or lower is **graded low** feedback: the decision needed one tier more. [Automatic tuning](#automatic-tuning) counts such a prompt at `Tuning:JudgeWeight` (0.75), between implicit feedback (0.5) and your own labels (1), and [model reliability](#model-reliability) counts it as a failed turn.
 - **Privacy:** a local-only request is never sent to a judge that is not local. With a local judge, nothing leaves the machine. A cloud judge does see the sampled requests and answers that are not local-only.

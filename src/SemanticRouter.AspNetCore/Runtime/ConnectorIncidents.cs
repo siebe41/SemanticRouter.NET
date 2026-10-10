@@ -1,25 +1,53 @@
+using System.Text.Json;
+
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>
 /// What went wrong with each connector lately, as <see cref="PromptDispatcher"/> saw it: since when every request to it
-/// has failed, and on which days it hit its usage limit. Feeds <see cref="RouterNotices"/>. Kept in memory.
+/// has failed, and on which days it hit its usage limit. Feeds <see cref="RouterNotices"/>. Kept in an
+/// <see cref="IStateValueStore"/> when there is one (the SQLite state), so a restart does not start the counts again.
 /// </summary>
-internal sealed class ConnectorIncidents(TimeProvider? time = null)
+internal sealed class ConnectorIncidents
 {
-    private static readonly TimeSpan LimitWindow = TimeSpan.FromDays(7);
+    internal const string StoreKey = "connector_incidents";
 
-    private readonly TimeProvider _time = time ?? TimeProvider.System;
+    private static readonly TimeSpan LimitWindow = TimeSpan.FromDays(7);
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    private readonly TimeProvider _time;
+    private readonly IStateValueStore? _store;
     private readonly Dictionary<string, State> _connectors = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _gate = new();
+
+    public ConnectorIncidents(TimeProvider? time = null, IStateValueStore? store = null)
+    {
+        _time = time ?? TimeProvider.System;
+        _store = store;
+        if (store?.Load(StoreKey) is { } saved)
+        {
+            try
+            {
+                foreach ((string connector, State state) in JsonSerializer.Deserialize<Dictionary<string, State>>(saved, Json) ?? [])
+                {
+                    _connectors[connector] = state;
+                }
+            }
+            catch (JsonException)
+            {
+                // Unreadable: start counting afresh.
+            }
+        }
+    }
 
     /// <summary>A request through <paramref name="connector"/> was served: it is up.</summary>
     public void Served(string connector)
     {
         lock (_gate)
         {
-            if (_connectors.TryGetValue(connector, out State? state))
+            if (_connectors.TryGetValue(connector, out State? state) && state.FailingSince is not null)
             {
                 state.FailingSince = null;
+                Save();
             }
         }
     }
@@ -41,11 +69,14 @@ internal sealed class ConnectorIncidents(TimeProvider? time = null)
                 state.LimitHits.Add(now);
                 state.LimitHits.RemoveAll(t => now - t > LimitWindow);
                 state.LimitDetail = detail;
-                return;
+            }
+            else
+            {
+                state.FailingSince ??= now;
+                state.Detail = detail;
             }
 
-            state.FailingSince ??= now;
-            state.Detail = detail;
+            Save();
         }
     }
 
@@ -70,13 +101,16 @@ internal sealed class ConnectorIncidents(TimeProvider? time = null)
         }
     }
 
+    /// <summary>Writes the state through (under the lock). Failures are the store's to log.</summary>
+    private void Save() => _store?.Save(StoreKey, JsonSerializer.Serialize(_connectors, Json));
+
     private sealed class State
     {
         public DateTimeOffset? FailingSince { get; set; }
 
         public string? Detail { get; set; }
 
-        public List<DateTimeOffset> LimitHits { get; } = [];
+        public List<DateTimeOffset> LimitHits { get; init; } = [];
 
         public string? LimitDetail { get; set; }
     }

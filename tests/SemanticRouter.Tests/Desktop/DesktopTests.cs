@@ -120,6 +120,26 @@ public sealed class DesktopTests : IDisposable
     }
 
     [Fact]
+    public void Run_from_an_AppImage_the_autostart_icon_is_a_copy_that_outlasts_the_app()
+    {
+        string icons = Path.Combine(_directory, "icons");
+        string image = Path.Combine(_directory, "SemanticRouter.AppImage");
+        File.WriteAllText(image, string.Empty);
+        var fromImage = new XdgAutostartFile(Path.Combine(_directory, "autostart"), icons, name => name == "APPIMAGE" ? image : null);
+
+        fromImage.Enable(image, SignInLaunch.Arguments("/home/ada/.config/semantic-router"));
+
+        string copy = Path.Combine(icons, "semantic-router.png");
+        File.Exists(copy).Should().BeTrue();
+        File.ReadAllText(fromImage.Location).Should().Contain("Icon=" + copy);
+
+        var installed = new XdgAutostartFile(Path.Combine(_directory, "autostart2"), Path.Combine(_directory, "icons2"), _ => null);
+        installed.Enable("/opt/router/SemanticRouter", []);
+        File.ReadAllText(installed.Location).Should().Contain("Icon=" + Path.Combine(AppContext.BaseDirectory, "semantic-router.png"));
+        Directory.Exists(Path.Combine(_directory, "icons2")).Should().BeFalse("an installed program's icon stays where it is");
+    }
+
+    [Fact]
     public void The_macos_sign_in_agent_starts_the_app_once_and_respects_quit()
     {
         var agent = new LaunchAgentFile(Path.Combine(_directory, "LaunchAgents"));

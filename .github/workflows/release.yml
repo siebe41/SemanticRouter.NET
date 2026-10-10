@@ -95,8 +95,9 @@ jobs:
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
           gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
 
-  # The installers (Velopack): Windows Setup.exe and Linux AppImage are built here, the macOS .pkg on macOS (below).
-  # Each platform is a channel with its own update feed; the previous release's package is fetched for a delta update.
+  # The installers (Velopack): the Linux AppImage is built here, the Windows Setup.exe on Windows (signing needs
+  # signtool) and the macOS .pkg on macOS. Each platform is a channel with its own update feed; the previous release's
+  # package is fetched for a delta update. Signing happens only when its secrets are set (docs/desktop.md#signing).
   installers:
     needs: desktop
     runs-on: ubuntu-latest
@@ -122,11 +123,56 @@ jobs:
 
       - name: Package and attach
         run: |
-          for rid in win-x64 linux-x64; do
-            deploy/package-installer.sh "$rid" "${GITHUB_REF_NAME#v}" "installers/$rid"
-            vpk "[${rid%%-*}]" upload github --outputDir "installers/$rid" --channel "$rid" \
-              --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
-          done
+          deploy/package-installer.sh linux-x64 "${GITHUB_REF_NAME#v}" installers/linux-x64
+          vpk upload github --outputDir installers/linux-x64 --channel linux-x64 \
+            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
+
+  installer-windows:
+    needs: desktop
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      AVALONIA_TELEMETRY_OPTOUT: 1
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
+      # Azure Trusted Signing: the credentials (DefaultAzureCredential reads them from the environment) and the
+      # account's endpoint, name and certificate profile (repository variables).
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+      SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+      SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install vpk
+        shell: bash
+        run: |
+          dotnet tool install -g vpk --version 1.2.161
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Signing metadata
+        if: env.AZURE_CLIENT_ID != '' && env.SIGNING_ACCOUNT != ''
+        shell: bash
+        run: |
+          printf '{"Endpoint":"%s","CodeSigningAccountName":"%s","CertificateProfileName":"%s"}' \
+            "$SIGNING_ENDPOINT" "$SIGNING_ACCOUNT" "$SIGNING_PROFILE" > "$RUNNER_TEMP/metadata.json"
+          echo "AZURE_SIGN_METADATA=$RUNNER_TEMP/metadata.json" >> "$GITHUB_ENV"
+
+      - name: Package and attach
+        shell: bash
+        run: |
+          deploy/package-installer.sh win-x64 "${GITHUB_REF_NAME#v}" installers/win-x64
+          vpk upload github --outputDir installers/win-x64 --channel win-x64 \
+            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
 
   installer-macos:
     needs: desktop
@@ -139,6 +185,16 @@ jobs:
       AVALONIA_TELEMETRY_OPTOUT: 1
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
+      # Signing and notarization (an Apple Developer account): the two Developer ID certificates as base64 .p12 files,
+      # their password, the identities, and the Apple ID that notarizes.
+      BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_BUILD_CERTIFICATE_BASE64 }}
+      INSTALLER_CERTIFICATE_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_BASE64 }}
+      P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+      APP_IDENTITY: ${{ vars.APPLE_SIGN_APP_IDENTITY }}
+      INSTALL_IDENTITY: ${{ vars.APPLE_SIGN_INSTALL_IDENTITY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -149,8 +205,29 @@ jobs:
       - name: Install vpk
         run: dotnet tool install -g vpk --version 1.2.161
 
-      # Unsigned: macOS asks to confirm the first start (docs/desktop.md). Signing and notarizing need an Apple
-      # Developer account (--signAppIdentity, --signInstallIdentity, --notaryProfile).
+      # A throw-away keychain with both certificates, and the notarytool profile vpk uses.
+      - name: Signing keychain
+        if: env.BUILD_CERTIFICATE_BASE64 != '' && env.APP_IDENTITY != ''
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(uuidgen)"
+          echo "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/build.p12"
+          echo "$INSTALLER_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/installer.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/build.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security import "$RUNNER_TEMP/installer.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
+          security list-keychain -d user -s "$keychain"
+          xcrun notarytool store-credentials --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM" --password "$APPLE_PASSWORD" \
+            --keychain "$keychain" semantic-router-notary
+          {
+            echo "APPLE_SIGN_APP_IDENTITY=$APP_IDENTITY"
+            echo "APPLE_SIGN_INSTALL_IDENTITY=$INSTALL_IDENTITY"
+            echo "APPLE_NOTARY_PROFILE=semantic-router-notary"
+            echo "APPLE_KEYCHAIN=$keychain"
+          } >> "$GITHUB_ENV"
+
       - name: Package and attach
         run: |
           for rid in osx-arm64 osx-x64; do

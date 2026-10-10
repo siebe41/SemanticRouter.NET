@@ -26,6 +26,9 @@ internal sealed partial class AnswerJudge : IDisposable
     /// <summary>What the judge's calls are recorded under in usage (route and client).</summary>
     public const string UsageLabel = "(judge)";
 
+    /// <summary>The state-store key of today's count of judge calls (<c>yyyy-MM-dd count</c>).</summary>
+    internal const string StoreKey = "judge_calls_today";
+
     /// <summary>The most bytes of a reply kept for grading.</summary>
     public const int CaptureLimit = 512 * 1024;
 
@@ -37,6 +40,7 @@ internal sealed partial class AnswerJudge : IDisposable
     private readonly RoutingFeedbackLog? _feedback;
     private readonly IServiceProvider _services;
     private readonly TimeProvider _time;
+    private readonly IStateValueStore? _store;
     private readonly ILogger _logger;
     private readonly Channel<Job> _queue = Channel.CreateBounded<Job>(new BoundedChannelOptions(QueueLength) { SingleReader = true });
     private readonly CancellationTokenSource _stopping = new();
@@ -53,7 +57,8 @@ internal sealed partial class AnswerJudge : IDisposable
         IServiceProvider services,
         ILogger<AnswerJudge> logger,
         RoutingFeedbackLog? feedback = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        IStateValueStore? store = null)
     {
         _provider = provider;
         _dispatcher = dispatcher;
@@ -62,6 +67,7 @@ internal sealed partial class AnswerJudge : IDisposable
         _logger = logger;
         _feedback = feedback;
         _time = time ?? TimeProvider.System;
+        _store = store;
         _worker = Task.Run(WorkAsync);
     }
 
@@ -138,6 +144,7 @@ internal sealed partial class AnswerJudge : IDisposable
 
             _today++;
             _pending++;
+            _store?.Save(StoreKey, string.Create(CultureInfo.InvariantCulture, $"{_day:yyyy-MM-dd} {_today}"));
         }
 
         return true;
@@ -174,14 +181,22 @@ internal sealed partial class AnswerJudge : IDisposable
             ? runtime.Router.Models.FirstOrDefault(m => m.Enabled && string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase))
             : null;
 
-    /// <summary>Today's count, seeded after a start from the entries graded so far today. Call under the lock.</summary>
+    /// <summary>
+    /// Today's count of judge calls. After a start it comes from the state store (every call made today, graded or
+    /// not), or else from the entries graded so far today. Call under the lock.
+    /// </summary>
     private int Count(DateTimeOffset now)
     {
         var day = DateOnly.FromDateTime(now.UtcDateTime);
         if (_today < 0)
         {
             DateTimeOffset start = new(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-            _today = _activity.Between(start, now.AddSeconds(1)).Count(e => e.Grade is not null);
+            int graded = _activity.Between(start, now.AddSeconds(1)).Count(e => e.Grade is not null);
+            int saved = _store?.Load(StoreKey) is { } value && value.Split(' ') is [var date, var count]
+                && date == day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) && int.TryParse(count, CultureInfo.InvariantCulture, out int calls)
+                ? calls
+                : 0;
+            _today = Math.Max(graded, saved);
             _day = day;
         }
         else if (day != _day)

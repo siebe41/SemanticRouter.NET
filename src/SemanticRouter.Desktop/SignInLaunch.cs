@@ -37,31 +37,57 @@ internal abstract class SignInLaunch
             return new LaunchAgentFile(Path.Combine(home, "Library", "LaunchAgents"));
         }
 
-        return OperatingSystem.IsLinux() ? new XdgAutostartFile(XdgAutostartFile.DefaultDirectory(Environment.GetEnvironmentVariable, home)) : null;
+        return OperatingSystem.IsLinux()
+            ? new XdgAutostartFile(XdgAutostartFile.DefaultDirectory(Environment.GetEnvironmentVariable, home), XdgAutostartFile.IconDirectory(Environment.GetEnvironmentVariable, home), Environment.GetEnvironmentVariable)
+            : null;
     }
 }
 
-/// <summary>Linux: <c>~/.config/autostart/semantic-router.desktop</c>, started by the desktop session at sign-in.</summary>
-internal sealed class XdgAutostartFile(string directory) : SignInLaunch
+/// <summary>
+/// Linux: <c>~/.config/autostart/semantic-router.desktop</c>, started by the desktop session at sign-in. Run from an
+/// AppImage, the program's own folder is a temporary mount that is gone once it exits, so the icon is copied into the
+/// user's icon folder (<c>~/.local/share/icons/hicolor/256x256/apps</c>) for the entry to point at.
+/// </summary>
+internal sealed class XdgAutostartFile(string directory, string? iconDirectory = null, Func<string, string?>? environment = null) : SignInLaunch
 {
+    private const string IconName = "semantic-router.png";
+
     public override string Location => Path.Combine(directory, "semantic-router.desktop");
 
     public static string DefaultDirectory(Func<string, string?> environment, string home) =>
         Path.Combine(environment("XDG_CONFIG_HOME") is { Length: > 0 } config ? config : Path.Combine(home, ".config"), "autostart");
+
+    /// <summary>The user's icon folder for a 256-pixel application icon (<c>$XDG_DATA_HOME</c>, or <c>~/.local/share</c>).</summary>
+    public static string IconDirectory(Func<string, string?> environment, string home) =>
+        Path.Combine(environment("XDG_DATA_HOME") is { Length: > 0 } data ? data : Path.Combine(home, ".local", "share"), "icons", "hicolor", "256x256", "apps");
 
     public override bool IsEnabled() => File.Exists(Location);
 
     public override void Enable(string program, IReadOnlyList<string> arguments)
     {
         Directory.CreateDirectory(directory);
-        File.WriteAllText(Location, Render(program, arguments));
+        File.WriteAllText(Location, Render(program, arguments, Icon()));
     }
 
     public override void Disable() => File.Delete(Location);
 
-    internal static string Render(string program, IReadOnlyList<string> arguments)
+    /// <summary>The icon the entry shows: next to the program, or a lasting copy when the program runs from an AppImage.</summary>
+    private string Icon()
     {
-        string icon = Path.Combine(AppContext.BaseDirectory, "semantic-router.png");
+        string bundled = Path.Combine(AppContext.BaseDirectory, IconName);
+        if (iconDirectory is null || environment?.Invoke("APPIMAGE") is not { Length: > 0 } || !File.Exists(bundled))
+        {
+            return bundled;
+        }
+
+        Directory.CreateDirectory(iconDirectory);
+        string copy = Path.Combine(iconDirectory, IconName);
+        File.Copy(bundled, copy, overwrite: true);
+        return copy;
+    }
+
+    internal static string Render(string program, IReadOnlyList<string> arguments, string icon)
+    {
         return new StringBuilder()
             .AppendLine("[Desktop Entry]")
             .AppendLine("Type=Application")

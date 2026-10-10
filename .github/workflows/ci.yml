@@ -152,7 +152,8 @@ jobs:
           Get-ChildItem $env:TEMP -Filter 'velopack*.log' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 80 }
           Get-ChildItem $env:LOCALAPPDATA\SemanticRouter -Filter '*.log' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 80 }
 
-  # The macOS installer (.pkg) can only be built on macOS: build it, so the release does not find out first.
+  # The macOS installer: installs the 1.0.0 .pkg into ~/Applications and updates it to 1.0.1 from a local feed
+  # (tests/installer/macos.sh). The .pkg can only be built on macOS.
   installer-macos:
     name: installer (macos)
     runs-on: macos-latest
@@ -172,11 +173,43 @@ jobs:
           dotnet tool install -g vpk --version 1.2.161
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
-      - name: Package
+      - name: Package 1.0.0 and 1.0.1
         run: |
           deploy/package-installer.sh osx-arm64 1.0.0 installers
-          ls -l installers
-          test -s installers/SemanticRouter-osx-arm64-Setup.pkg
+          cp installers/SemanticRouter-osx-arm64-Setup.pkg SemanticRouter-1.0.0.pkg
+          deploy/package-installer.sh osx-arm64 1.0.1 installers
+
+      - name: Install and update
+        run: tests/installer/macos.sh SemanticRouter-1.0.0.pkg installers
+
+  # The Linux AppImage: runs 1.0.0 and updates it to 1.0.1 from a local feed (tests/installer/linux.sh).
+  installer-linux:
+    name: installer (linux)
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      AVALONIA_TELEMETRY_OPTOUT: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Install vpk and the AppImage tools
+        run: |
+          sudo apt-get install -y --no-install-recommends squashfs-tools zstd
+          dotnet tool install -g vpk --version 1.2.161
+
+      - name: Package 1.0.0 and 1.0.1
+        run: |
+          deploy/package-installer.sh linux-x64 1.0.0 installers
+          cp installers/SemanticRouter-linux-x64.AppImage SemanticRouter-1.0.0.AppImage
+          deploy/package-installer.sh linux-x64 1.0.1 installers
+
+      - name: Run and update
+        run: tests/installer/linux.sh SemanticRouter-1.0.0.AppImage installers
 
   container:
     name: container image

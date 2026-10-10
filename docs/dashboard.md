@@ -65,7 +65,7 @@ Its numbers are the Usage page's for the same window.
 
 **Notifications:** when a notice appears, the [desktop app](desktop.md) shows a system notification and the service writes a warning to its log ("Needs a decision: …"). Each is announced once, and the log says when it clears. `Notifications:Enabled: false` is the one switch that silences both; the Overview still lists the notices.
 
-Connector failures and usage-limit hits are counted in memory, so a restart starts their count again.
+Connector failures and usage-limit hits are kept in the state database when there is one (`UseSqliteState`, as the `semantic-router` tool and the desktop app use), so they add up across restarts. Without it they are counted in memory, and a restart starts the count again.
 
 ## Apply, save, revert
 

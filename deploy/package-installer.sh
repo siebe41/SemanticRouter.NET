@@ -13,6 +13,11 @@
 #
 # Needs `vpk` (dotnet tool install -g vpk). With VPK_PREVIOUS_FROM=<repository url> (and GITHUB_TOKEN), the previous
 # release's package is downloaded first so a delta update is built.
+#
+# Signing, when configured (unsigned otherwise):
+#   Windows (on Windows): AZURE_SIGN_METADATA=<metadata.json> for Azure Trusted Signing; the Azure credentials come
+#     from the environment (AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET).
+#   macOS: APPLE_SIGN_APP_IDENTITY, APPLE_SIGN_INSTALL_IDENTITY, APPLE_NOTARY_PROFILE and APPLE_KEYCHAIN.
 set -euo pipefail
 
 rid="$1"
@@ -56,10 +61,26 @@ common=(
   --outputDir "$out"
 )
 
+signing=()
+case "$rid" in
+  win-*)
+    if [ -n "${AZURE_SIGN_METADATA:-}" ]; then
+      signing=(--azureTrustedSignFile "$AZURE_SIGN_METADATA")
+    fi
+    ;;
+  osx-*)
+    if [ -n "${APPLE_SIGN_APP_IDENTITY:-}" ]; then
+      signing=(--signAppIdentity "$APPLE_SIGN_APP_IDENTITY" --signInstallIdentity "$APPLE_SIGN_INSTALL_IDENTITY"
+        --notaryProfile "$APPLE_NOTARY_PROFILE" --keychain "$APPLE_KEYCHAIN")
+    fi
+    ;;
+esac
+
 case "$rid" in
   win-*)
     # A tray app: a Start menu entry, no desktop icon. No portable zip: the zip downloads (package-desktop.sh) stay.
-    vpk ${directive[@]+"${directive[@]}"} pack "${common[@]}" --mainExe SemanticRouter.exe --icon "$assets/icon.ico" --shortcuts StartMenuRoot --noPortable
+    vpk ${directive[@]+"${directive[@]}"} pack "${common[@]}" --mainExe SemanticRouter.exe --icon "$assets/icon.ico" --shortcuts StartMenuRoot --noPortable \
+      ${signing[@]+"${signing[@]}"}
     ;;
   linux-*)
     vpk ${directive[@]+"${directive[@]}"} pack "${common[@]}" --mainExe SemanticRouter --icon "$assets/icon.png" --categories "Network;Development;"
@@ -88,7 +109,7 @@ PLIST
     # The plist names the bundle id and the icon, so the icon goes in under that name.
     cp "$assets/icon.icns" "$work/SemanticRouter.icns"
     vpk ${directive[@]+"${directive[@]}"} pack "${common[@]}" --mainExe SemanticRouter --icon "$work/SemanticRouter.icns" \
-      --plist "$work/Info.plist" --noPortable
+      --plist "$work/Info.plist" --noPortable ${signing[@]+"${signing[@]}"}
     ;;
   *)
     echo "Unsupported runtime identifier: $rid" >&2

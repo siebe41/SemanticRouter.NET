@@ -37,8 +37,8 @@ public sealed class SqliteStateOptions
 public static class SqliteStateBuilderExtensions
 {
     /// <summary>
-    /// Keeps model cooldowns, tool-call affinity, the activity log and the configuration history in one SQLite file,
-    /// so they survive restarts. Several router instances on one machine may share the file (cooldowns and affinity
+    /// Keeps model cooldowns, tool-call affinity, the activity log, feedback, usage, learned changes, connector incidents
+    /// and the configuration history in one SQLite file, so they survive restarts. Several router instances on one machine may share the file (cooldowns and affinity
     /// are then shared); a database that cannot be opened or written falls back to memory with a warning.
     /// </summary>
     public static SemanticRouterBuilder UseSqliteState(this SemanticRouterBuilder builder, string path, Action<SqliteStateOptions>? configure = null)
@@ -59,6 +59,7 @@ public static class SqliteStateBuilderExtensions
         services.Replace(ServiceDescriptor.Singleton<IRouterConfigurationHistory, SqliteConfigurationHistory>());
         services.Replace(ServiceDescriptor.Singleton<ITuningStore, SqliteTuningStore>());
         services.Replace(ServiceDescriptor.Singleton<IUsageLedger, SqliteUsageLedger>());
+        services.Replace(ServiceDescriptor.Singleton<IStateValueStore, SqliteStateValues>());
         return builder;
     }
 }
@@ -481,6 +482,25 @@ internal sealed class SqliteTuningStore : ITuningStore
             command.ExecuteNonQuery();
         });
     }
+}
+
+/// <summary>Named values in the <c>meta</c> table (keys prefixed with <c>value:</c>).</summary>
+internal sealed class SqliteStateValues(SqliteRouterDatabase database) : IStateValueStore
+{
+    private const string Prefix = "value:";
+
+    public string? Load(string key) => database.Run<string?>("reading a saved value", null, connection =>
+    {
+        using SqliteCommand command = SqliteRouterDatabase.Command(connection, "SELECT value FROM meta WHERE key = $key;", ("$key", Prefix + key));
+        return command.ExecuteScalar() as string;
+    });
+
+    public void Save(string key, string value) => database.Run("saving a value", connection =>
+    {
+        using SqliteCommand command = SqliteRouterDatabase.Command(
+            connection, "INSERT OR REPLACE INTO meta (key, value) VALUES ($key, $value);", ("$key", Prefix + key), ("$value", value));
+        command.ExecuteNonQuery();
+    });
 }
 
 /// <summary>The activity log on disk, capped by count and age.</summary>
