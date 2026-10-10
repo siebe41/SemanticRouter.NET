@@ -6,6 +6,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # 8.x moved to a commercial license; Directory.Packages.props pins the Apache-2.0 7.x line.
+      - dependency-name: FluentAssertions
+        update-types: [ "version-update:semver-major" ]
     groups:
       nuget-minor-and-patch:
         patterns: [ "*" ]
