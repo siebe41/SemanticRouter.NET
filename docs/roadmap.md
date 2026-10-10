@@ -110,6 +110,25 @@ Tracked in [#40](https://github.com/siebe41/SemanticRouter.NET/issues/40): point
 | [#48](https://github.com/siebe41/SemanticRouter.NET/issues/48) | Optional local judge that grades a sample of cheap answers | Done: off by default; sampled, capped per day, never a local-only request to a cloud judge; low grades are feedback. |
 | [#49](https://github.com/siebe41/SemanticRouter.NET/issues/49) | Weekly digest; notify only when a decision is needed | Done: digest on the Overview and in the tray; notices for limits, unreliable models, connectors down and tuning suggestions; one switch. |
 
+### 7. After set it and forget it
+
+Tracked in [#62](https://github.com/siebe41/SemanticRouter.NET/issues/62).
+
+| Issue | Goal | Notes |
+|---|---|---|
+| [#63](https://github.com/siebe41/SemanticRouter.NET/issues/63) | First release, with the installers exercised on macOS and Linux | CI installs and updates on Windows, macOS and Linux. |
+| [#64](https://github.com/siebe41/SemanticRouter.NET/issues/64) | Sign the Windows installer and notarize the macOS app | The release workflow signs when the secrets are set ([desktop.md](desktop.md#signing)). |
+| [#65](https://github.com/siebe41/SemanticRouter.NET/issues/65) | Keep incident counts and the judge's daily count across restarts | Done with the SQLite state. |
+| [#66](https://github.com/siebe41/SemanticRouter.NET/issues/66) | Linux autostart icon when the app runs from an AppImage | Done. |
+| [#67](https://github.com/siebe41/SemanticRouter.NET/issues/67) | Recognise corrections in any language | |
+| [#68](https://github.com/siebe41/SemanticRouter.NET/issues/68) | Measure how often the judge agrees with hand labels | |
+| [#69](https://github.com/siebe41/SemanticRouter.NET/issues/69) | Learn the cheapest good-enough model per route | |
+| [#70](https://github.com/siebe41/SemanticRouter.NET/issues/70) | Latency as a model selection factor | |
+| [#71](https://github.com/siebe41/SemanticRouter.NET/issues/71) | Send the digest and notices to a webhook | |
+| [#72](https://github.com/siebe41/SemanticRouter.NET/issues/72) | Client side-request wording as an updatable data file | |
+| [#73](https://github.com/siebe41/SemanticRouter.NET/issues/73) | Fuzz tests for protocol translation | |
+| [#74](https://github.com/siebe41/SemanticRouter.NET/issues/74) | Per-client rate limit for gateway keys | |
+
 ### Continuous
 
 | Issue | Goal |

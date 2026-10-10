@@ -60,7 +60,23 @@ public sealed class ReliabilityTests : RouterHostTest
             },
             services: s => s.AddSingleton<TimeProvider>(_time));
 
-    private ModelReliabilityTracker Tracker => Services.GetRequiredService<ModelReliabilityTracker>();
+    /// <summary>
+    /// The tracker, with the test clock caught up to the real one first: the activity log stamps entries by the real
+    /// clock, and a slow machine can take longer than the tracker's one-second margin to get here.
+    /// </summary>
+    private ModelReliabilityTracker Tracker
+    {
+        get
+        {
+            TimeSpan behind = DateTimeOffset.UtcNow - _time.GetUtcNow();
+            if (behind > TimeSpan.Zero)
+            {
+                _time.Advance(behind);
+            }
+
+            return Services.GetRequiredService<ModelReliabilityTracker>();
+        }
+    }
 
     private static async Task<string> ModelForAsync(HttpClient client, string prompt)
     {

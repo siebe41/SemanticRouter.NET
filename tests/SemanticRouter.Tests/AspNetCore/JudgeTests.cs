@@ -148,6 +148,47 @@ public sealed class JudgeTests : RouterHostTest
     }
 
     [Fact]
+    public async Task The_daily_limit_holds_across_a_restart_with_a_state_store()
+    {
+        var store = new MemoryStateValues();
+        Task<HttpClient> Start() => StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+                (o.Judge.Enabled, o.Judge.Model, o.Judge.SampleRate, o.Judge.DailyLimit) = (true, "judge", 1, 2);
+            },
+            routing: o =>
+            {
+                ModelDefinition judge = Model("judge", 3, local: true, connector: "lmstudio");
+                judge.Model = "judge-32b";
+                o.Models.Add(judge);
+            },
+            services: s => s.AddSingleton<TimeProvider>(_time).AddSingleton<IStateValueStore>(store));
+
+        HttpClient client = await Start();
+        await AskAsync(client, "first question");
+        await AskAsync(client, "second question");
+        JudgeCalls(LocalHttp, "judge-32b").Should().Be(2);
+
+        await DisposeAsync();
+        client = await Start();
+        await AskAsync(client, "a question after the restart");
+
+        JudgeCalls(LocalHttp, "judge-32b").Should().Be(2, "today's two calls were remembered");
+        store.Values[AnswerJudge.StoreKey].Should().Be("2026-10-07 2");
+    }
+
+    private sealed class MemoryStateValues : IStateValueStore
+    {
+        public Dictionary<string, string> Values { get; } = [];
+
+        public string? Load(string key) => Values.GetValueOrDefault(key);
+
+        public void Save(string key, string value) => Values[key] = value;
+    }
+
+        [Fact]
     public async Task A_local_only_request_is_never_sent_to_a_cloud_judge()
     {
         HttpClient client = await StartJudgedAsync(j => (j.Enabled, j.SampleRate, j.Model) = (true, 1, "cloud-judge"));
