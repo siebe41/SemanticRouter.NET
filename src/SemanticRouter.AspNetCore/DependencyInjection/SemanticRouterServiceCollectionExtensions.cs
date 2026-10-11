@@ -99,6 +99,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.AddHostedService<SemanticRouterWarmupService>();
         services.AddHostedService<TuningService>();
         services.TryAddSingleton<RouterNotices>();
+        services.TryAddSingleton<WebhookNotifier>();
         services.TryAddSingleton<NoticeService>();
         services.AddHostedService(sp => sp.GetRequiredService<NoticeService>());
 
@@ -107,6 +108,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.AddHttpClient(EmbeddingsClientName)
             .ConfigureHttpClient((sp, client) =>
                 client.Timeout = sp.GetRequiredService<RouterRuntimeProvider>().Current.Configuration.Embeddings.Timeout);
+        services.AddHttpClient(WebhookNotifier.ClientName).ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(10));
 
         return new SemanticRouterBuilder(services);
     }
