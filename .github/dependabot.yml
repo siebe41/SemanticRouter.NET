@@ -6,6 +6,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # 8.x is commercially licensed; 7.x is the last Apache-2.0 line (Directory.Packages.props).
+      - dependency-name: FluentAssertions
+        versions: [ ">= 8.0.0" ]
     groups:
       nuget-minor-and-patch:
         patterns: [ "*" ]
