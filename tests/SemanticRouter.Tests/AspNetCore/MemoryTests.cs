@@ -298,7 +298,7 @@ public sealed class MemoryMapTests : RouterHostTest, IDisposable
 
         (await client.PostAsync("/router/api/memory/exposure/reset", null)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        (await MemoryAsync(client))["exposure"]!.AsObject().Should().BeEmpty();
+        (await MemoryAsync(client))["exposure"]!.AsObject().Count.Should().Be(0);
     }
 
     [Fact]
