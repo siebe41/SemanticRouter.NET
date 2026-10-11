@@ -1,0 +1,64 @@
+{
+  // The wording agentic clients use for the requests they make for themselves (ClientTurns). A client-turns.json next
+  // to the configuration file replaces entries by id, adds new ones, or turns one off with "enabled": false.
+  // Patterns are .NET regular expressions, matched case-insensitively. Where they are matched depends on the kind:
+  //   Warmup: the whole latest user message. Resumed: the start of a session's opening user message, on its first turn.
+  //   Title, Topic, Summary, CommandCheck: anywhere in the latest user message or the system prompt.
+  "version": 1,
+  "turns": [
+    {
+      "id": "warmup",
+      "client": "Claude Code",
+      "kind": "Warmup",
+      "pattern": "^warmup$"
+    },
+    {
+      "id": "claude-code/resumed",
+      "client": "Claude Code",
+      "kind": "Resumed",
+      "pattern": "^this session is being continued from a previous conversation"
+    },
+    {
+      "id": "claude-code/title",
+      "client": "Claude Code",
+      "kind": "Title",
+      "pattern": "write an? \\d+\\s*[-–]\\s*\\d+[ -]word title"
+    },
+    {
+      "id": "claude-code/short-title",
+      "client": "Claude Code",
+      "kind": "Title",
+      "pattern": "summari[sz]e this (coding )?conversation in under \\d+ (characters|words)"
+    },
+    {
+      "id": "generic/title",
+      "client": "Other clients",
+      "kind": "Title",
+      "pattern": "generate an? (short|concise|brief)[^.\\n]{0,40}title for (this|the following) (conversation|session|chat)"
+    },
+    {
+      "id": "claude-code/topic",
+      "client": "Claude Code",
+      "kind": "Topic",
+      "pattern": "indicates a new conversation topic|isNewTopic"
+    },
+    {
+      "id": "claude-code/compaction",
+      "client": "Claude Code",
+      "kind": "Summary",
+      "pattern": "create a detailed summary of the conversation so far"
+    },
+    {
+      "id": "codex/compaction",
+      "client": "Codex",
+      "kind": "Summary",
+      "pattern": "context checkpoint compaction|handoff summary for another (llm|model|agent)|memento message for the next agent"
+    },
+    {
+      "id": "claude-code/command-check",
+      "client": "Claude Code",
+      "kind": "CommandCheck",
+      "pattern": "<policy_spec>|extract the command prefix|process bash commands that an ai coding agent wants to run"
+    }
+  ]
+}

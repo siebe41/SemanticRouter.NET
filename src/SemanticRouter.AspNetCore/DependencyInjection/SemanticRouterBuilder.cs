@@ -108,6 +108,18 @@ public sealed class SemanticRouterBuilder
         return this;
     }
 
+    /// <summary>
+    /// Reads the local client-turn patterns (the wording of agentic clients' own requests, which replaces or adds to the
+    /// built-in patterns by id) from <paramref name="path"/>. Without this, it is <c>client-turns.json</c> next to the
+    /// configuration file when <see cref="UseConfigurationFile"/> is used; only the built-in patterns otherwise.
+    /// </summary>
+    public SemanticRouterBuilder UseClientTurnFile(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Services.Replace(ServiceDescriptor.Singleton(new ClientTurnFile(Path.GetFullPath(path))));
+        return this;
+    }
+
     /// <summary>Uses a custom <see cref="IRouterSecretStore"/> (a vault, the OS keychain) for <c>${secret:…}</c> references.</summary>
     public SemanticRouterBuilder UseSecretStore<TStore>()
         where TStore : class, IRouterSecretStore

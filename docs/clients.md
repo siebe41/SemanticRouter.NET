@@ -42,6 +42,20 @@ What happens to the different kinds of requests Claude Code sends:
 | `POST /v1/messages/count_tokens` | answers from its own estimator (map it with `app.MapAnthropicTokenCount()`). |
 | `thinking`, `cache_control`, `metadata` | passes them through to an `Anthropic` connector; drops what other backends cannot use. |
 
+The wording these side requests are recognised by is a data file, not code: the built-in patterns ship as `client-turns.json`, one entry per client and wording. When a client changes its wording, put a `client-turns.json` in the configuration directory, next to `semantic-router.json` (`UseClientTurnFile(path)` in your own host). It needs no restart: the router notices the change within a few seconds. An entry with a built-in `id` replaces it, a new `id` adds one, and `"enabled": false` turns a built-in entry off:
+
+```json
+{
+  "turns": [
+    { "id": "claude-code/title", "client": "Claude Code", "kind": "Title", "pattern": "write an? \\d+\\s*-\\s*\\d+[ -]word title|name this session" },
+    { "id": "aider/commit", "client": "Aider", "kind": "Summary", "pattern": "^write a one-line commit message" },
+    { "id": "claude-code/command-check", "enabled": false }
+  ]
+}
+```
+
+`kind` is `Warmup` (matched against the whole message), `Resumed` (the start of a session's opening message, routed at `ResumedTier`), or `Title`, `Topic`, `Summary`, `CommandCheck` (anywhere in the latest user message or the system prompt). Patterns are .NET regular expressions, matched case-insensitively. The built-in ids are `warmup`, `claude-code/resumed`, `claude-code/title`, `claude-code/short-title`, `generic/title`, `claude-code/topic`, `claude-code/compaction`, `codex/compaction` and `claude-code/command-check`. An entry that cannot be used (a bad pattern, no id) is skipped and logged, and the rest of the file still applies. `Housekeeping:Patterns` is still there for a quick addition in the configuration itself.
+
 ### Where agentic turns can go
 
 A tool-bearing turn needs a backend that can carry tools:
