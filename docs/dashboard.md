@@ -63,7 +63,28 @@ Its numbers are the Usage page's for the same window.
 | A connector is down | Every request to it has failed for `Notifications:ConnectorDownAfter` (1 hour). A usage limit does not count. |
 | Tuning wants a change it may not make | [Automatic tuning](routing-quality.md#automatic-tuning) has suggestions waiting: `Tuning:Mode` is `Suggest`, or a change someone undid came back with stronger evidence. |
 
-**Notifications:** when a notice appears, the [desktop app](desktop.md) shows a system notification and the service writes a warning to its log ("Needs a decision: …"). Each is announced once, and the log says when it clears. `Notifications:Enabled: false` is the one switch that silences both; the Overview still lists the notices.
+**Notifications:** when a notice appears, the [desktop app](desktop.md) shows a system notification and the service writes a warning to its log ("Needs a decision: …"). Each is announced once, and the log says when it clears. `Notifications:Enabled: false` is the one switch that silences them (and the webhooks below); the Overview still lists the notices.
+
+**Webhooks:** to hear about notices away from the machine, add webhooks. Each gets a message when a notice appears and when it clears, and the digest of the past week once a week (the first week starts when the webhook is added):
+
+```json
+"Notifications": {
+  "DashboardUrl": "http://router.lan:5080/router",
+  "Webhooks": {
+    "phone": { "Url": "https://ntfy.sh/my-router-topic", "Format": "Ntfy" },
+    "team":  { "Url": "https://hooks.slack.com/services/T000/B000/XXXX", "Format": "Slack", "Digest": false },
+    "ops":   { "Url": "https://example.com/hooks/router", "Notices": false }
+  }
+}
+```
+
+| Format | What is POSTed |
+|---|---|
+| `Json` (default) | `{"type":"notice","state":"appeared"\|"cleared","key","kind","title","detail","link","since"}`, or `{"type":"digest","summary","digest"}` with the same figures as `GET api/digest`. |
+| `Slack` | `{"text": …}`, which Slack incoming webhooks, Mattermost and Discord's `/slack` endpoint accept. |
+| `Ntfy` | The text as a plain body, with `Title`, `Tags`, `Priority` and (with a `DashboardUrl`) `Click` headers, for an [ntfy](https://ntfy.sh) topic URL. |
+
+`Notices` and `Digest` (both `true`) choose what a webhook gets. `DashboardUrl` turns the notice's page into a link people can open. A webhook URL usually carries a token, so it is treated as a secret: masked on the dashboard and moved to the secret file with `.UseSecretFile()`, like an API key, and it can be a `${secret:…}` or `${env:…}` reference. A delivery that fails is retried three times (after 2, 10 and 60 seconds) and then logged as a warning; it runs in the background and never holds up routing.
 
 Connector failures and usage-limit hits are kept in the state database when there is one (`UseSqliteState`, as the `semantic-router` tool and the desktop app use), so they add up across restarts. Without it they are counted in memory, and a restart starts the count again.
 

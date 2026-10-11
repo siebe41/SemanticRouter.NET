@@ -428,6 +428,14 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 document.Middleware.GatewayKeys[client] = key;
             }
         }
+
+        foreach ((string name, WebhookOptions baseline) in defaults.Notifications.Webhooks)
+        {
+            if (document.Notifications.Webhooks.TryGetValue(name, out WebhookOptions? hook) && (string.IsNullOrEmpty(hook.Url) || hook.Url == MaskedSecret))
+            {
+                hook.Url = baseline.Url;
+            }
+        }
     }
 
     /// <summary>
@@ -488,6 +496,18 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             else
             {
                 Middleware.GatewayKeys.Remove(client);
+            }
+        }
+
+        foreach ((string name, WebhookOptions hook) in Notifications.Webhooks.Where(h => h.Value.Url == MaskedSecret).ToArray())
+        {
+            if (current.Notifications.Webhooks.TryGetValue(name, out WebhookOptions? existing))
+            {
+                hook.Url = existing.Url;
+            }
+            else
+            {
+                Notifications.Webhooks.Remove(name);
             }
         }
     }
@@ -552,7 +572,8 @@ public sealed class RouterConfiguration : SemanticRouterOptions
 
     /// <summary>
     /// The configuration values that may hold secrets or references to them. With <paramref name="secretsOnly"/>, only
-    /// the ones that are masked and moved to the secret store: API keys, secret-looking header values and gateway keys.
+    /// the ones that are masked and moved to the secret store: API keys, secret-looking header values, gateway keys and
+    /// webhook URLs.
     /// </summary>
     private List<SecretSlot> Slots(bool secretsOnly)
     {
@@ -589,6 +610,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             slots.Add(new SecretSlot(
                 $"Middleware:GatewayKeys:{client}", $"gateway/{client}", true,
                 () => Middleware.GatewayKeys.TryGetValue(client, out string? v) ? v : null, v => Middleware.GatewayKeys[client] = v ?? string.Empty));
+        }
+
+        foreach ((string name, WebhookOptions hook) in Notifications.Webhooks)
+        {
+            slots.Add(new SecretSlot($"Notifications:Webhooks:{name}:Url", $"notifications/webhooks/{name}", true, () => hook.Url, v => hook.Url = v));
         }
 
         return slots;
