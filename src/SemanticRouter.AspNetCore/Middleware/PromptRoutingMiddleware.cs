@@ -31,6 +31,7 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly RoutingFeedbackLog? _feedback;
     private readonly RouterTuner? _tuner;
     private readonly AnswerJudge? _judge;
+    private readonly ClientTurnPatterns? _clientTurns;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -47,7 +48,8 @@ internal sealed partial class PromptRoutingMiddleware
         ConversationTracker? conversations = null,
         RoutingFeedbackLog? feedback = null,
         RouterTuner? tuner = null,
-        AnswerJudge? judge = null)
+        AnswerJudge? judge = null,
+        ClientTurnPatterns? clientTurns = null)
     {
         _next = next;
         _runtime = runtime;
@@ -62,6 +64,7 @@ internal sealed partial class PromptRoutingMiddleware
         _feedback = feedback;
         _tuner = tuner;
         _judge = judge;
+        _clientTurns = clientTurns;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -181,7 +184,7 @@ internal sealed partial class PromptRoutingMiddleware
         // A request the client makes for itself (a title, a compaction summary, a warm-up) by its fixed wording, or a
         // session it resumed from a summary.
         ClientTurnKind? clientTurn = options.Housekeeping.Enabled && requestedModel is null && !chat.IsToolResultContinuation
-            ? ClientTurns.Recognise(chat, prompt, firstTurn, options.Housekeeping)
+            ? ClientTurns.Recognise(chat, prompt, firstTurn, options.Housekeeping, _clientTurns?.Current)
             : null;
         bool housekeeping = clientTurn is { } turn && turn != ClientTurnKind.Resumed;
 

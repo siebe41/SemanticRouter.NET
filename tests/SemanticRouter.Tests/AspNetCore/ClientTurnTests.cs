@@ -1,8 +1,11 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.AspNetCore;
 
@@ -163,5 +166,122 @@ public sealed class ClientTurnTests : RouterHostTest
         client = await StartDispatchAsync(o => o.Housekeeping.Enabled = false);
         ClassifyAs(tier: 3, route: null, reason: RoutingReason.NoMatchFallback);
         (await RouteAsync(client, "/v1/messages", Anthropic(ClaudeCodeSystem, ("user", "Warmup")))).Should().Be(("3", "NoMatchFallback"));
+    }
+
+    [Fact]
+    public void The_built_in_patterns_are_a_data_file_with_one_entry_per_wording()
+    {
+        ClientTurnTable table = ClientTurnTable.BuiltIn;
+
+        table.Source.Should().Be("built-in v1");
+        table.Warning.Should().BeNull();
+        table.Patterns.Select(p => p.Entry.Id).Should().OnlyHaveUniqueItems().And.Contain(["warmup", "claude-code/resumed", "claude-code/title", "codex/compaction", "claude-code/command-check"]);
+        table.Patterns.Select(p => p.Entry.Kind).Take(2).Should().Equal([ClientTurnKind.Warmup, ClientTurnKind.Resumed], "a warm-up and a resumed session are tried first");
+    }
+
+    [Fact]
+    public async Task A_file_next_to_the_configuration_replaces_adds_and_turns_off_patterns()
+    {
+        string directory = Directory.CreateTempSubdirectory("sr-turns-").FullName;
+        try
+        {
+            string configuration = Path.Combine(directory, "semantic-router.json");
+            new JsonFileRouterConfigurationStore(configuration).Save(new RouterConfiguration());
+            await File.WriteAllTextAsync(ClientTurnTable.FileNextTo(configuration), """
+                {
+                  // Claude Code renamed its title request; a new client; no command checks.
+                  "turns": [
+                    { "id": "claude-code/title", "client": "Claude Code", "kind": "Title", "pattern": "^name this session in \\d+ words" },
+                    { "id": "aider/commit", "client": "Aider", "kind": "Summary", "pattern": "^write a one-line commit message" },
+                    { "id": "claude-code/command-check", "enabled": false },
+                  ]
+                }
+                """);
+            HttpClient client = await StartAsync(
+                o =>
+                {
+                    o.Mode = PromptRouterMode.Dispatch;
+                    o.PathPrefixes.Add("/v1/chat/completions");
+                },
+                services: s => s.AddSingleton<IRouterConfigurationStore>(new JsonFileRouterConfigurationStore(configuration)));
+            ClassifyAs(tier: 3, route: null, reason: RoutingReason.NoMatchFallback);
+
+            (await RouteAsync(client, "/v1/messages", Anthropic(ClaudeCodeSystem, ("user", "Name this session in 4 words: the login test is flaky"))))
+                .Should().Be(("1", "ClientHousekeeping"), "the replaced pattern applies");
+            (await RouteAsync(client, "/v1/messages", Anthropic(ClaudeCodeSystem, ("user", "Please write a 5-10 word title for the following conversation: …"))))
+                .Should().Be(("3", "NoMatchFallback"), "the replaced built-in wording no longer applies");
+            (await RouteAsync(client, "/v1/messages", Anthropic(null, ("user", "Write a one-line commit message for this diff"))))
+                .Should().Be(("1", "ClientHousekeeping"), "an added pattern applies");
+            (await RouteAsync(client, "/v1/messages", Anthropic(ClaudeCodeSystem, ("user", "<policy_spec>\n…</policy_spec>\nCommand: git status"))))
+                .Should().Be(("3", "NoMatchFallback"), "a turned-off pattern does not apply");
+            (await RouteAsync(client, "/v1/messages", Anthropic(ClaudeCodeSystem, ("user", "Warmup"))))
+                .Should().Be(("1", "ClientHousekeeping"), "the other built-in patterns stay");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task An_edited_file_applies_without_a_restart()
+    {
+        string file = Path.Combine(Directory.CreateTempSubdirectory("sr-turns-").FullName, ClientTurnTable.FileName);
+        try
+        {
+            var time = new ManualTimeProvider();
+            var patterns = new ClientTurnPatterns(NullLogger<ClientTurnPatterns>.Instance, new ClientTurnFile(file), time: time);
+            patterns.Current.Should().BeSameAs(ClientTurnTable.BuiltIn, "there is no file yet");
+
+            await File.WriteAllTextAsync(file, """{ "turns": [ { "id": "zed/title", "kind": "Title", "pattern": "^summarize this thread as a title" } ] }""");
+            time.Advance(TimeSpan.FromSeconds(6));
+            patterns.Current.Patterns.Should().Contain(p => p.Entry.Id == "zed/title");
+            patterns.Current.Source.Should().EndWith($"{file} (1 entry)");
+
+            await File.WriteAllTextAsync(file, """{ "turns": [ { "id": "zed/title", "enabled": false } ] }""");
+            File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddMinutes(1));
+            patterns.Current.Patterns.Should().Contain(p => p.Entry.Id == "zed/title", "it is checked at most every few seconds");
+            time.Advance(TimeSpan.FromSeconds(6));
+            patterns.Current.Patterns.Should().NotContain(p => p.Entry.Id == "zed/title");
+
+            File.Delete(file);
+            time.Advance(TimeSpan.FromSeconds(6));
+            patterns.Current.Should().BeSameAs(ClientTurnTable.BuiltIn, "the file is gone");
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(file)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void A_bad_entry_is_skipped_with_a_warning_and_a_bad_file_falls_back_to_the_built_in_patterns()
+    {
+        string file = Path.Combine(Directory.CreateTempSubdirectory("sr-turns-").FullName, ClientTurnTable.FileName);
+        try
+        {
+            File.WriteAllText(file, """
+                { "turns": [
+                  { "id": "claude-code/title", "kind": "Title", "pattern": "(unclosed" },
+                  { "id": "mine", "kind": "Configured", "pattern": "x" },
+                  { "kind": "Title", "pattern": "x" },
+                  { "id": "ok", "kind": "Topic", "pattern": "^is this a new topic" }
+                ] }
+                """);
+            ClientTurnTable table = ClientTurnTable.Load(file);
+
+            table.Patterns.Select(p => p.Entry.Id).Should().Contain("ok").And.Contain("claude-code/title", "an invalid replacement keeps the built-in pattern").And.NotContain("mine");
+            table.Warning.Should().Contain("entry claude-code/title has an invalid pattern").And.Contain("entry mine has kind Configured").And.Contain("entry (no id) needs an id");
+
+            File.WriteAllText(file, "{ not json");
+            table = ClientTurnTable.Load(file);
+
+            table.Patterns.Should().BeEquivalentTo(ClientTurnTable.BuiltIn.Patterns);
+            table.Warning.Should().Contain("could not be read").And.Contain("using the built-in patterns");
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(file)!, recursive: true);
+        }
     }
 }

@@ -96,6 +96,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<ConnectorIncidents>();
         services.TryAddSingleton<PromptDispatcher>();
         services.TryAddSingleton<AnswerJudge>();
+        services.TryAddSingleton<ClientTurnPatterns>();
         services.AddHostedService<SemanticRouterWarmupService>();
         services.AddHostedService<TuningService>();
         services.TryAddSingleton<RouterNotices>();
