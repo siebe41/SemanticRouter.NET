@@ -177,7 +177,7 @@ export function liveFeed() {
       <span class="t">${h(when(e.timestamp))}</span>
       <span class="who">${h(clientLabel(e))}</span>
       <span class="arrow">→</span>
-      ${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : `<span class="model ${local ? 'local' : 'cloud'}">${h(model || '—')}</span>`}
+      ${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.outcome === 'rate-limited' ? '<span class="badge warn">rate limited</span>' : `<span class="model ${local ? 'local' : 'cloud'}">${h(model || '—')}</span>`}
       <span class="tier">T${e.tier}</span>
       <span class="why">${h(e.reason)}${e.route ? ' · ' + h(e.route) + (e.similarity != null ? ' ' + num(e.similarity, 2) : '') : ''}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.attempt > 1 ? ' · try ' + e.attempt : ''}${e.degraded ? ' · degraded' : ''}</span>
       <span class="ms">${pending ? '…' : num(e.totalMilliseconds, 0) + ' ms'}</span>

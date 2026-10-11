@@ -183,6 +183,8 @@ export const actions = {
   'rules-customize'() { state.config.ComplexityTiers = [{ MinScore: 0.45, Tier: 2 }, { MinScore: 0.65, Tier: 3 }, { MinScore: 0.85, Tier: 4 }]; render(); },
   'alias-add'() { state.config.Middleware.ModelAliases = state.config.Middleware.ModelAliases || {}; let k = '*pattern*'; let n = 1; while (k in state.config.Middleware.ModelAliases) k = `*pattern${++n}*`; state.config.Middleware.ModelAliases[k] = 'auto'; render(); },
   'alias-claude'() { const a = state.config.Middleware.ModelAliases = state.config.Middleware.ModelAliases || {}; Object.assign(a, { '*haiku*': 'auto:cheapest', '*sonnet*': 'auto', '*opus*': 'auto:best', 'claude-*': 'auto', 'gpt-*': 'auto', 'o*-mini': 'auto:cheapest' }); render(); },
+  'ratelimit-add'() { const limits = state.config.Middleware.RateLimits = state.config.Middleware.RateLimits || {}; const k = '*' in limits ? (Object.keys(state.config.Middleware.GatewayKeys || {}).find((c) => !(c in limits)) || 'client') : '*'; limits[k] = { RequestsPerMinute: 60, TokensPerMinute: null }; render(); },
+  'ratelimit-remove'(el) { const entries = Object.entries(state.config.Middleware.RateLimits || {}); entries.splice(+el.dataset.index, 1); state.config.Middleware.RateLimits = Object.fromEntries(entries); render(); },
   'alias-remove'(el) { const entries = Object.entries(state.config.Middleware.ModelAliases); entries.splice(+el.dataset.index, 1); state.config.Middleware.ModelAliases = Object.fromEntries(entries); render(); },
   async 'embeddings-test'() {
     const out = $('#embeddings-result'); out.textContent = 'testing…';

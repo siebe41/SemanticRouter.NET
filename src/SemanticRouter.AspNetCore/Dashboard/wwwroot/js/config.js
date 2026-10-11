@@ -315,11 +315,29 @@ views.gateway = () => {
       <label class="field wide"><span class="name">Keys (client=key, one per line)</span><textarea data-bind="Middleware.GatewayKeys" data-kind="kv" rows="3" placeholder="laptop=\${env:ROUTER_KEY_LAPTOP}">${h(kv(m.GatewayKeys))}</textarea><span class="hint">Stored keys show as <code>***</code> and are kept when left as is. Use <code>\${env:…}</code> references to keep keys out of the file.</span></label>
       <label class="check"><input type="checkbox" data-bind="Middleware.RequireGatewayKeyForLocalClients" data-kind="bool" ${m.RequireGatewayKeyForLocalClients ? 'checked' : ''}> Require a key from this machine too (for a local reverse proxy)</label>
     </div></div>
+    ${rateLimitsCard(m)}
     <div class="card section"><div class="card-head"><h2>Model aliases</h2><span class="muted small">Map the names clients send to routing aliases or catalog models. Globs, first match wins.</span><span class="spacer"></span><button class="btn small" data-action="alias-add">Add alias</button><button class="btn ghost small" data-action="alias-claude">Add Claude Code defaults</button></div>
       <table><tr><th>Client model (glob)</th><th>Routes as</th><th></th></tr>
         ${aliases.map(([k, v], i) => `<tr><td><input type="text" data-action-input="alias-key" data-index="${i}" value="${h(k)}"></td><td><input type="text" data-action-input="alias-value" data-index="${i}" value="${h(v)}" list="alias-targets"></td><td><button class="btn ghost small" data-action="alias-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="3" class="muted small">No aliases. Unknown names route as <code>auto</code>.</td></tr>'}
       </table>
       <datalist id="alias-targets">${['auto', 'auto:cheapest', 'auto:best', 'auto:priority'].concat((state.config.Models || []).map((x) => x.Name)).map((x) => `<option value="${h(x)}">`).join('')}</datalist>
+    </div>`;
+};
+
+/* Rate limits per gateway client ("*" for every other client), with what each client used in the last minute. */
+const rateLimitsCard = (m) => {
+  const limits = Object.entries(m.RateLimits || {});
+  const seen = (state.status && state.status.gateway && state.status.gateway.rateLimits) || [];
+  const num = (v) => (v == null ? '' : v);
+  const used = (used, max) => (max ? `${Number(used).toLocaleString()} / ${Number(max).toLocaleString()}` : Number(used).toLocaleString());
+  return `<div class="card section"><div class="card-head"><h2>Rate limits</h2><span class="muted small">Per gateway client, over a sliding minute. A client over its limit gets a 429 with <code>Retry-After</code>. <code>*</code> covers every client without its own limit, and clients without a key by address.</span><span class="spacer"></span><button class="btn small" data-action="ratelimit-add">Add limit</button></div>
+      <table><tr><th>Client</th><th>Requests per minute</th><th>Tokens per minute</th><th></th></tr>
+        ${limits.map(([k, v], i) => `<tr><td><input type="text" aria-label="Client" data-action-input="ratelimit-key" data-index="${i}" value="${h(k)}" list="ratelimit-clients"></td><td><input type="number" min="1" aria-label="Requests per minute for ${h(k)}" data-action-input="ratelimit-rpm" data-index="${i}" value="${num(v.RequestsPerMinute)}" placeholder="no limit"></td><td><input type="number" min="1" aria-label="Tokens per minute for ${h(k)}" data-action-input="ratelimit-tpm" data-index="${i}" value="${num(v.TokensPerMinute)}" placeholder="no limit"></td><td><button class="btn ghost small" data-action="ratelimit-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted small">No rate limits.</td></tr>'}
+      </table>
+      <datalist id="ratelimit-clients">${['*'].concat(Object.keys(m.GatewayKeys || {})).map((x) => `<option value="${h(x)}">`).join('')}</datalist>
+      ${seen.length ? `<table><tr><th>Client</th><th>Limit</th><th>Requests, last minute</th><th>Tokens, last minute</th><th>Turned away</th></tr>
+        ${seen.map((r) => `<tr><td>${h(r.client)}</td><td><code>${h(r.limit)}</code></td><td>${used(r.requests, r.requestsPerMinute)}</td><td>${used(r.tokens, r.tokensPerMinute)}</td><td>${r.limited ? `<span class="badge warn">${Number(r.limited).toLocaleString()}</span> <span class="faint small">last ${h(new Date(r.lastLimited).toLocaleTimeString())}</span>` : '<span class="muted">none</span>'}</td></tr>`).join('')}
+      </table>` : ''}
     </div>`;
 };
 

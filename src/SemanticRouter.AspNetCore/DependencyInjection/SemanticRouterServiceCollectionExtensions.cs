@@ -97,6 +97,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<PromptDispatcher>();
         services.TryAddSingleton<AnswerJudge>();
         services.TryAddSingleton<ClientTurnPatterns>();
+        services.TryAddSingleton(sp => new ClientRateLimiter(sp.GetService<TimeProvider>()));
         services.AddHostedService<SemanticRouterWarmupService>();
         services.AddHostedService<TuningService>();
         services.TryAddSingleton<RouterNotices>();

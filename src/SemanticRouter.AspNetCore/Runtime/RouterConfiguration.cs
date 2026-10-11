@@ -295,6 +295,28 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
+        foreach ((string client, RateLimitOptions limit) in Middleware.RateLimits)
+        {
+            if (string.IsNullOrWhiteSpace(client))
+            {
+                errors.Add("Middleware:RateLimits entries must name a client (or \"*\" for every other client).");
+            }
+            else if (client != ClientRateLimiter.Everyone && !Middleware.GatewayKeys.ContainsKey(client))
+            {
+                errors.Add($"Middleware:RateLimits:{client} names no gateway client in Middleware:GatewayKeys; use \"*\" for every client without its own limit.");
+            }
+
+            if (limit.RequestsPerMinute is null && limit.TokensPerMinute is null)
+            {
+                errors.Add($"Middleware:RateLimits:{client} needs RequestsPerMinute, TokensPerMinute or both.");
+            }
+
+            if (limit.RequestsPerMinute is < 1 || limit.TokensPerMinute is < 1)
+            {
+                errors.Add($"Middleware:RateLimits:{client} limits must be at least 1.");
+            }
+        }
+
         foreach (BudgetDefinition budget in Usage.Budgets)
         {
             string label = string.IsNullOrWhiteSpace(budget.Name) ? "A budget" : $"Budget '{budget.Name}'";

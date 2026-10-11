@@ -42,6 +42,16 @@ document.addEventListener('input', (ev) => {
     state.config.Middleware.ModelAliases = Object.fromEntries(entries);
     $('#save-bar').classList.toggle('hidden', !isDirty());
   }
+  if (el.dataset.actionInput && el.dataset.actionInput.startsWith('ratelimit-')) {
+    const entries = Object.entries(state.config.Middleware.RateLimits || {});
+    const i = +el.dataset.index;
+    const value = el.value.trim() === '' ? null : Math.max(1, Math.round(+el.value));
+    if (el.dataset.actionInput === 'ratelimit-key') entries[i][0] = el.value.trim();
+    else if (el.dataset.actionInput === 'ratelimit-rpm') entries[i][1] = { ...entries[i][1], RequestsPerMinute: value };
+    else entries[i][1] = { ...entries[i][1], TokensPerMinute: value };
+    state.config.Middleware.RateLimits = Object.fromEntries(entries);
+    $('#save-bar').classList.toggle('hidden', !isDirty());
+  }
   if (el.id === 'tester-prompt') state.tester.prompt = el.value;
   if (el.id === 'memory-search') { state.memoryUi.search = el.value; if (graph) graph.redraw(); }
 });
