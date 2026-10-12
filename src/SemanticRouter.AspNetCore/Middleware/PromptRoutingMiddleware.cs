@@ -34,6 +34,7 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly ClientTurnPatterns? _clientTurns;
     private readonly ClientRateLimiter? _rateLimiter;
     private readonly CorrectionDetector? _corrections;
+    private readonly ModelTrials? _trials;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -53,7 +54,8 @@ internal sealed partial class PromptRoutingMiddleware
         AnswerJudge? judge = null,
         ClientTurnPatterns? clientTurns = null,
         ClientRateLimiter? rateLimiter = null,
-        CorrectionDetector? corrections = null)
+        CorrectionDetector? corrections = null,
+        ModelTrials? trials = null)
     {
         _next = next;
         _runtime = runtime;
@@ -71,6 +73,7 @@ internal sealed partial class PromptRoutingMiddleware
         _clientTurns = clientTurns;
         _rateLimiter = rateLimiter;
         _corrections = corrections;
+        _trials = trials;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -307,6 +310,22 @@ internal sealed partial class PromptRoutingMiddleware
             }
         }
 
+        // A cheaper model on trial for this route tries a share of its plain matches: the first turn of a conversation
+        // the router decided itself (not escalated, explicit, held by the conversation, a tool result or a client's
+        // own request). The plan keeps the usual models behind it, and leaves it out when it cannot serve this request.
+        long? trial = null;
+        if (_trials is not null && classifiedTurn && !explicitTurn && clientTurn is null && firstTurn && !plan.Sticky
+            && plan.Classification is { Reason: RoutingReason.SemanticMatch, RouteName: { } trialRoute }
+            && _trials.Pick(trialRoute) is { } pick)
+        {
+            RoutingPlan tried = runtime.Router.Plan(plan.Classification, routingRequest with { TrialModel = pick.Model });
+            if (tried.Trial is not null)
+            {
+                (plan, trial) = (tried, pick.Id);
+                _trials.Counted(pick.Id);
+            }
+        }
+
         PromptClassificationResult result = plan.Classification;
 
         context.Features.Set<IPromptRoutingFeature>(new PromptRoutingFeature(prompt, plan));
@@ -325,7 +344,7 @@ internal sealed partial class PromptRoutingMiddleware
             result.Similarity ?? float.NaN, result.Complexity.Score,
             plan.Candidates.Count > 0 ? plan.Candidates[0].Model.Name : "none", result.Elapsed.TotalMilliseconds);
 
-        TuningChange? learned = _tuner?.Explain(result);
+        TuningChange? learned = plan.RouteModel is not null && result.RouteName is { } learnedRoute ? _tuner?.ExplainModel(learnedRoute) : _tuner?.Explain(result);
         RoutingActivityEntry entry = _activity.Add(new RoutingActivityEntry
         {
             Id = _activity.Reserve(),
@@ -358,6 +377,7 @@ internal sealed partial class PromptRoutingMiddleware
             LearnedNote = learned is null ? null : $"learned {learned.Timestamp.ToString("d MMM", CultureInfo.InvariantCulture)}: {learned.Summary}",
             ClassificationMilliseconds = Math.Round(result.Elapsed.TotalMilliseconds, 2),
             Memory = memory,
+            Trial = trial,
         });
 
         if (feedback)

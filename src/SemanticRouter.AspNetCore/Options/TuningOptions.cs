@@ -75,6 +75,23 @@ public sealed class TuningOptions
     public int HoldDays { get; set; } = 30;
 
     /// <summary>
+    /// The share of a route's plain matches that try the next cheaper model able to do its work, while a trial runs
+    /// (<see cref="ModelTrialTurns"/>). Trials run only when <see cref="Mode"/> is <c>Apply</c>; 0 turns them off.
+    /// Never for explicit choices, escalated or follow-up turns, and a local-only request never goes to a cloud model.
+    /// Default 0.05.
+    /// </summary>
+    public double ModelTrialRate { get; set; } = 0.05;
+
+    /// <summary>Turns a trial gets before it is judged: the cheaper model takes the route over, or is dropped. Default 20.</summary>
+    public int ModelTrialTurns { get; set; } = 20;
+
+    /// <summary>
+    /// How much more often the cheaper model's turns may draw feedback (retried, corrected, tool errors, empty replies,
+    /// graded low) than the route's current model's and still take over. Default 0.05.
+    /// </summary>
+    public double ModelTrialMargin { get; set; } = 0.05;
+
+    /// <summary>
     /// Within <see cref="HoldDays"/>, an undone change comes back as a suggestion (never applied) when its evidence is
     /// this many times stronger than when it was undone. Default 2.
     /// </summary>
@@ -111,6 +128,16 @@ public sealed class TuningOptions
         if (!(JudgeWeight >= 0 && JudgeWeight <= 1))
         {
             yield return "Tuning:JudgeWeight must be between 0 and 1.";
+        }
+
+        if (!(ModelTrialRate >= 0 && ModelTrialRate <= 1) || !(ModelTrialMargin >= 0 && ModelTrialMargin <= 1))
+        {
+            yield return "Tuning:ModelTrialRate and ModelTrialMargin must be between 0 and 1.";
+        }
+
+        if (ModelTrialTurns < 1)
+        {
+            yield return "Tuning:ModelTrialTurns must be at least 1.";
         }
 
         if (JudgeAgreementPairs < 1)
