@@ -332,7 +332,7 @@ internal sealed partial class AnswerJudge : IDisposable
                 using JsonDocument document = JsonDocument.Parse(reply[start..(end + 1)]);
                 JsonElement root = document.RootElement;
                 if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("grade", out JsonElement value)
-                    && (value.ValueKind == JsonValueKind.Number ? value.TryGetDouble(out double number) : double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out number))
+                    && (value.ValueKind == JsonValueKind.Number ? value.TryGetDouble(out double number) : value.ValueKind == JsonValueKind.String && double.TryParse(value.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out number))
                     && number is >= 1 and <= 5)
                 {
                     string? reason = root.TryGetProperty("reason", out JsonElement why) && why.ValueKind == JsonValueKind.String ? why.GetString()?.Trim() : null;

@@ -16,6 +16,14 @@ dotnet test       # no network, model or vendor CLI needed
 dotnet format     # fixes formatting in place; CI runs it with --verify-no-changes
 ```
 
+`dotnet test` includes fuzz tests for protocol translation (`ProtocolFuzzTests`): mutated request and reply bodies for every protocol must parse, translate and be written without an unhandled exception. CI runs them with a fixed seed. When you change a parser, translator or response writer, run them longer, with other seeds:
+
+```bash
+SEMANTIC_ROUTER_FUZZ_ITERATIONS=5000 SEMANTIC_ROUTER_FUZZ_SEED=42 dotnet test --filter "FullyQualifiedName~Fuzz"
+```
+
+A failure lists each distinct crash site with the seed, the iteration and the body that caused it.
+
 Every pull request runs CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): build, test and pack on Linux, Windows and macOS, the dashboard end-to-end tests, the installers, the container image, a secret scan of the git history, a check for NuGet packages with known vulnerabilities and the formatting check. The README's [Building and testing](README.md#building-and-testing) section says what each check does and how to run it locally.
 
 ## Guidelines
