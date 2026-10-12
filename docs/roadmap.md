@@ -120,7 +120,7 @@ Tracked in [#62](https://github.com/siebe41/SemanticRouter.NET/issues/62).
 | [#64](https://github.com/siebe41/SemanticRouter.NET/issues/64) | Sign the Windows installer and notarize the macOS app | The release workflow signs when the secrets are set ([desktop.md](desktop.md#signing)). |
 | [#65](https://github.com/siebe41/SemanticRouter.NET/issues/65) | Keep incident counts and the judge's daily count across restarts | Done with the SQLite state. |
 | [#66](https://github.com/siebe41/SemanticRouter.NET/issues/66) | Linux autostart icon when the app runs from an AppImage | Done. |
-| [#67](https://github.com/siebe41/SemanticRouter.NET/issues/67) | Recognise corrections in any language | |
+| [#67](https://github.com/siebe41/SemanticRouter.NET/issues/67) | Recognise corrections in any language | Phrases in five languages, and a comparison by meaning for the rest ([routing-quality.md](routing-quality.md#corrections-in-other-words)). |
 | [#68](https://github.com/siebe41/SemanticRouter.NET/issues/68) | Measure how often the judge agrees with hand labels | |
 | [#69](https://github.com/siebe41/SemanticRouter.NET/issues/69) | Learn the cheapest good-enough model per route | |
 | [#70](https://github.com/siebe41/SemanticRouter.NET/issues/70) | Latency as a model selection factor | |

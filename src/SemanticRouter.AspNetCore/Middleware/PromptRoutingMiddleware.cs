@@ -33,6 +33,7 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly AnswerJudge? _judge;
     private readonly ClientTurnPatterns? _clientTurns;
     private readonly ClientRateLimiter? _rateLimiter;
+    private readonly CorrectionDetector? _corrections;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -51,7 +52,8 @@ internal sealed partial class PromptRoutingMiddleware
         RouterTuner? tuner = null,
         AnswerJudge? judge = null,
         ClientTurnPatterns? clientTurns = null,
-        ClientRateLimiter? rateLimiter = null)
+        ClientRateLimiter? rateLimiter = null,
+        CorrectionDetector? corrections = null)
     {
         _next = next;
         _runtime = runtime;
@@ -68,6 +70,7 @@ internal sealed partial class PromptRoutingMiddleware
         _judge = judge;
         _clientTurns = clientTurns;
         _rateLimiter = rateLimiter;
+        _corrections = corrections;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -502,6 +505,12 @@ internal sealed partial class PromptRoutingMiddleware
         else if (classifiedTurn && callout is null && Corrections.Matches(prompt))
         {
             AddFeedback(entry, FeedbackKind.Corrected, previousTurn, client, Above(previousTurn.Tier), $"corrected in request {entry.Id}");
+        }
+        else if (classifiedTurn && callout is null)
+        {
+            // Other wording or another language: compared by meaning, after the request has gone on.
+            _corrections?.CheckInBackground(prompt, () =>
+                AddFeedback(entry, FeedbackKind.Corrected, previousTurn, client, Above(previousTurn.Tier), $"corrected in request {entry.Id} (by meaning)"));
         }
 
         if (chat.IsToolResultContinuation && conversationKey is not null)

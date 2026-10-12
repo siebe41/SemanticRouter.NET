@@ -306,6 +306,16 @@ public sealed class FeedbackOptions
 {
     /// <summary>Turns feedback on. Default <see langword="true"/>.</summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// How close in meaning (cosine similarity, with the routing embedding model) a short follow-up must be to an example
+    /// correction to count as one, when no known phrase matched: catches other wording and other languages. 0 turns the
+    /// check off; it never runs with the lexical hashing embeddings. Default 0.72.
+    /// </summary>
+    public float CorrectionSimilarity { get; set; } = 0.72f;
+
+    /// <summary>How much closer it must be to the example corrections than to the example follow-ups that are not ("now add a test"). Default 0.12.</summary>
+    public float CorrectionMargin { get; set; } = 0.12f;
 }
 
 /// <summary>

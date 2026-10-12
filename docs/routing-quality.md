@@ -87,7 +87,7 @@ Labels on the Evaluate page improve routing only when someone adds them. The rou
 | Feedback | Noticed when | About |
 |---|---|---|
 | **Retried** | The same client sends the same prompt again within `RetryEscalation:Window` (2 minutes) of the answer, whether or not retry escalation is on. | The answer. |
-| **Corrected** | The next message in the conversation starts like a correction: "that's wrong", "no, I meant…", "it still doesn't compile", "you forgot…", "try again", or a short message saying it is still failing. English phrases only, for now. | The previous turn. |
+| **Corrected** | The next message in the conversation reads as a correction: "that's wrong", "no, I meant…", "it still doesn't compile", "you forgot…", "try again", or a short message saying it is still failing, in English, Dutch, German, French or Spanish. A short follow-up in other words or another language is compared by meaning ([below](#corrections-in-other-words)). | The previous turn. |
 | **Overridden** | The next message chooses a model or tier with a [callout](clients.md#telling-the-router-what-you-want). | The previous turn. |
 | **Tool errors** | Tool results come back marked as errors on two tool turns in a row (the Anthropic protocol carries the flag), or the model writes malformed tool calls. | The turn running the task, or the turn itself. |
 | **Empty reply** | The model answers with no output tokens. | The turn itself. |
@@ -97,6 +97,12 @@ Labels on the Evaluate page improve routing only when someone adds them. The rou
 - Each feedback item carries an automatic label: the decision needed at least one tier more (for an override, the tier you asked for). [Automatic tuning](#automatic-tuning) learns from these.
 - **Where to see it:** badges on the Activity page next to each decision, and a Feedback table on the Usage page with the share of decisions that received feedback, per route and per model. A route or model with a high share is where routing goes wrong.
 - No prompt text is kept: feedback records the decision, route, model, tier and a short reason, in memory and in the state database when there is one (kept as long as activity).
+
+### Corrections in other words
+
+Phrases catch the common corrections in five languages. For the rest, a short follow-up to an answer (up to 120 characters, not a question, no phrase matched) is compared with example corrections ("it still doesn't work", "dat klopt niet", "das ist falsch", "c'est faux", "eso está mal", and others in Italian and Portuguese) and with example next steps ("now add a test", "thanks, looks good"), using the routing embedding model. It counts as a correction when it is at least `Middleware:Feedback:CorrectionSimilarity` (0.72) close to a correction and `CorrectionMargin` (0.12) closer to the corrections than to the next steps. The check runs after the request has gone on, costs one embedding call per candidate (none for other messages), and its feedback says "(by meaning)".
+
+The defaults were measured with the default ONNX model (all-MiniLM-L6-v2): no next step or question among the test messages counts, while short corrections the phrases miss ("klopt niet helemaal", "funktioniert nicht") do. A multilingual embedding model recognises more. Other models score similarity on their own scale: with an embeddings API, check a few of your own corrections and next steps before lowering the threshold. `CorrectionSimilarity: 0` turns the check off; it never runs with the lexical hashing embeddings.
 
 ## The judge
 
