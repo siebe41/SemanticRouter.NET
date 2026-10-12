@@ -132,6 +132,47 @@ public sealed class OnnxEmbeddingTests : IDisposable
     }
 
     [Fact]
+    public async Task With_MiniLM_corrections_in_other_languages_are_recognised_and_next_steps_are_not()
+    {
+        using OnnxEmbeddingProviderFactory factory = RealFactory();
+        IEmbeddingProvider provider = factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx });
+        var detector = new CorrectionDetector(null!, Microsoft.Extensions.Logging.Abstractions.NullLogger<CorrectionDetector>.Instance);
+        var options = new FeedbackOptions();
+        async Task<bool> Corrected(string prompt) =>
+            Corrections.Matches(prompt) || (CorrectionDetector.IsCandidate(prompt) && await detector.MatchesAsync(provider, prompt, options, CancellationToken.None));
+
+        // Measured with the default model: the phrases catch most, the comparison catches the wording they miss.
+        string[] corrections =
+        [
+            "klopt niet helemaal", "het crasht nog steeds", "werkt nog steeds niet", "dit is fout",
+            "funktioniert nicht", "das stimmt nicht", "geht immer noch nicht",
+            "ce n'est pas correct", "toujours la même erreur", "ça ne compile pas",
+            "no es correcto", "sigue dando el mismo error", "no funciona",
+        ];
+        string[] others =
+        [
+            "schrijf een functie die bestanden sorteert", "maak de knop blauw", "hoe werkt dit", "wat betekent deze foutmelding",
+            "erkläre mir diesen Code", "schreibe eine Funktion zum Sortieren", "mach weiter",
+            "explique-moi ce code", "écris une fonction de tri", "comment ça marche ?",
+            "explícame este código", "escribe una función para ordenar", "sigue con el siguiente paso", "¿cómo funciona esto?",
+            "now refactor the parser", "ok go ahead", "perfect, ship it", "explain this error", "what does this error mean?",
+            "show me how it works", "fix the failing test in auth.ts", "make it work with postgres too", "use tabs instead of spaces",
+        ];
+
+        foreach (string prompt in corrections)
+        {
+            (await Corrected(prompt)).Should().BeTrue($"'{prompt}' corrects the previous answer");
+        }
+
+        foreach (string prompt in others)
+        {
+            (await Corrected(prompt)).Should().BeFalse($"'{prompt}' is not a correction");
+        }
+
+        (await detector.MatchesAsync(provider, "klopt niet helemaal", options, CancellationToken.None)).Should().BeTrue("no phrase covers it: the comparison does");
+    }
+
+    [Fact]
     public async Task A_loaded_model_is_shared_by_every_configuration_version()
     {
         using OnnxEmbeddingProviderFactory factory = RealFactory();

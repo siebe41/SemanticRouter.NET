@@ -295,6 +295,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
+        if (Middleware.Feedback.CorrectionSimilarity is < 0 or > 1 || Middleware.Feedback.CorrectionMargin is < 0 or > 1)
+        {
+            errors.Add("Middleware:Feedback:CorrectionSimilarity and CorrectionMargin must be from 0 to 1.");
+        }
+
         foreach ((string client, RateLimitOptions limit) in Middleware.RateLimits)
         {
             if (string.IsNullOrWhiteSpace(client))
