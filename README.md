@@ -478,6 +478,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Usage:Budgets[]` | `[]` | `{ Name, Model or Connector or Profile, Period (Day/Week/Month), MaxTokens, MaxCostUsd }`. A spent budget's models are not tried until the period ends; a spent profile budget stops that profile's paid models only. |
 | `Middleware:GatewayKeys` | `{}` | Optional client keys by name (`"laptop": "${env:ROUTER_KEY_LAPTOP}"`). When set, remote clients must send one as `Authorization: Bearer` or `x-api-key`; the name is recorded in Activity. Never forwarded. |
 | `Middleware:RequireGatewayKeyForLocalClients` | `false` | Require the key from loopback clients too (a local reverse proxy). |
+| `Middleware:RateLimits` | `{}` | Per gateway client (and `*` for the rest): `{ RequestsPerMinute, TokensPerMinute }` over a sliding minute. A client over its limit gets `429` with `Retry-After` in its protocol, recorded in Activity. See [docs/dashboard.md](docs/dashboard.md#rate-limits). |
 | `Middleware:ProfileHeader` / `ProjectHeader` | `X-Router-Profile` / `X-Router-Project` | Headers that name the routing profile and the project. |
 | `Middleware:ClientProfiles` | `{}` | Gateway client → profile it always runs under. |
 | `Middleware:ProfileRules[]` | `[]` | `{ Profile, Clients[], Projects[], ToolsInclude[], ToolsExclude[] }`; the first match picks the profile. |

@@ -208,6 +208,28 @@ public sealed class PromptRouterMiddlewareOptions
     /// forwards remote traffic, since such requests arrive from loopback.
     /// </summary>
     public bool RequireGatewayKeyForLocalClients { get; set; }
+
+    /// <summary>
+    /// Rate limits per gateway client (a name from <see cref="GatewayKeys"/>), plus <c>"*"</c> for every other client: a
+    /// client without its own entry, or one that sends no key (counted per address). A client over its limit gets a 429
+    /// with <c>Retry-After</c> in its own protocol, and the request is recorded in the activity log. Empty by default (no
+    /// limits). Budgets stop spending once a period's limit is reached; rate limits stop a client stuck in a loop from
+    /// spending it in minutes, or crowding out the others.
+    /// </summary>
+    public IDictionary<string, RateLimitOptions> RateLimits { get; } = new Dictionary<string, RateLimitOptions>(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>One client's rate limit (<see cref="PromptRouterMiddlewareOptions.RateLimits"/>), over a sliding minute.</summary>
+public sealed class RateLimitOptions
+{
+    /// <summary>Requests per minute; <see langword="null"/> for no limit.</summary>
+    public int? RequestsPerMinute { get; set; }
+
+    /// <summary>
+    /// Tokens per minute (input and output); <see langword="null"/> for no limit. A request is charged its estimated input
+    /// when it is admitted and the rest once the reply's usage is known; it is admitted while the client is under the limit.
+    /// </summary>
+    public int? TokensPerMinute { get; set; }
 }
 
 /// <summary>

@@ -144,8 +144,8 @@ public static partial class RouterDashboardEndpoints
             })
             .WithMetadata(DashboardAnonymousMetadata.Instance);
 
-        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories) =>
-            Results.Json(BuildStatus(provider, health, activity, budgets, factories), ApiJson));
+        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories, ClientRateLimiter rateLimits) =>
+            Results.Json(BuildStatus(provider, health, activity, budgets, factories, rateLimits), ApiJson));
 
         api.MapGet("/config", (RouterRuntimeProvider provider) =>
         {
@@ -609,7 +609,8 @@ public static partial class RouterDashboardEndpoints
     }
 
     private static StatusResponse BuildStatus(
-        RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories)
+        RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories,
+        ClientRateLimiter rateLimits)
     {
         RouterRuntime runtime = provider.Current;
         RouterConfiguration config = runtime.Configuration;
@@ -653,7 +654,8 @@ public static partial class RouterDashboardEndpoints
                 config.Middleware.EffectiveAnthropicPathPrefixes.ToArray(),
                 config.Middleware.EffectiveResponsesPathPrefixes.ToArray(),
                 config.Middleware.ModelAliases.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
-                config.Selection.Strategy.ToString()),
+                config.Selection.Strategy.ToString(),
+                rateLimits.Status(config.Middleware.RateLimits)),
             new ActivitySummary(
                 recent.Count,
                 recent.Count(e => e.Outcome == "served"),
@@ -846,7 +848,9 @@ public static partial class RouterDashboardEndpoints
     public sealed record RouteStatus(string Name, int Tier, int Utterances, bool LocalOnly, IReadOnlyList<string> RequiredCapabilities, float Threshold);
 
     /// <summary>Gateway settings.</summary>
-    public sealed record GatewayStatus(string Mode, IReadOnlyList<string> PathPrefixes, IReadOnlyList<string> AnthropicPathPrefixes, IReadOnlyList<string> ResponsesPathPrefixes, IReadOnlyDictionary<string, string> ModelAliases, string Strategy);
+    public sealed record GatewayStatus(
+        string Mode, IReadOnlyList<string> PathPrefixes, IReadOnlyList<string> AnthropicPathPrefixes, IReadOnlyList<string> ResponsesPathPrefixes,
+        IReadOnlyDictionary<string, string> ModelAliases, string Strategy, IReadOnlyList<RateLimitStatus> RateLimits);
 
     /// <summary>Counts over the activity log.</summary>
     public sealed record ActivitySummary(

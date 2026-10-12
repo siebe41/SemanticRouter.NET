@@ -6,3 +6,6 @@ c30150a37c639a4d642b661b5c8ca8e2d4455f1d:tests/SemanticRouter.Tests/AspNetCore/R
 
 # Throwaway admin token for the CI container smoke test; it only exists inside that container.
 99bca1248e4d636e44a7f7acbf3a141a462ed4f9:.github/workflows/ci.yml:curl-auth-header:67
+
+# Made-up gateway key for a client in the rate-limit tests; it only exists inside the test host.
+9688376bcbe5c340b96e818198bf518320383241:tests/SemanticRouter.Tests/AspNetCore/RateLimitTests.cs:generic-api-key:18

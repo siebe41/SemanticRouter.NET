@@ -200,6 +200,19 @@ Whatever the setup:
 
 The chat endpoints (`/v1/chat/completions`, `/v1/messages`) are separate from the dashboard. To tell clients of a shared router apart, give each one a key under `Middleware:GatewayKeys` (`"laptop": "${env:ROUTER_KEY_LAPTOP}"`). Remote requests without a valid key get `401` in their protocol's error format; the matched name appears in the Activity page (`client`). Clients send the key the way they send any API key: `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` for Claude Code, `OPENAI_API_KEY` for OpenAI clients. Keys are compared in constant time and never logged or forwarded; backends always get the connector's own credentials. Loopback clients may omit the key unless `RequireGatewayKeyForLocalClients` is on. `GET /v1/models` and `count_tokens` are not covered.
 
+### Rate limits
+
+Budgets stop spending once a period's limit is reached, but an agent stuck in a loop can spend a day's budget in minutes, and one busy client can crowd out the others. `Middleware:RateLimits` caps each client over a sliding minute:
+
+```json
+"RateLimits": {
+  "ci":  { "RequestsPerMinute": 30, "TokensPerMinute": 200000 },
+  "*":   { "RequestsPerMinute": 120 }
+}
+```
+
+An entry is named after a gateway client (a name from `GatewayKeys`). `*` covers every client without its own entry, including clients that send no key, which are counted per address. A request is charged its estimated input tokens when it is admitted and the rest once the reply's usage is known. It is admitted while the client is under both limits. A client over a limit gets `429` with `Retry-After` (the seconds until enough of its last minute has passed) in its protocol's error format: Anthropic `rate_limit_error`, OpenAI Responses `rate_limit_exceeded`, a problem document for chat completions. The request reaches no model and shows in Activity as **rate limited**, with the limit it hit. The **Gateway** page edits the limits and lists each client's requests and tokens in the last minute and how often it was turned away. Limits are off by default. Counts are kept in memory, so a restart starts them again; changing a limit takes effect at once.
+
 ## Themes
 
 Themes are token blocks in `app.css`: every colour, font and radius the UI uses is a CSS variable set per `[data-theme]`, and the rest of the stylesheet only refers to the variables. The default, **Machine Dark**, is built on two colours: blue `#228fa7` for the working surfaces (primary actions, navigation, links, focus) and orange `#d08c34` for signals (the tier decision, warnings, cooldowns, the second chart), on near-black surfaces with Inter headings and Fira Sans text. Green and red are kept for status only. **Machine Light** uses the same two colours with darker ink variants for small text, and **Terminal** is a green-on-black alternative.

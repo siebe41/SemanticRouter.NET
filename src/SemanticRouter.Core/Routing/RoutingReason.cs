@@ -68,4 +68,10 @@ public enum RoutingReason
     /// agentic work it continues needs, without classifying the summary.
     /// </summary>
     ResumedSession = 13,
+
+    /// <summary>
+    /// The client was over its rate limit (requests or tokens per minute), so the request was turned away with a 429
+    /// before it was classified.
+    /// </summary>
+    RateLimited = 14,
 }

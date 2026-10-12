@@ -32,6 +32,7 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly RouterTuner? _tuner;
     private readonly AnswerJudge? _judge;
     private readonly ClientTurnPatterns? _clientTurns;
+    private readonly ClientRateLimiter? _rateLimiter;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -49,7 +50,8 @@ internal sealed partial class PromptRoutingMiddleware
         RoutingFeedbackLog? feedback = null,
         RouterTuner? tuner = null,
         AnswerJudge? judge = null,
-        ClientTurnPatterns? clientTurns = null)
+        ClientTurnPatterns? clientTurns = null,
+        ClientRateLimiter? rateLimiter = null)
     {
         _next = next;
         _runtime = runtime;
@@ -65,6 +67,7 @@ internal sealed partial class PromptRoutingMiddleware
         _tuner = tuner;
         _judge = judge;
         _clientTurns = clientTurns;
+        _rateLimiter = rateLimiter;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -167,6 +170,20 @@ internal sealed partial class PromptRoutingMiddleware
             await ProtocolErrors.WriteAsync(context, protocol, StatusCodes.Status400BadRequest, "Unknown routing profile", profileError, context.RequestAborted)
                 .ConfigureAwait(false);
             return;
+        }
+
+        // A client over its rate limit is turned away before anything is spent on it. A client without a gateway key is
+        // counted by its address.
+        string rateClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
+        (string Name, RateLimitOptions Limit)? rateLimit = _rateLimiter is null ? null : ClientRateLimiter.LimitFor(options.RateLimits, client);
+        if (rateLimit is { } limit)
+        {
+            RateLimitDecision admission = _rateLimiter!.TryAdmit(rateClient, limit.Limit, chat.EstimatedInputTokens);
+            if (!admission.Admitted)
+            {
+                await RejectRateLimitedAsync(context, protocol, client, rateClient, chat, prompt, profile.Profile, admission).ConfigureAwait(false);
+                return;
+            }
         }
 
         if (requestedModel is not null
@@ -431,6 +448,12 @@ internal sealed partial class PromptRoutingMiddleware
             {
                 _conversations!.Touch(conversationKey, answeredBy, conversation);
             }
+        }
+
+        if (rateLimit is not null && (entry.InputTokens is not null || entry.OutputTokens is not null))
+        {
+            // Admission charged the estimate; charge the rest now that the real usage is known.
+            _rateLimiter!.Charge(rateClient, (long)(entry.InputTokens ?? chat.EstimatedInputTokens) + (entry.OutputTokens ?? 0) - chat.EstimatedInputTokens);
         }
 
         RecordMemoryExposure(runtime, entry);
@@ -780,6 +803,40 @@ internal sealed partial class PromptRoutingMiddleware
 
     internal static Task WriteProblemAsync(HttpContext context, ChatProtocol protocol, int statusCode, string title, string detail) =>
         ProtocolErrors.WriteAsync(context, protocol, statusCode, title, detail, context.RequestAborted);
+
+    /// <summary>Answers a client over its rate limit with a 429 and <c>Retry-After</c> in its protocol, and records it in the activity log.</summary>
+    private async Task RejectRateLimitedAsync(
+        HttpContext context, ChatProtocol protocol, string? client, string rateClient, ChatCompletionRequest chat, string prompt, string? profile, RateLimitDecision admission)
+    {
+        int seconds = (int)Math.Ceiling(admission.RetryAfter.TotalSeconds);
+        string who = client is not null ? $"Client '{client}'" : $"This client ({rateClient})";
+        string detail = $"{who} is over {admission.Detail}; retry in {seconds.ToString(CultureInfo.InvariantCulture)} s.";
+        LogRateLimited(_logger, rateClient, admission.Detail!, seconds);
+        RoutingActivityEntry entry = _activity.Add(new RoutingActivityEntry
+        {
+            Id = _activity.Reserve(),
+            TraceId = Activity.Current?.TraceId.ToHexString(),
+            Timestamp = DateTimeOffset.UtcNow,
+            Protocol = protocol,
+            Path = context.Request.Path.Value ?? string.Empty,
+            Client = client,
+            RequestedModel = chat.Model,
+            PromptPreview = prompt.Length <= PreviewLength ? prompt : prompt[..PreviewLength] + "…",
+            Reason = RoutingReason.RateLimited,
+            Profile = profile,
+            HasTools = chat.HasTools,
+            ToolContinuation = chat.IsToolResultContinuation,
+            EstimatedInputTokens = chat.EstimatedInputTokens,
+            Outcome = "rate-limited",
+            Detail = detail,
+        });
+        _activity.Complete(entry);
+        context.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
+        await ProtocolErrors.WriteAsync(context, protocol, StatusCodes.Status429TooManyRequests, "Rate limit reached", detail, context.RequestAborted).ConfigureAwait(false);
+    }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Rate limit: {Client} is over {Limit}; asked to retry in {Seconds} s.")]
+    private static partial void LogRateLimited(ILogger logger, string client, string limit, int seconds);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Refused a gateway request from {Remote} to {Path}: no valid gateway key.")]
     private static partial void LogGatewayKeyMissing(ILogger logger, string remote, PathString path);
