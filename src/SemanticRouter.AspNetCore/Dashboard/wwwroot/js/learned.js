@@ -12,6 +12,8 @@ const STATES = {
   Undone: ['', 'undone'],
   Dismissed: ['', 'dismissed'],
   Expired: ['', 'expired'],
+  Trying: ['info', 'on trial'],
+  Dropped: ['', 'dropped'],
 };
 
 const day = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
@@ -25,12 +27,14 @@ function effect(e) {
 
 function change(c, compact) {
   const [kind, label] = STATES[c.state] || ['', c.state.toLowerCase()];
-  const buttons = readOnly() ? '' : c.state === 'Applied'
+  const buttons = readOnly() ? '' : c.state === 'Trying'
+    ? `<button class="btn small" data-action="tuning-undo" data-id="${c.id}" title="Stop trying this model; it is not tried again for a while">Stop trial</button>`
+    : c.state === 'Applied'
     ? `<button class="btn small" data-action="tuning-undo" data-id="${c.id}" title="Put this one setting back; other changes stay">Undo</button>`
     : c.state === 'Suggested'
       ? `<button class="btn small primary" data-action="tuning-apply" data-id="${c.id}">Apply</button> <button class="btn small ghost" data-action="tuning-dismiss" data-id="${c.id}">Dismiss</button>`
       : '';
-  const done = c.undoneAt ? ` · ${c.state === 'Dismissed' ? 'dismissed' : 'undone'} ${h(day(c.undoneAt))}${c.actor ? ' by ' + h(c.actor) : ''}` : '';
+  const done = c.undoneAt ? ` · ${{ Dismissed: 'dismissed', Dropped: 'dropped', Expired: 'ended' }[c.state] || (c.kind === 'RouteModel' && !c.version ? 'stopped' : 'undone')} ${h(day(c.undoneAt))}${c.actor ? ' by ' + h(c.actor) : ''}` : '';
   return `<div class="learned-item" id="learned-${c.id}">
     <div class="inline"><b>${h(c.summary)}</b> <span class="badge ${kind}">${h(label)}</span><span class="spacer"></span>${buttons}</div>
     <div class="small faint">${h(day(c.timestamp))}${c.version ? ` · configuration version ${c.version}` : ''}${done}</div>
@@ -48,9 +52,9 @@ function status(t) {
 views.learned = () => {
   const t = state.tuning;
   if (!t) return '<div class="section-head"><h1>Router learned</h1></div><div class="card muted">This router does not tune itself (no tuning API).</div>';
-  const shown = t.changes.filter((c) => state.learnedFilter === 'all' || ['Applied', 'Suggested'].includes(c.state));
+  const shown = t.changes.filter((c) => state.learnedFilter === 'all' || ['Applied', 'Suggested', 'Trying'].includes(c.state));
   return `
-    <div class="section-head"><h1>Router learned</h1><span class="muted">Thresholds and utterances the router changed by itself, why, and what happened since. Each one can be undone.</span></div>
+    <div class="section-head"><h1>Router learned</h1><span class="muted">Thresholds, utterances and cheaper models per route the router changed or is trying by itself, why, and what happened since. Each one can be undone.</span></div>
     <div class="card section">
       <div class="inline">${status(t)}<span class="spacer"></span>
         ${readOnly() ? '' : `<button class="btn small" data-action="tuning-run" ${t.mode === 'Off' || t.paused ? 'disabled' : ''}>Run now</button>
@@ -82,5 +86,6 @@ export function learnedCard() {
 
 /* On an activity entry routed differently because of a learned change. */
 export function learnedBadge(e) {
-  return e.learned ? ` <a href="#/learned" class="badge accent" title="${h(e.learnedNote || '')}">learned</a>` : '';
+  return (e.learned ? ` <a href="#/learned" class="badge accent" title="${h(e.learnedNote || '')}">learned</a>` : '')
+    + (e.trial ? ` <a href="#/learned" class="badge info" title="A cheaper model on trial for this route (change ${e.trial})">trial</a>` : '');
 }

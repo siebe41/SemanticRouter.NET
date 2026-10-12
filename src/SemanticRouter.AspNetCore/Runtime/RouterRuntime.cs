@@ -348,6 +348,14 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             warnings.Add("No model is enabled, so every request gets 503: add one on the dashboard's Models page or run `semantic-router init`.");
         }
 
+        foreach (RouteDefinition route in configuration.Routes.Where(r => r.PreferredModel is { Length: > 0 }))
+        {
+            if (!configuration.Models.Any(m => m.Enabled && string.Equals(m.Name, route.PreferredModel, StringComparison.OrdinalIgnoreCase)))
+            {
+                warnings.Add($"Route '{route.Name}' prefers model '{route.PreferredModel}', which is not an enabled catalog model: its tier chooses as usual.");
+            }
+        }
+
         RouterConfiguration resolved = configuration.ResolveSecrets(_secrets, warnings);
         foreach (string warning in warnings)
         {

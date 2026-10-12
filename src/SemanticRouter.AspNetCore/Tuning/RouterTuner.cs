@@ -53,6 +53,8 @@ internal sealed partial class RouterTuner : IDisposable
     private readonly Lock _gate = new();
     private long _lastId;
     private IReadOnlyList<TuningChange> _inForce = [];
+    private IReadOnlyList<TuningChange> _models = [];
+    private readonly ModelTrials? _trials;
 
     public RouterTuner(
         RouterRuntimeProvider provider,
@@ -61,7 +63,8 @@ internal sealed partial class RouterTuner : IDisposable
         RoutingFeedbackLog feedback,
         ITuningStore store,
         ILogger<RouterTuner> logger,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        ModelTrials? trials = null)
     {
         _provider = provider;
         _labels = labels;
@@ -70,6 +73,7 @@ internal sealed partial class RouterTuner : IDisposable
         _store = store;
         _logger = logger;
         _time = time ?? TimeProvider.System;
+        _trials = trials;
         IReadOnlyList<TuningChange> changes = store.Changes();
         _lastId = changes.Count > 0 ? changes.Max(c => c.Id) : 0;
         Refresh(changes);
@@ -147,6 +151,12 @@ internal sealed partial class RouterTuner : IDisposable
 
         ExpireStale(runtime.Configuration);
 
+        // Cheaper models per route learn from feedback on real turns, not from labels.
+        var models = new List<TuningChange>();
+        LearnModels(runtime, options, now, models);
+        runtime = _provider.Current;
+        string modelResult = models.Count == 0 ? string.Empty : $" Models: {string.Join("; ", models.Select(c => $"{c.Summary} ({c.State.ToString().ToLowerInvariant()})"))}.";
+
         // The judge's labels count for as much as its grades agree with the hand labels, once there are enough to tell.
         JudgeAgreementReport agreement = JudgeAgreement.Measure(
             _activity.Between(now - TimeSpan.FromDays(options.FeedbackDays), now.AddSeconds(1)), confirmed, runtime.Router.Models,
@@ -159,8 +169,8 @@ internal sealed partial class RouterTuner : IDisposable
             return Finish(
                 now,
                 confirmed.Count,
-                $"Waiting for labelled prompts: {total} of {options.MinimumPrompts} ({confirmed.Count} in the evaluation set, {automatic.Count} from feedback).",
-                [],
+                $"Waiting for labelled prompts: {total} of {options.MinimumPrompts} ({confirmed.Count} in the evaluation set, {automatic.Count} from feedback).{modelResult}",
+                models,
                 null,
                 null);
         }
@@ -219,10 +229,10 @@ internal sealed partial class RouterTuner : IDisposable
 
         int appliedCount = made.Count(c => c.State == TuningChangeState.Applied);
         int suggestedCount = made.Count(c => c.State == TuningChangeState.Suggested);
-        string result = made.Count == 0
+        string result = (made.Count == 0
             ? $"Nothing to change: {planned.ConfirmedBefore.Correct} of {planned.ConfirmedBefore.Total} prompts in the evaluation set route to their tier."
-            : $"{Plural(appliedCount, "change")} applied, {Plural(suggestedCount, "suggestion")}: {string.Join("; ", made.Select(c => c.Summary))}.";
-        return Finish(now, confirmed.Count, result, made, planned.ConfirmedBefore, applicable.ConfirmedAfter);
+            : $"{Plural(appliedCount, "change")} applied, {Plural(suggestedCount, "suggestion")}: {string.Join("; ", made.Select(c => c.Summary))}.") + modelResult;
+        return Finish(now, confirmed.Count, result, [.. models, .. made], planned.ConfirmedBefore, applicable.ConfirmedAfter);
     }
 
     private TuningRun Finish(DateTimeOffset now, int labelCount, string result, IReadOnlyList<TuningChange> made, TuningScore? before, TuningScore? after)
@@ -513,6 +523,12 @@ internal sealed partial class RouterTuner : IDisposable
         try
         {
             TuningChange change = Find(id);
+            if (change.Kind == TuningChangeKind.RouteModel && change.State == TuningChangeState.Trying)
+            {
+                // A trial changed no configuration: stopping it is enough, and it is not tried again for a while.
+                return Save(change with { State = TuningChangeState.Undone, UndoneAt = _time.GetUtcNow(), Actor = actor });
+            }
+
             if (change.State != TuningChangeState.Applied)
             {
                 throw new TuningConflictException($"Change {id} is {change.State.ToString().ToLowerInvariant()}, not applied.");
@@ -523,13 +539,26 @@ internal sealed partial class RouterTuner : IDisposable
                 .Where(c => c.State == TuningChangeState.Applied && c.Setting == change.Setting && c.Id >= id)
                 .OrderBy(c => c.Id).ToArray();
             RouterConfiguration next = _provider.Current.Configuration.Clone();
-            if (change.Kind != TuningChangeKind.Utterance && !Matches(next, change, chain[^1].NewValue))
+            if (change.Kind == TuningChangeKind.RouteModel)
+            {
+                if (!MatchesModel(next, change, chain[^1].NewModel))
+                {
+                    throw new TuningConflictException(
+                        $"The {Setting(change)} was changed since (it is {Find(next, change)?.PreferredModel ?? "the tier's choice"}), so undoing change {id} would overwrite that. Change it on the Routes page instead.");
+                }
+
+                SetModel(next, change, change.OldModel);
+            }
+            else if (change.Kind != TuningChangeKind.Utterance && !Matches(next, change, chain[^1].NewValue))
             {
                 throw new TuningConflictException(
                     $"The {Setting(change)} was changed since (it is {TuningChange.Format(Current(next, change))}), so undoing change {id} would overwrite that. Change it on the Routes page instead.");
             }
+            else
+            {
+                Set(next, change, change.OldValue, remove: true);
+            }
 
-            Set(next, change, change.OldValue, remove: true);
             DateTimeOffset now = _time.GetUtcNow();
             RouterRuntime runtime = _provider.Apply(next, persist: true, UndoSource, actor, $"undo of auto-tune change {id}: {change.Summary}");
             TuningChange undone = change;
@@ -556,10 +585,17 @@ internal sealed partial class RouterTuner : IDisposable
         _busy.Wait();
         try
         {
+            DateTimeOffset stopped = _time.GetUtcNow();
+            TuningChange[] trials = _store.Changes().Where(c => c.Kind == TuningChangeKind.RouteModel && c.State == TuningChangeState.Trying).ToArray();
+            foreach (TuningChange trial in trials)
+            {
+                Save(trial with { State = TuningChangeState.Undone, UndoneAt = stopped, Actor = actor });
+            }
+
             TuningChange[] applied = _store.Changes().Where(c => c.State == TuningChangeState.Applied).ToArray();
             if (applied.Length == 0)
             {
-                return (0, []);
+                return (trials.Length, []);
             }
 
             RouterConfiguration next = _provider.Current.Configuration.Clone();
@@ -568,13 +604,23 @@ internal sealed partial class RouterTuner : IDisposable
             foreach (IGrouping<string, TuningChange> setting in applied.GroupBy(c => c.Setting))
             {
                 TuningChange first = setting.MinBy(c => c.Id)!, last = setting.MaxBy(c => c.Id)!;
-                if (first.Kind != TuningChangeKind.Utterance && !Matches(next, first, last.NewValue))
+                if (first.Kind == TuningChangeKind.RouteModel
+                    ? !MatchesModel(next, first, last.NewModel)
+                    : first.Kind != TuningChangeKind.Utterance && !Matches(next, first, last.NewValue))
                 {
                     skipped.Add($"the {Setting(first)} (changed since)");
                     continue;
                 }
 
-                Set(next, first, first.OldValue, remove: true);
+                if (first.Kind == TuningChangeKind.RouteModel)
+                {
+                    SetModel(next, first, first.OldModel);
+                }
+                else
+                {
+                    Set(next, first, first.OldValue, remove: true);
+                }
+
                 undone.AddRange(setting);
             }
 
@@ -588,7 +634,7 @@ internal sealed partial class RouterTuner : IDisposable
                 }
             }
 
-            return (undone.Count, skipped);
+            return (undone.Count + trials.Length, skipped);
         }
         finally
         {
@@ -639,6 +685,7 @@ internal sealed partial class RouterTuner : IDisposable
     {
         TuningState state = State with { Paused = paused };
         _store.SaveState(state);
+        _trials?.Refresh();
         return state;
     }
 
@@ -698,6 +745,7 @@ internal sealed partial class RouterTuner : IDisposable
     {
         TuningChangeKind.DefaultThreshold => configuration.DefaultSimilarityThreshold == value,
         TuningChangeKind.RouteThreshold => Find(configuration, change) is { } route && route.SimilarityThreshold == value,
+        TuningChangeKind.RouteModel => MatchesModel(configuration, change, change.OldModel),
         _ => Find(configuration, change) is { } route && !route.Utterances.Contains(change.Utterance!, StringComparer.OrdinalIgnoreCase),
     };
 
@@ -741,6 +789,7 @@ internal sealed partial class RouterTuner : IDisposable
     {
         TuningChangeKind.DefaultThreshold => "default threshold",
         TuningChangeKind.RouteThreshold => $"threshold of {change.Route}",
+        TuningChangeKind.RouteModel => $"model of {change.Route}",
         _ => $"utterance of {change.Route}",
     };
 
@@ -757,11 +806,19 @@ internal sealed partial class RouterTuner : IDisposable
             Refresh(_store.Changes());
         }
 
+        if (change.Kind == TuningChangeKind.RouteModel)
+        {
+            _trials?.Refresh();
+        }
+
         return change;
     }
 
-    private void Refresh(IReadOnlyList<TuningChange> changes) =>
-        Volatile.Write(ref _inForce, changes.Where(c => c.State == TuningChangeState.Applied && c.Kind != TuningChangeKind.Utterance).OrderBy(c => c.Id).ToArray());
+    private void Refresh(IReadOnlyList<TuningChange> changes)
+    {
+        Volatile.Write(ref _inForce, changes.Where(c => c.State == TuningChangeState.Applied && c.Kind is TuningChangeKind.DefaultThreshold or TuningChangeKind.RouteThreshold).OrderBy(c => c.Id).ToArray());
+        Volatile.Write(ref _models, changes.Where(c => c.State == TuningChangeState.Applied && c.Kind == TuningChangeKind.RouteModel).OrderBy(c => c.Id).ToArray());
+    }
 
     private static string Plural(int count, string noun) => count == 1 ? $"1 {noun}" : $"{count} {noun}s";
 

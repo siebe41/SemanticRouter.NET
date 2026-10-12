@@ -150,6 +150,9 @@ public sealed class RoutingActivityEntry
     /// </summary>
     public string? PromptKey { get; set; }
 
+    /// <summary>The learned change whose trial this turn was (a cheaper model tried on its route), when it was one.</summary>
+    public long? Trial { get; init; }
+
     /// <summary>
     /// The models the request was sent to, in order (Dispatch mode). Failed attempts are included: the backend may have
     /// received the request before it failed.

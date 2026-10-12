@@ -64,6 +64,12 @@ public sealed record PromptRoutingRequest
     public bool LocalOnly { get; init; }
 
     /// <summary>
+    /// A cheaper model to try first on a plain route match (a trial of whether it does the route's work as well), when it
+    /// can serve the request; the usual candidates stay behind it (<see cref="RoutingPlan.Trial"/>).
+    /// </summary>
+    public string? TrialModel { get; init; }
+
+    /// <summary>
     /// A decision made before routing (a recognised client side request): the classifier and the conversation floor
     /// are skipped and the models are ranked for it.
     /// </summary>
@@ -84,6 +90,12 @@ public sealed record RoutingPlan(
 
     /// <summary>Models left out because <see cref="IModelReliability"/> says they are unreliable for this kind of work.</summary>
     public IReadOnlyList<string> Unreliable { get; init; } = [];
+
+    /// <summary>The first candidate is the route's learned model (<see cref="RouteDefinition.PreferredModel"/>).</summary>
+    public string? RouteModel { get; init; }
+
+    /// <summary>The first candidate is a model on trial (<see cref="PromptRoutingRequest.TrialModel"/>).</summary>
+    public string? Trial { get; init; }
 }
 
 /// <summary>Routes a prompt to an ordered list of catalog models.</summary>
@@ -116,6 +128,7 @@ public sealed class PromptRouter : IPromptRouter
     private readonly ModelDefinition[] _models;
     private readonly Dictionary<string, RoutingProfile> _profiles;
     private readonly HashSet<string> _followConversation;
+    private readonly Dictionary<string, string> _routeModels;
     private readonly TimeZoneInfo _zone;
     private readonly TimeProvider _time;
 
@@ -138,6 +151,9 @@ public sealed class PromptRouter : IPromptRouter
         _models = options.Models.ToArray();
         _profiles = new Dictionary<string, RoutingProfile>(options.Profiles, StringComparer.OrdinalIgnoreCase);
         _followConversation = new HashSet<string>(options.Routes.Where(r => r.FollowsConversation).Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
+        _routeModels = options.Routes.Where(r => !string.IsNullOrWhiteSpace(r.PreferredModel))
+            .GroupBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().PreferredModel!, StringComparer.OrdinalIgnoreCase);
         _zone = options.Selection.EffectiveTimeZone;
         _time = time ?? TimeProvider.System;
     }
@@ -265,6 +281,21 @@ public sealed class PromptRouter : IPromptRouter
             candidates = _selector.RankCandidates(requirements, models);
         }
 
+        // A plain match of a route: a model on trial, or the route's learned model, goes first even below the route's
+        // tier, as long as it can serve this request. Escalated, explicit and conversation-held turns keep the ranking.
+        string? trial = null, routeModel = null;
+        if (classification.Reason == RoutingReason.SemanticMatch && classification.RouteName is { } routeName)
+        {
+            if (request.TrialModel is { } trying && Promote(trying, candidates, models, requirements, routeName) is { } tried)
+            {
+                (candidates, trial) = (tried, tried[0].Model.Name);
+            }
+            else if (_routeModels.TryGetValue(routeName, out string? learned) && Promote(learned, candidates, models, requirements, routeName) is { } learnedFirst)
+            {
+                (candidates, routeModel) = (learnedFirst, learnedFirst[0].Model.Name);
+            }
+        }
+
         // Stay on the conversation's model while it is exactly what the turn needs: available, and on the required
         // tier (not above it, so a conversation that no longer needs it moves to a cheaper model).
         if (request.PreferredModel is { } preferred
@@ -281,7 +312,27 @@ public sealed class PromptRouter : IPromptRouter
         {
             Unreliable = unreliable,
             Sticky = request.PreferredModel is { } same && candidates.Count > 0 && string.Equals(candidates[0].Model.Name, same, StringComparison.OrdinalIgnoreCase),
+            RouteModel = routeModel,
+            Trial = trial,
         };
+    }
+
+    /// <summary>
+    /// <paramref name="candidates"/> with the model named <paramref name="name"/> first, when it can serve the request
+    /// (allowed, enabled, capable, big enough, available and reliable for the route) whatever its tier; otherwise <see langword="null"/>.
+    /// </summary>
+    private IReadOnlyList<ModelCandidate>? Promote(
+        string name, IReadOnlyList<ModelCandidate> candidates, ModelDefinition[] models, ModelRequirements requirements, string route)
+    {
+        if (models.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)) is not { } model
+            || _selector.RankCandidates(requirements with { RequiredTier = Math.Min(model.Tier, requirements.RequiredTier) }, [model], _health.IsAvailable) is not [var ranked]
+            || _reliability?.IsReliable(model, route, requirements.RequiredCapabilities) == false)
+        {
+            return null;
+        }
+
+        ModelCandidate first = ranked with { MeetsRequiredTier = model.Tier >= requirements.RequiredTier };
+        return [first, .. candidates.Where(c => c.Model != model)];
     }
 
     private RoutingProfile? ProfileOf(PromptRoutingRequest request) =>

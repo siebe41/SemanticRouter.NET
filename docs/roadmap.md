@@ -122,7 +122,7 @@ Tracked in [#62](https://github.com/siebe41/SemanticRouter.NET/issues/62).
 | [#66](https://github.com/siebe41/SemanticRouter.NET/issues/66) | Linux autostart icon when the app runs from an AppImage | Done. |
 | [#67](https://github.com/siebe41/SemanticRouter.NET/issues/67) | Recognise corrections in any language | Phrases in five languages, and a comparison by meaning for the rest ([routing-quality.md](routing-quality.md#corrections-in-other-words)). |
 | [#68](https://github.com/siebe41/SemanticRouter.NET/issues/68) | Measure how often the judge agrees with hand labels | Judge agreement on the Evaluate page and `GET api/judge/agreement`; it scales the judge's weight in tuning ([routing-quality.md](routing-quality.md#the-judge)). |
-| [#69](https://github.com/siebe41/SemanticRouter.NET/issues/69) | Learn the cheapest good-enough model per route | |
+| [#69](https://github.com/siebe41/SemanticRouter.NET/issues/69) | Learn the cheapest good-enough model per route | Trials of a cheaper model per route, kept or dropped on feedback ([routing-quality.md](routing-quality.md#cheaper-models-per-route)). |
 | [#70](https://github.com/siebe41/SemanticRouter.NET/issues/70) | Latency as a model selection factor | |
 | [#71](https://github.com/siebe41/SemanticRouter.NET/issues/71) | Send the digest and notices to a webhook | JSON, Slack-compatible and ntfy webhooks ([dashboard.md](dashboard.md#digest-and-notifications)). |
 | [#72](https://github.com/siebe41/SemanticRouter.NET/issues/72) | Client side-request wording as an updatable data file | `client-turns.json`, overridable next to the configuration ([clients.md](clients.md)). |

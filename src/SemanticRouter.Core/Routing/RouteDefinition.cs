@@ -53,6 +53,14 @@ public sealed class RouteDefinition
     /// </summary>
     public bool FollowsConversation { get; set; }
 
+    /// <summary>
+    /// A catalog model that serves this route's plain matches first, even below <see cref="Tier"/>: one that has shown
+    /// it does this work as well as the tier's usual choice, for less. Set by automatic tuning when a trial of a cheaper
+    /// model goes well; <see langword="null"/> (the default) leaves the choice to the tier. Escalated, explicit and
+    /// conversation-held turns are routed as usual.
+    /// </summary>
+    public string? PreferredModel { get; set; }
+
     /// <summary>Optional free-form description for documentation and diagnostics.</summary>
     public string? Description { get; set; }
 

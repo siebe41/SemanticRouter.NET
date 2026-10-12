@@ -14,6 +14,9 @@ public enum TuningChangeKind
 
     /// <summary>An utterance added to a route.</summary>
     Utterance,
+
+    /// <summary>A cheaper model for a route (<see cref="RouteDefinition.PreferredModel"/>): on trial, then taking over or dropped.</summary>
+    RouteModel,
 }
 
 /// <summary>Where a learned change stands.</summary>
@@ -34,6 +37,12 @@ public enum TuningChangeState
 
     /// <summary>A suggestion that no longer fits the configuration, or that a newer one replaced.</summary>
     Expired,
+
+    /// <summary>A cheaper model on trial for a route: a share of its turns try it.</summary>
+    Trying,
+
+    /// <summary>A trial whose model did worse than the route's current one.</summary>
+    Dropped,
 }
 
 /// <summary>
@@ -65,6 +74,15 @@ public sealed record TuningChange
 
     /// <summary>The utterance added.</summary>
     public string? Utterance { get; init; }
+
+    /// <summary>For a route model: the route's learned model before (<see langword="null"/>: the tier's choice).</summary>
+    public string? OldModel { get; init; }
+
+    /// <summary>For a route model: the cheaper model tried, and taking the route over when it does as well.</summary>
+    public string? NewModel { get; init; }
+
+    /// <summary>For a route model: the model that served the route when the trial began, which it is compared with.</summary>
+    public string? Incumbent { get; init; }
 
     /// <summary>Why, in a sentence, with the evidence.</summary>
     public string Why { get; init; } = string.Empty;
@@ -102,6 +120,7 @@ public sealed record TuningChange
     {
         TuningChangeKind.DefaultThreshold => "threshold:",
         TuningChangeKind.RouteThreshold => "threshold:" + Route?.ToLowerInvariant(),
+        TuningChangeKind.RouteModel => "model:" + Route?.ToLowerInvariant(),
         _ => "utterance:" + Route?.ToLowerInvariant() + ":" + Utterance?.Trim().ToLowerInvariant(),
     };
 
@@ -111,6 +130,7 @@ public sealed record TuningChange
     {
         TuningChangeKind.DefaultThreshold => $"default threshold {Format(OldValue)} → {Format(NewValue)}",
         TuningChangeKind.RouteThreshold => $"threshold of {Route} {Format(OldValue)} → {Format(NewValue)}",
+        TuningChangeKind.RouteModel => $"model for {Route}: {Incumbent ?? OldModel ?? "the tier's choice"} → {NewModel}",
         _ => $"utterance for {Route}: \"{Preview(Utterance, 60)}\"",
     };
 

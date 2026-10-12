@@ -154,6 +154,9 @@ internal sealed record ChangeDto(
     float? NewValue,
     float? Target,
     string? Utterance,
+    string? OldModel,
+    string? NewModel,
+    string? Incumbent,
     string Summary,
     string Why,
     int Fixed,
@@ -167,7 +170,7 @@ internal sealed record ChangeDto(
     Effect? Effect)
 {
     public static ChangeDto From(TuningChange c, Effect? effect) => new(
-        c.Id, c.Timestamp, c.Kind, c.Route, c.OldValue, c.NewValue, c.Target, c.Utterance, c.Summary, c.Why, c.Fixed, c.Broken,
+        c.Id, c.Timestamp, c.Kind, c.Route, c.OldValue, c.NewValue, c.Target, c.Utterance, c.OldModel, c.NewModel, c.Incumbent, c.Summary, c.Why, c.Fixed, c.Broken,
         c.Examples, c.State, c.Version, c.UndoneAt, c.Actor, c.UndoVersion, effect);
 }
 

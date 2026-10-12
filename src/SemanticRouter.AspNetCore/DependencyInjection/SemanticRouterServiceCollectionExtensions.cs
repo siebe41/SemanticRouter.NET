@@ -79,6 +79,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<RetryTracker>();
         services.TryAddSingleton<ConversationTracker>();
         services.TryAddSingleton<ITuningStore, InMemoryTuningStore>();
+        services.TryAddSingleton<ModelTrials>();
         services.TryAddSingleton<RouterTuner>();
         services.TryAddSingleton<MemoryExposureLog>();
         services.TryAddSingleton<MemoryIndex>();

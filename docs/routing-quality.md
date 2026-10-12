@@ -139,6 +139,16 @@ Calibration finds better thresholds, but someone has to run it and apply the res
 - **When:** every `Interval` (a day), and early once `NewLabels` (10) prompts were labelled since the last run. **Run now** on the dashboard runs it at once.
 - **Every change is its own configuration version** (source `auto-tune`), so the configuration history shows it with a diff and the reason, and rollback works as for any version.
 
+### Cheaper models per route
+
+A route's tier picks its model, but the work some routes see is easier than their tier: a cheaper model may do it as well. Tuning finds out from real turns, not labels:
+
+1. **A trial starts** on a route with at least `Middleware:Reliability:MinimumTurns` (10) plain matches from one model in the last `FeedbackDays`, when a cheaper enabled model can do the route's work (its capabilities, and local when the route is local-only). It tries the next cheaper one, one step down, not straight to the cheapest. Router learned lists it as **on trial**, with why: "mid (tier 3) costs less than cloud (tier 4), which served agentic: 2 of 40 turns drew feedback (2 retried). 5% of the route's plain matches try it, up to 20 turns".
+2. **During the trial**, `ModelTrialRate` (5%) of the route's plain matches go to the cheaper model first, with the usual models behind it, until it has `ModelTrialTurns` (20). Only the first turn of a conversation the router decided itself: never an explicit choice, a callout, a retry or other escalation, a follow-up, a tool result or a client's own request. A local-only request never goes to a cloud model on trial. Activity marks these turns **trial**.
+3. **The trial is judged** at the next run after it has its turns. Feedback that says a turn was not good enough (retried, corrected, tool errors, empty reply, graded low) is counted on both models' turns. The cheaper model takes the route over when its share is at most `ModelTrialMargin` (5 points) above the current model's: the route gets `PreferredModel` in a new configuration version, and its plain matches go to that model first from then on, even below the route's tier. Otherwise it is **dropped**. Either way the evidence is in the reason: "mid: 1 of 20 trial turns drew feedback (1 corrected); cloud: 2 of 40 turns drew feedback".
+
+**Undo** puts the route back on its tier's choice; **Stop trial** ends a running trial. A dropped, stopped or undone model is not tried on that route again for `HoldDays`. Trials run only when `Tuning:Mode` is `Apply` and learning is not paused; `ModelTrialRate: 0` turns them off. A route's `PreferredModel` can also be set by hand; turns that need more (an escalation, an explicit choice, a conversation that needs its tier) are routed by the tier as usual.
+
 ### Where you see it
 
 - **Router learned** (its own dashboard page, and a card on the Overview) lists each change with:

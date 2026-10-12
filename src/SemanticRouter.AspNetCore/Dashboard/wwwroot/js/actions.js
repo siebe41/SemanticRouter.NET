@@ -92,7 +92,7 @@ export const actions = {
   },
   async 'tuning-undo'(el) {
     const c = await api('POST', `/tuning/changes/${el.dataset.id}/undo`);
-    await afterTuning(); toast(`Undone: ${c.summary}. It is not made again for a while.`, 'ok');
+    await afterTuning(); toast(`${c.kind === 'RouteModel' && !c.version ? 'Trial stopped' : 'Undone'}: ${c.summary}. It is not made again for a while.`, 'ok');
   },
   async 'tuning-apply'(el) { const c = await api('POST', `/tuning/changes/${el.dataset.id}/apply`); await afterTuning(); toast(`Applied: ${c.summary}.`, 'ok'); },
   async 'tuning-dismiss'(el) { await api('POST', `/tuning/changes/${el.dataset.id}/dismiss`); await afterTuning(); },
