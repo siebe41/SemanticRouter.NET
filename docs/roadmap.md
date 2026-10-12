@@ -126,7 +126,7 @@ Tracked in [#62](https://github.com/siebe41/SemanticRouter.NET/issues/62).
 | [#70](https://github.com/siebe41/SemanticRouter.NET/issues/70) | Latency as a model selection factor | |
 | [#71](https://github.com/siebe41/SemanticRouter.NET/issues/71) | Send the digest and notices to a webhook | JSON, Slack-compatible and ntfy webhooks ([dashboard.md](dashboard.md#digest-and-notifications)). |
 | [#72](https://github.com/siebe41/SemanticRouter.NET/issues/72) | Client side-request wording as an updatable data file | `client-turns.json`, overridable next to the configuration ([clients.md](clients.md)). |
-| [#73](https://github.com/siebe41/SemanticRouter.NET/issues/73) | Fuzz tests for protocol translation | |
+| [#73](https://github.com/siebe41/SemanticRouter.NET/issues/73) | Fuzz tests for protocol translation | `ProtocolFuzzTests` in CI with a fixed seed; longer runs by hand ([CONTRIBUTING.md](../CONTRIBUTING.md#building-and-testing)). |
 | [#74](https://github.com/siebe41/SemanticRouter.NET/issues/74) | Per-client rate limit for gateway keys | `Middleware:RateLimits` ([dashboard.md](dashboard.md#rate-limits)). |
 
 ### Continuous

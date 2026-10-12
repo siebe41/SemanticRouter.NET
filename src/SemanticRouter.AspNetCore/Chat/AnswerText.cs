@@ -48,6 +48,11 @@ internal static class AnswerText
             return;
         }
 
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
         switch (protocol)
         {
             case ChatProtocol.Anthropic when streamed:
@@ -99,7 +104,7 @@ internal static class AnswerText
             default:
                 foreach (JsonElement choice in Array(root, "choices"))
                 {
-                    if (choice.TryGetProperty(streamed ? "delta" : "message", out JsonElement message) && message.ValueKind == JsonValueKind.Object)
+                    if (choice.ValueKind == JsonValueKind.Object && choice.TryGetProperty(streamed ? "delta" : "message", out JsonElement message) && message.ValueKind == JsonValueKind.Object)
                     {
                         text.Append(Str(message, "content"));
                         tools |= message.TryGetProperty("tool_calls", out JsonElement calls) && calls.ValueKind == JsonValueKind.Array && calls.GetArrayLength() > 0;

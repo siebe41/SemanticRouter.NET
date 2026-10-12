@@ -79,7 +79,7 @@ public sealed partial class ChatCompletionRequest
             };
         }
 
-        if (root.TryGetArray("include", out JsonElement include) && include.EnumerateArray().Any(i => i.GetString()?.Contains("logprobs", StringComparison.Ordinal) == true))
+        if (root.TryGetArray("include", out JsonElement include) && include.EnumerateArray().Any(i => i.ValueKind == JsonValueKind.String && i.GetString()!.Contains("logprobs", StringComparison.Ordinal)))
         {
             protocolOnly.Add("logprobs");
         }

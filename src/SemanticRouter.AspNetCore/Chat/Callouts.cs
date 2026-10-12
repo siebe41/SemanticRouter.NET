@@ -144,7 +144,7 @@ internal static partial class Callouts
         bool changed = false;
         foreach (JsonObject message in messages.OfType<JsonObject>())
         {
-            if (message["role"]?.GetValue<string>() != "user")
+            if (Text(message["role"]) != "user")
             {
                 continue;
             }
@@ -164,7 +164,7 @@ internal static partial class Callouts
                     // and reminder-only parts are skipped.
                     foreach (JsonObject part in parts.OfType<JsonObject>())
                     {
-                        if (part["type"]?.GetValue<string>() is not ("text" or "input_text")
+                        if (Text(part["type"]) is not ("text" or "input_text")
                             || part["text"] is not JsonValue partText || !partText.TryGetValue(out string? partContent))
                         {
                             continue;
@@ -193,6 +193,9 @@ internal static partial class Callouts
 
         return changed;
     }
+
+    /// <summary>The node's string value, or <see langword="null"/> when it is missing or not a string.</summary>
+    private static string? Text(JsonNode? node) => node is JsonValue value && value.TryGetValue(out string? text) ? text : null;
 
     /// <summary><paramref name="text"/> without its leading callout, or <see langword="null"/> to leave it as it is.</summary>
     private static string? StripText(string text, RouterRuntime runtime, (string Tag, int Start, int End)? found = null)

@@ -185,7 +185,17 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
                 ChatProtocol.Responses => ResponsesResponseReader.RelayAsync(response, writer, cancellationToken),
                 _ => OpenAIResponseReader.RelayAsync(response, writer, cancellationToken),
             };
-            await relay.ConfigureAwait(false);
+            try
+            {
+                await relay.ConfigureAwait(false);
+            }
+            catch (JsonException ex) when (!writer.HasStarted)
+            {
+                // A 200 whose body is not the JSON the protocol promises (an HTML page from a proxy, a truncated
+                // reply): nothing reached the client yet, so the next model can answer instead.
+                LogUnreadableReply(_logger, Name, response.Content.Headers.ContentType?.MediaType ?? "no content type", ex.Message);
+                return ConnectorResult.Failed(ModelFailureKind.Unavailable, "unreadable reply");
+            }
 
             return ConnectorResult.Completed;
         }
@@ -216,7 +226,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
                 {
                     foreach (JsonArray content in messages.OfType<JsonObject>().Select(m => m["content"]).OfType<JsonArray>())
                     {
-                        foreach (JsonNode? block in content.Where(b => b is JsonObject o && (string?)o["signature"] == ThinkingBlock.RouterSignature).ToArray())
+                        foreach (JsonNode? block in content.Where(b => b is JsonObject o && o["signature"] is JsonValue signature && signature.TryGetValue(out string? value) && value == ThinkingBlock.RouterSignature).ToArray())
                         {
                             content.Remove(block);
                         }
@@ -365,6 +375,9 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             return null;
         }
     }
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: the reply ({ContentType}) could not be read ({Error}); trying the next model.")]
+    private static partial void LogUnreadableReply(ILogger logger, string connector, string contentType, string error);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: request to {Uri} failed: {Error}")]
     private static partial void LogUpstreamFailure(ILogger logger, string connector, Uri uri, string error);
