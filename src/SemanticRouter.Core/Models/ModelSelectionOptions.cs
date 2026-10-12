@@ -24,6 +24,18 @@ public sealed class ModelSelectionOptions
     /// <summary>How long a model is skipped after it fails or is unreachable. Default 30 seconds.</summary>
     public TimeSpan FailureCooldown { get; set; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// For <see cref="SelectionStrategy.Balanced"/>: how many times slower than the fastest model a model may be and
+    /// still be chosen for being cheaper. Default 1.5.
+    /// </summary>
+    public double BalancedLatencyFactor { get; set; } = 1.5;
+
+    /// <summary>How far back time to first byte is measured for the latency-aware strategies. Default one day.</summary>
+    public TimeSpan LatencyWindow { get; set; } = TimeSpan.FromDays(1);
+
+    /// <summary>Turns a model needs in <see cref="LatencyWindow"/> before its latency counts; with fewer it counts as typical. Default 5.</summary>
+    public int LatencySamples { get; set; } = 5;
+
     /// <summary>The time zone of models' <see cref="ModelDefinition.ActiveHours"/> (an IANA or Windows id). Default: this machine's.</summary>
     public string? TimeZone { get; set; }
 
@@ -36,6 +48,16 @@ public sealed class ModelSelectionOptions
         if (!Enum.IsDefined(Strategy))
         {
             yield return $"Selection.{nameof(Strategy)} '{Strategy}' is unknown.";
+        }
+
+        if (!(BalancedLatencyFactor >= 1))
+        {
+            yield return $"Selection.{nameof(BalancedLatencyFactor)} must be at least 1.";
+        }
+
+        if (LatencyWindow <= TimeSpan.Zero || LatencySamples < 1)
+        {
+            yield return $"Selection.{nameof(LatencyWindow)} must be positive and {nameof(LatencySamples)} at least 1.";
         }
 
         if (EstimatedOutputTokens < 0)

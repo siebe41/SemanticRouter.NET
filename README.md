@@ -62,7 +62,7 @@ Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md
 - **A dashboard with hot reload.** Live status, cooldowns, an activity log with every decision, a prompt tester, and an editor for routes, models, connectors, tiers, routing rules, embeddings and gateway settings. Apply changes to the running router, save them to a file, or revert. Themeable (Machine Dark by default).
 - **Every model a provider has, each on its tier.** **Discover models** (or `semantic-router models`) lists what a connector offers and suggests a catalog entry for each: Claude's Haiku, Sonnet, Opus and Fable on four rungs, other known families (Qwen, Llama, DeepSeek, Gemma, gpt-oss, Gemini, …) from a model-family table you can extend, the rest of the local models by size, with tools, vision and context from the server's own report. It shows which local models are loaded and whether LM Studio or Ollama will load the others on demand. See [Model lineups](docs/providers.md#model-lineups-several-models-per-provider).
 - **Named tiers.** The capability ladder is explicit configuration (`Tiers`), shown everywhere a tier appears, with a matrix of which routes need each rung and which models provide it.
-- **Capability-aware, cost-aware routing.** Routes declare the tier and capabilities an intent needs. Models declare their tier, capabilities, context window, cost and priority. The selector picks the cheapest model that qualifies, the most capable one, or follows your priority order, and clients can choose per request (`auto:cheapest`, `auto:best`, `auto:priority`).
+- **Capability-aware, cost-aware routing.** Routes declare the tier and capabilities an intent needs. Models declare their tier, capabilities, context window, cost and priority. The selector picks the cheapest model that qualifies, the most capable one, the fastest lately, or follows your priority order, and clients can choose per request (`auto:cheapest`, `auto:best`, `auto:fastest`, `auto:balanced`, `auto:priority`).
 - **Every kind of provider.** There is an OpenAI-compatible HTTP connector for local servers and APIs, a CLI connector that runs Claude Code, Copilot CLI or Codex CLI on your own login, a Copilot connector on GitHub's official SDK, and an `IChatConnector` interface for anything else.
 - **Automatic failover and quota cooldowns.** A model that is unreachable, times out, returns 5xx/429 or reports a usage limit is skipped for a cooldown period. An account-wide subscription limit cools down every model on that account at once.
 - **Privacy rails.** Routes marked `LocalOnly` can only be served by models marked `IsLocal`, even on failover. Subscription CLI connectors refuse requests from other machines by default.
@@ -147,6 +147,10 @@ Eligible models that meet the required tier are ordered by the strategy:
 | `CheapestCapable` *(default)* | estimated cost ↑, then tier ↑, then `Priority` ↑ | you want the cheapest model that is good enough. Ties between free options (local models, flat-rate subscriptions) go to the **lowest sufficient tier**, saving premium quota for prompts that need it. |
 | `MostCapable` | tier ↓, then cost ↑ | quality matters more than cost |
 | `Priority` | your `Priority` ↑, then cost ↑ | you want explicit control |
+| `Fastest` | typical time to first byte ↑, then cost ↑ | waiting matters more than cost |
+| `Balanced` | the models within `BalancedLatencyFactor` of the fastest by cost ↑, then the rest by cost ↑ | cheap, but not much slower than the quickest |
+
+A model's typical time to first byte is the median over its served turns in the last `LatencyWindow` (a day), once it has `LatencySamples` (5) of them. A model without enough turns counts as the median of the others; with no data at all, `Fastest` and `Balanced` order by cost. They pick the model and record why: the Activity page shows it, and Dispatch sends it as `X-Prompt-Route-Selection`, e.g. `fastest: quick (300 ms to first byte) over cheaper cloud (1,500 ms to first byte)`.
 
 With `AllowBelowRequiredTier` (the default), the remaining eligible models follow, most capable first. When every tier-4 model is out of quota, a hard prompt still gets the best answer available rather than an error.
 
@@ -376,7 +380,9 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `ClassificationCache:Enabled` / `MaxEntries` / `MaxAge` | `true` / `2048` / `00:10:00` | Reuse a recent decision for the same prompt (whitespace-normalised) instead of embedding it again. In memory, per configuration version. |
 | `Profiles:{name}` | `{}` | Routing profiles: `AllowedModels[]`, `DeniedModels[]` (globs), `AllowedConnectors[]`, `DeniedConnectors[]`, `MinTier`, `MaxTier`, `Strategy`, `LocalOnly`, `Description`. See [docs/routing-profiles.md](docs/routing-profiles.md). |
 | `Complexity:*` | | `TokenSaturation`, `{Length,Code,Structure,Reasoning}Weight`, `ReasoningKeywords`, … |
-| `Selection:Strategy` | `CheapestCapable` | `CheapestCapable`, `MostCapable` or `Priority`. |
+| `Selection:Strategy` | `CheapestCapable` | `CheapestCapable`, `MostCapable`, `Priority`, `Fastest` or `Balanced`. |
+| `Selection:BalancedLatencyFactor` | `1.5` | For `Balanced`: how many times slower than the fastest model a cheaper model may be. |
+| `Selection:LatencyWindow` / `LatencySamples` | `1.00:00:00` / `5` | The recent served turns a model's typical time to first byte is taken from, and how many it needs. |
 | `Selection:AllowBelowRequiredTier` | `true` | Degrade to the best available model instead of failing. |
 | `Selection:MaxAttempts` | `3` | Models tried per request. |
 | `Selection:QuotaCooldown` / `FailureCooldown` | `00:15:00` / `00:00:30` | How long failed models are skipped. |

@@ -80,7 +80,7 @@ public static class PromptRouterApplicationBuilderExtensions
 
     /// <summary>
     /// Maps an OpenAI-compatible <c>GET /v1/models</c> listing the routing aliases (<c>auto</c>, <c>auto:cheapest</c>,
-    /// <c>auto:best</c>, <c>auto:priority</c>) and every enabled catalog model, so chat clients can offer them.
+    /// <c>auto:best</c>, <c>auto:fastest</c>, <c>auto:balanced</c>, <c>auto:priority</c>) and every enabled catalog model, so chat clients can offer them.
     /// </summary>
     public static RouteHandlerBuilder MapRouterModels(
         this IEndpointRouteBuilder endpoints,

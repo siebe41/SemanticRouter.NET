@@ -96,6 +96,12 @@ public sealed record RoutingPlan(
 
     /// <summary>The first candidate is a model on trial (<see cref="PromptRoutingRequest.TrialModel"/>).</summary>
     public string? Trial { get; init; }
+
+    /// <summary>
+    /// Why a latency-aware strategy (<see cref="SelectionStrategy.Fastest"/>, <see cref="SelectionStrategy.Balanced"/>)
+    /// chose the first candidate, e.g. <c>fastest: qwen-small (310 ms to first byte) over cheaper llama (1,420 ms)</c>.
+    /// </summary>
+    public string? SelectionNote { get; init; }
 }
 
 /// <summary>Routes a prompt to an ordered list of catalog models.</summary>
@@ -129,6 +135,8 @@ public sealed class PromptRouter : IPromptRouter
     private readonly Dictionary<string, RoutingProfile> _profiles;
     private readonly HashSet<string> _followConversation;
     private readonly Dictionary<string, string> _routeModels;
+    private readonly IModelLatency? _latency;
+    private readonly SelectionStrategy _strategy;
     private readonly TimeZoneInfo _zone;
     private readonly TimeProvider _time;
 
@@ -139,7 +147,8 @@ public sealed class PromptRouter : IPromptRouter
         IModelSelector? selector = null,
         IModelHealth? health = null,
         TimeProvider? time = null,
-        IModelReliability? reliability = null)
+        IModelReliability? reliability = null,
+        IModelLatency? latency = null)
     {
         ArgumentNullException.ThrowIfNull(classifier);
         ArgumentNullException.ThrowIfNull(options);
@@ -148,6 +157,8 @@ public sealed class PromptRouter : IPromptRouter
         _selector = selector ?? new DefaultModelSelector(options.Selection);
         _health = health ?? new ModelHealthTracker(options.Selection);
         _reliability = reliability;
+        _latency = latency;
+        _strategy = options.Selection.Strategy;
         _models = options.Models.ToArray();
         _profiles = new Dictionary<string, RoutingProfile>(options.Profiles, StringComparer.OrdinalIgnoreCase);
         _followConversation = new HashSet<string>(options.Routes.Where(r => r.FollowsConversation).Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
@@ -308,13 +319,36 @@ public sealed class PromptRouter : IPromptRouter
             return new RoutingPlan(classification, requirements, [previous, .. candidates.Where(c => c != previous)]) { Sticky = true, Unreliable = unreliable };
         }
 
+        bool sticky = request.PreferredModel is { } same && candidates.Count > 0 && string.Equals(candidates[0].Model.Name, same, StringComparison.OrdinalIgnoreCase);
         return new RoutingPlan(classification, requirements, candidates)
         {
             Unreliable = unreliable,
-            Sticky = request.PreferredModel is { } same && candidates.Count > 0 && string.Equals(candidates[0].Model.Name, same, StringComparison.OrdinalIgnoreCase),
+            Sticky = sticky,
             RouteModel = routeModel,
             Trial = trial,
+            SelectionNote = sticky || routeModel is not null || trial is not null ? null : SelectionNote(requirements.Strategy ?? _strategy, candidates),
         };
+    }
+
+    /// <summary>For a latency-aware strategy: the chosen model's time to first byte, and the cheaper model it was chosen over.</summary>
+    private string? SelectionNote(SelectionStrategy strategy, IReadOnlyList<ModelCandidate> candidates)
+    {
+        if (_latency is null || strategy is not (SelectionStrategy.Fastest or SelectionStrategy.Balanced)
+            || candidates.Count == 0 || !candidates[0].MeetsRequiredTier)
+        {
+            return null;
+        }
+
+        ModelDefinition first = candidates[0].Model;
+        ModelDefinition cheapest = candidates.Where(c => c.MeetsRequiredTier).OrderBy(c => c.EstimatedCost).ThenBy(c => c.Model.Tier).First().Model;
+        string name = strategy == SelectionStrategy.Fastest ? "fastest" : "balanced";
+        return cheapest == first
+            ? $"{name}: {first.Name} ({Latency(first)}), also the cheapest"
+            : $"{name}: {first.Name} ({Latency(first)}) over cheaper {cheapest.Name} ({Latency(cheapest)})";
+
+        string Latency(ModelDefinition model) => _latency.TypicalTimeToFirstByte(model) is { } typical
+            ? typical.TotalMilliseconds.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) + " ms to first byte"
+            : "no recent latency";
     }
 
     /// <summary>

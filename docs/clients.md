@@ -109,7 +109,7 @@ client = OpenAI(base_url="http://localhost:5080/v1", api_key="semantic-router")
 client.chat.completions.create(model="auto", messages=[{"role": "user", "content": "hello"}])
 ```
 
-Model names: `auto` (configured strategy), `auto:cheapest`, `auto:best`, `auto:priority`, or a catalog model name to force it. `GET /v1/models` lists all of them, so model pickers in chat UIs work.
+Model names: `auto` (configured strategy), `auto:cheapest`, `auto:best`, `auto:fastest` (lowest recent time to first byte), `auto:balanced` (the cheapest of the nearly fastest), `auto:priority`, or a catalog model name to force it. `GET /v1/models` lists all of them, so model pickers in chat UIs work.
 
 ## OpenAI Codex CLI
 

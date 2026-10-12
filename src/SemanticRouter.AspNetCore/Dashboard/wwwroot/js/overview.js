@@ -73,7 +73,7 @@ views.overview = () => {
       <textarea id="tester-prompt" aria-label="Prompt to try" placeholder="Paste a prompt…">${h(t.prompt)}</textarea>
       <div class="inline" style="margin-top:8px">
         <select id="tester-model" aria-label="Model" style="width:220px">
-          ${['auto', 'auto:cheapest', 'auto:best', 'auto:priority'].concat(s.models.map((m) => m.name)).map((m) => `<option ${m === t.model ? 'selected' : ''}>${h(m)}</option>`).join('')}
+          ${['auto', 'auto:cheapest', 'auto:best', 'auto:fastest', 'auto:balanced', 'auto:priority'].concat(s.models.map((m) => m.name)).map((m) => `<option ${m === t.model ? 'selected' : ''}>${h(m)}</option>`).join('')}
         </select>
         <button class="btn primary" data-action="tester-classify" ${t.busy ? 'disabled' : ''}>Classify</button>
         <button class="btn" data-action="tester-send" ${t.busy ? 'disabled' : ''}>Send</button>
@@ -117,7 +117,7 @@ export function renderActivityTable(entries, labels) {
       <td><span class="tier">T${e.tier}</span></td>
       <td class="small">${h(e.reason)}${e.cached ? ' <span class="badge" title="Reused a recent decision: no embedding call">cached</span>' : ''}${learnedBadge(e)}</td>
       <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
-      <td class="small">${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.outcome === 'rate-limited' ? `<span class="badge warn" title="${h(e.detail || '')}">rate limited</span>` : e.servedBy ? `<b>${h(e.servedBy)}</b>${e.attempt > 1 ? ` <span class="badge warn">try ${e.attempt}</span>` : ''}${e.degraded ? ' <span class="badge warn">degraded</span>' : ''}` : `<span class="muted">${h(e.plannedModel || '—')}</span> <span class="faint">planned</span>`}${e.sticky ? ' <span class="badge" title="Stayed on the model that answered the conversation\'s last turn">sticky</span>' : ''}${e.callout ? ` <span class="badge accent" title="Chosen with an inline callout">${h(e.callout)}</span>` : ''}${unreliableBadge(e)}${feedbackBadges(e)}${gradeBadge(e)}</td>
+      <td class="small">${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.outcome === 'rate-limited' ? `<span class="badge warn" title="${h(e.detail || '')}">rate limited</span>` : e.servedBy ? `<b>${h(e.servedBy)}</b>${e.attempt > 1 ? ` <span class="badge warn">try ${e.attempt}</span>` : ''}${e.degraded ? ' <span class="badge warn">degraded</span>' : ''}` : `<span class="muted">${h(e.plannedModel || '—')}</span> <span class="faint">planned</span>`}${e.sticky ? ' <span class="badge" title="Stayed on the model that answered the conversation\'s last turn">sticky</span>' : ''}${e.selection ? ` <span class="badge" title="${h(e.selection)}">${h(e.selection.split(':')[0])}</span>` : ''}${e.callout ? ` <span class="badge accent" title="Chosen with an inline callout">${h(e.callout)}</span>` : ''}${unreliableBadge(e)}${feedbackBadges(e)}${gradeBadge(e)}</td>
       <td class="num small">${e.totalMilliseconds != null ? num(e.totalMilliseconds, 0) : num(e.classificationMilliseconds, 1)}${e.timeToFirstByteMilliseconds != null && e.totalMilliseconds != null ? `<div class="faint" title="Time to the first byte of the reply">first ${num(e.timeToFirstByteMilliseconds, 0)}</div>` : ''}</td>
       ${labels ? `<td>${e.toolContinuation ? '' : `<button class="btn ghost small" data-action="label-open" data-id="${e.id}" title="Say which tier this prompt should have had">Label</button>`}</td>` : ''}
     </tr>`).join('')}
