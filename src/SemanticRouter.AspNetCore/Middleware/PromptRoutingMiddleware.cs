@@ -378,6 +378,7 @@ internal sealed partial class PromptRoutingMiddleware
             ClassificationMilliseconds = Math.Round(result.Elapsed.TotalMilliseconds, 2),
             Memory = memory,
             Trial = trial,
+            Selection = plan.SelectionNote,
         });
 
         if (feedback)
@@ -804,6 +805,11 @@ internal sealed partial class PromptRoutingMiddleware
         headers[prefix + "-Reason"] = result.Reason.ToString();
         headers[prefix + "-Complexity"] = result.Complexity.Score.ToString("0.000", CultureInfo.InvariantCulture);
         headers[prefix + "-Model"] = plan.Candidates.Count > 0 ? plan.Candidates[0].Model.Name : "none";
+        if (plan.SelectionNote is { } selection && selection.All(char.IsAscii))
+        {
+            headers[prefix + "-Selection"] = selection;
+        }
+
         if (result.Similarity is { } similarity)
         {
             headers[prefix + "-Similarity"] = similarity.ToString("0.0000", CultureInfo.InvariantCulture);

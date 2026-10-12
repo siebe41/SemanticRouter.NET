@@ -291,7 +291,7 @@ public sealed class AnnotateModeTests : RouterHostTest
 
         json.RootElement.GetProperty("object").GetString().Should().Be("list");
         json.RootElement.GetProperty("data").EnumerateArray().Select(m => m.GetProperty("id").GetString())
-            .Should().Equal("auto", "auto:cheapest", "auto:best", "auto:priority", "local", "cloud");
+            .Should().Equal("auto", "auto:cheapest", "auto:best", "auto:priority", "auto:fastest", "auto:balanced", "local", "cloud");
     }
 
     [Fact]

@@ -1,0 +1,87 @@
+using System.Net;
+using System.Text;
+using Microsoft.Extensions.DependencyInjection;
+using SemanticRouter.AspNetCore;
+using SemanticRouter.Tests.Support;
+using static SemanticRouter.Tests.Support.TestEmbeddings;
+
+namespace SemanticRouter.Tests.AspNetCore;
+
+/// <summary>
+/// Latency as a selection factor (#70): each model's typical time to first byte comes from its recent served turns, and
+/// <c>auto:fastest</c> takes the quicker of two capable models while plain <c>auto</c> keeps choosing by cost.
+/// </summary>
+public sealed class ModelLatencyTests : RouterHostTest
+{
+    private static RoutingActivityEntry Served(string model, double ttfb, DateTimeOffset at, string outcome = "served") =>
+        new() { Timestamp = at, Tier = 4, ServedBy = model, Outcome = outcome, TimeToFirstByteMilliseconds = ttfb };
+
+    [Fact]
+    public void The_tracker_takes_each_models_median_over_its_recent_served_turns()
+    {
+        var clock = new ManualTimeProvider();
+        DateTimeOffset now = clock.GetUtcNow();
+        var activity = new RoutingActivityLog();
+        foreach (double ttfb in new[] { 900, 200, 300, 250, 5000 })
+        {
+            activity.Add(Served("quick", ttfb, now.AddMinutes(-5)));
+        }
+
+        foreach (double ttfb in new[] { 100, 100, 100, 100 })
+        {
+            activity.Add(Served("sparse", ttfb, now.AddMinutes(-5)));
+        }
+
+        for (int i = 0; i < 5; i++)
+        {
+            activity.Add(Served("stale", 50, now.AddDays(-2)));
+            activity.Add(Served("failing", 50, now.AddMinutes(-1), outcome: "failed"));
+        }
+
+        var tracker = new ModelLatencyTracker(activity, clock);
+
+        tracker.Typical().Should().BeEquivalentTo(new Dictionary<string, TimeSpan> { ["quick"] = TimeSpan.FromMilliseconds(300) },
+            "sparse has fewer than 5 turns, stale's are outside the day, failing's were not served");
+        tracker.TypicalTimeToFirstByte(Model("QUICK", 4)).Should().Be(TimeSpan.FromMilliseconds(300));
+
+        tracker.Configure(new ModelSelectionOptions { LatencySamples = 4, LatencyWindow = TimeSpan.FromDays(3) });
+
+        tracker.Typical().Keys.Should().BeEquivalentTo(["quick", "sparse", "stale"]);
+    }
+
+    [Fact]
+    public async Task Auto_fastest_takes_the_quicker_capable_model_and_says_why()
+    {
+        // "cloud" (tier 4, cost 3) is slow, "quick" (tier 4, cost 5) is fast; both can do the work.
+        ClassifyAs(tier: 4);
+        HttpClient client = await StartAsync(
+            o => o.PathPrefixes.Add("/v1/chat/completions"),
+            routing: o =>
+            {
+                ModelDefinition quick = Model("quick", 4, costPerMillion: 5m, connector: "anthropic");
+                quick.Model = "quick-model";
+                o.Models.Add(quick);
+            });
+        RoutingActivityLog activity = Services.GetRequiredService<RoutingActivityLog>();
+        for (int i = 0; i < 5; i++)
+        {
+            activity.Add(Served("cloud", 1500 + i, DateTimeOffset.UtcNow.AddMinutes(-5)));
+            activity.Add(Served("quick", 300 + i, DateTimeOffset.UtcNow.AddMinutes(-5)));
+        }
+
+        HttpResponseMessage fastest = await client.PostAsync("/v1/chat/completions", Chat("auto:fastest"));
+        fastest.StatusCode.Should().Be(HttpStatusCode.OK);
+        fastest.Headers.GetValues("X-Prompt-Route-Model").Single().Should().Be("quick");
+        string why = fastest.Headers.GetValues("X-Prompt-Route-Selection").Single();
+        why.Should().Be("fastest: quick (302 ms to first byte) over cheaper cloud (1,502 ms to first byte)");
+        activity.Recent(1).Single().Selection.Should().Be(why);
+
+        HttpResponseMessage cheapest = await client.PostAsync("/v1/chat/completions", Chat("auto"));
+        cheapest.Headers.GetValues("X-Prompt-Route-Model").Single().Should().Be("cloud", "the default strategy still chooses by cost");
+        cheapest.Headers.Contains("X-Prompt-Route-Selection").Should().BeFalse();
+        activity.Recent(1).Single().Selection.Should().BeNull();
+    }
+
+    private static StringContent Chat(string model) =>
+        new($$"""{"model":"{{model}}","messages":[{"role":"user","content":"implement the parser"}]}""", Encoding.UTF8, "application/json");
+}

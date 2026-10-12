@@ -243,7 +243,7 @@ views.routing = () => {
     </div>
 
     <div class="card section"><div class="card-head"><h2>Model selection and failover</h2></div><div class="form-grid">
-      <label class="field"><span class="name">Strategy</span><select data-bind="Selection.Strategy">${STRATEGIES.map((x) => `<option ${x === (sel.Strategy || 'CheapestCapable') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Clients can override per request with auto:cheapest / auto:best / auto:priority.</span></label>
+      <label class="field"><span class="name">Strategy</span><select data-bind="Selection.Strategy">${STRATEGIES.map((x) => `<option ${x === (sel.Strategy || 'CheapestCapable') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Fastest and Balanced use each model's recent time to first byte. Clients can override per request with auto:cheapest / auto:best / auto:priority / auto:fastest / auto:balanced.</span></label>
       <label class="field"><span class="name">Max attempts</span><input type="number" min="1" data-bind="Selection.MaxAttempts" data-kind="number" value="${sel.MaxAttempts || 3}"></label>
       <label class="field"><span class="name">Quota cooldown</span><input type="text" data-bind="Selection.QuotaCooldown" value="${h(sel.QuotaCooldown || '00:15:00')}"></label>
       <label class="field"><span class="name">Failure cooldown</span><input type="text" data-bind="Selection.FailureCooldown" value="${h(sel.FailureCooldown || '00:00:30')}"></label>
@@ -320,7 +320,7 @@ views.gateway = () => {
       <table><tr><th>Client model (glob)</th><th>Routes as</th><th></th></tr>
         ${aliases.map(([k, v], i) => `<tr><td><input type="text" data-action-input="alias-key" data-index="${i}" value="${h(k)}"></td><td><input type="text" data-action-input="alias-value" data-index="${i}" value="${h(v)}" list="alias-targets"></td><td><button class="btn ghost small" data-action="alias-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="3" class="muted small">No aliases. Unknown names route as <code>auto</code>.</td></tr>'}
       </table>
-      <datalist id="alias-targets">${['auto', 'auto:cheapest', 'auto:best', 'auto:priority'].concat((state.config.Models || []).map((x) => x.Name)).map((x) => `<option value="${h(x)}">`).join('')}</datalist>
+      <datalist id="alias-targets">${['auto', 'auto:cheapest', 'auto:best', 'auto:fastest', 'auto:balanced', 'auto:priority'].concat((state.config.Models || []).map((x) => x.Name)).map((x) => `<option value="${h(x)}">`).join('')}</datalist>
     </div>`;
 };
 
@@ -365,7 +365,7 @@ export OPENAI_API_KEY=semantic-router
 from openai import OpenAI
 client = OpenAI(base_url="${origin}/v1", api_key="semantic-router")
 client.chat.completions.create(model="auto", messages=[{"role": "user", "content": "hello"}])`,
-      'Works with Aider, Continue, Cline, Open WebUI, LibreChat, the OpenAI CLI and anything else with a configurable base URL. <code>auto:best</code>, <code>auto:cheapest</code> and <code>auto:priority</code> pick a strategy; a catalog model name forces that model.')}
+      'Works with Aider, Continue, Cline, Open WebUI, LibreChat, the OpenAI CLI and anything else with a configurable base URL. <code>auto:best</code>, <code>auto:cheapest</code>, <code>auto:fastest</code>, <code>auto:balanced</code> and <code>auto:priority</code> pick a strategy; a catalog model name forces that model.')}
     ${snippet('OpenAI Codex CLI', `# ~/.codex/config.toml
 model_provider = "semantic-router"
 model = "auto"

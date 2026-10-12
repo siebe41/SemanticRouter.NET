@@ -70,6 +70,8 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<IToolCallAffinity, ToolCallAffinity>();
         services.TryAddSingleton<RoutingActivityLog>();
         services.TryAddSingleton<RoutingFeedbackLog>();
+        services.TryAddSingleton(sp => new ModelLatencyTracker(sp.GetRequiredService<RoutingActivityLog>(), sp.GetService<TimeProvider>()));
+        services.TryAddSingleton<IModelLatency>(sp => sp.GetRequiredService<ModelLatencyTracker>());
         services.TryAddSingleton<ModelReliabilityTracker>();
         services.TryAddSingleton<IModelReliability>(sp => sp.GetRequiredService<ModelReliabilityTracker>());
         services.TryAddSingleton<IEvaluationSetStore>(sp =>

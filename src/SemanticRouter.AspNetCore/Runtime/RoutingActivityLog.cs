@@ -150,6 +150,9 @@ public sealed class RoutingActivityEntry
     /// </summary>
     public string? PromptKey { get; set; }
 
+    /// <summary>Why a latency-aware strategy chose the model (<see cref="RoutingPlan.SelectionNote"/>).</summary>
+    public string? Selection { get; init; }
+
     /// <summary>The learned change whose trial this turn was (a cheaper model tried on its route), when it was one.</summary>
     public long? Trial { get; init; }
 

@@ -69,7 +69,7 @@ A rule matches when every condition it sets holds:
 "Middleware": {
   "VirtualModels": {
     "private": { "Profile": "private", "Description": "Local models only." },
-    "fast":    { "Strategy": "CheapestCapable" }
+    "fast":    { "Strategy": "Fastest" }
   }
 }
 ```
