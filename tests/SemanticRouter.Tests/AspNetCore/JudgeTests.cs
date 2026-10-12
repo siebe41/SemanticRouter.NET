@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Tests.Support;
@@ -92,6 +93,29 @@ public sealed class JudgeTests : RouterHostTest
         RoutingFeedback feedback = Services.GetRequiredService<RoutingFeedbackLog>().Recent().Should().ContainSingle().Subject;
         (feedback.Kind, feedback.EntryId, feedback.Model, feedback.Tier, feedback.NeededTier).Should().Be((FeedbackKind.Judged, entry.Id, "local", 1, 2));
         feedback.Detail.Should().Contain("graded 2/5");
+    }
+
+    [Fact]
+    public async Task A_graded_answer_is_matched_to_its_hand_label_by_the_whole_prompt()
+    {
+        _time.Advance(DateTimeOffset.UtcNow - _time.GetUtcNow()); // activity is stamped with the real clock
+        HttpClient client = await StartJudgedAsync(j => (j.Enabled, j.SampleRate) = (true, 1));
+        string longPrompt = "Compare the travel options between the two cities for a family of four in late spring, with trains, flights and a rental car, " +
+            "and say which is cheapest once luggage and transfers to the centre are counted.";
+
+        await AskAsync(client, longPrompt);
+        (await client.PostAsync("/router/api/evaluation/cases", Json(JsonSerializer.Serialize(new { prompt = longPrompt, tier = 3 })))).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        RoutingActivityEntry entry = Latest;
+        entry.PromptPreview.Should().EndWith("…", "the preview holds only the start of the prompt");
+        entry.PromptKey.Should().Be(JudgeAgreement.KeyOf(longPrompt));
+        using JsonDocument agreement = JsonDocument.Parse(await client.GetStringAsync("/router/api/judge/agreement"));
+        JsonElement root = agreement.RootElement;
+        (root.GetProperty("pairs").GetInt32(), root.GetProperty("agreeing").GetInt32()).Should().Be((1, 1), "graded 2 at tier 1 and labelled tier 3: the label confirms the low grade");
+        JsonElement pair = root.GetProperty("recent")[0];
+        (pair.GetProperty("entryId").GetInt64(), pair.GetProperty("grade").GetInt32(), pair.GetProperty("answeredTier").GetInt32(), pair.GetProperty("labelTier").GetInt32())
+            .Should().Be((entry.Id, 2, 1, 3));
+        root.GetProperty("effectiveWeight").GetDouble().Should().Be(0.75, "one pair is too few to change the judge's weight");
     }
 
     [Fact]

@@ -46,6 +46,13 @@ public sealed class TuningOptions
     /// </summary>
     public double JudgeWeight { get; set; } = 0.75;
 
+    /// <summary>
+    /// Graded answers with a hand label in the evaluation set needed before the judge's agreement with those labels
+    /// scales <see cref="JudgeWeight"/> (<see cref="JudgeAgreement"/>): a judge that agrees half the time counts half as
+    /// much. Default 10.
+    /// </summary>
+    public int JudgeAgreementPairs { get; set; } = 10;
+
     /// <summary>Feedback from the last this many days is learned from. Default 30.</summary>
     public int FeedbackDays { get; set; } = 30;
 
@@ -104,6 +111,11 @@ public sealed class TuningOptions
         if (!(JudgeWeight >= 0 && JudgeWeight <= 1))
         {
             yield return "Tuning:JudgeWeight must be between 0 and 1.";
+        }
+
+        if (JudgeAgreementPairs < 1)
+        {
+            yield return "Tuning:JudgeAgreementPairs must be at least 1.";
         }
 
         if (FeedbackDays < 1)

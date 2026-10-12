@@ -137,7 +137,7 @@ internal sealed partial class AnswerJudge : IDisposable
                 return false;
             }
 
-            if (!_queue.Writer.TryWrite(new Job(entry, Clip(prompt, options.MaxCharacters), Clip(answer, options.MaxCharacters), highestTier)))
+            if (!_queue.Writer.TryWrite(new Job(entry, Clip(prompt, options.MaxCharacters), Clip(answer, options.MaxCharacters), highestTier, JudgeAgreement.KeyOf(prompt))))
             {
                 return false;
             }
@@ -253,6 +253,7 @@ internal sealed partial class AnswerJudge : IDisposable
 
         RoutingActivityEntry entry = job.Entry;
         entry.Grade = grade.Grade;
+        entry.PromptKey = job.PromptKey;
         entry.GradeNote = grade.Reason is { Length: > 0 } reason ? $"{judge.Name}: {reason}" : judge.Name;
         _activity.Revise(entry);
         LogGraded(_logger, entry.Id, entry.ServedBy ?? "?", grade.Grade, judge.Name);
@@ -360,7 +361,7 @@ internal sealed partial class AnswerJudge : IDisposable
     [GeneratedRegex(@"\bgrade\b\D{0,10}([1-5])\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex GradeText();
 
-    private sealed record Job(RoutingActivityEntry Entry, string Prompt, string Answer, int HighestTier);
+    private sealed record Job(RoutingActivityEntry Entry, string Prompt, string Answer, int HighestTier, string PromptKey);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Request {Id} (answered by {Model}) graded {Grade}/5 by {Judge}.")]
     private static partial void LogGraded(ILogger logger, long id, string model, int grade, string judge);
