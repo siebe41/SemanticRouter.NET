@@ -146,7 +146,13 @@ internal sealed partial class RouterTuner : IDisposable
         }
 
         ExpireStale(runtime.Configuration);
-        (IReadOnlyList<EvaluationCase> automatic, Dictionary<string, HashSet<FeedbackKind>> kinds) = AutomaticLabels(confirmed, options, now);
+
+        // The judge's labels count for as much as its grades agree with the hand labels, once there are enough to tell.
+        JudgeAgreementReport agreement = JudgeAgreement.Measure(
+            _activity.Between(now - TimeSpan.FromDays(options.FeedbackDays), now.AddSeconds(1)), confirmed, runtime.Router.Models,
+            runtime.Configuration.Middleware.Judge.FailingGrade, options);
+        double judgeWeight = agreement.EffectiveWeight;
+        (IReadOnlyList<EvaluationCase> automatic, Dictionary<string, HashSet<FeedbackKind>> kinds) = AutomaticLabels(confirmed, options, judgeWeight, now);
         int total = confirmed.Count + automatic.Count;
         if (total < options.MinimumPrompts)
         {
@@ -160,7 +166,10 @@ internal sealed partial class RouterTuner : IDisposable
         }
 
         var made = new List<TuningChange>();
-        var evidence = new Evidence(new HashSet<EvaluationCase>(confirmed), kinds);
+        string? judgeNote = agreement.Applied
+            ? string.Create(CultureInfo.InvariantCulture, $"counted at {judgeWeight:0.00}: {agreement.Summary}")
+            : null;
+        var evidence = new Evidence(new HashSet<EvaluationCase>(confirmed), kinds, judgeNote);
         IReadOnlyList<TuningChange> history = _store.Changes();
 
         // Thresholds: find the steps, then apply those that may be applied (re-planned without the others).
@@ -171,7 +180,7 @@ internal sealed partial class RouterTuner : IDisposable
         {
             MaxStep = options.MaxStep,
             AutomaticWeight = options.FeedbackWeight,
-            AutomaticWeights = [.. automatic.Select(c => Weight(kinds.TryGetValue(c.Prompt, out HashSet<FeedbackKind>? seen) ? seen : [], options))],
+            AutomaticWeights = [.. automatic.Select(c => Weight(kinds.TryGetValue(c.Prompt, out HashSet<FeedbackKind>? seen) ? seen : [], options, judgeWeight))],
         };
         ThresholdTuning planned = tuner.Tune(prepared, confirmed.Count, limits);
 
@@ -229,10 +238,10 @@ internal sealed partial class RouterTuner : IDisposable
     /// evaluation set keep their hand label.
     /// </summary>
     private (IReadOnlyList<EvaluationCase> Cases, Dictionary<string, HashSet<FeedbackKind>> Kinds) AutomaticLabels(
-        IReadOnlyList<EvaluationCase> confirmed, TuningOptions options, DateTimeOffset now)
+        IReadOnlyList<EvaluationCase> confirmed, TuningOptions options, double judgeWeight, DateTimeOffset now)
     {
         var kinds = new Dictionary<string, HashSet<FeedbackKind>>(StringComparer.Ordinal);
-        if (options.FeedbackWeight <= 0 && options.JudgeWeight <= 0)
+        if (options.FeedbackWeight <= 0 && judgeWeight <= 0)
         {
             return ([], kinds);
         }
@@ -250,7 +259,7 @@ internal sealed partial class RouterTuner : IDisposable
         foreach (RoutingFeedback item in feedback)
         {
             if (item.NeededTier is not { } tier
-                || (item.Kind == FeedbackKind.Judged ? options.JudgeWeight : options.FeedbackWeight) <= 0
+                || (item.Kind == FeedbackKind.Judged ? judgeWeight : options.FeedbackWeight) <= 0
                 || !entries.TryGetValue(item.EntryId, out RoutingActivityEntry? entry)
                 || entry.ToolContinuation
                 || string.IsNullOrWhiteSpace(entry.PromptPreview)
@@ -271,14 +280,15 @@ internal sealed partial class RouterTuner : IDisposable
     }
 
     /// <summary>
-    /// A prompt labelled only by the judge counts at <see cref="TuningOptions.JudgeWeight"/>, one with other feedback at
-    /// <see cref="TuningOptions.FeedbackWeight"/>, one with both at the higher of the two.
+    /// A prompt labelled only by the judge counts at <paramref name="judgeWeight"/> (<see cref="TuningOptions.JudgeWeight"/>,
+    /// scaled by its agreement with the hand labels), one with other feedback at <see cref="TuningOptions.FeedbackWeight"/>,
+    /// one with both at the higher of the two.
     /// </summary>
-    private static double Weight(HashSet<FeedbackKind> kinds, TuningOptions options)
+    private static double Weight(HashSet<FeedbackKind> kinds, TuningOptions options, double judgeWeight)
     {
         bool judged = kinds.Contains(FeedbackKind.Judged);
         bool other = kinds.Count > (judged ? 1 : 0);
-        return judged && other ? Math.Max(options.JudgeWeight, options.FeedbackWeight) : judged ? options.JudgeWeight : options.FeedbackWeight;
+        return judged && other ? Math.Max(judgeWeight, options.FeedbackWeight) : judged ? judgeWeight : options.FeedbackWeight;
     }
 
     private static TuningChange ThresholdChange(ThresholdStep step, TuningOptions options, Evidence evidence, DateTimeOffset now)
@@ -331,7 +341,7 @@ internal sealed partial class RouterTuner : IDisposable
         {
             string[] seen = automatic
                 .SelectMany(c => evidence.Kinds.TryGetValue(c.Prompt, out HashSet<FeedbackKind>? k) ? k : [])
-                .Distinct().Order().Select(Describe).ToArray();
+                .Distinct().Order().Select(k => k == FeedbackKind.Judged && evidence.JudgeNote is { } note ? $"{Describe(k)} ({note})" : Describe(k)).ToArray();
             parts.Add($"{fromFeedback} from feedback" + (seen.Length > 0 ? ": " + string.Join(", ", seen) : string.Empty));
         }
 
@@ -767,5 +777,5 @@ internal sealed partial class RouterTuner : IDisposable
         Hold,
     }
 
-    private sealed record Evidence(HashSet<EvaluationCase> Confirmed, Dictionary<string, HashSet<FeedbackKind>> Kinds);
+    private sealed record Evidence(HashSet<EvaluationCase> Confirmed, Dictionary<string, HashSet<FeedbackKind>> Kinds, string? JudgeNote);
 }

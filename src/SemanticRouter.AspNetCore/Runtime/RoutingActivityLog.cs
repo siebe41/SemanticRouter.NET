@@ -145,6 +145,12 @@ public sealed class RoutingActivityEntry
     public string? GradeNote { get; set; }
 
     /// <summary>
+    /// A hash of the prompt the judge graded, to find its hand label in the evaluation set (<see cref="JudgeAgreement"/>);
+    /// no more of the prompt is kept than <see cref="PromptPreview"/>.
+    /// </summary>
+    public string? PromptKey { get; set; }
+
+    /// <summary>
     /// The models the request was sent to, in order (Dispatch mode). Failed attempts are included: the backend may have
     /// received the request before it failed.
     /// </summary>

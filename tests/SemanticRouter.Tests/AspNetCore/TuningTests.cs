@@ -268,6 +268,84 @@ public sealed class TuningTests : RouterHostTest
         (await ThresholdsAsync(client)).Reasoning.Should().Be(0.88f);
     }
 
+    /// <summary>
+    /// Four graded answers whose prompts are labelled by hand (agreeing with the grade or not), and three reasoning
+    /// prompts the judge graded low: they needed tier 4, which only a lower reasoning threshold gives them.
+    /// </summary>
+    private async Task<HttpClient> StartJudgedAsync(bool agrees)
+    {
+        HttpClient client = await StartTunedAsync(t => (t.MinimumPrompts, t.JudgeAgreementPairs) = (2, 4), smallTalk: 0, reasoning: 0);
+        var activity = Services.GetRequiredService<RoutingActivityLog>();
+        var feedback = Services.GetRequiredService<RoutingFeedbackLog>();
+        IEvaluationSetStore labels = Services.GetRequiredService<IEvaluationSetStore>();
+        var cases = labels.Load().ToList();
+        for (int i = 0; i < 4; i++)
+        {
+            // "local" (tier 1) answered and the judge graded it 2: the label agrees when it asks for more than tier 1.
+            string prompt = agrees ? _embeddings.At($"what happened in the outage {i}", 0, 0.3f) : _embeddings.At($"hi again {i}", 0, 0.9f);
+            RoutingActivityEntry entry = activity.Add(new RoutingActivityEntry
+            {
+                Id = activity.Reserve(),
+                Timestamp = DateTimeOffset.UtcNow.AddMinutes(-10),
+                PromptPreview = prompt,
+                Tier = 1,
+                Reason = RoutingReason.SemanticMatch,
+                ServedBy = "local",
+                Grade = 2,
+            });
+            cases.Add(new EvaluationCase(prompt, agrees ? 3 : 1) { Note = $"labelled from activity #{entry.Id}" });
+        }
+
+        labels.Save(cases);
+        for (int i = 0; i < 3; i++)
+        {
+            string prompt = _embeddings.At($"design the payments ledger {i}", 2, 0.825f);
+            RoutingActivityEntry entry = activity.Add(new RoutingActivityEntry
+            {
+                Id = activity.Reserve(),
+                Timestamp = DateTimeOffset.UtcNow.AddMinutes(-5),
+                PromptPreview = prompt,
+                Tier = 3,
+                Reason = RoutingReason.NoMatchFallback,
+                ServedBy = "local",
+                Grade = 1,
+            });
+            feedback.Add(new RoutingFeedback { Timestamp = DateTimeOffset.UtcNow.AddMinutes(-4), EntryId = entry.Id, Kind = FeedbackKind.Judged, Tier = 3, NeededTier = 4 });
+        }
+
+        return client;
+    }
+
+    [Fact]
+    public async Task A_judge_that_agrees_with_the_hand_labels_keeps_its_weight_and_the_reason_says_so()
+    {
+        HttpClient client = await StartJudgedAsync(agrees: true);
+
+        JsonElement agreement = await JsonOf(await client.GetAsync("/router/api/judge/agreement"));
+        JsonElement run = await RunAsync(client);
+
+        (agreement.GetProperty("pairs").GetInt32(), agreement.GetProperty("agreeing").GetInt32(), agreement.GetProperty("rate").GetDouble()).Should().Be((4, 4, 1.0));
+        agreement.GetProperty("effectiveWeight").GetDouble().Should().Be(0.75);
+        JsonElement change = run.GetProperty("changes").EnumerateArray().Single(c => c.GetProperty("route").GetString() == "reasoning");
+        change.GetProperty("why").GetString().Should().Contain("graded low by the judge (counted at 0.75: its grades agree with 4 of 4 hand labels)");
+        (await ThresholdsAsync(client)).Reasoning.Should().Be(0.88f);
+    }
+
+    [Fact]
+    public async Task A_judge_that_disagrees_with_the_hand_labels_counts_for_less()
+    {
+        HttpClient client = await StartJudgedAsync(agrees: false);
+
+        JsonElement agreement = await JsonOf(await client.GetAsync("/router/api/judge/agreement"));
+        JsonElement run = await RunAsync(client);
+
+        (agreement.GetProperty("pairs").GetInt32(), agreement.GetProperty("agreeing").GetInt32()).Should().Be((4, 0));
+        (agreement.GetProperty("lowGrades").GetInt32(), agreement.GetProperty("lowAgreeing").GetInt32()).Should().Be((4, 0));
+        agreement.GetProperty("effectiveWeight").GetDouble().Should().Be(0, "it agrees with none of the hand labels");
+        run.GetProperty("changes").EnumerateArray().Should().NotContain(c => c.GetProperty("route").GetString() == "reasoning", "the judge's labels count for nothing");
+        (await ThresholdsAsync(client)).Reasoning.Should().Be(0.90f);
+    }
+
     [Fact]
     public async Task A_labelled_prompt_its_route_misses_becomes_an_utterance_and_undo_removes_it()
     {

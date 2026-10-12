@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace SemanticRouter.AspNetCore;
 
@@ -21,6 +22,12 @@ internal static class TuningApi
 
         api.MapGet("/tuning/changes", (RouterTuner tuner, RouterRuntimeProvider provider, RoutingActivityLog activity, RoutingFeedbackLog feedback, int? limit) =>
             Results.Json(Status(tuner, provider, activity, feedback, limit).Changes, json));
+
+        // How often the judge's grades agree with the hand labels, and what weight that gives its labels in tuning.
+        api.MapGet("/judge/agreement", (HttpContext context, RouterRuntimeProvider provider, RoutingActivityLog activity, IEvaluationSetStore labels) =>
+            Results.Json(
+                JudgeAgreement.Measure(provider.Current, activity, labels, (context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow()),
+                json));
 
         api.MapPost("/tuning/run", async (RouterTuner tuner, CancellationToken cancellationToken) =>
         {

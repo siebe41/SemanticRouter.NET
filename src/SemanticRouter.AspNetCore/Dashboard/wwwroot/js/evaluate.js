@@ -7,7 +7,8 @@ import { render } from './shell.js';
 export const pct = (v) => (v * 100).toFixed(v === 1 || v === 0 ? 0 : 1) + '%';
 export async function loadEvaluationSet() {
   try {
-    const r = await api('GET', '/evaluation/set');
+    const [r, judge] = await Promise.all([api('GET', '/evaluation/set'), api('GET', '/judge/agreement').catch(() => null)]);
+    state.evaluation.judge = judge;
     state.evaluation.location = r.location; state.evaluation.count = r.count;
     state.evaluation.text = r.cases.map((c) => JSON.stringify(Object.fromEntries(Object.entries({ prompt: c.prompt, tier: c.tier, route: c.route, localOnly: c.localOnly || undefined, note: c.note }).filter(([, v]) => v != null)))).join('\n');
   } catch (e) { state.evaluation.text = ''; toast(e.message, 'danger'); }
@@ -78,6 +79,22 @@ export function evaluationResults(r) {
       ${r.misroutes.length ? `<div class="table-wrap"><table><tr><th>Prompt</th><th>Expected</th><th>Routed</th><th>Best routes</th><th></th></tr>${misroutes}</table></div>` : '<div class="muted small">Every prompt was routed to its tier.</div>'}</div>`;
 }
 
+/* How often the judge's grades agree with the hand labels, and the weight that gives its labels in tuning. */
+export function judgeCard() {
+  const j = state.evaluation.judge;
+  const enabled = ((state.config.Middleware || {}).Judge || {}).Enabled;
+  if (!j || (!enabled && !j.pairs)) return '';
+  const weight = (v) => Number(v).toFixed(2);
+  const effect = !j.pairs ? `Judge labels count at ${weight(j.configuredWeight)} until ${j.minimumPairs} graded answers have a hand label.`
+    : j.pairs < j.minimumPairs ? `Judge labels count at ${weight(j.configuredWeight)} (<code>Tuning:JudgeWeight</code>); the agreement scales it from ${j.minimumPairs} pairs.`
+    : `Judge labels count at <b>${weight(j.effectiveWeight)}</b>: <code>Tuning:JudgeWeight</code> ${weight(j.configuredWeight)} × ${pct(j.rate)} agreement.`;
+  return `<div class="card section"><div class="card-head"><h2>Judge agreement</h2><span class="muted small">Graded answers whose prompt is also in the evaluation set: a low grade agrees when the label is above the tier that answered, a good grade when it is at or below it.</span></div>
+    <div class="small">${j.pairs ? `<b>${j.agreeing} of ${j.pairs}</b> agree (${pct(j.rate)}) · low grades confirmed ${j.lowAgreeing} of ${j.lowGrades} · good grades confirmed ${j.goodAgreeing} of ${j.goodGrades}` : 'No graded answer has a hand label yet. Label graded prompts from the Activity page.'}</div>
+    <div class="small muted" style="margin-top:4px">${effect}</div>
+    ${j.recent.length ? `<table style="margin-top:10px"><tr><th>Request</th><th>Model</th><th class="num">Grade</th><th class="num">Answered tier</th><th class="num">Label</th><th></th></tr>${j.recent.map((p) => `<tr><td>#${p.entryId}</td><td>${h(p.model || '—')}</td><td class="num">${p.grade}/5</td><td class="num">${p.answeredTier}</td><td class="num">${p.labelTier}</td><td>${p.agrees ? '<span class="badge ok">agrees</span>' : '<span class="badge warn">disagrees</span>'}</td></tr>`).join('')}</table>` : ''}
+  </div>`;
+}
+
 export function healthCard() {
   const hr = state.evaluation.health;
   const kinds = { FewUtterances: ['info', 'few utterances'], DuplicateUtterances: ['warn', 'duplicate'], ConflictingUtterances: ['danger', 'conflict'], Overlap: ['warn', 'overlap'] };
@@ -119,6 +136,7 @@ views.evaluate = () => {
         <span class="muted small">Threshold ${state.config.DefaultSimilarityThreshold} · ${(state.config.Routes || []).length} routes · ${h((state.config.Embeddings || {}).Provider || '')}</span></div>
     </div>
     ${ev.report ? evaluationResults(ev.report) : ''}
+    ${judgeCard()}
     ${healthCard()}
     ${compareCard()}`;
 };
