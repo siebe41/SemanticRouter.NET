@@ -137,6 +137,17 @@ Tracked in [#62](https://github.com/siebe41/SemanticRouter.NET/issues/62).
 | [#73](https://github.com/siebe41/SemanticRouter.NET/issues/73) | Fuzz tests for protocol translation | Done: `ProtocolFuzzTests` in CI with a fixed seed; longer runs by hand ([CONTRIBUTING.md](../CONTRIBUTING.md#building-and-testing)). |
 | [#74](https://github.com/siebe41/SemanticRouter.NET/issues/74) | Per-client rate limit for gateway keys | Done: `Middleware:RateLimits` ([dashboard.md](dashboard.md#rate-limits)). |
 
+### 8. Keep prompt caches working
+
+Tracked in [#92](https://github.com/siebe41/SemanticRouter.NET/issues/92). Caches are per model, so moving a conversation between models re-sends and re-writes its whole context; the router should weigh that before it moves one.
+
+| Issue | Goal | Notes |
+|---|---|---|
+| [#93](https://github.com/siebe41/SemanticRouter.NET/issues/93) | Get the prompt-cache numbers right | Streamed and CLI cache counts, `prompt_cache_key`, "saved by routing", a hit rate on the dashboard. |
+| [#94](https://github.com/siebe41/SemanticRouter.NET/issues/94) | Cache-aware stickiness | Stay on the model with the warm cache when moving costs more; return to it after a failover. |
+| [#95](https://github.com/siebe41/SemanticRouter.NET/issues/95) | Cache markers on translated Anthropic requests | So OpenAI and Codex clients routed to Claude use its cache. |
+| [#96](https://github.com/siebe41/SemanticRouter.NET/issues/96) | Cache-aware cost estimates | Ranking and per-route model trials count cache prices. |
+
 ### Continuous
 
 | Issue | Goal |
