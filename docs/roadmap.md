@@ -4,7 +4,7 @@ Where SemanticRouter.NET is headed, and why in this order. Each goal is a GitHub
 
 ## Where we are
 
-Today the router is a library, a `semantic-router` .NET tool and container image (`init`, `doctor`, run), and two samples:
+Today the router is a library, a `semantic-router` .NET tool and container image (`init`, `doctor`, run), a desktop app with installers for Windows, macOS and Linux (first released as [v0.1.0](https://github.com/siebe41/SemanticRouter.NET/releases/tag/v0.1.0)), and two samples:
 
 - It accepts OpenAI chat completions and the Anthropic Messages API, routes each turn to local models, subscription CLIs or paid APIs, and writes the reply in the client's protocol, including streaming and tool calls.
 - Claude Code can be pointed at it with `ANTHROPIC_BASE_URL`; its model names map through aliases, its tool loops stay on one model, and a subscription CLI can answer its tool-bearing turns through prompted tool calling.
@@ -29,6 +29,14 @@ Today the router is a library, a `semantic-router` .NET tool and container image
 
 - It runs in the background as a per-user service (`semantic-router service install`: systemd, launchd or a Windows sign-in entry), so no terminal has to stay open, or as a desktop app with a tray icon and the dashboard in its own window or the browser.
 
+- It learns from how its answers land: an optional judge grades a sample of cheap answers, and how often it agrees with your hand labels scales how much tuning trusts it. Corrections are recognised in five languages and, for other wording, by meaning. A cheaper model is tried on a share of each route's turns and takes the route over when it does as well.
+
+- It can choose for speed as well as cost: `Fastest` and `Balanced` (`auto:fastest`, `auto:balanced`) use each model's recent time to first byte, and every decision says why it picked the model.
+
+- It reports only what needs a decision: a weekly digest and notices on the dashboard, in the tray and to webhooks (JSON, Slack-compatible, ntfy). Gateway keys can be rate limited per client.
+
+- Protocol translation is fuzz-tested in CI, and the wording that marks a client's side requests ships as a data file that can be updated without a release.
+
 - A provider's whole lineup can be discovered and tiered at once (dashboard and `semantic-router models`): Claude's four families on four rungs, other known families from a model-family table you can extend, the rest of the local models by size, with LM Studio's and Ollama's load state and on-demand loading taken into account.
 
 ## What done looks like
@@ -45,7 +53,7 @@ Claims in the docs should match what has been exercised.
 | Codex CLI 0.161.0 | Exercised end to end against a stub OpenAI-compatible backend: a streaming Responses session in which Codex ran a shell command and a namespaced tool, and got the answer back. Recorded Codex requests are replayed in the tests against OpenAI-compatible, Anthropic and prompted-CLI backends. |
 | curl, all three protocols | Exercised. |
 | OpenAI SDKs, Aider, Continue, Cline, Open WebUI, LibreChat | Standard OpenAI chat completions; not individually tested. |
-| Desktop app | Exercised on Linux (X11, WebKitGTK): hosting, attaching to a running router, single-instance hand-over, the dashboard window. Windows and macOS builds compile and their logic is tested in CI; the tray and window are untried there. |
+| Desktop app | Exercised on Linux (X11, WebKitGTK): hosting, attaching to a running router, single-instance hand-over, the dashboard window. The installers (Setup.exe, .pkg, AppImage) install and update in CI on Windows, macOS and Linux; the tray and window are untried on Windows and macOS. |
 | Windows and macOS | The whole suite runs on Linux, Windows and macOS in CI, including real child processes started from a stand-in CLI (argument quoting, UTF-8 stdin, process-tree kill). The real vendor CLIs have been exercised on Linux only. |
 
 ## Plan
@@ -116,18 +124,29 @@ Tracked in [#62](https://github.com/siebe41/SemanticRouter.NET/issues/62).
 
 | Issue | Goal | Notes |
 |---|---|---|
-| [#63](https://github.com/siebe41/SemanticRouter.NET/issues/63) | First release, with the installers exercised on macOS and Linux | CI installs and updates on Windows, macOS and Linux. |
-| [#64](https://github.com/siebe41/SemanticRouter.NET/issues/64) | Sign the Windows installer and notarize the macOS app | The release workflow signs when the secrets are set ([desktop.md](desktop.md#signing)). |
+| [#63](https://github.com/siebe41/SemanticRouter.NET/issues/63) | First release, with the installers exercised on macOS and Linux | Done: CI installs and updates on Windows, macOS and Linux; released as [v0.1.0](https://github.com/siebe41/SemanticRouter.NET/releases/tag/v0.1.0). |
+| [#64](https://github.com/siebe41/SemanticRouter.NET/issues/64) | Sign the Windows installer and notarize the macOS app | Done: the release workflow signs when the secrets are set ([desktop.md](desktop.md#signing)). |
 | [#65](https://github.com/siebe41/SemanticRouter.NET/issues/65) | Keep incident counts and the judge's daily count across restarts | Done with the SQLite state. |
 | [#66](https://github.com/siebe41/SemanticRouter.NET/issues/66) | Linux autostart icon when the app runs from an AppImage | Done. |
-| [#67](https://github.com/siebe41/SemanticRouter.NET/issues/67) | Recognise corrections in any language | Phrases in five languages, and a comparison by meaning for the rest ([routing-quality.md](routing-quality.md#corrections-in-other-words)). |
-| [#68](https://github.com/siebe41/SemanticRouter.NET/issues/68) | Measure how often the judge agrees with hand labels | Judge agreement on the Evaluate page and `GET api/judge/agreement`; it scales the judge's weight in tuning ([routing-quality.md](routing-quality.md#the-judge)). |
-| [#69](https://github.com/siebe41/SemanticRouter.NET/issues/69) | Learn the cheapest good-enough model per route | Trials of a cheaper model per route, kept or dropped on feedback ([routing-quality.md](routing-quality.md#cheaper-models-per-route)). |
-| [#70](https://github.com/siebe41/SemanticRouter.NET/issues/70) | Latency as a model selection factor | `Fastest` and `Balanced` strategies (`auto:fastest`, `auto:balanced`) from each model's recent time to first byte; the reason shows on the Activity page ([README](../README.md#step-2-choosing-a-model)). |
-| [#71](https://github.com/siebe41/SemanticRouter.NET/issues/71) | Send the digest and notices to a webhook | JSON, Slack-compatible and ntfy webhooks ([dashboard.md](dashboard.md#digest-and-notifications)). |
-| [#72](https://github.com/siebe41/SemanticRouter.NET/issues/72) | Client side-request wording as an updatable data file | `client-turns.json`, overridable next to the configuration ([clients.md](clients.md)). |
-| [#73](https://github.com/siebe41/SemanticRouter.NET/issues/73) | Fuzz tests for protocol translation | `ProtocolFuzzTests` in CI with a fixed seed; longer runs by hand ([CONTRIBUTING.md](../CONTRIBUTING.md#building-and-testing)). |
-| [#74](https://github.com/siebe41/SemanticRouter.NET/issues/74) | Per-client rate limit for gateway keys | `Middleware:RateLimits` ([dashboard.md](dashboard.md#rate-limits)). |
+| [#67](https://github.com/siebe41/SemanticRouter.NET/issues/67) | Recognise corrections in any language | Done: phrases in five languages, and a comparison by meaning for the rest ([routing-quality.md](routing-quality.md#corrections-in-other-words)). |
+| [#68](https://github.com/siebe41/SemanticRouter.NET/issues/68) | Measure how often the judge agrees with hand labels | Done: judge agreement on the Evaluate page and `GET api/judge/agreement`; it scales the judge's weight in tuning ([routing-quality.md](routing-quality.md#the-judge)). |
+| [#69](https://github.com/siebe41/SemanticRouter.NET/issues/69) | Learn the cheapest good-enough model per route | Done: trials of a cheaper model per route, kept or dropped on feedback ([routing-quality.md](routing-quality.md#cheaper-models-per-route)). |
+| [#70](https://github.com/siebe41/SemanticRouter.NET/issues/70) | Latency as a model selection factor | Done: `Fastest` and `Balanced` strategies (`auto:fastest`, `auto:balanced`) from each model's recent time to first byte; the reason shows on the Activity page ([README](../README.md#step-2-choosing-a-model)). |
+| [#71](https://github.com/siebe41/SemanticRouter.NET/issues/71) | Send the digest and notices to a webhook | Done: JSON, Slack-compatible and ntfy webhooks ([dashboard.md](dashboard.md#digest-and-notifications)). |
+| [#72](https://github.com/siebe41/SemanticRouter.NET/issues/72) | Client side-request wording as an updatable data file | Done: `client-turns.json`, overridable next to the configuration ([clients.md](clients.md)). |
+| [#73](https://github.com/siebe41/SemanticRouter.NET/issues/73) | Fuzz tests for protocol translation | Done: `ProtocolFuzzTests` in CI with a fixed seed; longer runs by hand ([CONTRIBUTING.md](../CONTRIBUTING.md#building-and-testing)). |
+| [#74](https://github.com/siebe41/SemanticRouter.NET/issues/74) | Per-client rate limit for gateway keys | Done: `Middleware:RateLimits` ([dashboard.md](dashboard.md#rate-limits)). |
+
+### 8. Keep prompt caches working
+
+Tracked in [#92](https://github.com/siebe41/SemanticRouter.NET/issues/92). Caches are per model, so moving a conversation between models re-sends and re-writes its whole context; the router should weigh that before it moves one.
+
+| Issue | Goal | Notes |
+|---|---|---|
+| [#93](https://github.com/siebe41/SemanticRouter.NET/issues/93) | Get the prompt-cache numbers right | Streamed and CLI cache counts, `prompt_cache_key`, "saved by routing", a hit rate on the dashboard. |
+| [#94](https://github.com/siebe41/SemanticRouter.NET/issues/94) | Cache-aware stickiness | Stay on the model with the warm cache when moving costs more; return to it after a failover. |
+| [#95](https://github.com/siebe41/SemanticRouter.NET/issues/95) | Cache markers on translated Anthropic requests | So OpenAI and Codex clients routed to Claude use its cache. |
+| [#96](https://github.com/siebe41/SemanticRouter.NET/issues/96) | Cache-aware cost estimates | Ranking and per-route model trials count cache prices. |
 
 ### Continuous
 
