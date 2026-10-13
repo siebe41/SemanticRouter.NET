@@ -84,7 +84,7 @@ internal sealed partial class SdkCopilotBackend(string? executable, string? home
                         toolsRequested = true;
                         break;
                     case AssistantUsageEvent usage when usage.Data.Initiator is null:
-                        yield return new CopilotUpdate.Usage(ToInt(usage.Data.InputTokens), ToInt(usage.Data.OutputTokens), ToInt(usage.Data.CacheReadTokens));
+                        yield return new CopilotUpdate.Usage(ToInt(usage.Data.InputTokens), ToInt(usage.Data.OutputTokens), ToInt(usage.Data.CacheReadTokens), ToInt(usage.Data.CacheWriteTokens));
                         break;
                     case AutoModeSwitchRequestedEvent autoSwitch when autoSwitch.Data.RetryAfterSeconds is { } seconds:
                         retryAfter = TimeSpan.FromSeconds(seconds);

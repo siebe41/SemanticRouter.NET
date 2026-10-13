@@ -66,6 +66,13 @@ public sealed partial class ChatCompletionRequest
     /// <summary>The <c>metadata.user_id</c> (Anthropic) or <c>user</c> (OpenAI) field, when given.</summary>
     public string? UserId { get; init; }
 
+    /// <summary>
+    /// OpenAI's <c>prompt_cache_key</c> (chat completions and Responses): groups requests that share a prompt prefix
+    /// so they reach the same cache. Carried between those two protocols. Other backends do not need it (Anthropic
+    /// caches by prefix), so it is not reported as dropped there.
+    /// </summary>
+    public string? PromptCacheKey { get; init; }
+
     /// <summary>Extended thinking / reasoning effort the client asked for.</summary>
     public ReasoningRequest? Reasoning { get; init; }
 
@@ -238,6 +245,7 @@ public sealed partial class ChatCompletionRequest
             TopP = root.GetDouble("top_p"),
             StopSequences = stops,
             UserId = root.GetString("user"),
+            PromptCacheKey = root.GetString("prompt_cache_key"),
         });
     }
 
@@ -412,6 +420,7 @@ public sealed partial class ChatCompletionRequest
             TopP = request.TopP,
             StopSequences = request.StopSequences,
             UserId = request.UserId,
+            PromptCacheKey = request.PromptCacheKey,
             Reasoning = request.Reasoning,
             ResponseFormat = request.ResponseFormat,
             ParallelToolCalls = request.ParallelToolCalls,

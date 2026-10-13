@@ -106,6 +106,11 @@ internal static class OpenAIRequestBuilder
                 writer.WriteString("user", user);
             }
 
+            if (request.PromptCacheKey is { } cacheKey)
+            {
+                writer.WriteString("prompt_cache_key", cacheKey);
+            }
+
             if (reasoning && request.Reasoning is { } effort)
             {
                 writer.WriteString("reasoning_effort", effort.EffectiveEffort is "xhigh" or "max" ? "high" : effort.EffectiveEffort);
@@ -644,6 +649,11 @@ internal static class ResponsesRequestBuilder
             if (request.UserId is { } user)
             {
                 writer.WriteString("safety_identifier", user);
+            }
+
+            if (request.PromptCacheKey is { } cacheKey)
+            {
+                writer.WriteString("prompt_cache_key", cacheKey);
             }
 
             writer.WriteEndObject();

@@ -141,6 +141,25 @@ public sealed class CliAdapterTests : IDisposable
     }
 
     [Fact]
+    public void Parsers_read_the_prompt_cache_counts_the_clis_report()
+    {
+        // Claude Code reports Anthropic usage: input_tokens excludes the cached tokens.
+        new ClaudeCodeCliAdapter().CreateParser()
+            .Parse("""{"type":"result","subtype":"success","is_error":false,"result":"ok","usage":{"input_tokens":12,"output_tokens":3,"cache_read_input_tokens":9000,"cache_creation_input_tokens":400}}""")
+            .Should().Be(new CliEvent(CliEventKind.Final, "ok", InputTokens: 12, OutputTokens: 3, CacheReadTokens: 9000, CacheCreationTokens: 400));
+
+        // Codex counts the cached tokens inside input_tokens, as OpenAI does.
+        ICliOutputParser codex = new CodexCliAdapter().CreateParser();
+        codex.Parse("""{"type":"item.completed","item":{"id":"1","type":"agent_message","text":"done"}}""");
+        codex.Parse("""{"type":"turn.completed","usage":{"input_tokens":5000,"cached_input_tokens":4800,"output_tokens":20}}""")
+            .Should().Be(new CliEvent(CliEventKind.Final, "done", InputTokens: 200, OutputTokens: 20, CacheReadTokens: 4800));
+
+        new ClaudeCodeCliAdapter().CreateParser()
+            .Parse("""{"type":"result","subtype":"success","result":"ok","usage":{"input_tokens":"12","cache_read_input_tokens":null}}""")
+            .Should().Be(new CliEvent(CliEventKind.Final, "ok"), "counts that are not numbers are left out, not a crash");
+    }
+
+    [Fact]
     public void Custom_adapter_fills_placeholders()
     {
         var options = new ConnectorOptions

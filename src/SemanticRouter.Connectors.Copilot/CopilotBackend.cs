@@ -37,7 +37,7 @@ internal abstract record CopilotUpdate
     public sealed record ToolCall(string Id, string Name, string ArgumentsJson) : CopilotUpdate;
 
     /// <summary>Tokens of one model call.</summary>
-    public sealed record Usage(int? InputTokens, int? OutputTokens, int? CacheReadTokens) : CopilotUpdate;
+    public sealed record Usage(int? InputTokens, int? OutputTokens, int? CacheReadTokens, int? CacheWriteTokens = null) : CopilotUpdate;
 
     /// <summary>The runtime reported a failure (<c>session.error</c>).</summary>
     /// <param name="Type"><c>quota</c>, <c>rate_limit</c>, <c>authentication</c>, <c>authorization</c>, <c>context_limit</c>, <c>query</c>, …</param>

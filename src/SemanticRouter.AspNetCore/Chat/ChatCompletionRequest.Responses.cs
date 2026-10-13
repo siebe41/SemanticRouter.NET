@@ -104,6 +104,7 @@ public sealed partial class ChatCompletionRequest
             Temperature = root.GetDouble("temperature"),
             TopP = root.GetDouble("top_p"),
             UserId = root.GetString("safety_identifier") ?? root.GetString("user"),
+            PromptCacheKey = root.GetString("prompt_cache_key"),
             Reasoning = reasoning.GetString("effort") is { } effort && effort != "none" ? new ReasoningRequest(effort, null) : null,
             ResponseFormat = text.TryGetObject("format", out JsonElement format) ? ReadResponseFormat(format, nested: false) : null,
             ParallelToolCalls = root.TryGetProperty("parallel_tool_calls", out JsonElement parallel) && parallel.ValueKind == JsonValueKind.False ? false : null,
