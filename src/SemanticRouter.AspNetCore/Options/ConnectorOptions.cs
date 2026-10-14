@@ -49,6 +49,24 @@ public enum CliToolCalling
     Prompted = 1,
 }
 
+/// <summary>How strictly a prompted-tool-calling reply is read for tool calls.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<PromptedToolParsing>))]
+public enum PromptedToolParsing
+{
+    /// <summary>
+    /// Also accept the near-misses models write: another tool-ish fence label, a <c>json</c> or unlabelled fence or bare
+    /// JSON that names a tool, and calls in the middle of the reply. Default.
+    /// </summary>
+    Lenient = 0,
+
+    /// <summary>
+    /// Only a fence with the request's own label, which carries a random token the conversation has never shown, naming
+    /// a tool of the request, at the end of the reply. Anything else stays text. Harder for text a tool returned to pass
+    /// for a call; models that cannot follow the format answer in text instead.
+    /// </summary>
+    Strict = 1,
+}
+
 /// <summary>Ready-made settings for well-known CLIs. See <c>docs/providers.md</c>.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<CliPreset>))]
 public enum CliPreset
@@ -151,6 +169,9 @@ public sealed class ConnectorOptions
     /// separate run, to rewrite just that call. Default <see langword="true"/>. Either way the activity entry says so.
     /// </summary>
     public bool RepairToolCalls { get; set; } = true;
+
+    /// <summary>CLI, prompted tool calling: how strictly the reply is read for tool calls. Default <see cref="PromptedToolParsing.Lenient"/>.</summary>
+    public PromptedToolParsing PromptedToolParsing { get; set; } = PromptedToolParsing.Lenient;
 
     /// <summary>
     /// CLI: output fragments (case-insensitive) that mean "quota or rate limit exhausted". They put the model in the

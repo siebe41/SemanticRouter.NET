@@ -8,19 +8,21 @@ namespace SemanticRouter.AspNetCore;
 /// <param name="WorkingDirectory">The scratch directory the process runs in.</param>
 /// <param name="Options">The connector's options.</param>
 /// <param name="Request">The full request, when tools or tool traffic must be rendered into the prompt.</param>
+/// <param name="ToolFormat">The fence label this request's tool calls use.</param>
 internal sealed record CliRequest(
     string? Model,
     IReadOnlyList<ChatMessage> Messages,
     string WorkingDirectory,
     ConnectorOptions Options,
-    ChatCompletionRequest? Request = null)
+    ChatCompletionRequest? Request = null,
+    PromptedToolFormat? ToolFormat = null)
 {
     /// <summary>The system prompt and the conversation prompt.</summary>
     public (string? System, string Prompt) RenderTranscript() =>
-        Request is null ? ChatTranscript.Render(Messages) : ChatTranscript.Render(Request);
+        Request is null ? ChatTranscript.Render(Messages) : ChatTranscript.Render(Request, format: ToolFormat);
 
     /// <summary>The whole prompt with the system prompt inlined.</summary>
-    public string RenderInline() => Request is null ? ChatTranscript.RenderInline(Messages) : ChatTranscript.RenderInline(Request);
+    public string RenderInline() => Request is null ? ChatTranscript.RenderInline(Messages) : ChatTranscript.RenderInline(Request, ToolFormat);
 }
 
 internal enum CliOutputMode
