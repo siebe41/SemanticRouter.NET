@@ -10,7 +10,7 @@ on:
 
 # Read-only by default; each job that publishes asks for the one extra permission it needs. Every publishing job runs
 # in the `release` environment, so the repository owner can require an approval (and restrict it to v* tags) under
-# Settings > Environments.
+# Settings > Environments. Publishing to nuget.org needs the `NUGET_USER` variable there (see the nuget job).
 permissions:
   contents: read
 
@@ -42,16 +42,48 @@ jobs:
           name: packages
           path: artifacts/*.nupkg
 
-      # The key is only in this step's environment, not the test and pack steps'. Without it the push is skipped.
+  # NuGet Trusted Publishing: no NuGet key is stored anywhere. This job exchanges its GitHub OIDC token for an API key
+  # that nuget.org issues for one hour, under the policy on the nuget.org account (repository, release.yml, environment
+  # `release`). It runs nothing but the push, so restore, build and test code in the job above never sees the token.
+  # A release fails here rather than skipping the push: the README tells people to install from nuget.org.
+  nuget:
+    needs: packages
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      NUGET_USER: ${{ vars.NUGET_USER }}
+    steps:
+      - name: Check the nuget.org account is set
+        run: |
+          if [ -z "$NUGET_USER" ]; then
+            echo "::error::Set the NUGET_USER variable (the nuget.org profile name that owns the Trusted Publishing policy) under Settings > Environments > release."
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: artifacts
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 9.0.x
+
+      - name: NuGet login
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       - name: Push to NuGet
         env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-        run: |
-          if [ -z "$NUGET_API_KEY" ]; then
-            echo "::notice::NUGET_API_KEY is not set; skipping the NuGet push."
-            exit 0
-          fi
-          dotnet nuget push "artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: dotnet nuget push "artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
   image:
     runs-on: ubuntu-latest
