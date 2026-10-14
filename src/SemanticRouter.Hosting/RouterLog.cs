@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Console;
+using SemanticRouter.AspNetCore;
 
 namespace SemanticRouter.Host;
 
@@ -23,6 +24,7 @@ internal static class RouterLog
         }
 
         var writer = new StreamWriter(new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+        OwnerOnly.Restrict(log);
         TextWriter synchronized = TextWriter.Synchronized(writer);
         Console.SetOut(synchronized);
         Console.SetError(synchronized);

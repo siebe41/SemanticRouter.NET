@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using SemanticRouter.AspNetCore;
 
 namespace SemanticRouter.Host;
 
@@ -16,8 +17,11 @@ internal sealed record RouterInstance(int ProcessId, IReadOnlyList<string> Urls,
 
     public static string PathIn(string configurationDirectory) => Path.Combine(configurationDirectory, FileName);
 
-    public void Write(string configurationDirectory) =>
+    public void Write(string configurationDirectory)
+    {
         File.WriteAllText(PathIn(configurationDirectory), JsonSerializer.Serialize(this, Json));
+        OwnerOnly.Restrict(PathIn(configurationDirectory));
+    }
 
     /// <summary>The recorded instance, or <see langword="null"/> when there is none or it is unreadable.</summary>
     public static RouterInstance? Read(string configurationDirectory)

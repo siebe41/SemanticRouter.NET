@@ -98,6 +98,12 @@ internal sealed partial class SqliteRouterDatabase
             using SqliteConnection connection = Open();
             Migrate(connection);
             Available = true;
+
+            // The activity log holds prompt previews. SQLite gives the -wal and -shm files the database's mode.
+            foreach (string file in new[] { path, path + "-wal", path + "-shm" })
+            {
+                OwnerOnly.Restrict(file);
+            }
         }
         catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException)
         {
