@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/siebe41/SemanticRouter.NET/actions/workflows/ci.yml/badge.svg)](https://github.com/siebe41/SemanticRouter.NET/actions/workflows/ci.yml)
 
-A lightweight **semantic prompt router** for .NET 9 and ASP.NET Core. It sends every prompt to the **cheapest model that is capable enough to answer it**, choosing across:
+A lightweight **semantic prompt router** for .NET 10 and ASP.NET Core. It sends every prompt to the **cheapest model that is capable enough to answer it**, choosing across:
 
 - **local models** (LM Studio, Ollama, vLLM),
 - **your own subscription CLIs** (Claude Code, GitHub Copilot CLI, Codex CLI),
@@ -202,7 +202,7 @@ semantic-router service install   # or keep it running in the background, starte
 
 ## Quick start
 
-To work on the library or try the samples, you need the [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0).
+To work on the library or try the samples, you need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```bash
 git clone https://github.com/siebe41/SemanticRouter.NET.git

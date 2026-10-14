@@ -5,7 +5,7 @@
     already runs, and shows the dashboard in a window on the platform's own web view or in the browser.
   -->
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <!-- A GUI program: Windows gives it no console window. -->
     <OutputType>WinExe</OutputType>
     <RootNamespace>SemanticRouter.Desktop</RootNamespace>

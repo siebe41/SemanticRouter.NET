@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SemanticRouter;
 using SemanticRouter.AspNetCore;
@@ -108,6 +109,11 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<WebhookNotifier>();
         services.TryAddSingleton<NoticeService>();
         services.AddHostedService(sp => sp.GetRequiredService<NoticeService>());
+
+        // The client factory logs every request of the router's own clients at Information, and since .NET 10 a failed one
+        // with its exception message, which can quote a key a backend echoed back. The connectors log failures themselves,
+        // redacted, so the factory's messages for these clients are left out.
+        services.AddLogging(logging => logging.AddFilter("System.Net.Http.HttpClient.SemanticRouter", LogLevel.Warning));
 
         // Connector clients time out per request (time to response headers), so streamed replies are never cut off.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<HttpClientFactoryOptions>, ConnectorHttpClientOptions>());
