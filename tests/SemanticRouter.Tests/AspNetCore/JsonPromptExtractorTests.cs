@@ -65,6 +65,23 @@ public class JsonPromptExtractorTests
     }
 
     [Fact]
+    public void A_user_message_that_is_only_injected_context_does_not_hide_the_one_before_it()
+    {
+        string json = JsonSerializer.Serialize(new
+        {
+            messages = new[]
+            {
+                new { role = "system", content = "You are Copilot." },
+                new { role = "user", content = "<current_datetime>2026-10-12T11:19:05-05:00</current_datetime>\ntell me a joke" },
+                new { role = "user", content = "<system_reminder>\nIMPORTANT: The tools listed below are deferred.\n</system_reminder>" },
+            },
+        });
+
+        Extract(json).Should().Be("tell me a joke");
+        Extract(json, PromptMessageSelection.AllMessages).Should().Be("You are Copilot.\n\ntell me a joke");
+    }
+
+    [Fact]
     public void Configured_tags_are_ignored_too()
     {
         string json = JsonSerializer.Serialize(new { messages = new[] { new { role = "user", content = "<environment_details>cwd: /src</environment_details>\nfix the build" } } });

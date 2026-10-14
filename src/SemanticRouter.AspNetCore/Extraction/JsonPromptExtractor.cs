@@ -46,7 +46,7 @@ public sealed class JsonPromptExtractor : IPromptExtractor
 
         if (body.TryGetProperty("messages", out JsonElement messages) && messages.ValueKind == JsonValueKind.Array)
         {
-            string? fromMessages = Clean(ExtractFromMessages(messages));
+            string? fromMessages = ExtractFromMessages(messages);
             if (!string.IsNullOrWhiteSpace(fromMessages))
             {
                 return fromMessages;
@@ -55,7 +55,7 @@ public sealed class JsonPromptExtractor : IPromptExtractor
 
         // Responses API: "input" is a list of items; messages among them have roles like chat messages.
         if (body.TryGetProperty("input", out JsonElement items) && items.ValueKind == JsonValueKind.Array
-            && Clean(ExtractFromMessages(items)) is { Length: > 0 } fromItems)
+            && ExtractFromMessages(items) is { Length: > 0 } fromItems)
         {
             return fromItems;
         }
@@ -88,6 +88,10 @@ public sealed class JsonPromptExtractor : IPromptExtractor
 
     private string? Clean(string? text) => _stripSystemReminders ? StripInjectedBlocks(text, _injectedTags) : text;
 
+    /// <summary>
+    /// The text of the selected messages, each cleaned on its own: a user message that is nothing but injected context
+    /// (a client notice sent after the person's message) does not hide the message before it.
+    /// </summary>
     private string? ExtractFromMessages(JsonElement messages)
     {
         if (_selection == PromptMessageSelection.LastUserMessage)
@@ -95,7 +99,7 @@ public sealed class JsonPromptExtractor : IPromptExtractor
             string? last = null;
             foreach (JsonElement message in messages.EnumerateArray())
             {
-                if (IsRole(message, "user") && ReadContent(message) is { Length: > 0 } text)
+                if (IsRole(message, "user") && Clean(ReadContent(message)) is { Length: > 0 } text)
                 {
                     last = text;
                 }
@@ -112,7 +116,7 @@ public sealed class JsonPromptExtractor : IPromptExtractor
                 continue;
             }
 
-            if (ReadContent(message) is { Length: > 0 } text)
+            if (Clean(ReadContent(message)) is { Length: > 0 } text)
             {
                 if (builder.Length > 0)
                 {
