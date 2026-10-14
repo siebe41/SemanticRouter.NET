@@ -1,0 +1,182 @@
+<!doctype html>
+<!-- The demo video's stage: two real terminals (xterm.js, fed by record.js from real ptys), the router's live dashboard
+     in a browser window, captions, and the title and end cards. record.js drives it through window.stage. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SemanticRouter.NET demo</title>
+<link rel="stylesheet" href="/node_modules/@xterm/xterm/css/xterm.css">
+<style>
+  :root {
+    --bg: #111619; --bg-elevated: #181d21; --bg-sunken: #0c1013; --border: #283138; --border-strong: #37434c;
+    --text: #e8edf0; --text-muted: #94a3ac; --text-faint: #788892;
+    --accent: #228fa7; --accent-ink: #2bb0cc; --signal: #d08c34; --signal-ink: #e3a24f; --danger: #ea696e; --info: #899ca5;
+    --font-heading: "Inter", system-ui, sans-serif; --font-mono: "DejaVu Sans Mono", "Liberation Mono", monospace;
+  }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; }
+  body { background: radial-gradient(1400px 800px at 50% 35%, #15222a 0%, var(--bg-sunken) 75%); font-family: var(--font-heading); color: var(--text); }
+
+  .win {
+    position: absolute; display: flex; flex-direction: column; overflow: hidden;
+    background: var(--bg-sunken); border: 1px solid var(--border-strong); border-radius: 12px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+    transition: left 800ms cubic-bezier(.2,.8,.2,1), top 800ms cubic-bezier(.2,.8,.2,1), width 800ms cubic-bezier(.2,.8,.2,1),
+      height 800ms cubic-bezier(.2,.8,.2,1), opacity 600ms ease, transform 800ms cubic-bezier(.2,.8,.2,1), filter 600ms ease;
+  }
+  .win .bar { flex: 0 0 38px; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: #161c20; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--text-muted); }
+  .win .bar i { width: 12px; height: 12px; border-radius: 50%; background: #3a454d; }
+  .win .bar span { flex: 1; text-align: center; margin-right: 52px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .win .bar .url { flex: 1; margin: 0 40px 0 12px; text-align: left; background: var(--bg-sunken); border: 1px solid var(--border); border-radius: 7px; padding: 4px 12px; font-family: var(--font-mono); font-size: 13px; }
+  .win .body { position: relative; flex: 1; overflow: hidden; }
+  .scaler { position: absolute; left: 0; top: 0; width: max-content; transform-origin: 0 0; transition: transform 800ms cubic-bezier(.2,.8,.2,1); }
+  .term .scaler { padding: 14px 16px; }
+  .xterm .xterm-viewport { overflow: hidden !important; background: transparent !important; }
+  iframe { border: 0; background: var(--bg); display: block; }
+  .off { opacity: 0; pointer-events: none; }
+  .behind { opacity: 0.35; transform: scale(0.97); filter: blur(1px); }
+
+  #caption {
+    position: absolute; left: 24px; right: 24px; bottom: 22px; height: 112px; box-sizing: border-box; padding: 18px 28px;
+    background: rgba(12, 16, 19, 0.95); border: 1px solid var(--border-strong); border-radius: 14px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); transition: opacity 400ms ease, transform 400ms ease;
+  }
+  #caption.hidden { opacity: 0; transform: translateY(18px); }
+  #caption .headline { font-size: 32px; font-weight: 650; letter-spacing: -0.01em; }
+  #caption .sub { margin-top: 10px; font-family: var(--font-mono); font-size: 19px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 300ms ease; }
+  #caption .sub.in { opacity: 1; }
+  #caption .local { color: var(--accent-ink); font-weight: 700; }
+  #caption .cloud { color: var(--signal-ink); font-weight: 700; }
+  #caption .fail { color: var(--danger); text-decoration: line-through; }
+  #caption .tag { display: inline-block; margin-left: 12px; padding: 1px 10px; border-radius: 6px; border: 1px solid var(--border-strong); color: var(--text); font-size: 16px; }
+  #caption .tag.local { border-color: var(--accent); }
+  #caption .tag.cloud { border-color: var(--signal); }
+
+  #card {
+    position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px;
+    background: radial-gradient(1200px 650px at 50% 40%, #16232a 0%, var(--bg-sunken) 72%); text-align: center; transition: opacity 800ms ease;
+  }
+  #card.hidden { opacity: 0; pointer-events: none; }
+  #card .brand { display: flex; align-items: center; gap: 26px; }
+  #card .brand svg { width: 96px; height: 96px; }
+  #card .name { font-size: 80px; font-weight: 700; letter-spacing: -0.025em; }
+  #card .name span { color: var(--accent); }
+  #card .tagline { font-size: 38px; font-weight: 500; line-height: 1.3; }
+  #card .row { display: flex; gap: 22px; }
+  #card .pill { padding: 20px 28px; border-radius: 14px; border: 1px solid var(--border-strong); background: var(--bg-elevated); min-width: 300px; text-align: left; }
+  #card .pill b { display: block; font-size: 25px; margin-bottom: 8px; }
+  #card .pill small { font-size: 18px; color: var(--text-muted); }
+  #card .pill.l { border-top: 4px solid var(--accent); } #card .pill.s { border-top: 4px solid var(--signal); } #card .pill.a { border-top: 4px solid var(--info); }
+  #card code { display: block; font-family: var(--font-mono); font-size: 30px; text-align: left; line-height: 1.6; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 12px; padding: 22px 36px; }
+  #card code .p { color: var(--signal-ink); } #card code .c { color: var(--text-faint); }
+  #card .url { font-size: 32px; color: var(--accent-ink); font-weight: 600; }
+  #card .muted { font-size: 24px; color: var(--text-muted); }
+  #card .fade { opacity: 0; transform: translateY(14px); transition: opacity 700ms ease, transform 700ms ease; }
+  #card .fade.in { opacity: 1; transform: none; }
+</style>
+</head>
+<body>
+  <div class="win term off" id="w-router"><div class="bar"><i></i><i></i><i></i><span>~/billing — bash</span></div><div class="body"><div class="scaler"><div id="t-router"></div></div></div></div>
+  <div class="win term off" id="w-claude"><div class="bar"><i></i><i></i><i></i><span>~/billing — claude</span></div><div class="body"><div class="scaler"><div id="t-claude"></div></div></div></div>
+  <div class="win off" id="w-dash"><div class="bar"><i></i><i></i><i></i><div class="url">localhost:5080/router/#/live</div></div><div class="body"><div class="scaler"><iframe id="dash" src="about:blank"></iframe></div></div></div>
+  <div id="caption" class="hidden"><div class="headline"></div><div class="sub"></div></div>
+  <div id="card"></div>
+
+<script src="/node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script>
+  const logo = '<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="#0c1013"/>'
+    + '<path d="M6 16h8l4-8 4 16 4-8h0" fill="none" stroke="#228fa7" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>'
+    + '<circle cx="26" cy="16" r="2.8" fill="#d08c34"/></svg>';
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const $ = (id) => document.getElementById(id);
+
+  const theme = {
+    background: 'rgba(0,0,0,0)', foreground: '#e8edf0', cursor: '#2bb0cc', cursorAccent: '#0c1013', selectionBackground: '#28485288',
+    black: '#1b2227', red: '#ea696e', green: '#a4d037', yellow: '#e3a24f', blue: '#4ea8de', magenta: '#c792ea', cyan: '#2bb0cc', white: '#d5dde2',
+    brightBlack: '#5c6b74', brightRed: '#ff8a8f', brightGreen: '#bfe85a', brightYellow: '#f5c06f', brightBlue: '#7cc4f2', brightMagenta: '#ddb3f5', brightCyan: '#5fd3ea', brightWhite: '#ffffff',
+  };
+  const terms = {};
+  for (const [id, cols, rows] of [['router', 96, 26], ['claude', 88, 34]]) {
+    const term = new Terminal({ cols, rows, fontFamily: 'DejaVu Sans Mono, monospace', fontSize: 16, lineHeight: 1.12, theme, allowTransparency: true, scrollback: 0, cursorBlink: false });
+    term.open($('t-' + id));
+    terms[id] = term;
+  }
+
+  // Window placement per layout: [left, top, width, height] or 'off' / 'behind'.
+  const layouts = {
+    blank:   { router: 'off', claude: 'off', dash: 'off' },
+    setup:   { router: [190, 50, 1540, 860], claude: 'off', dash: 'off' },
+    connect: { router: [190, 50, 1540, 860, 'behind'], claude: [300, 90, 1320, 820], dash: 'off' },
+    split:   { router: [190, 50, 1540, 860, 'off'], claude: [24, 24, 1010, 892], dash: [1058, 24, 838, 892, 1180] },
+    dash:    { router: [190, 50, 1540, 860, 'off'], claude: [-1010, 24, 1010, 892, 'off'], dash: [24, 24, 1872, 892, 1440] },
+  };
+
+  function place(win, spec) {
+    win.classList.toggle('off', spec === 'off' || spec[4] === 'off');
+    win.classList.toggle('behind', spec[4] === 'behind');
+    if (!Array.isArray(spec)) return;
+    const [left, top, width, height, pageWidth] = spec;
+    Object.assign(win.style, { left: left + 'px', top: top + 'px', width: width + 'px', height: height + 'px' });
+    const body = { w: width - 2, h: height - 40 };
+    const scaler = win.querySelector('.scaler');
+    if (win.id === 'w-dash') {
+      const logical = pageWidth || 1440;
+      const scale = body.w / logical;
+      const frame = $('dash');
+      frame.style.width = logical + 'px';
+      frame.style.height = Math.ceil(body.h / scale) + 'px';
+      scaler.style.transform = `scale(${scale})`;
+    } else {
+      const natural = { w: scaler.offsetWidth, h: scaler.offsetHeight };
+      const scale = Math.min(body.w / natural.w, body.h / natural.h);
+      scaler.style.transform = `scale(${scale})`;
+    }
+  }
+
+  window.stage = {
+    write(id, data) { terms[id].write(data); },
+    screen(id) {
+      const b = terms[id].buffer.active; const lines = [];
+      for (let i = 0; i < terms[id].rows; i++) lines.push(b.getLine(b.viewportY + i)?.translateToString(true) ?? '');
+      return lines.join('\n');
+    },
+    layout(name) {
+      const l = layouts[name];
+      place($('w-router'), l.router); place($('w-claude'), l.claude); place($('w-dash'), l.dash);
+    },
+    dash(url) { $('dash').src = url; },
+    async caption(headline, sub) {
+      const c = $('caption');
+      c.querySelector('.headline').textContent = headline;
+      const s = c.querySelector('.sub'); s.classList.remove('in'); s.innerHTML = '';
+      c.classList.remove('hidden');
+      if (sub) { s.innerHTML = sub; await sleep(30); s.classList.add('in'); }
+    },
+    sub(html) { const s = $('caption').querySelector('.sub'); s.innerHTML = html; s.classList.add('in'); },
+    hideCaption() { $('caption').classList.add('hidden'); },
+    async title() {
+      $('card').innerHTML = `
+        <div class="brand">${logo}<div class="name">SemanticRouter<span>.NET</span></div></div>
+        <div class="tagline fade">Every prompt goes to the cheapest model<br>that can answer it.</div>
+        <div class="row">
+          <div class="pill l fade"><b>Local models</b><small>LM Studio · Ollama · vLLM</small></div>
+          <div class="pill s fade"><b>Your subscriptions</b><small>Claude Code · Copilot · Codex</small></div>
+          <div class="pill a fade"><b>Paid APIs</b><small>OpenAI · Anthropic · Gemini</small></div>
+        </div>`;
+      $('card').classList.remove('hidden');
+      for (const el of $('card').querySelectorAll('.fade')) { await sleep(700); el.classList.add('in'); }
+    },
+    async end() {
+      $('card').innerHTML = `
+        <div class="brand">${logo}<div class="name">SemanticRouter<span>.NET</span></div></div>
+        <code class="fade"><span class="p">$</span> dotnet tool install -g SemanticRouter.Host<br><span class="p">$</span> semantic-router init<br><span class="p">$</span> semantic-router</code>
+        <div class="url fade">github.com/siebe41/SemanticRouter.NET</div>
+        <div class="muted fade">Open source · MIT · .NET 10</div>`;
+      $('card').classList.remove('hidden');
+      for (const el of $('card').querySelectorAll('.fade')) { await sleep(900); el.classList.add('in'); }
+    },
+    hideCard() { $('card').classList.add('hidden'); },
+  };
+  stage.layout('blank');
+</script>
+</body>
+</html>

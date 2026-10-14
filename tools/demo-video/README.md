@@ -1,43 +1,71 @@
 # Demo video
 
-Records a one-minute marketing video of the router at work: the real `semantic-router` host and its real dashboard,
-driven by scripted requests, with captions and title cards drawn over the page.
+Records a narrated, 1¾-minute marketing video of SemanticRouter.NET: install, `init`, start, then Claude Code
+working through the router while its dashboard shows each decision, a Claude session limit with automatic
+failover, and the dashboard on its own.
 
-| Time | Scene |
-|---|---|
-| 0:00 | Title: one endpoint for local models, your subscriptions and paid APIs |
-| 0:05 | Small talk → `lmstudio-small` (Open WebUI, chat completions) |
-| 0:10 | Everyday code → `lmstudio-coder` (Codex, Responses API) |
-| 0:15 | Hard reasoning → `claude-code` (Claude Code, Messages API) |
-| 0:20 | Agentic coding with tools → `claude-code-opus` |
-| 0:25 | Private data → a local-only route |
-| 0:30 | Note text in a prompt: the dashboard shows which note went to which model |
-| 0:38 | A burst of 12 prompts from three clients |
-| 0:45 | Claude hits its session limit → cooldown and failover to the local coder |
-| 0:51 | The memory map |
-| 0:57 | End card: install command and repository |
+| Time | Narration | On screen |
+|---|---|---|
+| 0:00 | Most prompts don't need a frontier model… | Title card |
+| 0:13 | Setup takes about a minute… | `dotnet tool install -g SemanticRouter.Host` |
+| 0:17 | Then run init… | `semantic-router init` finds LM Studio's models and the Claude Code CLI |
+| 0:30 | Start the router… | `semantic-router` and its startup banner |
+| 0:37 | Point Claude Code at it… | a second terminal: `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `claude` |
+| 0:49 | A simple question… | Claude Code on the left, the Live dashboard on the right; → local small model |
+| 0:55 | A small coding task… | → local coder model |
+| 1:03 | A hard debugging question… | → Claude Opus |
+| 1:14 | When you hit your Claude session limit… | Claude cools down, the turn fails over to the local coder |
+| 1:23 | The dashboard shows every decision… | the dashboard full screen, with OpenAI clients on the same endpoint |
+| 1:35 | Open source, MIT licensed… | End card with the three commands |
 
-Nothing in it is mocked inside the router. The backends are stand-ins: `serve.js` runs a stub LM Studio on
-`localhost:1234` (or the router's port + 1 when LM Studio is running), and Claude Code is `fake-claude/claude` behind
-the real CLI connector, which answers in Claude Code's `stream-json` format and, once `record.js` switches it,
-with Claude Code's session-limit message. Routing, failover, cooldowns, note detection and the dashboard are the real
-ones, on [demo-router.json](demo-router.json) and the notes in [vault](vault).
+## What is real
+
+Everything except the models. The terminals are real shells in pseudo-terminals, shown with xterm.js; the tool is
+installed with `dotnet tool install`; the configuration is the one `semantic-router init` writes; Claude Code is the
+real CLI, pointed at the router the way [docs/clients.md](../../docs/clients.md) says; routing, cooldowns, failover
+and the dashboard are the router's own.
+
+The models are stand-ins, so a recording needs no GPU and spends no subscription:
+
+- [lmstudio-stub.js](lmstudio-stub.js) answers as LM Studio on `localhost:1234`, with `qwen/qwen3-8b` and
+  `qwen/qwen3-coder-30b`.
+- [fake-claude/claude](fake-claude/claude) is on the demo user's `PATH`. The router's Claude Code CLI calls (print
+  mode, no session persistence) get answers in Claude Code's `stream-json` format, or its session-limit message once
+  `record.js` switches it. Everything else, such as you typing `claude`, runs the real Claude Code.
+- Both answer from [replies.js](replies.js), so an answer reads the same whichever model the router picks.
+
+Captions show what the router decided, read from its activity log during the take, so they say what really
+happened.
 
 ## Recording
 
-Needs the .NET 10 SDK, Node 22, Playwright with Chromium, and ffmpeg with libx264. Linux or macOS (the fake `claude`
-is a Node script with a shebang).
+Needs Linux, the .NET 10 SDK, Node 22, Chromium for Playwright, ffmpeg with libx264, Claude Code, and Python for the
+narration ([Kokoro](https://github.com/thewh1teagle/kokoro-onnx), an open TTS model that runs offline).
 
 ```bash
-dotnet build src/SemanticRouter.Host --configuration Release
 cd tools/demo-video
-node serve.js &                      # the router on http://127.0.0.1:5290, fresh each time
-node record.js /tmp/demo-frames      # about a minute; captures the dashboard frame by frame
-./build.sh /tmp/demo-frames out/semantic-router-demo.mp4
+npm install
+
+# 1. Narration (once, or after editing narration.json): writes out/voice/*.wav and durations.json.
+pip install kokoro-onnx soundfile
+curl -LO https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+curl -LO https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
+python tts.py kokoro-v1.0.onnx voices-v1.0.bin out/voice
+
+# 2. The package to install on camera. Without DEMO_FEED the take installs the release on nuget.org.
+dotnet pack ../../src/SemanticRouter.Host -c Release -o out/feed -p:Version=0.3.0
+
+# 3. Record (about two minutes), then encode with the narration mixed in.
+DEMO_FEED=out/feed node record.js out/frames out/voice
+node build.js out/frames out/voice out/semantic-router-demo.mp4
 ```
 
-`build.sh` writes a 1920×1080, 30 fps H.264 MP4 and a 960-wide GIF next to it. Restart `serve.js` before each
-take: the dashboard should start empty and Claude should not be cooling down. `out/` is ignored by git.
+`build.js` writes the MP4 (1920×1080, 30 fps, H.264 and AAC) and an `.srt` with the narration as subtitles.
 
-To change the story, edit the scenes in [record.js](record.js) (each one is a headline, a client, a prompt and how
-to describe the router's answer) and the title and end cards in [overlay.js](overlay.js).
+`record.js` uses ports 1234 and 5080 and a throw-away home directory for the demo user, `DEMO_HOME` (default
+`/home/demo`, deleted at the start of every take), so the terminals show `~/billing` and nothing of the recording
+machine. The demo shells get a minimal environment: none of your variables or credentials. `DEMO_REAL_CLAUDE` names
+the Claude Code binary if `claude` on your `PATH` is not it.
+
+To change the story, edit the lines in [narration.json](narration.json) (then run `tts.py` again; every beat waits
+for its line), the prompts and captions in [record.js](record.js), and the answers in [replies.js](replies.js).

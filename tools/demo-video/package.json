@@ -1,0 +1,13 @@
+{
+  "name": "semantic-router-demo-video",
+  "private": true,
+  "description": "Records the SemanticRouter.NET demo video. See README.md.",
+  "scripts": {
+    "record": "node record.js"
+  },
+  "dependencies": {
+    "@xterm/xterm": "5.5.0",
+    "node-pty": "1.0.0",
+    "playwright": "1.56.1"
+  }
+}

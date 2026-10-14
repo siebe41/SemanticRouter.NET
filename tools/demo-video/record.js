@@ -1,174 +1,293 @@
-// Records the demo video: drives real requests through the router started by serve.js and captures the live
-// dashboard, with captions and title cards drawn over it (overlay.js), as JPEG frames plus their timestamps.
-//   node record.js <frames-dir>        then ./build.sh <frames-dir> <out.mp4>
-// The router must be fresh (just started), so the dashboard starts empty and Claude is not cooling down.
+// Records the demo video. Everything on screen is real: two shells in pseudo-terminals (rendered with xterm.js on
+// stage.html) install the tool, run `semantic-router init`, start the router and run Claude Code against it, and the
+// router's own dashboard shows the decisions. Only the models are stand-ins: lmstudio-stub.js answers as LM Studio,
+// and fake-claude/claude answers the router's Claude Code CLI calls (and can report a session limit). Each beat is
+// timed to its narration line (tts.py), and the narration's start times are written for build.js.
+//
+//   node record.js <frames-dir> <voice-dir>
+//
+//   DEMO_HOME         the throw-away home directory of the demo user (default /home/demo; it is deleted first)
+//   DEMO_FEED         a folder holding a SemanticRouter.Host .nupkg to install instead of nuget.org's
+//   DEMO_REAL_CLAUDE  the real Claude Code binary (default: `claude` on PATH)
 const fs = require('fs');
+const http = require('http');
+const os = require('os');
 const path = require('path');
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { execFileSync } = require('child_process');
+const pty = require('node-pty');
+const { chromium } = require('playwright');
+const { createStub } = require('./lmstudio-stub');
 
-const base = `http://127.0.0.1:${Number(process.env.DEMO_PORT || 5290)}`;
-const limitFile = path.join(require('os').tmpdir(), 'semantic-router-demo-claude-limit');
-const out = path.resolve(process.argv[2] || 'frames');
-const keys = { 'open-webui': 'demo-key-open-webui', 'claude-code-laptop': 'demo-key-claude-code', 'codex-cli': 'demo-key-codex' };
+const here = __dirname;
+const out = path.resolve(process.argv[2] || 'out/frames');
+const voiceDir = path.resolve(process.argv[3] || 'out/voice');
+const home = process.env.DEMO_HOME || '/home/demo';
+const project = path.join(home, 'billing');
+const router = 'http://localhost:5080';
+const limitFile = path.join(os.tmpdir(), 'semantic-router-demo-claude-limit');
+const which = (cmd) => execFileSync('bash', ['-c', `command -v ${cmd}`]).toString().trim();
+const realClaude = process.env.DEMO_REAL_CLAUDE || fs.realpathSync(which('claude'));
+const dotnetDir = process.env.DOTNET_ROOT || path.dirname(fs.realpathSync(which('dotnet')));
+const durations = JSON.parse(fs.readFileSync(path.join(voiceDir, 'durations.json'), 'utf8'));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// One request in the protocol each client really speaks; returns the router's decision headers.
-async function send(client, prompt, { tools = false } = {}) {
-  const started = Date.now();
-  let url; let headers; let body;
-  if (client === 'claude-code-laptop') {
-    url = '/v1/messages';
-    headers = { 'x-api-key': keys[client], 'anthropic-version': '2023-06-01' };
-    body = {
-      model: 'claude-sonnet-4-5', max_tokens: 1024, messages: [{ role: 'user', content: prompt }],
-      ...(tools ? { tools: [{ name: 'Edit', description: 'Edit a file', input_schema: { type: 'object', properties: { path: { type: 'string' } } } }] } : {}),
-    };
-  } else if (client === 'codex-cli') {
-    url = '/v1/responses';
-    headers = { authorization: `Bearer ${keys[client]}` };
-    body = { model: 'gpt-5-codex', input: prompt };
-  } else {
-    url = '/v1/chat/completions';
-    headers = { authorization: `Bearer ${keys[client]}` };
-    body = { model: 'auto', messages: [{ role: 'user', content: prompt }] };
+// A fresh demo user: no tool, no router configuration, Claude Code's first-run notices already seen.
+function prepareHome() {
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
+  fs.mkdirSync(project, { recursive: true });
+  fs.symlinkSync(path.join(here, 'fake-claude', 'claude'), path.join(home, '.local', 'bin', 'claude'));
+  if (process.env.DEMO_FEED) {
+    fs.writeFileSync(path.join(project, 'nuget.config'),
+      `<?xml version="1.0" encoding="utf-8"?>\n<configuration><packageSources><clear /><add key="local" value="${path.resolve(process.env.DEMO_FEED)}" /></packageSources></configuration>\n`);
   }
-
-  const res = await fetch(base + url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
-  await res.text();
-  const h = (n) => res.headers.get(`x-prompt-route${n}`);
-  return {
-    status: res.status, model: h('-model'), tier: h('-tier'), route: h(''), similarity: Number(h('-similarity') || 0),
-    attempt: Number(h('-attempt') || 1), degraded: h('-degraded') === 'true', localOnly: h('-local-only') === 'true',
-    ms: Date.now() - started,
-  };
+  fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({
+    hasCompletedOnboarding: true, theme: 'dark', numStartups: 9, autoUpdates: false, migrationVersion: 14,
+    opusProMigrationComplete: true, sonnet1m45MigrationComplete: true, hasResetAutoModeOptInForDefaultOffer: true,
+    hasSeenAutoDefaultNotice: true, hasSeenAutoDefaultNudge: true, hasSeenAutoModeEntryWarning: true,
+    lastReleaseNotesSeen: execFileSync(realClaude, ['--version']).toString().split(' ')[0],
+    projects: { [project]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true, allowedTools: [] } },
+  }, null, 2));
+  fs.rmSync(limitFile, { force: true });
 }
 
-const isLocal = (model) => model?.startsWith('lmstudio');
-function describe(r, extra = '') {
-  const cls = isLocal(r.model) ? 'local' : 'cloud';
-  const where = isLocal(r.model) ? '<span class="tag">local · free</span>' : '<span class="tag">Claude subscription</span>';
-  return `→ <span class="${cls}">${r.model}</span> <span class="meta">· T${r.tier} · ${r.route} ${r.similarity.toFixed(2)} · ${r.ms} ms</span>${where}${extra}`;
+// Only what the demo user's shell needs: none of the recording machine's own variables or credentials.
+const env = {
+  HOME: home, TERM: 'xterm-256color', LANG: 'C.UTF-8',
+  PATH: [path.join(home, '.local', 'bin'), path.join(home, '.dotnet', 'tools'), dotnetDir, path.dirname(process.execPath), '/usr/local/bin', '/usr/bin', '/bin'].join(':'),
+  DOTNET_ROOT: dotnetDir, DOTNET_NOLOGO: '1', DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+  DISABLE_AUTOUPDATER: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+  DEMO_REAL_CLAUDE: realClaude, DEMO_CLAUDE_LIMIT_FILE: limitFile,
+  PS1: '\\[\\e[38;5;38m\\]~/billing\\[\\e[0m\\] \\[\\e[38;5;179m\\]$\\[\\e[0m\\] ',
+};
+
+// Serves stage.html and xterm.js to the browser.
+function serveStage() {
+  const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const file = path.join(here, decodeURIComponent(new URL(req.url, 'http://x').pathname));
+      if (!file.startsWith(here) || !fs.existsSync(file)) { res.writeHead(404).end(); return; }
+      res.writeHead(200, { 'Content-Type': types[path.extname(file)] || 'application/octet-stream' });
+      fs.createReadStream(file).pipe(res);
+    });
+    server.listen(0, '127.0.0.1', () => resolve(server));
+  });
 }
 
 (async () => {
+  prepareHome();
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
 
-  const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1440, height: 810 }, deviceScaleFactor: 4 / 3 });
-  await page.goto(`${base}/router/#/live`);
-  await page.waitForSelector('text=Model router');
-  await page.addStyleTag({ path: path.join(__dirname, 'overlay.css') });
-  await page.addScriptTag({ path: path.join(__dirname, 'overlay.js') });
-  await page.evaluate(() => window.__demo.title());
+  const stub = createStub();
+  await new Promise((r) => stub.listen(1234, '127.0.0.1', r));
+  const stageServer = await serveStage();
 
-  // Capture every frame the compositor produces, with its timestamp, straight to disk.
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  // The dashboard forbids framing (frame-ancestors 'none'); lift that for its page loads on this stage only.
+  await page.route('http://localhost:5080/router/**', async (route) => {
+    if (route.request().resourceType() !== 'document') return route.continue();
+    const response = await route.fetch();
+    const headers = { ...response.headers() };
+    delete headers['content-security-policy'];
+    delete headers['x-frame-options'];
+    return route.fulfill({ response, headers });
+  });
+  await page.goto(`http://127.0.0.1:${stageServer.address().port}/stage.html`);
+  await page.waitForFunction(() => window.stage);
+
+  // Two shells, each mirrored into its xterm on the stage.
+  const shells = {};
+  for (const [id, cols, rows] of [['router', 96, 26], ['claude', 88, 34]]) {
+    const shell = pty.spawn('bash', ['--noprofile', '--norc', '-i'], { name: 'xterm-256color', cols, rows, cwd: project, env });
+    let pending = '';
+    shell.onData((d) => { pending += d; });
+    setInterval(() => {
+      if (!pending) return;
+      const data = pending; pending = '';
+      page.evaluate(([i, d]) => window.stage.write(i, d), [id, data]).catch(() => {});
+    }, 16);
+    shells[id] = shell;
+  }
+
+  const screen = (id) => page.evaluate((i) => window.stage.screen(i), id);
+  async function waitFor(id, pattern, timeout = 60000) {
+    const until = Date.now() + timeout;
+    while (Date.now() < until) {
+      if (pattern.test(await screen(id))) return;
+      await sleep(150);
+    }
+    throw new Error(`Timed out waiting for ${pattern} in the ${id} terminal:\n${await screen(id)}`);
+  }
+  // Types like a person: about 18 characters a second, then Enter.
+  async function type(id, text, enter = true) {
+    for (const ch of text) { shells[id].write(ch); await sleep(35 + Math.random() * 45); }
+    if (enter) { await sleep(280); shells[id].write('\r'); }
+  }
+
+  // Frames, with the wall-clock time each arrived, to place the narration on the video's own clock.
   const cdp = await page.context().newCDPSession(page);
   const frames = [];
   cdp.on('Page.screencastFrame', async ({ data, metadata, sessionId }) => {
     const file = `${String(frames.length).padStart(5, '0')}.jpg`;
-    frames.push({ file, t: metadata.timestamp });
+    frames.push({ file, t: metadata.timestamp, wall: Date.now() / 1000 });
     fs.writeFileSync(path.join(out, file), Buffer.from(data, 'base64'));
     try { await cdp.send('Page.screencastFrameAck', { sessionId }); } catch { /* closing */ }
   });
-  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 92, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 });
 
-  const demo = (fn, arg) => page.evaluate(([f, a]) => window.__demo[f](a), [fn, arg]);
-  const scene = async (headline, client, prompt, opts = {}) => {
-    await page.evaluate(([h, c]) => window.__demo.scene(h, c), [headline, client]);
-    await demo('type', prompt);
-    const r = await send(client, prompt, opts);
-    await demo('result', (opts.describe || describe)(r));
-    await sleep(opts.hold ?? 2600);
-    return r;
+  const narration = [];
+  const say = (key) => {
+    narration.push({ key, wall: Date.now() / 1000 });
+    return sleep(durations[key] * 1000);
   };
+  const stage = (fn, ...args) => page.evaluate(([f, a]) => window.stage[f](...a), [fn, args]);
+
+  // What the router did with a prompt, from its own activity log.
+  async function decision(prompt) {
+    for (let i = 0; i < 20; i++) {
+      const res = await fetch(`${router}/router/api/activity?limit=20`).then((r) => r.json());
+      const rows = Array.isArray(res) ? res : res.entries || res.items || [];
+      const hit = rows.find((e) => e.promptPreview?.startsWith(prompt.slice(0, 30)) && e.outcome === 'served');
+      if (hit) return hit;
+      await sleep(250);
+    }
+    return null;
+  }
+  const isLocal = (model) => model?.startsWith('lmstudio');
+  function describe(e) {
+    if (!e) return '';
+    const cls = isLocal(e.servedBy) ? 'local' : 'cloud';
+    const tag = isLocal(e.servedBy) ? '<span class="tag local">local · free</span>' : '<span class="tag cloud">Claude subscription</span>';
+    const failed = (e.sentTo || []).filter((m) => m !== e.servedBy).map((m) => `<span class="fail">${m}</span> `).join('');
+    return `${failed}→ <span class="${cls}">${e.servedBy}</span>  ·  tier ${e.tier}  ·  ${e.route || e.reason}${tag}`;
+  }
+  async function ask(prompt, done) {
+    await type('claude', prompt);
+    await waitFor('claude', done);
+    return decision(prompt);
+  }
+
+  await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 92, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 });
+  await sleep(300);
 
   // 1. Title.
-  await sleep(3200);
-  await demo('hideCard');
+  let line = say('title');
+  await stage('title');
+  await line;
+  await stage('hideCard');
+  await stage('layout', 'setup');
   await sleep(900);
 
-  // 2. One prompt per kind of work, each in the protocol its client speaks.
-  await scene('Small talk? A small local model answers it. Free.', 'open-webui', 'hello, how are you today?');
-  await scene('Everyday code goes to the local coder.', 'codex-cli',
-    'write a unit test for this function: int Add(int a, int b) => a + b;');
-  await scene('Hard reasoning goes to your Claude subscription.', 'claude-code-laptop',
-    'compare the trade-offs between event sourcing and CRUD for our [[Billing migration]]');
-  await scene('Agentic coding gets the strongest model.', 'claude-code-laptop',
-    'implement this feature across the codebase: durable cooldowns for the router', { tools: true });
-  await scene('Private data never leaves your machine.', 'open-webui',
-    'look up the customer record for account number 4471',
-    { describe: (r) => describe(r, '<span class="tag lock">local-only route</span>') });
+  // 2. Setup, for real: install, init, start.
+  line = say('install');
+  await stage('caption', '1. Install the tool', 'one command · .NET 10');
+  await type('router', 'dotnet tool install -g SemanticRouter.Host');
+  await waitFor('router', /successfully installed/);
+  await line;
 
-  // 3. Notes: text from the vault in a prompt, and where it went.
-  await scene('And you can see which of your notes went where.', 'open-webui',
-    'summarize this text:\nDuplicate invoices if the ledger replays events twice.\nCustomer account numbers are reused after closure in the legacy system.',
-    { hold: 1400 });
-  await demo('hideCaption');
-  await page.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
-  await sleep(3200);
-  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
-  await sleep(900);
-
-  // 4. A burst from three clients at once.
-  await page.evaluate(() => window.__demo.scene('Every request, every decision, live.', ''));
-  await demo('result', '<span class="meta">12 prompts from Open WebUI, Codex and Claude Code at once…</span>');
-  const burst = [
-    ['open-webui', 'thanks a lot!'],
-    ['codex-cli', 'convert this loop to LINQ: foreach (var o in orders) if (o.Total > 100) big.Add(o);'],
-    ['claude-code-laptop', 'why does this async code deadlock when I call .Result in ASP.NET?'],
-    ['open-webui', 'translate this to French: the meeting moved to Friday'],
-    ['codex-cli', 'write a regex that matches email addresses'],
-    ['open-webui', 'fix the grammar in this sentence: their going to the store tomorow'],
-    ['claude-code-laptop', 'design a scalable architecture for a multi-tenant billing platform'],
-    ['open-webui', 'show the employee salary history for Carol'],
-    ['codex-cli', 'add null checks to this method: void Save(Order o) { db.Add(o); }'],
-    ['open-webui', 'good morning! tell me a joke'],
-    ['claude-code-laptop', 'refactor the module and update every caller of LegacyLedger'],
-    ['open-webui', 'rewrite this to sound more professional: we messed up the invoices, sorry'],
-  ];
-  const pending = [];
-  for (const [client, prompt] of burst) { pending.push(send(client, prompt, { tools: client === 'claude-code-laptop' })); await sleep(330); }
-  const results = await Promise.all(pending);
-  const local = results.filter((r) => isLocal(r.model)).length;
-  await demo('result', `<span class="local">${local} of ${results.length}</span> <span class="meta">answered locally, at no cost · the rest on your Claude subscription · $0 on API keys</span>`);
-  await sleep(2800);
-
-  // 5. Claude hits its usage limit: the router cools it down and fails over.
-  fs.writeFileSync(limitFile, '');
-  await scene('Claude hit its usage limit? The router fails over on its own.', 'claude-code-laptop',
-    'find the root cause of this memory leak in the cache layer',
-    {
-      hold: 3400,
-      describe: (r) => `<span class="fail">claude-code</span> <span class="meta">“you've hit your session limit”</span> → <span class="local">${r.model}</span>`
-        + ` <span class="meta">· ${r.ms} ms</span><span class="tag warn">Claude cools down until 5pm</span>`,
-    });
-
-  // 6. The memory map.
-  await demo('hideCaption');
-  await page.click('nav a[href="#/memory"]');
-  await sleep(1200);
-  await page.evaluate(() => window.__demo.scene('The memory map: which notes reached local models, and which reached the cloud.', ''));
-  await sleep(4200);
-  await demo('hideCaption');
+  line = say('init');
+  await stage('caption', '2. init finds your models', 'LM Studio · Ollama · the claude, codex and copilot CLIs · writes a starting configuration');
   await sleep(400);
+  await type('router', 'semantic-router init');
+  await waitFor('router', /Next: /);
+  await line;
+
+  line = say('start');
+  await stage('caption', '3. Start the router', 'OpenAI and Anthropic APIs on localhost:5080 · dashboard on /router');
+  await sleep(300);
+  await type('router', 'semantic-router');
+  await waitFor('router', /is listening on/);
+  await stage('dash', `${router}/router/#/live`);
+  await line;
+
+  // 3. Claude Code, in a second terminal.
+  await stage('layout', 'connect');
+  await sleep(500);
+  line = say('connect');
+  await stage('caption', '4. Point Claude Code at it', 'two environment variables · Claude Code works exactly as before');
+  await type('claude', `export ANTHROPIC_BASE_URL=${router}`);
+  await type('claude', 'export ANTHROPIC_AUTH_TOKEN=semantic-router');
+  await type('claude', 'claude --model sonnet');
+  await waitFor('claude', /Claude Code v/);
+  await line;
+  await stage('layout', 'split');
+  await sleep(1100);
+
+  // 4. Routing, turn by turn.
+  line = say('hello');
+  await stage('caption', 'A simple question → a small local model', '');
+  let e = await ask('hi! what can you do?', /What would you like to work on/);
+  await stage('sub', describe(e));
+  await Promise.all([line, sleep(2600)]);
+  await sleep(600);
+
+  line = say('code');
+  await stage('caption', 'A small coding task → the local coder', '');
+  e = await ask('write a unit test for the InvoiceTotal function', /Assert\.Equal/);
+  await stage('sub', describe(e));
+  await Promise.all([line, sleep(2600)]);
+  await sleep(1400);
+
+  line = say('hard');
+  await stage('caption', 'A hard debugging question → Claude', '');
+  e = await ask('the invoice job deadlocks under load, find the root cause', /three-file change/);
+  await stage('sub', describe(e));
+  await Promise.all([line, sleep(2600)]);
+  await sleep(1400);
+
+  // 5. The Claude session limit runs out: cooldown and failover, inside the same Claude Code session.
+  fs.writeFileSync(limitFile, '');
+  line = say('limit');
+  await stage('caption', 'Claude hits its session limit → you keep working', '');
+  e = await ask('why does the cache serve stale data after a deploy?', /Startup\.cs/);
+  await stage('sub', `${describe(e)}<span class="tag">Claude cools down until it resets</span>`);
+  await Promise.all([line, sleep(3000)]);
+  await sleep(1200);
+
+  // 6. The dashboard, with other clients on the same endpoint.
+  await stage('hideCaption');
+  await stage('layout', 'dash');
+  line = say('dashboard');
+  await sleep(900);
+  await stage('caption', 'Every decision, live', 'any OpenAI or Anthropic client can use the same endpoint');
+  const others = ['summarize this email in two lines', 'translate this sentence to French: the meeting moved to Friday',
+    'write a regex that matches email addresses', 'thanks a lot!', 'rewrite this paragraph to sound more professional'];
+  for (const prompt of others) {
+    fetch(`${router}/v1/chat/completions`, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'auto', messages: [{ role: 'user', content: prompt }] }) }).catch(() => {});
+    await sleep(700);
+  }
+  await line;
+  await sleep(600);
 
   // 7. End card.
-  await demo('end');
-  await sleep(5800);
+  await stage('hideCaption');
+  line = say('end');
+  await stage('end');
+  await line;
+  await sleep(1800);
 
-  fs.rmSync(limitFile, { force: true });
   await cdp.send('Page.stopScreencast');
   await sleep(300);
+  shells.claude.write('\x03\x03');
+  shells.router.write('\x03');
+  await sleep(1500);
+  for (const shell of Object.values(shells)) shell.kill();
   await browser.close();
+  stub.close(); stageServer.close();
+  fs.rmSync(limitFile, { force: true });
 
-  // ffmpeg concat list: each frame lasts until the next one arrived; the last one holds for a second.
+  // Each frame lasts until the next one; the narration goes on the same clock (frame time ≈ arrival time - lag).
+  const lag = frames.map((f) => f.wall - f.t).sort((a, b) => a - b)[Math.floor(frames.length / 2)];
+  const t0 = frames[0].t;
   const lines = [];
-  frames.forEach((f, i) => {
-    const next = frames[i + 1];
-    lines.push(`file '${f.file}'`, `duration ${(next ? next.t - f.t : 1).toFixed(4)}`);
-  });
+  frames.forEach((f, i) => lines.push(`file '${f.file}'`, `duration ${((frames[i + 1]?.t ?? f.t + 1) - f.t).toFixed(4)}`));
   lines.push(`file '${frames[frames.length - 1].file}'`);
   fs.writeFileSync(path.join(out, 'frames.txt'), lines.join('\n') + '\n');
-  console.log(`${frames.length} frames, ${(frames[frames.length - 1].t - frames[0].t).toFixed(1)} s`);
-})().catch((e) => { console.error(e); process.exit(1); });
+  const timeline = narration.map((n) => ({ key: n.key, start: +(n.wall - lag - t0).toFixed(3), duration: durations[n.key] }));
+  fs.writeFileSync(path.join(out, 'timeline.json'), JSON.stringify(timeline, null, 2));
+  console.log(`${frames.length} frames, ${(frames[frames.length - 1].t - t0).toFixed(1)} s; narration at ${timeline.map((n) => n.start.toFixed(1)).join(', ')}`);
+  process.exit(0);
+})().catch((err) => { console.error(err); process.exit(1); });

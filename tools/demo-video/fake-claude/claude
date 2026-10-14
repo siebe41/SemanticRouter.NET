@@ -1,28 +1,47 @@
 #!/usr/bin/env node
-// Stands in for the `claude` CLI in the demo video: answers in Claude Code's print-mode stream-json format, a little
-// slower than the local models. While the file named by DEMO_CLAUDE_LIMIT_FILE exists it answers the way Claude Code
-// does at its session limit, so the router's quota cooldown and failover are the real ones.
+// Stands in for the `claude` CLI in the demo video. The router's calls (print mode without session persistence) are
+// answered in Claude Code's stream-json format with the reply from ../replies.js, a little slower than the local
+// models. While the file named by DEMO_CLAUDE_LIMIT_FILE exists they get Claude Code's session-limit message instead,
+// so the router's quota cooldown and failover are the real ones. Anything else (you at the terminal) is handed to the
+// real Claude Code named by DEMO_REAL_CLAUDE.
 const fs = require('fs');
+const path = require('path');
+const { spawnSync } = require('child_process');
 
 const args = process.argv.slice(2);
+const fromRouter = args.includes('-p') && args.includes('--no-session-persistence');
+if (!fromRouter && process.env.DEMO_REAL_CLAUDE) {
+  process.exit(spawnSync(process.env.DEMO_REAL_CLAUDE, args, { stdio: 'inherit' }).status ?? 1);
+}
+
+const { replyFor, words } = require(path.join(fs.realpathSync(__dirname), '..', 'replies.js'));
 const model = args.includes('--model') ? args[args.indexOf('--model') + 1] : 'sonnet';
 const limitFile = process.env.DEMO_CLAUDE_LIMIT_FILE;
 const write = (o) => process.stdout.write(JSON.stringify(o) + '\n');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-process.stdin.resume();
-process.stdin.on('data', () => {});
-process.stdin.on('end', () => {
-  setTimeout(() => {
-    if (limitFile && fs.existsSync(limitFile)) {
-      write({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your session limit · resets 5pm" });
-      process.exit(1);
-    }
+// The router renders the conversation as a transcript of "[user]" / "[assistant]" turns; the last user turn is what
+// this answers.
+function latestPrompt(transcript) {
+  const at = transcript.lastIndexOf('[user]\n');
+  return at >= 0 ? transcript.slice(at + '[user]\n'.length) : transcript;
+}
 
-    const text = model === 'opus' ? 'Here is the plan, then the change across every file.' : 'Here is a careful answer, step by step.';
-    write({ type: 'system', subtype: 'init', model });
-    for (const word of text.split(/(?= )/)) {
-      write({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: word } } });
-    }
-    write({ type: 'result', subtype: 'success', is_error: false, result: text, usage: { input_tokens: 40, output_tokens: 12 } });
-  }, 650 + Math.random() * 450);
+let input = '';
+process.stdin.on('data', (c) => { input += c; });
+process.stdin.on('end', async () => {
+  const prompt = latestPrompt(input);
+  await sleep(700 + Math.random() * 400);
+  if (limitFile && fs.existsSync(limitFile)) {
+    write({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your session limit · resets 5pm" });
+    process.exit(1);
+  }
+
+  const reply = replyFor(prompt);
+  write({ type: 'system', subtype: 'init', model });
+  for (const word of words(reply)) {
+    write({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: word } } });
+    await sleep(28);
+  }
+  write({ type: 'result', subtype: 'success', is_error: false, result: reply, usage: { input_tokens: Math.round(input.length / 4), output_tokens: words(reply).length } });
 });
