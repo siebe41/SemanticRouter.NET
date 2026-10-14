@@ -191,15 +191,17 @@ Uses your own Claude subscription. **Read [TERMS.md](TERMS.md#anthropic-claude-c
 The `haiku`, `sonnet` and `opus` aliases follow Anthropic's latest model of each family; add `claude-fable-5-1` on tier 5 if your plan includes it ([Model lineups](#model-lineups-several-models-per-provider)).
 
 What the preset does:
-- **Command line.** It runs `claude -p <prompt> --output-format stream-json --verbose --include-partial-messages --tools "" --disallowedTools "mcp__*" --strict-mcp-config --no-session-persistence --permission-mode dontAsk [--model …] [--system-prompt …]` in an empty temporary directory. These flags were checked against Claude Code 2.1.293.
+- **Command line.** It runs `claude -p --output-format stream-json --verbose --include-partial-messages --tools "" --disallowedTools "mcp__*" --strict-mcp-config --no-session-persistence --permission-mode dontAsk [--model …] [--system-prompt …]` in an empty directory that only you can write to. These flags were checked against Claude Code 2.1.293.
 - **Tools.** Add `"ToolCalling": "Prompted"` (and `tools` to the models' capabilities) to let agentic clients such as Claude Code use this connector for tool-bearing turns; see [Tool calling and agentic clients](#tool-calling-and-agentic-clients).
-- **Long prompts.** Prompts longer than `MaxArgumentLength` go on stdin.
-- **System messages.** Client system messages replace Claude Code's default system prompt.
+- **Prompt on stdin.** The conversation is written to the CLI's standard input, not passed as an argument, because other users of the machine can read a process's arguments (`ps`) and process auditing records them. `"PromptInput": "Argument"` puts it after `-p` instead, up to `MaxArgumentLength` characters.
+- **System messages.** Client system messages replace Claude Code's default system prompt. They are passed with `--system-prompt`, so they are visible on the command line; one longer than `MaxArgumentLength` is moved into the conversation instead.
 - **Environment.** It removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` from the child environment. In print mode an API key would otherwise be used instead of your subscription. Set `RemoveEnvironmentVariables` yourself to change this.
 - **Limits.** Usage-limit messages ("You've hit your session limit", "weekly limit", …) are quota errors. Account-wide limits cool down every model on the connector; "You've hit your Opus limit" cools down only the Opus model.
 - **Extra flags** go in `Arguments`, e.g. `[ "--effort", "low" ]`.
 
 Your user-level Claude settings (for example `~/.claude/CLAUDE.md`) still apply.
+
+**Where CLIs run.** Every CLI run (and `doctor`'s checks) gets a fresh directory under a parent that only you can write to, because a CLI reads instructions, settings and hooks from its working directory, and Claude Code reads `CLAUDE.md` from every directory above it. On Linux the parent is `$XDG_RUNTIME_DIR/semantic-router`, or `~/.cache/semantic-router` (`$XDG_CACHE_HOME`) when there is no runtime directory; it is never under the shared `/tmp`. On macOS it is under your own `$TMPDIR`, and on Windows under `%TEMP%`. On Linux and macOS the parent is created with mode 0700, and a CLI request fails (with a message naming the directory) if it, or a directory above it, can be written to by other users.
 
 ## GitHub Copilot CLI
 
@@ -216,7 +218,7 @@ Uses your Copilot plan's AI credits. See [TERMS.md](TERMS.md#github-copilot-cli)
 ]
 ```
 
-The preset runs `copilot --prompt=<prompt> -s --no-color --stream off --no-ask-user --deny-tool=shell --deny-tool=write --deny-tool=url --deny-tool=memory --disable-builtin-mcps --no-custom-instructions --no-auto-update [--model=…]`.
+The preset runs `copilot -s --no-color --stream off --no-ask-user --deny-tool=shell --deny-tool=write --deny-tool=url --deny-tool=memory --disable-builtin-mcps --no-custom-instructions --no-auto-update [--model=…]` with the prompt piped to it on stdin, so it is not visible on the command line. `"PromptInput": "Argument"` passes it as `--prompt=<prompt>` instead, up to `MaxArgumentLength` characters.
 - Copilot's valid model IDs change often; check `/model` in an interactive session. Copilot Free and Student plans can only use automatic model selection, so omit `Model` there.
 - Copilot is billed per token in AI credits. Cost `0` treats your monthly allowance as free; give it a higher `Priority` than other free models if you want to save credits.
 
@@ -282,7 +284,7 @@ The `Custom` preset runs any command:
 }
 ```
 
-The executable is started directly, never through a shell, so prompts cannot inject commands.
+The executable is started directly, never through a shell, so prompts cannot inject commands. With `"PromptInput": "Argument"`, a prompt that starts with `-` gets a leading space when `{prompt}` is a whole argument, so the CLI cannot read it as an option (inside a larger argument, such as `--prompt={prompt}`, it is left as is). A bare name (`llm`) is looked up on the absolute `PATH` entries only and started by its full path, never from the current directory; a relative path with a folder (`tools/llm`) is taken relative to the router's current directory.
 
 ## OpenAI API
 

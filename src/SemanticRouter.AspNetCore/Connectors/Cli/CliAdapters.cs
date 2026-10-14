@@ -88,6 +88,14 @@ internal abstract class CliAdapter
     /// <summary>A CLI would read an argument starting with '-' as an option; a leading space keeps it a value.</summary>
     protected static string AsArgument(string prompt) => prompt.StartsWith('-') ? " " + prompt : prompt;
 
+    /// <summary>
+    /// Whether the prompt goes on standard input. It does unless <see cref="ConnectorOptions.PromptInput"/> asks for an
+    /// argument: other local users can read a process's arguments (<c>ps</c>, <c>/proc/{pid}/cmdline</c>) and process
+    /// auditing records them. Prompts too long for an argument use standard input either way.
+    /// </summary>
+    protected static bool UsesStandardInput(CliRequest request, string prompt) =>
+        request.Options.PromptInput == CliPromptInput.Stdin || prompt.Length > request.Options.MaxArgumentLength;
+
     protected static string? GetString(JsonElement element, string property) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
@@ -101,16 +109,14 @@ internal abstract class CliAdapter
 
 /// <summary>
 /// Anthropic Claude Code in print mode (https://code.claude.com/docs/en/headless, /cli-reference):
-/// <c>claude -p &lt;prompt&gt; --output-format stream-json --verbose --include-partial-messages --tools ""
-/// --disallowedTools "mcp__*" --strict-mcp-config --no-session-persistence --permission-mode dontAsk</c>.
-/// Built-in and MCP tools are removed so it answers as a plain model; client system messages replace the default
-/// system prompt via <c>--system-prompt</c>. Flags verified against Claude Code 2.1.293's <c>--help</c>.
+/// <c>claude -p --output-format stream-json --verbose --include-partial-messages --tools ""
+/// --disallowedTools "mcp__*" --strict-mcp-config --no-session-persistence --permission-mode dontAsk</c>, with the
+/// prompt on standard input (print mode reads it when no prompt argument is given). Built-in and MCP tools are removed
+/// so it answers as a plain model; client system messages replace the default system prompt via
+/// <c>--system-prompt</c>. Flags verified against Claude Code 2.1.293's <c>--help</c>.
 /// </summary>
 internal sealed class ClaudeCodeCliAdapter : CliAdapter
 {
-    private const string StdinInstruction =
-        "Reply to the conversation provided on standard input as the assistant. Output only your reply.";
-
     public override string DefaultExecutable => "claude";
 
     public override CliOutputMode OutputMode => CliOutputMode.JsonLines;
@@ -134,10 +140,15 @@ internal sealed class ClaudeCodeCliAdapter : CliAdapter
             system = null;
         }
 
-        bool useStdin = prompt.Length > request.Options.MaxArgumentLength;
+        bool useStdin = UsesStandardInput(request, prompt);
 
-        // The prompt comes straight after -p, before any variadic option that could swallow it.
-        var arguments = new List<string> { "-p", useStdin ? StdinInstruction : AsArgument(prompt) };
+        // An argument prompt comes straight after -p, before any variadic option that could swallow it.
+        var arguments = new List<string> { "-p" };
+        if (!useStdin)
+        {
+            arguments.Add(AsArgument(prompt));
+        }
+
         arguments.AddRange(
         [
             "--output-format", "stream-json", "--verbose", "--include-partial-messages",
@@ -221,9 +232,10 @@ internal sealed class ClaudeCodeCliAdapter : CliAdapter
 /// <summary>
 /// GitHub Copilot CLI in programmatic mode
 /// (https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference):
-/// <c>copilot --prompt=&lt;prompt&gt; -s --no-color --stream off --no-ask-user --deny-tool=shell --deny-tool=write
-/// --deny-tool=url --deny-tool=memory --disable-builtin-mcps --no-custom-instructions --no-auto-update</c>.
-/// Without <c>--allow-all-tools</c> nothing is pre-approved, and deny rules win over any allow rule.
+/// <c>copilot -s --no-color --stream off --no-ask-user --deny-tool=shell --deny-tool=write --deny-tool=url
+/// --deny-tool=memory --disable-builtin-mcps --no-custom-instructions --no-auto-update</c>, with the prompt piped on
+/// standard input (<c>--prompt=&lt;prompt&gt;</c> with <see cref="CliPromptInput.Argument"/>). Without
+/// <c>--allow-all-tools</c> nothing is pre-approved, and deny rules win over any allow rule.
 /// </summary>
 internal sealed class CopilotCliAdapter : CliAdapter
 {
@@ -237,10 +249,10 @@ internal sealed class CopilotCliAdapter : CliAdapter
     public override (List<string> Arguments, string? StandardInput) Build(CliRequest request)
     {
         string prompt = request.RenderInline();
-        bool useStdin = prompt.Length > request.Options.MaxArgumentLength;
+        bool useStdin = UsesStandardInput(request, prompt);
 
-        // "--prompt=<value>" keeps the prompt a single token even when it starts with '-'. Piped input is the
-        // documented alternative for long prompts ("echo ... | copilot").
+        // Piped input is documented ("echo ... | copilot") and ignored when --prompt is given. "--prompt=<value>" keeps
+        // an argument prompt a single token even when it starts with '-'.
         var arguments = new List<string>();
         if (!useStdin)
         {
@@ -356,7 +368,8 @@ internal sealed class CodexCliAdapter : CliAdapter
 /// <summary>
 /// Any other command: <see cref="ConnectorOptions.Arguments"/> is the full argument list with <c>{model}</c> and
 /// <c>{prompt}</c> placeholders (a lone <c>{model}</c> argument, and the option before it, are dropped when the model
-/// has no id); standard output is the reply and a non-zero exit code is a failure.
+/// has no id; a lone <c>{prompt}</c> starting with '-' gets a leading space, as in the presets); standard output is the
+/// reply and a non-zero exit code is a failure.
 /// </summary>
 internal sealed class CustomCliAdapter : CliAdapter
 {
@@ -380,6 +393,13 @@ internal sealed class CustomCliAdapter : CliAdapter
                     arguments.RemoveAt(arguments.Count - 1);
                 }
 
+                continue;
+            }
+
+            if (template == "{prompt}" && asArgument)
+            {
+                // A whole argument would be read as an option if it started with '-'; inside one ("--prompt={prompt}") it cannot.
+                arguments.Add(AsArgument(prompt));
                 continue;
             }
 

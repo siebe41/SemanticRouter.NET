@@ -78,6 +78,54 @@ public sealed class SecretsTests
     }
 
     [Fact]
+    public void Cli_environment_variables_and_cookie_headers_are_secrets()
+    {
+        RouterConfiguration document = Document();
+        var claude = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        claude.EnvironmentVariables["CLAUDE_CODE_OAUTH_TOKEN"] = "oauth-secret-123";
+        document.Connectors["claude"] = claude;
+        document.Connectors["azure"].Headers["Cookie"] = "session=abc123";
+
+        RouterConfiguration masked = document.Masked();
+        masked.Connectors["claude"].EnvironmentVariables["CLAUDE_CODE_OAUTH_TOKEN"].Should().Be("***");
+        masked.Connectors["azure"].Headers["Cookie"].Should().Be("***");
+
+        masked.UnmaskFrom(document);
+        masked.Connectors["claude"].EnvironmentVariables["CLAUDE_CODE_OAUTH_TOKEN"].Should().Be("oauth-secret-123");
+
+        var store = new MemorySecretStore();
+        document.MoveSecretsToStore(store);
+        document.ToJson().Should().NotContain("oauth-secret-123").And.NotContain("abc123");
+        document.ResolveSecrets(store).Connectors["claude"].EnvironmentVariables["CLAUDE_CODE_OAUTH_TOKEN"].Should().Be("oauth-secret-123");
+    }
+
+    [Fact]
+    public void A_stored_secret_is_not_sent_where_its_connector_now_points()
+    {
+        RouterConfiguration current = Document();
+        var cli = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        cli.EnvironmentVariables["CLAUDE_CODE_OAUTH_TOKEN"] = "oauth-secret-123";
+        current.Connectors["claude"] = cli;
+
+        RouterConfiguration moved = current.Masked();
+        moved.Connectors["azure"].BaseAddress = new Uri("https://collector.example");
+        moved.Connectors["claude"].Preset = CliPreset.Custom;
+        moved.Connectors["claude"].Executable = "/bin/sh";
+        moved.Embeddings.Endpoint = new Uri("https://collector.example");
+        moved.UnmaskFrom(current);
+
+        moved.ToJson().Should().NotContain("sk-azure").And.NotContain("hdr-secret-123").And.NotContain("oauth-secret-123").And.NotContain("emb-key");
+        RouterRuntimeProvider.Validate(moved).Should().Contain(e => e.StartsWith("Connectors:azure:ApiKey: enter the secret again", StringComparison.Ordinal))
+            .And.Contain(e => e.StartsWith("Connectors:claude:EnvironmentVariables:CLAUDE_CODE_OAUTH_TOKEN", StringComparison.Ordinal))
+            .And.Contain(e => e.StartsWith("Embeddings:ApiKey", StringComparison.Ordinal));
+
+        RouterConfiguration unchanged = current.Masked();
+        unchanged.UnmaskFrom(current);
+        unchanged.Connectors["azure"].ApiKey.Should().Be("sk-azure");
+        RouterRuntimeProvider.Validate(unchanged).Should().NotContain(e => e.Contains("enter the secret again", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void Protected_file_store_round_trips_without_plain_text_on_disk()
     {
         string directory = Directory.CreateTempSubdirectory("router-secrets").FullName;

@@ -64,6 +64,12 @@ public sealed record PromptRoutingRequest
     public bool LocalOnly { get; init; }
 
     /// <summary>
+    /// <see langword="false"/> when the prompt may not go to the embedding provider (a local-only request, and embeddings
+    /// that are not on this machine): it is classified by its complexity alone. Default <see langword="true"/>.
+    /// </summary>
+    public bool EmbeddingsAllowed { get; init; } = true;
+
+    /// <summary>
     /// A cheaper model to try first on a plain route match (a trial of whether it does the route's work as well), when it
     /// can serve the request; the usual candidates stay behind it (<see cref="RoutingPlan.Trial"/>).
     /// </summary>
@@ -134,6 +140,7 @@ public sealed class PromptRouter : IPromptRouter
     private readonly ModelDefinition[] _models;
     private readonly Dictionary<string, RoutingProfile> _profiles;
     private readonly HashSet<string> _followConversation;
+    private readonly bool _localOnlyRoutes;
     private readonly Dictionary<string, string> _routeModels;
     private readonly IModelLatency? _latency;
     private readonly SelectionStrategy _strategy;
@@ -162,6 +169,7 @@ public sealed class PromptRouter : IPromptRouter
         _models = options.Models.ToArray();
         _profiles = new Dictionary<string, RoutingProfile>(options.Profiles, StringComparer.OrdinalIgnoreCase);
         _followConversation = new HashSet<string>(options.Routes.Where(r => r.FollowsConversation).Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
+        _localOnlyRoutes = options.Routes.Any(r => r.LocalOnly);
         _routeModels = options.Routes.Where(r => !string.IsNullOrWhiteSpace(r.PreferredModel))
             .GroupBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().PreferredModel!, StringComparer.OrdinalIgnoreCase);
@@ -180,6 +188,16 @@ public sealed class PromptRouter : IPromptRouter
     {
         ArgumentNullException.ThrowIfNull(request);
         RoutingProfile? profile = ProfileOf(request);
+
+        // Naming a cloud model, or a client's own request decided by its wording, skips classification, but not the
+        // local-only routes: a prompt one of them covers stays on this machine whichever way it arrives.
+        if (_localOnlyRoutes && !request.LocalOnly && profile?.LocalOnly != true
+            && (request.Classification is not null || Named(request.RequestedModel) is { IsLocal: false })
+            && (await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false)).LocalOnly)
+        {
+            request = request with { LocalOnly = true };
+        }
+
         Func<ModelDefinition, bool> usable = Usable(request, profile);
 
         if (request.RequestedModel is { } requested
@@ -215,7 +233,9 @@ public sealed class PromptRouter : IPromptRouter
         PromptClassificationResult classification;
         using (System.Diagnostics.Activity? classify = RouterTelemetry.Source.StartActivity("semantic_router.classify"))
         {
-            classification = await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false);
+            classification = request.EmbeddingsAllowed
+                ? await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false)
+                : await _classifier.ClassifyWithoutEmbeddingAsync(request.Prompt, cancellationToken).ConfigureAwait(false);
             if (request.ConversationFloor is { } conversation
                 && (conversation > classification.RequiredTier || (classification.RouteName is { } route && _followConversation.Contains(route) && classification.Reason == RoutingReason.SemanticMatch)))
             {
@@ -373,6 +393,10 @@ public sealed class PromptRouter : IPromptRouter
         request.Profile is not { Length: > 0 } name ? null
         : _profiles.TryGetValue(name, out RoutingProfile? profile) ? profile
         : throw new ArgumentException($"Unknown routing profile '{name}'.", nameof(request));
+
+    /// <summary>The enabled catalog model called <paramref name="name"/>, or <see langword="null"/>.</summary>
+    private ModelDefinition? Named(string? name) =>
+        name is null ? null : _models.FirstOrDefault(m => m.Enabled && string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Models the profile allows, within their active hours, and local when the request must stay local.</summary>
     private Func<ModelDefinition, bool> Usable(PromptRoutingRequest request, RoutingProfile? profile)

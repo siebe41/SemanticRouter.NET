@@ -70,6 +70,17 @@ public sealed class EmbeddingProviderOptions
     /// <summary>Base address of the embeddings server, e.g. <c>http://localhost:11434</c>.</summary>
     public Uri? Endpoint { get; set; }
 
+    /// <summary>
+    /// Whether <see cref="Endpoint"/> is on this machine or a server you control, so prompts that must stay local may be
+    /// sent to it. Default: <see langword="true"/> for a loopback address, <see langword="false"/> for anything else.
+    /// The in-process providers are always local.
+    /// </summary>
+    public bool? IsLocal { get; set; }
+
+    /// <summary>Whether prompts embedded with these settings stay on this machine (or a server declared <see cref="IsLocal"/>).</summary>
+    internal bool KeepsPromptsLocal =>
+        Provider != EmbeddingProviderKind.OpenAICompatible || (IsLocal ?? Endpoint is { IsLoopback: true });
+
     /// <summary>Path of the embeddings API. Default <c>/v1/embeddings</c>.</summary>
     public string RequestPath { get; set; } = "/v1/embeddings";
 

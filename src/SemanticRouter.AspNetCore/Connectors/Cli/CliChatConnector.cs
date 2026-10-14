@@ -109,17 +109,29 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
 
         _metrics?.CliActive(Name, 1);
-        string workingDirectory = Path.Combine(Path.GetTempPath(), "semantic-router", Guid.NewGuid().ToString("N"));
+        string? workingDirectory = null;
         try
         {
-            Directory.CreateDirectory(workingDirectory);
+            try
+            {
+                workingDirectory = CliScratch.Create(Guid.NewGuid().ToString("N"));
+            }
+            catch (IOException ex)
+            {
+                LogStartFailed(_logger, Name, _executable, ex.Message);
+                return ConnectorResult.Failed(ModelFailureKind.Unavailable, ex.Message);
+            }
+
             return await RunAsync(request, context, workingDirectory, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _metrics?.CliActive(Name, -1);
             _gate.Release();
-            TryDelete(workingDirectory);
+            if (workingDirectory is not null)
+            {
+                TryDelete(workingDirectory);
+            }
         }
     }
 

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
+using SemanticRouter.AspNetCore;
 
 namespace SemanticRouter.Host;
 
@@ -293,6 +294,8 @@ internal delegate Task<ProcessResult> ProcessRunner(string fileName, IReadOnlyLi
 /// <summary>A per-user service manager: systemd, launchd or the Windows sign-in entries.</summary>
 internal abstract class ServicePlatform
 {
+    private static readonly string[] SystemDirectories = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+
     /// <summary>A short name: "systemd user service", "launchd agent", "Windows sign-in entry".</summary>
     public abstract string Kind { get; }
 
@@ -355,7 +358,12 @@ internal abstract class ServicePlatform
     /// <summary>Runs a command and collects its output; a missing executable is a failed result, not an exception.</summary>
     public static async Task<ProcessResult> RunProcessAsync(string fileName, IReadOnlyList<string> arguments)
     {
-        var start = new ProcessStartInfo(fileName)
+        if (SystemTool(fileName, System.Environment.GetEnvironmentVariable("PATH")) is not { } path)
+        {
+            return new ProcessResult(-1, $"{fileName}: not found in /usr/bin, /bin, /usr/sbin, /sbin or on PATH.");
+        }
+
+        var start = new ProcessStartInfo(path)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -393,5 +401,22 @@ internal abstract class ServicePlatform
 
             return new ProcessResult(process.ExitCode, ((await stdout.ConfigureAwait(false)) + (await stderr.ConfigureAwait(false))).Trim());
         }
+    }
+
+    /// <summary>
+    /// The full path of a system tool (<c>systemctl</c>, <c>launchctl</c>, <c>id</c>): where the system keeps it, else the
+    /// first absolute PATH entry that has it. Started by bare name it could be found in the current directory first, which
+    /// may be anything, a cloned repository included.
+    /// </summary>
+    internal static string? SystemTool(string name, string? searchPath)
+    {
+        if (Path.IsPathFullyQualified(name))
+        {
+            return name;
+        }
+
+        bool windows = OperatingSystem.IsWindows();
+        string? system = windows ? null : SystemDirectories.Select(directory => Path.Combine(directory, name)).FirstOrDefault(File.Exists);
+        return system ?? CliExecutableLocator.Find(name, searchPath, windows).Path;
     }
 }

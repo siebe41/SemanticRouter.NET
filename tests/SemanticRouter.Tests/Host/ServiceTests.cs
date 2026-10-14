@@ -319,6 +319,31 @@ public sealed class ServiceTests : IDisposable
         File.Exists(RouterInstance.PathIn(ConfigurationDirectory)).Should().BeFalse();
     }
 
+    [Fact]
+    public async Task Service_manager_commands_are_started_by_full_path_never_from_the_current_directory()
+    {
+        string bin = Directory.CreateDirectory(Path.Combine(_directory, "bin")).FullName;
+        string name = "sr-tool-" + Guid.NewGuid().ToString("N");
+        string file = Path.Combine(bin, OperatingSystem.IsWindows() ? name + ".exe" : name); // Windows runs only a native .exe
+        File.WriteAllText(file, string.Empty);
+        string relative = Path.GetRelativePath(Environment.CurrentDirectory, bin);
+
+        ServicePlatform.SystemTool(name, bin).Should().Be(file);
+        if (!Path.IsPathRooted(relative))
+        {
+            ServicePlatform.SystemTool(name, relative).Should().BeNull("a relative PATH entry depends on the current directory");
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            ServicePlatform.SystemTool("sh", string.Empty).Should().BeOneOf("/usr/bin/sh", "/bin/sh");
+        }
+
+        ProcessResult missing = await ServicePlatform.RunProcessAsync(name, []);
+        missing.Succeeded.Should().BeFalse();
+        missing.Output.Should().Contain("not found");
+    }
+
     private static int FreePort()
     {
         using var probe = new TcpListener(IPAddress.Loopback, 0);

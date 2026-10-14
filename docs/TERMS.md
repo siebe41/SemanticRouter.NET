@@ -71,7 +71,7 @@ Each mechanism below exists because of a specific line in a vendor's terms. Thos
 - **Billing** ([models and pricing](https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing)): usage draws AI credits from your plan's allowance, per token.
 
 **How the connector lines up with this:**
-- The preset runs the official `copilot` binary in its documented programmatic mode (`--prompt`, `-s`), with tools denied (`--deny-tool=…`, `--no-ask-user`, `--disable-builtin-mcps`, `--no-custom-instructions`).
+- The preset runs the official `copilot` binary in its documented programmatic mode (prompt piped on stdin, `-s`), with tools denied (`--deny-tool=…`, `--no-ask-user`, `--disable-builtin-mcps`, `--no-custom-instructions`).
 - It never calls Copilot's internal APIs and never shares a token (rules 1 and 2).
 - Loopback-only, cooldowns and concurrency limits keep it personal and away from "bulk activity" or resale (rules 4–6).
 

@@ -65,7 +65,7 @@ Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md
 - **Capability-aware, cost-aware routing.** Routes declare the tier and capabilities an intent needs. Models declare their tier, capabilities, context window, cost and priority. The selector picks the cheapest model that qualifies, the most capable one, the fastest lately, or follows your priority order, and clients can choose per request (`auto:cheapest`, `auto:best`, `auto:fastest`, `auto:balanced`, `auto:priority`).
 - **Every kind of provider.** There is an OpenAI-compatible HTTP connector for local servers and APIs, a CLI connector that runs Claude Code, Copilot CLI or Codex CLI on your own login, a Copilot connector on GitHub's official SDK, and an `IChatConnector` interface for anything else.
 - **Automatic failover and quota cooldowns.** A model that is unreachable, times out, returns 5xx/429 or reports a usage limit is skipped for a cooldown period. An account-wide subscription limit cools down every model on that account at once.
-- **Privacy rails.** Routes marked `LocalOnly` can only be served by models marked `IsLocal`, even on failover. Subscription CLI connectors refuse requests from other machines by default.
+- **Privacy rails.** Routes marked `LocalOnly` can only be served by models marked `IsLocal`, even on failover. Once a conversation has been kept local, its later turns, tool loops and the client's compaction and title requests about it stay local too, and naming a cloud model does not take a local-only prompt off the machine. Subscription CLI connectors refuse requests from other machines by default.
 - **Routing profiles.** Named policies for who is asking and what the code belongs to: allowed and denied models, tier floors and caps, a strategy, local-only. Picked by gateway key, header, model name (`auto@private`) or rules on project and tools; a conversation containing a credential can be kept local automatically. See [docs/routing-profiles.md](docs/routing-profiles.md).
 - **Zero-dependency core.** `SemanticRouter.Core` references no NuGet packages. It has SIMD cosine similarity over `ReadOnlySpan<float>` (`System.Numerics.Vector<T>`), a tokenizer-free token estimator, complexity heuristics, and the route and model selectors. It is AOT-compatible.
 - **Explainable decisions.** Every decision carries a reason, a tier, route similarities, complexity signals and the ranked model list. These are exposed through `X-Prompt-Route-*` headers, structured logs, metrics and a diagnostics endpoint.
@@ -122,7 +122,7 @@ These combine with a noisy-OR, `1 − Π(1 − weightᵢ·signalᵢ)`, so a sing
 | Complexity ≥ `ComplexityShortCircuitThreshold` *(skipped while any route is local-only)* | tier from complexity alone, **no embedding call** | `ComplexityShortCircuit` |
 | Request names a catalog model | that model only | `ModelOverride` |
 | The message (or an earlier one in the conversation) starts with a callout such as `@opus` or `@tier2` | what the callout asks | `ExplicitCallout` |
-| Classifier failed and `FailOpen` is on | `FallbackTier` | `ClassifierFailure` |
+| Classifier failed and `FailOpen` is on | `FallbackTier`, local-only while any route is local-only | `ClassifierFailure` |
 | The conversation needed a higher tier on recent turns, e.g. "ok, go ahead" in the middle of a task (`Middleware:Conversation`, on by default) | the conversation's floor, which decays as it moves on to simpler work | `ConversationFloor` |
 | The same client repeats a prompt soon after it was answered (`Middleware:RetryEscalation`, off by default) | one tier above the model that answered | `RetryEscalation` |
 | A request an agentic client makes for itself, recognised by its wording: a session title, a topic check, a compaction summary, a warm-up ping, a shell command check (`Middleware:Housekeeping`, on by default) | `Housekeeping:Tier` (1), **no embedding call** | `ClientHousekeeping` |
@@ -432,14 +432,14 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `StreamPromptedReplies` | CLI | `true` | With `Prompted`: stream the reply's text and hold back only what may be a tool call. `false` buffers the reply, so a failed run can still fail over. |
 | `RepairToolCalls` | CLI | `true` | With `Prompted`: re-ask once, briefly, for a tool call that could not be read. See [providers.md](docs/providers.md#prompted-tool-calling-in-practice). |
 | `Preset` | CLI | `Custom` | `ClaudeCode`, `GitHubCopilot`, `Codex` or `Custom`. |
-| `Executable` | CLI | preset's command | Started directly, never through a shell. On Windows use the `.exe`. |
+| `Executable` | CLI | preset's command | Started directly, never through a shell, by its full path: a bare name is looked up on the absolute `PATH` entries only, never in the current directory. On Windows use the `.exe`. |
 | `Arguments[]` | CLI | | Custom: the full template (`{model}`, `{prompt}`). Presets: extra arguments appended. |
-| `PromptInput` | CLI (custom) | `Stdin` | `Stdin` or `Argument`. |
+| `PromptInput` | CLI | `Stdin` | `Stdin` or `Argument`. `Argument` puts the prompt on the command line (Custom: the `{prompt}` placeholder), where other users of the machine can read it while the CLI runs. Codex always uses stdin. |
 | `QuotaErrorPatterns[]` | CLI | preset patterns | Extra output fragments that mean "quota exhausted". |
 | `EnvironmentVariables`, `RemoveEnvironmentVariables[]` | CLI | preset defaults | The presets remove API-key variables that would switch billing away from your subscription. |
 | `MaxConcurrency` | CLI, Copilot | `2` | Simultaneous processes (Copilot: simultaneous turns). |
 | `MaxQueue` | CLI, Copilot | `null` (always wait) | When this many requests are already waiting for a process, the next goes to another model. |
-| `MaxArgumentLength` | CLI | `24000` | Longer prompts are sent on stdin. |
+| `MaxArgumentLength` | CLI | `24000` | With `PromptInput: Argument`, longer prompts are sent on stdin. Longer Claude Code system prompts are moved into the conversation. |
 | `Executable`, `HomeDirectory` | Copilot | `copilot`, `~/.copilot` | The Copilot CLI the SDK runs as its runtime, and its `COPILOT_HOME`. |
 | `AllowRemoteClients` | CLI, Copilot | `false` | See [TERMS.md](docs/TERMS.md) before changing this. |
 | `Timeout` | all | HTTP 100 s · CLI 5 min | Time to first output. Streams are not cut off. |
@@ -449,6 +449,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | Key | Default | Description |
 |---|---|---|
 | `Embeddings:Provider` | `Hashing` | `Hashing` (dev only), `Onnx` (in-process model, see below) or `OpenAICompatible` (`Endpoint`, `Model`, `ApiKey`, `RequestPath`, `MaxBatchSize`, `Timeout`). |
+| `Embeddings:IsLocal` | loopback `Endpoint` only | Whether an `OpenAICompatible` endpoint keeps prompts on this machine (or a server you control). When it does not, requests already known to be local-only (a local-only profile, `LocalOnlyWhen`, `@local`, a conversation kept local) are classified by complexity alone instead of being sent to it, tuning and evaluation leave local-only prompts out, and a warning says that local-only routes still need every prompt embedded there first. |
 | `Embeddings:Model` / `ModelPath` / `Pooling` | | For `Onnx`: `all-MiniLM-L6-v2` (default) or `bge-small-en-v1.5`, downloaded on first use; or `ModelPath`, a directory with your own `model.onnx` and `vocab.txt`, with `Pooling` `Mean` or `Cls`. Needs the `SemanticRouter.Embeddings.Onnx` package (`.AddOnnxEmbeddings()` / `.UseOnnxEmbeddings()`); the tool includes it. |
 | `Embeddings:WarmUpOnStartup` | `true` | Embed utterances in the background at startup. |
 | `Middleware:Mode` | `Annotate` | `Annotate` or `Dispatch`. |

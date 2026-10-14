@@ -163,6 +163,13 @@ internal sealed partial class RouterTuner : IDisposable
             runtime.Configuration.Middleware.Judge.FailingGrade, options);
         double judgeWeight = agreement.EffectiveWeight;
         (IReadOnlyList<EvaluationCase> automatic, Dictionary<string, HashSet<FeedbackKind>> kinds) = AutomaticLabels(confirmed, options, judgeWeight, now);
+        if (!runtime.Configuration.Embeddings.KeepsPromptsLocal)
+        {
+            // Tuning embeds every prompt it learns from; local-only ones do not go to an endpoint off this machine.
+            confirmed = [.. confirmed.Where(c => !c.LocalOnly)];
+            automatic = [.. automatic.Where(c => !c.LocalOnly)];
+        }
+
         int total = confirmed.Count + automatic.Count;
         if (total < options.MinimumPrompts)
         {

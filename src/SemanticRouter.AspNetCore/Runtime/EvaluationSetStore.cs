@@ -67,6 +67,7 @@ public sealed class JsonLinesEvaluationSetStore : IEvaluationSetStore
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             string temp = _path + ".tmp";
             File.WriteAllText(temp, EvaluationSet.ToJsonLines(cases));
+            OwnerOnly.Restrict(temp);
             File.Move(temp, _path, overwrite: true);
         }
     }

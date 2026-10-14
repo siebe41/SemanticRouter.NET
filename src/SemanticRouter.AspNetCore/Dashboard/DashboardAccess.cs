@@ -49,12 +49,7 @@ internal sealed class DashboardAccess
         _options = options;
         _admin = string.IsNullOrEmpty(adminToken) ? null : Encoding.UTF8.GetBytes(adminToken);
         _readOnly = string.IsNullOrEmpty(readOnlyToken) ? null : Encoding.UTF8.GetBytes(readOnlyToken);
-        _publicAuthorities = new HashSet<string>(
-            options.PublicOrigins
-                .Select(o => Uri.TryCreate(o.Trim(), UriKind.Absolute, out Uri? uri) ? Authority(uri) : null)
-                .Where(a => a is not null)
-                .Cast<string>(),
-            StringComparer.OrdinalIgnoreCase);
+        _publicAuthorities = LocalHosts.Authorities(options.PublicOrigins);
     }
 
     /// <summary>Whether any token is configured, so remote clients can sign in.</summary>
@@ -214,25 +209,12 @@ internal sealed class DashboardAccess
             return false;
         }
 
-        string authority = Authority(uri);
+        string authority = LocalHosts.Authority(uri);
         return string.Equals(authority, request.Host.Value, StringComparison.OrdinalIgnoreCase) || _publicAuthorities.Contains(authority);
     }
 
-    private bool IsLocalHost(HttpRequest request)
-    {
-        string host = request.Host.Host;
-        if (string.IsNullOrEmpty(host)
-            || string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
-            || host.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase)
-            || (IPAddress.TryParse(host.Trim('[', ']'), out IPAddress? address) && IPAddress.IsLoopback(address)))
-        {
-            return true;
-        }
-
-        return _publicAuthorities.Contains(request.Host.Value!);
-    }
-
-    private static string Authority(Uri uri) => uri.IsDefaultPort ? uri.Host : $"{uri.Host}:{uri.Port}";
+    private bool IsLocalHost(HttpRequest request) =>
+        LocalHosts.IsLocalName(request.Host.Host) || _publicAuthorities.Contains(request.Host.Value!);
 
     private static bool FixedTimeEquals(byte[] a, byte[] b) =>
         CryptographicOperations.FixedTimeEquals(SHA256.HashData(a), SHA256.HashData(b));

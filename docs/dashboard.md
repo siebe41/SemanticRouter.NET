@@ -107,7 +107,7 @@ Editing never touches the running router until you choose:
 
 Applied documents are kept in the configuration history: in memory by default, or on disk with `UseSqliteState` (see [architecture.md](architecture.md#durable-state)).
 
-Secrets are never sent to the browser: the API masks them as `***`, and sending `***` back keeps the stored value.
+Secrets are never sent to the browser: the API masks them as `***`, and sending `***` back keeps the stored value. Secrets are API keys, header values whose name looks like a credential (`key`, `token`, `secret`, `auth`, `cookie`, `password`, `credential`, `session`, `signature`), every CLI `EnvironmentVariables` value, gateway keys and webhook URLs. A stored secret only goes where it was configured to go: when a connector's type, address or program changes (or the embeddings' provider or endpoint), `***` is refused and the secret has to be entered again. The configuration history keeps no secrets either; a rollback takes them from the running configuration.
 
 ## Keeping secrets out of the file
 
@@ -193,12 +193,15 @@ The same settings are on `RouterDashboardOptions` (`app.MapRouterDashboard("/rou
 Whatever the setup:
 
 - **Writes must come from the dashboard's own origin.** `PUT`, `POST` and `DELETE` with an `Origin` other than the request's host (or a `PublicOrigins` entry), or with `Sec-Fetch-Site: cross-site`, get `403`. Scripts that send no `Origin` (curl) are unaffected.
+- **What a CLI runs is changed in the configuration file, not over the API.** Loopback clients are admin without a token, so the admin API refuses changes to a CLI or Copilot connector's `Executable`, `Arguments`, `EnvironmentVariables` and `HomeDirectory`; otherwise any program on the machine could make the router run anything it liked. Adding a preset started from `PATH` (Claude Code, Codex, Copilot) still works from the dashboard. `AllowProcessSettings: true` lifts this.
 - **A reverse proxy on this machine makes every request look local.** Use ASP.NET Core's forwarded-headers middleware so the real client address is seen, or set `RequireTokenForLocalClients: true`.
 - **Subscription CLI connectors stay loopback-only** (`AllowRemoteClients: false`) whatever the dashboard allows: a remote client's request falls through to an API-key or local model. Serving other people from your personal subscription is what [TERMS.md](TERMS.md) rules out.
 
 ### Gateway keys
 
-The chat endpoints (`/v1/chat/completions`, `/v1/messages`) are separate from the dashboard. To tell clients of a shared router apart, give each one a key under `Middleware:GatewayKeys` (`"laptop": "${env:ROUTER_KEY_LAPTOP}"`). Remote requests without a valid key get `401` in their protocol's error format; the matched name appears in the Activity page (`client`). Clients send the key the way they send any API key: `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` for Claude Code, `OPENAI_API_KEY` for OpenAI clients. Keys are compared in constant time and never logged or forwarded; backends always get the connector's own credentials. Loopback clients may omit the key unless `RequireGatewayKeyForLocalClients` is on. `GET /v1/models` and `count_tokens` are not covered.
+The chat endpoints (`/v1/chat/completions`, `/v1/messages`) are separate from the dashboard. To tell clients of a shared router apart, give each one a key under `Middleware:GatewayKeys` (`"laptop": "${env:ROUTER_KEY_LAPTOP}"`). Remote requests without a valid key get `401` in their protocol's error format; the matched name appears in the Activity page (`client`). Clients send the key the way they send any API key: `ANTHROPIC_AUTH_TOKEN` or `ANTHROPIC_API_KEY` for Claude Code, `OPENAI_API_KEY` for OpenAI clients. Keys are compared in constant time and never logged or forwarded; backends always get the connector's own credentials. Loopback clients may omit the key unless `RequireGatewayKeyForLocalClients` is on. `GET /v1/models`, `count_tokens` and `/semantic-router/classify` follow the same rule.
+
+Web pages cannot use the gateway. A request without a valid key is refused (`403`) when it comes from this machine under a host name that is not this machine (`localhost`, a loopback address or a `PublicOrigins` entry), which is what a DNS-rebinding page looks like, or when it carries a browser `Origin` other than the router's own. SDKs and CLIs send no `Origin` and are unaffected.
 
 ### Rate limits
 

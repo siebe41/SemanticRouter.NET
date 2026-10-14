@@ -73,11 +73,11 @@ public sealed class CliProcessIntegrationTests : IDisposable
 
             result.Outcome.Should().Be(ConnectorOutcome.Completed);
             using JsonDocument report = JsonDocument.Parse(Content(body));
-            report.RootElement.GetProperty("prompt").GetString().Should().Be("hello there");
+            report.RootElement.GetProperty("prompt").GetString().Should().BeNull("the prompt is not on the command line");
+            report.RootElement.GetProperty("stdin").GetString().Should().Be("hello there");
             report.RootElement.GetProperty("secret").GetString().Should().Be("unset", "RemoveEnvironmentVariables is honoured");
             report.RootElement.GetProperty("set").GetString().Should().Be("yes");
             report.RootElement.GetProperty("files").GetInt32().Should().Be(0, "each run gets a fresh empty directory");
-            report.RootElement.GetProperty("stdinLength").GetInt32().Should().Be(0);
         }
         finally
         {
@@ -86,9 +86,24 @@ public sealed class CliProcessIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task Argument_prompts_arrive_after_print()
+    {
+        ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);
+        options.PromptInput = CliPromptInput.Argument;
+        using var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
+
+        (_, string body) = await SendAsync(connector, "hello there");
+
+        using JsonDocument report = JsonDocument.Parse(Content(body));
+        report.RootElement.GetProperty("prompt").GetString().Should().Be("hello there");
+        report.RootElement.GetProperty("stdinLength").GetInt32().Should().Be(0);
+    }
+
+    [Fact]
     public async Task Long_non_ascii_prompts_go_through_stdin_and_system_prompts_as_arguments()
     {
         ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);
+        options.PromptInput = CliPromptInput.Argument;
         options.MaxArgumentLength = 50;
         using var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
         string prompt = string.Concat(Enumerable.Repeat("Grüße, 世界 — ", 400));
@@ -115,7 +130,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
 
         result.Outcome.Should().Be(ConnectorOutcome.Completed);
         string firstLine = Content(body).Split('\n')[0];
-        JsonSerializer.Deserialize<string[]>(firstLine).Should().Equal("--flag", string.Empty, prompt);
+        JsonSerializer.Deserialize<string[]>(firstLine).Should().Equal(["--flag", string.Empty, " " + prompt], "a leading space keeps the dash from reading as an option");
     }
 
     [Fact]
@@ -204,5 +219,51 @@ public sealed class CliProcessIntegrationTests : IDisposable
 
         CliExecutableLocator.Find("gemini", path, windows: true).Problem("g").Should().Contain("not found on PATH");
         CliExecutableLocator.Find(FakeCli).Found.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Locator_skips_relative_and_empty_path_entries()
+    {
+        string bin = Directory.CreateDirectory(Path.Combine(_scratch, "bin")).FullName;
+        File.WriteAllText(Path.Combine(bin, "tool"), string.Empty);
+        string relative = Path.GetRelativePath(Environment.CurrentDirectory, bin);
+        if (Path.IsPathRooted(relative))
+        {
+            return; // on another drive than the current directory (Windows): there is no relative form
+        }
+
+        CliExecutableLocator.Find("tool", relative, windows: false).Found.Should().BeFalse("a relative entry depends on the current directory");
+        CliExecutableLocator.Find("tool", string.Join(Path.PathSeparator, ".", string.Empty, relative, bin), windows: false)
+            .Path.Should().Be(Path.Combine(bin, "tool"));
+    }
+
+    [Fact]
+    public void The_runner_starts_the_resolved_full_path_never_a_file_in_the_current_directory()
+    {
+        // .NET (and Windows) would start a bare name found in the current directory before searching PATH.
+        string name = "sr-planted-" + Guid.NewGuid().ToString("N");
+        string planted = Path.Combine(Environment.CurrentDirectory, name);
+        File.WriteAllText(planted, "#!/bin/sh\necho planted\n");
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(planted, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            Action start = () => SystemCliProcessRunner.CreateStartInfo(Invocation(name));
+            start.Should().Throw<FileNotFoundException>().WithMessage($"*'{name}'*not found*");
+            CliExecutableLocator.Find(name, ".", OperatingSystem.IsWindows()).Found.Should().BeFalse();
+        }
+        finally
+        {
+            File.Delete(planted);
+        }
+
+        SystemCliProcessRunner.CreateStartInfo(Invocation(FakeCli)).FileName.Should().Be(FakeCli);
+        string shell = SystemCliProcessRunner.CreateStartInfo(Invocation(OperatingSystem.IsWindows() ? "cmd" : "sh")).FileName;
+        Path.IsPathFullyQualified(shell).Should().BeTrue(shell);
+
+        CliInvocation Invocation(string executable) => new() { Executable = executable, Arguments = [], WorkingDirectory = _scratch };
     }
 }

@@ -44,7 +44,8 @@ internal interface ICliProcessRunner
 
 /// <summary>
 /// Starts real processes with <see cref="ProcessStartInfo.ArgumentList"/> and <c>UseShellExecute = false</c>, so no
-/// shell ever interprets the prompt.
+/// shell ever interprets the prompt. The executable is resolved with <see cref="CliExecutableLocator"/> first and started
+/// by its full path, so a file of the same name in the current directory is never run instead.
 /// </summary>
 internal sealed class SystemCliProcessRunner : ICliProcessRunner
 {
@@ -52,7 +53,32 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
 
     public ICliProcess Start(CliInvocation invocation)
     {
-        var startInfo = new ProcessStartInfo(invocation.Executable)
+        var process = new Process { StartInfo = CreateStartInfo(invocation) };
+        try
+        {
+            process.Start();
+        }
+        catch (Win32Exception ex)
+        {
+            process.Dispose();
+            throw new FileNotFoundException($"Could not start '{invocation.Executable}': {ex.Message}", invocation.Executable, ex);
+        }
+
+        return new SystemCliProcess(process, invocation.StandardInput);
+    }
+
+    /// <exception cref="FileNotFoundException">The executable is not on PATH, or only a script wrapper is.</exception>
+    internal static ProcessStartInfo CreateStartInfo(CliInvocation invocation)
+    {
+        CliExecutableLookup lookup = CliExecutableLocator.Find(invocation.Executable);
+        if (lookup.Path is not { } path)
+        {
+            throw new FileNotFoundException(
+                $"Could not start '{invocation.Executable}': " + (lookup.ScriptPath is null ? "not found." : $"only a script wrapper was found ({lookup.ScriptPath})."),
+                invocation.Executable);
+        }
+
+        var startInfo = new ProcessStartInfo(path)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -80,18 +106,7 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
             startInfo.Environment[name] = value;
         }
 
-        var process = new Process { StartInfo = startInfo };
-        try
-        {
-            process.Start();
-        }
-        catch (Win32Exception ex)
-        {
-            process.Dispose();
-            throw new FileNotFoundException($"Could not start '{invocation.Executable}': {ex.Message}", invocation.Executable, ex);
-        }
-
-        return new SystemCliProcess(process, invocation.StandardInput);
+        return startInfo;
     }
 
     private sealed class SystemCliProcess : ICliProcess

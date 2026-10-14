@@ -94,7 +94,7 @@ internal sealed partial class AnswerJudge : IDisposable
     {
         JudgeOptions options = runtime.Configuration.Middleware.Judge;
         if (!options.Enabled || !automatic || options.SampleRate <= 0 || JudgeModel(runtime) is not { } judge
-            || (plan.Requirements.LocalOnly && !judge.IsLocal)
+            || !MaySee(runtime, judge, plan.Requirements.LocalOnly, plan.Requirements.Profile)
             || !plan.Candidates.Any(c => c.Model.Tier <= options.MaxTier))
         {
             return false;
@@ -114,7 +114,7 @@ internal sealed partial class AnswerJudge : IDisposable
     {
         JudgeOptions options = runtime.Configuration.Middleware.Judge;
         if (entry.Outcome != "served" || reply.Truncated || JudgeModel(runtime) is not { } judge
-            || (entry.LocalOnly && !judge.IsLocal)
+            || !MaySee(runtime, judge, entry.LocalOnly, entry.Profile)
             || runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, entry.ServedBy, StringComparison.OrdinalIgnoreCase)) is not { } answering
             || answering.Tier > options.MaxTier
             || string.Equals(answering.Name, judge.Name, StringComparison.OrdinalIgnoreCase))
@@ -175,6 +175,14 @@ internal sealed partial class AnswerJudge : IDisposable
 
         _stopping.Dispose();
     }
+
+    /// <summary>
+    /// Whether the judge may read this request and its answer: it is the one model that sees them besides the one that
+    /// answered, so it keeps the same rules (local-only, and the routing profile's allowed and denied models and connectors).
+    /// </summary>
+    private static bool MaySee(RouterRuntime runtime, ModelDefinition judge, bool localOnly, string? profile) =>
+        (!localOnly || judge.IsLocal)
+        && (profile is null || (runtime.Router.Profiles.TryGetValue(profile, out RoutingProfile? rules) && rules.Allows(judge)));
 
     private static ModelDefinition? JudgeModel(RouterRuntime runtime) =>
         runtime.Configuration.Middleware.Judge.Model is { Length: > 0 } name
@@ -239,7 +247,7 @@ internal sealed partial class AnswerJudge : IDisposable
     {
         RouterRuntime runtime = _provider.Current;
         JudgeOptions options = runtime.Configuration.Middleware.Judge;
-        if (!options.Enabled || JudgeModel(runtime) is not { } judge || (job.Entry.LocalOnly && !judge.IsLocal))
+        if (!options.Enabled || JudgeModel(runtime) is not { } judge || !MaySee(runtime, judge, job.Entry.LocalOnly, job.Entry.Profile))
         {
             return;
         }

@@ -134,8 +134,7 @@ internal sealed partial class SdkCopilotBackend(string? executable, string? home
                     throw new FileNotFoundException(runtime.Problem("copilot") ?? "the copilot CLI was not found", runtime.Requested);
                 }
 
-                string sessions = Path.Combine(Path.GetTempPath(), "semantic-router", "copilot");
-                Directory.CreateDirectory(sessions);
+                string sessions = CliScratch.Create("copilot");
                 var client = new CopilotClient(new CopilotClientOptions
                 {
                     Mode = CopilotClientMode.Empty,

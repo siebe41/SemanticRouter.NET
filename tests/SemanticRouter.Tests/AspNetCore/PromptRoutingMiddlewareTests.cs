@@ -241,6 +241,26 @@ public sealed class AnnotateModeTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Failing_open_stays_local_while_any_route_is_local_only()
+    {
+        Classifier.Setup(c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("embeddings down"));
+        HttpClient client = await StartAsync(routing: o =>
+        {
+            RouteDefinition customers = Route("customers", 1, "look up the customer record");
+            customers.LocalOnly = true;
+            o.Routes.Add(customers);
+        });
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        response.Headers.GetValues("X-Prompt-Route-Reason").Should().Equal("ClassifierFailure");
+        response.Headers.GetValues("X-Prompt-Route-Model").Should().ContainSingle()
+            .Which.Should().Be("local", "the unclassified prompt might have been one the local-only route covers");
+        CloudHttp.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Propagates_classification_failures_when_fail_open_is_disabled()
     {
         Classifier.Setup(c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))

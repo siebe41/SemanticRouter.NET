@@ -30,8 +30,12 @@ public sealed record CliExecutableLookup(string Requested, string? Path, string?
 }
 
 /// <summary>
-/// Finds CLI executables the way the operating system will start them (<c>UseShellExecute = false</c>): a path as
-/// given, or a PATH search that adds <c>.exe</c> on Windows. Used to explain start failures and by start-up checks.
+/// Finds CLI executables: a path as given, or a search of the absolute PATH entries that adds <c>.exe</c> on Windows. The
+/// process runner starts the full path this returns, never a bare name, because the operating system would also look
+/// in the current directory (and .NET on Unix in the application's directory) before PATH, and the router may be
+/// started from a cloned repository that contains a file named <c>claude</c>. Relative and empty PATH entries are
+/// skipped for the same reason. A relative path with a directory (<c>tools/llm</c>) is taken as configured, relative to
+/// the router's current directory.
 /// </summary>
 public static class CliExecutableLocator
 {
@@ -92,12 +96,18 @@ public static class CliExecutableLocator
     {
         foreach (string directory in (searchPath ?? string.Empty).Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
         {
+            string entry = directory.Trim().Trim('"');
+            if (!Path.IsPathFullyQualified(entry))
+            {
+                continue; // "." or "bin" would mean the current directory, whatever that is
+            }
+
             foreach (string extension in extensions)
             {
                 string candidate;
                 try
                 {
-                    candidate = Path.Combine(directory.Trim().Trim('"'), executable + extension);
+                    candidate = Path.Combine(entry, executable + extension);
                 }
                 catch (ArgumentException)
                 {

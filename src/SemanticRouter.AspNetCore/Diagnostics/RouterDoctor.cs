@@ -265,8 +265,16 @@ public static class RouterDoctor
     private static async Task<(int ExitCode, string Output)> RunAsync(
         ICliProcessRunner runner, string executable, string[] arguments, ConnectorOptions connector, CancellationToken cancellationToken)
     {
-        string directory = Path.Combine(Path.GetTempPath(), "semantic-router", "doctor-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
+        string directory;
+        try
+        {
+            directory = CliScratch.Create("doctor-" + Guid.NewGuid().ToString("N"));
+        }
+        catch (IOException ex)
+        {
+            return (-1, ex.Message);
+        }
+
         try
         {
             // The same environment requests get, so the result reflects what the router will use.

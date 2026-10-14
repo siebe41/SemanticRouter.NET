@@ -179,7 +179,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     public static IReadOnlyList<string> Validate(RouterConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        return configuration.GetDocumentValidationErrors();
+        return [.. configuration.GetDocumentValidationErrors(), .. configuration.MaskedSecretErrors()];
     }
 
     /// <summary>
@@ -273,7 +273,9 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     {
         try
         {
-            return _history?.Record(document, source, actor, string.IsNullOrEmpty(note) ? null : note);
+            // Masked: the history is for reviewing and rolling back routing, not a second copy of the keys (a rollback takes
+            // them from the running configuration).
+            return _history?.Record(document.Masked(), source, actor, string.IsNullOrEmpty(note) ? null : note);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
         {
@@ -292,7 +294,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
         IReadOnlyList<RouterConfigurationVersion> recent = _history.List(1);
         RouterConfigurationVersion? latest = recent.Count > 0 ? recent[0] : null;
-        if (latest is null || _history.GetVersion(latest.Id)?.ToJson() != document.ToJson())
+        if (latest is null || _history.GetVersion(latest.Id)?.ToJson() != document.Masked().ToJson())
         {
             Record(document, "startup", null, source == RouterConfigurationSource.Store ? _store?.Location : "the application's configuration");
         }
@@ -349,6 +351,15 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         {
             // Allowed so a fresh install can start and be configured from the dashboard, but every request gets 503.
             warnings.Add("No model is enabled, so every request gets 503: add one on the dashboard's Models page or run `semantic-router init`.");
+        }
+
+        if (!configuration.Embeddings.KeepsPromptsLocal
+            && (configuration.Routes.Any(r => r.LocalOnly) || configuration.Profiles.Values.Any(p => p.LocalOnly)))
+        {
+            warnings.Add(
+                $"Embeddings go to {configuration.Embeddings.Endpoint}, which is not on this machine. Requests already known to be local-only " +
+                "are classified without it, but local-only routes are found by embedding the prompt, so every prompt reaches that endpoint " +
+                "first. Use Onnx or a local embedding server, or set Embeddings:IsLocal if the server is yours.");
         }
 
         foreach (RouteDefinition route in configuration.Routes.Where(r => r.PreferredModel is { Length: > 0 }))

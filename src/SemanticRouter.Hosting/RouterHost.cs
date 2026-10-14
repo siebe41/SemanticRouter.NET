@@ -38,7 +38,8 @@ internal static class RouterHost
     /// </summary>
     public static WebApplication Build(HostSettings settings, Action<WebApplicationBuilder>? configure = null)
     {
-        Directory.CreateDirectory(settings.ConfigurationDirectory);
+        // Configuration, state with prompt previews, the evaluation set and logs: for this user only.
+        OwnerOnly.Directory(settings.ConfigurationDirectory);
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             // The router has no hosting-startup assemblies. Looking for one named after the application fails in the

@@ -105,6 +105,14 @@ internal sealed partial class PromptRoutingMiddleware
             return;
         }
 
+        if (client is null && GatewayGuard.For(context).Refusal(context) is { } refusal)
+        {
+            LogGatewayRequestRefused(_logger, context.Request.Path, refusal);
+            await ProtocolErrors.WriteAsync(context, protocol, StatusCodes.Status403Forbidden, "Forbidden", refusal, context.RequestAborted)
+                .ConfigureAwait(false);
+            return;
+        }
+
         using Activity? routeSpan = RouterTelemetry.Source.StartActivity("semantic_router.route");
         routeSpan?.SetTag("semantic_router.protocol", protocol.ToString());
         routeSpan?.SetTag("semantic_router.client", client);
@@ -227,6 +235,17 @@ internal sealed partial class PromptRoutingMiddleware
             _conversations!.Forget(conversationKey);
         }
 
+        // A conversation that was kept local stays local on every later turn: follow-ups that match no local-only route,
+        // tool loops, and the client's own compaction and title requests about it. A first turn starts afresh, but not a
+        // title request sent alongside it.
+        string? localKey = _conversations is not null ? ConversationTracker.LocalKey(retryClient, chat) : null;
+        if (localKey is not null && firstTurn && clientTurn is null)
+        {
+            _conversations!.ForgetLocalOnly(localKey);
+        }
+
+        bool keptLocal = localKey is not null && !(firstTurn && clientTurn is null) && _conversations!.IsLocalOnly(localKey);
+
         // The decision this turn may judge (feedback): the conversation's previous turn.
         DecisionRecord? previousTurn = feedback && conversationKey is not null && !firstTurn ? _conversations!.Last(conversationKey, conversation) : null;
 
@@ -274,6 +293,8 @@ internal sealed partial class PromptRoutingMiddleware
             ? _conversations!.Lookup(conversationKey, prompt, conversation)
             : default;
 
+        bool localOnly = profile.LocalOnly || choice is { Clear: false, Local: true } || keptLocal
+            || (profile.Profile is { } named && runtime.Router.Profiles.TryGetValue(named, out RoutingProfile? rules) && rules.LocalOnly);
         var routingRequest = new PromptRoutingRequest
         {
             ConversationFloor = conversationContext.Floor,
@@ -281,7 +302,8 @@ internal sealed partial class PromptRoutingMiddleware
             MinimumTier = minimumTier,
             ExplicitTier = explicitTurn ? choice!.Tier : null,
             Profile = profile.Profile,
-            LocalOnly = profile.LocalOnly || choice is { Clear: false, Local: true },
+            LocalOnly = localOnly,
+            EmbeddingsAllowed = !localOnly || runtime.Configuration.Embeddings.KeepsPromptsLocal,
             Prompt = prompt,
             EstimatedInputTokens = chat.EstimatedInputTokens,
             AdditionalCapabilities = ImpliedCapabilities(chat),
@@ -292,6 +314,11 @@ internal sealed partial class PromptRoutingMiddleware
         };
 
         RoutingPlan plan = await RouteAsync(runtime, routingRequest, options.FailOpen, context.RequestAborted).ConfigureAwait(false);
+        if (localKey is not null && plan.Requirements.LocalOnly)
+        {
+            _conversations!.MarkLocalOnly(localKey);
+        }
+
         string? calloutNote = callout is { Clear: true } ? callout.Tag : null;
         if (explicitTurn)
         {
@@ -527,7 +554,7 @@ internal sealed partial class PromptRoutingMiddleware
         {
             AddFeedback(entry, FeedbackKind.Corrected, previousTurn, client, Above(previousTurn.Tier), $"corrected in request {entry.Id}");
         }
-        else if (classifiedTurn && callout is null)
+        else if (classifiedTurn && callout is null && (!entry.LocalOnly || runtime.Configuration.Embeddings.KeepsPromptsLocal))
         {
             // Other wording or another language: compared by meaning, after the request has gone on.
             _corrections?.CheckInBackground(prompt, () =>
@@ -793,7 +820,12 @@ internal sealed partial class PromptRoutingMiddleware
         {
             int fallbackTier = runtime.Configuration.FallbackTier;
             LogClassificationFailed(_logger, fallbackTier, ex);
-            return runtime.Router.Plan(PromptClassificationResult.Bypass(fallbackTier, RoutingReason.ClassifierFailure), request);
+
+            // Unclassified, the prompt may be one a local-only route would have kept on this machine, so while any
+            // route is local-only the fallback is too: it goes to a local model or fails, never to the cloud.
+            bool localOnly = runtime.Configuration.Routes.Any(r => r.LocalOnly);
+            return runtime.Router.Plan(
+                PromptClassificationResult.Bypass(fallbackTier, RoutingReason.ClassifierFailure) with { LocalOnly = localOnly }, request);
         }
     }
 
@@ -875,6 +907,9 @@ internal sealed partial class PromptRoutingMiddleware
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Refused a gateway request from {Remote} to {Path}: no valid gateway key.")]
     private static partial void LogGatewayKeyMissing(ILogger logger, string remote, PathString path);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Refused a gateway request to {Path}: {Reason}")]
+    private static partial void LogGatewayRequestRefused(ILogger logger, PathString path, string reason);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "No prompt found in JSON request to {Path}; passing through.")]
     private static partial void LogNoPrompt(ILogger logger, PathString path);

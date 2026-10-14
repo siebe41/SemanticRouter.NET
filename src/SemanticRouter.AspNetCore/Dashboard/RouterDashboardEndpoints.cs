@@ -55,6 +55,14 @@ public sealed class RouterDashboardOptions
     public bool RequireTokenForLocalClients { get; set; }
 
     /// <summary>
+    /// Let the admin API change what a CLI or Copilot connector runs: its program, arguments, environment variables and
+    /// home directory, beyond a preset started from PATH. Off by default, because loopback clients are admin without a
+    /// token, and with this any program on the machine (or any user, on a shared one) could run whatever it liked as
+    /// you. Those settings are then changed in the configuration file. Default <see langword="false"/>.
+    /// </summary>
+    public bool AllowProcessSettings { get; set; }
+
+    /// <summary>
     /// Addresses the dashboard is reached at besides <c>localhost</c>, e.g. <c>https://router.home.lan</c>. Changes
     /// are accepted from these origins, and loopback requests may name them in the Host header.
     /// </summary>
@@ -96,6 +104,16 @@ public static partial class RouterDashboardEndpoints
         var themes = new ThemeCatalog(options.ThemesDirectory ?? (endpoints.ServiceProvider.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store
             ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Location))!, "themes")
             : null));
+        // No other site may frame the dashboard: inside a frame, clicks a page tricks the user into are same-origin writes.
+        group.AddEndpointFilter((invocation, next) =>
+        {
+            IHeaderDictionary headers = invocation.HttpContext.Response.Headers;
+            headers.ContentSecurityPolicy = "frame-ancestors 'none'";
+            headers.XFrameOptions = "DENY";
+            headers.XContentTypeOptions = "nosniff";
+            headers["Referrer-Policy"] = "no-referrer";
+            return next(invocation);
+        });
         group.AddEndpointFilter(access.FilterAsync);
 
         group.MapGet("/", (HttpContext context) => Asset(context, "index.html", "text/html; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
@@ -164,7 +182,7 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem("Expected a configuration document.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            return Results.Json(new ValidationResult(RouterRuntimeProvider.Validate(candidate)), ApiJson);
+            return Results.Json(new ValidationResult([.. RouterRuntimeProvider.Validate(candidate), .. ProcessSettingErrors(candidate, provider, options)]), ApiJson);
         });
 
         api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist, string? note) =>
@@ -175,7 +193,7 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem("Expected a configuration document.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            IReadOnlyList<string> errors = RouterRuntimeProvider.Validate(candidate);
+            IReadOnlyList<string> errors = [.. RouterRuntimeProvider.Validate(candidate), .. ProcessSettingErrors(candidate, provider, options)];
             if (errors.Count > 0)
             {
                 return Results.Json(new ValidationResult(errors), ApiJson, statusCode: StatusCodes.Status400BadRequest);
@@ -223,6 +241,8 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem($"Version {id} is not in the history.", statusCode: StatusCodes.Status404NotFound);
             }
 
+            // The history keeps no secrets: they come from the running configuration.
+            document.UnmaskFrom(provider.Current.Configuration);
             IReadOnlyList<string> errors = RouterRuntimeProvider.Validate(document);
             if (errors.Count > 0)
             {
@@ -467,6 +487,14 @@ public static partial class RouterDashboardEndpoints
             : $"{role} from {context.Connection.RemoteIpAddress}";
     }
 
+    /// <summary>Errors for CLI and Copilot connectors whose program, arguments or environment the request would change.</summary>
+    private static IEnumerable<string> ProcessSettingErrors(RouterConfiguration candidate, RouterRuntimeProvider provider, RouterDashboardOptions options) =>
+        options.AllowProcessSettings ? [] : candidate.ProcessSettingChanges(provider.Current.Configuration).Select(name =>
+            $"Connectors:{name}: what a CLI runs (its program, arguments, environment variables and home directory) is changed in the " +
+            $"configuration file{(provider.Store is { } store ? $" ({store.Location})" : string.Empty)}, not over the admin API, which " +
+            "any program on this machine can reach. Presets started from PATH can be added here. To allow it, set " +
+            "SemanticRouter:Dashboard:AllowProcessSettings.");
+
     private static RouterDashboardOptions CopyOf(RouterDashboardOptions? source)
     {
         var copy = new RouterDashboardOptions();
@@ -477,6 +505,7 @@ public static partial class RouterDashboardEndpoints
             copy.ReadOnlyToken = source.ReadOnlyToken;
             copy.AllowUnauthenticatedRemoteClients = source.AllowUnauthenticatedRemoteClients;
             copy.RequireTokenForLocalClients = source.RequireTokenForLocalClients;
+            copy.AllowProcessSettings = source.AllowProcessSettings;
             copy.DefaultActivityLimit = source.DefaultActivityLimit;
             copy.ThemesDirectory = source.ThemesDirectory;
             foreach (string origin in source.PublicOrigins)
