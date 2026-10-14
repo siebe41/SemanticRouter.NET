@@ -344,7 +344,8 @@ internal sealed class CodexCliAdapter : CliAdapter
 /// <summary>
 /// Any other command: <see cref="ConnectorOptions.Arguments"/> is the full argument list with <c>{model}</c> and
 /// <c>{prompt}</c> placeholders (a lone <c>{model}</c> argument, and the option before it, are dropped when the model
-/// has no id); standard output is the reply and a non-zero exit code is a failure.
+/// has no id; a lone <c>{prompt}</c> starting with '-' gets a leading space, as in the presets); standard output is the
+/// reply and a non-zero exit code is a failure.
 /// </summary>
 internal sealed class CustomCliAdapter : CliAdapter
 {
@@ -368,6 +369,13 @@ internal sealed class CustomCliAdapter : CliAdapter
                     arguments.RemoveAt(arguments.Count - 1);
                 }
 
+                continue;
+            }
+
+            if (template == "{prompt}" && asArgument)
+            {
+                // A whole argument would be read as an option if it started with '-'; inside one ("--prompt={prompt}") it cannot.
+                arguments.Add(AsArgument(prompt));
                 continue;
             }
 

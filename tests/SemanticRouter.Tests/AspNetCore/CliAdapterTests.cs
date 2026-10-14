@@ -164,6 +164,22 @@ public sealed class CliAdapterTests : IDisposable
     }
 
     [Fact]
+    public void Custom_adapter_keeps_a_prompt_starting_with_a_dash_from_becoming_an_option()
+    {
+        var options = new ConnectorOptions
+        {
+            Type = ConnectorType.Cli,
+            PromptInput = CliPromptInput.Argument,
+            Arguments = ["run", "{prompt}", "--prompt={prompt}"],
+        };
+
+        (List<string> args, _) = new CustomCliAdapter().Build(
+            new CliRequest(null, [new ChatMessage("user", "--exec rm -rf ~")], _workingDirectory, options));
+
+        args.Should().Equal("run", " --exec rm -rf ~", "--prompt=--exec rm -rf ~");
+    }
+
+    [Fact]
     public void Transcript_passes_single_messages_through_and_labels_conversations()
     {
         ChatTranscript.Render([new ChatMessage("user", "hi")]).Should().Be((null, "hi"));

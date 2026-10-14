@@ -115,7 +115,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
 
         result.Outcome.Should().Be(ConnectorOutcome.Completed);
         string firstLine = Content(body).Split('\n')[0];
-        JsonSerializer.Deserialize<string[]>(firstLine).Should().Equal("--flag", string.Empty, prompt);
+        JsonSerializer.Deserialize<string[]>(firstLine).Should().Equal(["--flag", string.Empty, " " + prompt], "a leading space keeps the dash from reading as an option");
     }
 
     [Fact]
