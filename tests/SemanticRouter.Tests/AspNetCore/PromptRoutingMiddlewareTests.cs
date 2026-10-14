@@ -499,6 +499,7 @@ public sealed class DispatchModeTests : RouterHostTest
         invocation.Executable.Should().Be("claude");
         invocation.Arguments.Should().ContainInOrder("--model", "sonnet");
         invocation.RemoveEnvironment.Should().Contain("ANTHROPIC_API_KEY");
+        invocation.SetEnvironment.Should().Contain("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1").And.Contain("DISABLE_AUTOUPDATER", "1");
         Directory.Exists(invocation.WorkingDirectory).Should().BeFalse("the scratch directory is deleted after the run");
         CloudHttp.Requests.Should().BeEmpty("the flat-rate subscription is cheaper than the paid API at the same tier");
     }

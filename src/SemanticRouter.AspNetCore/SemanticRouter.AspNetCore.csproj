@@ -21,6 +21,8 @@
     <EmbeddedResource Include="Dashboard\wwwroot\*" LogicalName="dashboard/%(Filename)%(Extension)" />
     <!-- Native ES modules, served from /js/; no build step. -->
     <EmbeddedResource Include="Dashboard\wwwroot\js\*.js" LogicalName="dashboard/js/%(Filename)%(Extension)" />
+    <!-- Inter and Fira Sans (SIL OFL 1.1, licences beside them), so the dashboard asks no other host for fonts. -->
+    <EmbeddedResource Include="Dashboard\wwwroot\fonts\*" LogicalName="dashboard/fonts/%(Filename)%(Extension)" />
     <EmbeddedResource Include="Connectors\model-families.json" LogicalName="SemanticRouter.AspNetCore.model-families.json" />
     <EmbeddedResource Include="Middleware\client-turns.json" LogicalName="SemanticRouter.AspNetCore.client-turns.json" />
   </ItemGroup>

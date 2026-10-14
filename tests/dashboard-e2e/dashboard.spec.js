@@ -10,12 +10,16 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'sem
 const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'json'];
 const THEMES = ['machine-dark', 'machine-light', 'terminal'];
 
-// Every test fails if the page throws or logs an error. The web fonts are left out so that runs do not depend on a
-// third-party CDN, and screenshots use fonts every Linux runner has.
+// Every test fails if the page throws or logs an error (a Content-Security-Policy violation is one), or asks any host
+// but the router for anything: the dashboard bundles its fonts and must work offline.
 const test = base.extend({
-  page: async ({ page }, use) => {
+  page: async ({ page, baseURL }, use) => {
     const errors = [];
-    await page.route(/fonts\.bunny\.net/, (route) => route.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+    const own = new URL(baseURL).origin;
+    page.on('request', (r) => {
+      const url = r.url();
+      if (!url.startsWith('data:') && !url.startsWith('blob:') && new URL(url).origin !== own) errors.push(`request to another host: ${url}`);
+    });
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
     await use(page);

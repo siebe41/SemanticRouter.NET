@@ -72,6 +72,24 @@ internal abstract class CliAdapter
     /// <summary>Environment variables removed by default (e.g. API keys that would switch billing).</summary>
     public virtual IReadOnlyList<string> DefaultRemovedEnvironment => [];
 
+    /// <summary>
+    /// Environment variables set by default, under the connector's own <see cref="ConnectorOptions.EnvironmentVariables"/>
+    /// (which win). The presets use them to keep the CLI from contacting anything but its model API.
+    /// </summary>
+    public virtual IReadOnlyDictionary<string, string> DefaultEnvironment => new Dictionary<string, string>();
+
+    /// <summary>The environment to set for a run: <see cref="DefaultEnvironment"/> overlaid with the connector's own variables.</summary>
+    public Dictionary<string, string> EnvironmentFor(ConnectorOptions options)
+    {
+        var environment = new Dictionary<string, string>(DefaultEnvironment, StringComparer.Ordinal);
+        foreach ((string name, string value) in options.EnvironmentVariables)
+        {
+            environment[name] = value;
+        }
+
+        return environment;
+    }
+
     /// <summary>Builds the argument list and optional standard input.</summary>
     public abstract (List<string> Arguments, string? StandardInput) Build(CliRequest request);
 
@@ -129,6 +147,14 @@ internal sealed class ClaudeCodeCliAdapter : CliAdapter
     // subscription; ANTHROPIC_BASE_URL could point back at this router and loop.
     public override IReadOnlyList<string> DefaultRemovedEnvironment =>
         ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"];
+
+    // A run answers one prompt: no auto-update in the middle of it, and no telemetry, error reporting or other traffic
+    // beyond the model API (https://code.claude.com/docs/en/settings#environment-variables).
+    public override IReadOnlyDictionary<string, string> DefaultEnvironment => new Dictionary<string, string>
+    {
+        ["DISABLE_AUTOUPDATER"] = "1",
+        ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1",
+    };
 
     public override (List<string> Arguments, string? StandardInput) Build(CliRequest request)
     {

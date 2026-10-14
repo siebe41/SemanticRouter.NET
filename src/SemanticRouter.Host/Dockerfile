@@ -9,7 +9,7 @@
 # 127.0.0.1 only on a network you trust, and see docs/host.md for HTTPS.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
-COPY global.json nuget.config Directory.Build.props Directory.Packages.props .editorconfig ./
+COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props .editorconfig ./
 COPY src/ src/
 RUN dotnet publish src/SemanticRouter.Host/SemanticRouter.Host.csproj -c Release -o /app /p:UseAppHost=false
 

@@ -1,0 +1,8 @@
+<Project>
+  <!--
+    Avalonia's build tasks send build telemetry (Avalonia.BuildServices) unless AVALONIA_TELEMETRY_OPTOUT is set. This
+    empty target replaces theirs, so no build in this repository sends it whatever the environment. It is imported
+    after the package targets, and the later definition of a target wins.
+  -->
+  <Target Name="AvaloniaStats" />
+</Project>

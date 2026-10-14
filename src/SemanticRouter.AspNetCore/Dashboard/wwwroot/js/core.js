@@ -11,7 +11,7 @@ export const THEMES = [
 ];
 export const THEME_KEY = 'semantic-router.theme';
 
-export const PREFIX = window.ROUTER_PREFIX || '/router';
+export const PREFIX = document.querySelector('meta[name="router-prefix"]')?.content || '/router';
 export const API = PREFIX + '/api';
 export const CAPABILITY_HINTS = ['chat', 'code', 'tools', 'vision', 'reasoning'];
 export const STRATEGIES = ['CheapestCapable', 'MostCapable', 'Priority', 'Fastest', 'Balanced'];

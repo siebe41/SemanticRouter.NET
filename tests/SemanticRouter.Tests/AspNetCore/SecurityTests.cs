@@ -469,7 +469,7 @@ public sealed class DashboardAccessTests : RouterHostTest
         {
             HttpResponseMessage response = await client.GetAsync(path);
             response.Headers.GetValues("X-Frame-Options").Should().Equal("DENY");
-            response.Headers.GetValues("Content-Security-Policy").Should().Equal("frame-ancestors 'none'");
+            response.Headers.GetValues("Content-Security-Policy").Single().Should().Contain("frame-ancestors 'none'").And.Contain("script-src 'self';");
             response.Headers.GetValues("X-Content-Type-Options").Should().Equal("nosniff");
         }
     }

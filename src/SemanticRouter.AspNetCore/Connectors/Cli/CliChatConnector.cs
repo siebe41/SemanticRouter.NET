@@ -188,7 +188,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             Arguments = arguments,
             WorkingDirectory = cliRequest.WorkingDirectory,
             StandardInput = standardInput,
-            SetEnvironment = new Dictionary<string, string>(_options.EnvironmentVariables),
+            SetEnvironment = _adapter.EnvironmentFor(_options),
             RemoveEnvironment = _removedEnvironment,
         };
     }
