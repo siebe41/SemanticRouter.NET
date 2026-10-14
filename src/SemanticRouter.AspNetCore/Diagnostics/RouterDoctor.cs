@@ -148,7 +148,7 @@ public static class RouterDoctor
         }
 
         bool onnx = embeddings.Provider == EmbeddingProviderKind.Onnx;
-        string what = onnx ? $"ONNX model {embeddings.ModelPath ?? embeddings.Model ?? "all-MiniLM-L6-v2"}" : $"{embeddings.Model} at {embeddings.Endpoint}";
+        string what = onnx ? $"ONNX model {embeddings.ModelPath ?? embeddings.Model ?? "all-MiniLM-L6-v2"}" : $"{embeddings.Model} at {AddressDisplay.Show(embeddings.Endpoint)}";
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

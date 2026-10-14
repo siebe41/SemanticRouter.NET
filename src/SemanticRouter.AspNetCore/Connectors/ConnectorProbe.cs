@@ -78,6 +78,7 @@ public static partial class ConnectorProbe
         }
 
         var uri = new Uri(baseAddress, "/v1/models");
+        string shown = AddressDisplay.Show(uri)!;
         bool hasKey = !string.IsNullOrEmpty(connector.ApiKey);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, uri, connector);
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -92,31 +93,31 @@ public static partial class ConnectorProbe
                 return new(
                     hasKey || status == 403 ? ConnectorProbeFailure.CredentialsRejected : ConnectorProbeFailure.AuthenticationRequired,
                     [], status,
-                    $"{uri} answered HTTP {statusText}: {OpenAICompatibleConnector.CredentialAdvice(name, status, hasKey)}.");
+                    $"{shown} answered HTTP {statusText}: {OpenAICompatibleConnector.CredentialAdvice(name, status, hasKey)}.");
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                return new(ConnectorProbeFailure.HttpError, [], status, $"{uri} answered HTTP {statusText}.");
+                return new(ConnectorProbeFailure.HttpError, [], status, $"{shown} answered HTTP {statusText}.");
             }
 
             using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeoutSource.Token).ConfigureAwait(false));
             if (!json.RootElement.TryGetArray("data", out JsonElement data))
             {
-                return new(ConnectorProbeFailure.InvalidResponse, [], status, $"{uri} did not return a model list.");
+                return new(ConnectorProbeFailure.InvalidResponse, [], status, $"{shown} did not return a model list.");
             }
 
             DiscoveredModel[] details = data.EnumerateArray().Select(ReadListedModel).OfType<DiscoveredModel>().ToArray();
-            return new(ConnectorProbeFailure.None, details.Select(d => d.Id).ToArray(), status, $"{uri}: {details.Length} model(s).") { Details = details };
+            return new(ConnectorProbeFailure.None, details.Select(d => d.Id).ToArray(), status, $"{shown}: {details.Length} model(s).") { Details = details };
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
             return new(ConnectorProbeFailure.Unreachable, [], null,
-                $"{uri} is not reachable ({(ex is OperationCanceledException ? "timed out" : ex.Message)}).");
+                $"{shown} is not reachable ({(ex is OperationCanceledException ? "timed out" : ex.Message)}).");
         }
         catch (JsonException)
         {
-            return new(ConnectorProbeFailure.InvalidResponse, [], null, $"{uri} did not return JSON.");
+            return new(ConnectorProbeFailure.InvalidResponse, [], null, $"{shown} did not return JSON.");
         }
     }
 

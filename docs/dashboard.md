@@ -126,7 +126,7 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 
 | Method and path | Purpose |
 |---|---|
-| `GET api/status` | Runtime version and source, warm-up state, tiers, models with cooldowns, connectors, routes, gateway settings, activity counters, `machine` (the host name of the machine the router runs on), and `endpoints`: per connector its `host` (or `program` and `via`), `local`, `encrypted`, `state` and `stateNote`, `attempts`, `failures`, `successRate`, `lastUsed`, `lastSuccess`, `lastFailure` and `lastError`, `failingSince`, `modelsCoolingDown` and `cooldownUntil`, `limitDays`, `firstByteP50`/`P95`, `totalP50`/`P95`, `tokensPerSecond`, and the latest `check`. |
+| `GET api/status` | Runtime version and source, warm-up state, tiers, models with cooldowns, connectors, routes, gateway settings, activity counters, `machine` (the host name of the machine the router runs on), and `endpoints`: per connector its `host` (or `program` and `via`), `local`, `encrypted`, `state` and `stateNote`, `attempts`, `failures`, `successRate`, `lastUsed`, `lastSuccess`, `lastFailure` and `lastError`, `failingSince`, `modelsCoolingDown` and `cooldownUntil`, `limitDays`, `firstByteP50`/`P95`, `totalP50`/`P95`, `tokensPerSecond`, and the latest `check`. Addresses here and in check, discovery and doctor messages are shown without their user name, password, query or fragment, where a key may sit. |
 | `GET api/config` | The active document (masked) with version, source and store location. |
 | `GET api/config/baseline` | The application's own configuration (masked). |
 | `POST api/config/validate` | Validation errors for a document. |

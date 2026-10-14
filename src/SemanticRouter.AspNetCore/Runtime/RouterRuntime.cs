@@ -357,7 +357,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             && (configuration.Routes.Any(r => r.LocalOnly) || configuration.Profiles.Values.Any(p => p.LocalOnly)))
         {
             warnings.Add(
-                $"Embeddings go to {configuration.Embeddings.Endpoint}, which is not on this machine. Requests already known to be local-only " +
+                $"Embeddings go to {AddressDisplay.Show(configuration.Embeddings.Endpoint)}, which is not on this machine. Requests already known to be local-only " +
                 "are classified without it, but local-only routes are found by embedding the prompt, so every prompt reaches that endpoint " +
                 "first. Use Onnx or a local embedding server, or set Embeddings:IsLocal if the server is yours.");
         }

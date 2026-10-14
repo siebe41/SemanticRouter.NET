@@ -671,7 +671,7 @@ public static partial class RouterDashboardEndpoints
             runtime.Warnings,
             (typeof(RouterDashboardEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "dev").Split('+')[0],
             new EmbeddingsStatus(
-                config.Embeddings.Provider.ToString(), config.Embeddings.Model, config.Embeddings.Endpoint?.ToString(), config.Embeddings.Dimensions,
+                config.Embeddings.Provider.ToString(), config.Embeddings.Model, AddressDisplay.Show(config.Embeddings.Endpoint), config.Embeddings.Dimensions,
                 [nameof(EmbeddingProviderKind.Hashing), nameof(EmbeddingProviderKind.OpenAICompatible), .. factories.Select(f => f.Kind.ToString()).Distinct()],
                 factories.SelectMany(f => f.Models.Select(m => new EmbeddingModelStatus(f.Kind.ToString(), m.Name, m.Description, m.SuggestedThreshold, m.DownloadBytes))).ToArray(),
                 (runtime.Classifier as SemanticPromptClassifier)?.IndexStatistics is { } index
@@ -686,7 +686,7 @@ public static partial class RouterDashboardEndpoints
                 config.Connectors.TryGetValue(m.Connector, out ConnectorOptions? c) ? c.Type.ToString() : null)).ToArray(),
             config.Connectors.Select(kv => new ConnectorStatus(
                 kv.Key, kv.Value.Type.ToString(), kv.Value.Type == ConnectorType.Cli ? kv.Value.Preset.ToString() : null,
-                kv.Value.Type is ConnectorType.Cli or ConnectorType.Copilot ? kv.Value.Executable : kv.Value.BaseAddress?.ToString(),
+                kv.Value.Type is ConnectorType.Cli or ConnectorType.Copilot ? kv.Value.Executable : AddressDisplay.Show(kv.Value.BaseAddress),
                 kv.Value.Type == ConnectorType.Cli ? kv.Value.ToolCalling.ToString() : "Native",
                 !string.IsNullOrEmpty(runtime.Resolved.Connectors.TryGetValue(kv.Key, out ConnectorOptions? resolved) ? resolved.ApiKey : null),
                 config.Models.Count(m => string.Equals(m.Connector, kv.Key, StringComparison.OrdinalIgnoreCase)))).ToArray(),
