@@ -114,6 +114,12 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         status["tiers"]!.AsArray().Should().HaveCount(5, "the default ladder");
         status["activity"]!["served"]!.GetValue<int>().Should().Be(1);
         status["activity"]!["byModel"]!["local"]!.GetValue<int>().Should().Be(1);
+        JsonNode service = status["service"]!;
+        service["machine"]!.GetValue<string>().Should().Be(Environment.MachineName);
+        service["processId"]!.GetValue<int>().Should().Be(Environment.ProcessId);
+        service["state"]!.GetValue<string>().Should().Be("ok");
+        service["lastOutcome"]!.GetValue<string>().Should().Be("served");
+        service["lastServed"].Should().NotBeNull();
         JsonNode entry = activity["entries"]!.AsArray().Single()!;
         entry["promptPreview"]!.GetValue<string>().Should().Be("hello there");
         entry["servedBy"]!.GetValue<string>().Should().Be("local");

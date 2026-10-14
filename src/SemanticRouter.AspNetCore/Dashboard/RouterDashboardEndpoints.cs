@@ -5,6 +5,8 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
@@ -163,7 +165,7 @@ public static partial class RouterDashboardEndpoints
             .WithMetadata(DashboardAnonymousMetadata.Instance);
 
         api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories, ClientRateLimiter rateLimits, IServiceProvider services) =>
-            Results.Json(BuildStatus(provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>()), ApiJson));
+            Results.Json(BuildStatus(provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>(), Listening(services), options.PublicOrigins), ApiJson));
 
         api.MapGet("/config", (RouterRuntimeProvider provider) =>
         {
@@ -653,12 +655,13 @@ public static partial class RouterDashboardEndpoints
 
     private static StatusResponse BuildStatus(
         RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories,
-        ClientRateLimiter rateLimits, ConnectorIncidents? incidents, EndpointChecks? checks)
+        ClientRateLimiter rateLimits, ConnectorIncidents? incidents, EndpointChecks? checks, IEnumerable<string> listening, IEnumerable<string> publicOrigins)
     {
         RouterRuntime runtime = provider.Current;
         RouterConfiguration config = runtime.Configuration;
         IReadOnlyDictionary<string, DateTimeOffset> cooldowns = health.GetCooldowns();
         IReadOnlyList<RoutingActivityEntry> recent = activity.Recent(500);
+        IReadOnlyList<EndpointStatus> endpoints = EndpointHealth.Build(config, cooldowns, recent, incidents, checks);
 
         return new StatusResponse(
             runtime.Version,
@@ -720,9 +723,14 @@ public static partial class RouterDashboardEndpoints
                     .OrderBy(l => l.Connector, StringComparer.OrdinalIgnoreCase)
                     .ToArray()),
             budgets.Status(config.Usage),
-            EndpointHealth.Build(config, cooldowns, recent, incidents, checks),
-            Environment.MachineName);
+            endpoints,
+            Environment.MachineName,
+            ServiceHealth.Build(runtime, endpoints, recent, listening, publicOrigins));
     }
+
+    /// <summary>The addresses the server listens on, when it is a real server (not the test host).</summary>
+    private static IEnumerable<string> Listening(IServiceProvider services) =>
+        services.GetService<IServer>()?.Features.Get<IServerAddressesFeature>()?.Addresses ?? (IEnumerable<string>)[];
 
     private static double? Percentile(IEnumerable<double?> values, double quantile)
     {
@@ -867,7 +875,8 @@ public static partial class RouterDashboardEndpoints
         ActivitySummary Activity,
         IReadOnlyList<BudgetStatus> Budgets,
         IReadOnlyList<EndpointStatus> Endpoints,
-        string Machine);
+        string Machine,
+        ServiceStatus Service);
 
     /// <summary>Embedding provider in use.</summary>
     public sealed record EmbeddingsStatus(

@@ -201,6 +201,19 @@ test('the endpoints card and the top bar show the host in use, its state and fig
   await expect(page.locator('#endpoints')).not.toContainText('sk-e2e-not-a-real-key');
 });
 
+test('the service card shows where the router runs, the base URLs for clients and its health', async ({ page }) => {
+  const base = `http://localhost:${Number(process.env.E2E_PORT || 5190)}`;
+  await open(page, 'overview');
+
+  const card = page.locator('#service');
+  await expect(card.locator('.card-head .badge')).toHaveText('running');
+  await expect(card).toContainText(`${base}/v1`);
+  await expect(card.locator('[data-action="copy-text"]').first()).toHaveAttribute('data-text', `${base}/v1`);
+  await expect(card).toContainText('this machine only');
+  await expect(card).toContainText('pid');
+  await expect(card).toContainText('127.0.0.1');
+});
+
 test('router learned runs tuning, pauses and resumes learning', async ({ page }) => {
   await open(page, 'learned');
   await expect(page.locator('#view')).toContainText('applies changes');
