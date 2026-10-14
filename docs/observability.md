@@ -16,11 +16,15 @@ Every served request records the tokens the backend reported (input, output, pro
 | OpenAI-compatible, streamed pass-through | The final chunk's `usage`, which servers send only when the client asks with `stream_options.include_usage` |
 | Anthropic, JSON or SSE | `usage` on the message, or on `message_start` plus `message_delta` |
 | OpenAI Responses, JSON or SSE | `usage` on the response, or on `response.completed` (`input_tokens_details.cached_tokens` split out) |
-| Claude Code CLI | The `result` event's `usage` |
+| Claude Code CLI | The `result` event's `usage`, cache reads and writes included |
+| Codex CLI | `turn.completed`'s `usage` (`cached_input_tokens` split out of `input_tokens`) |
+| GitHub Copilot | The SDK's usage events: input, output, cache reads and writes |
 
 Prices come from the catalog: `InputCostPerMillionTokens` and `OutputCostPerMillionTokens`, plus optional `CacheReadCostPerMillionTokens` and `CacheWriteCostPerMillionTokens` (default: the input price). Local models and flat-rate subscriptions are priced at 0.
 
-**Saved by routing.** Set `Usage:ReferenceModel` to a catalog model, which may be disabled. The dashboard then shows what each request would have cost at that model's prices (cache tokens counted as plain input), minus what it did cost.
+**Saved by routing.** Set `Usage:ReferenceModel` to a catalog model, which may be disabled. The dashboard then shows what each request would have cost at that model's prices, cache reads and writes at its cache prices, minus what it did cost. A cache discount is not counted as a saving: the reference model would have cached the conversation too.
+
+**Prompt-cache hits.** The Usage page shows cache reads and writes separately and a hit rate: cache reads as a share of all prompt tokens (input, cache reads and cache writes), overall and per group. Each activity entry shows its cached tokens.
 
 ```jsonc
 "Usage": {

@@ -46,7 +46,9 @@ internal readonly record struct CliEvent(
     bool IsError = false,
     bool QuotaSignal = false,
     int? InputTokens = null,
-    int? OutputTokens = null)
+    int? OutputTokens = null,
+    int? CacheReadTokens = null,
+    int? CacheCreationTokens = null)
 {
     public static CliEvent None => default;
 }
@@ -92,7 +94,7 @@ internal abstract class CliAdapter
             : null;
 
     protected static int? GetInt(JsonElement element, string property) =>
-        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out JsonElement value) && value.TryGetInt32(out int number)
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out int number)
             ? number
             : null;
 }
@@ -200,7 +202,9 @@ internal sealed class ClaudeCodeCliAdapter : CliAdapter
                             text,
                             isError,
                             InputTokens: GetInt(usage, "input_tokens"),
-                            OutputTokens: GetInt(usage, "output_tokens"));
+                            OutputTokens: GetInt(usage, "output_tokens"),
+                            CacheReadTokens: GetInt(usage, "cache_read_input_tokens"),
+                            CacheCreationTokens: GetInt(usage, "cache_creation_input_tokens"));
 
                     default:
                         return CliEvent.None;
@@ -320,8 +324,16 @@ internal sealed class CodexCliAdapter : CliAdapter
                         return CliEvent.None;
 
                     case "turn.completed":
+                        // Codex counts cached tokens inside input_tokens, as OpenAI does; they are split out.
                         root.TryGetProperty("usage", out JsonElement usage);
-                        return new CliEvent(CliEventKind.Final, _lastMessage, InputTokens: GetInt(usage, "input_tokens"), OutputTokens: GetInt(usage, "output_tokens"));
+                        int? input = GetInt(usage, "input_tokens");
+                        int? cached = GetInt(usage, "cached_input_tokens");
+                        return new CliEvent(
+                            CliEventKind.Final,
+                            _lastMessage,
+                            InputTokens: input is { } i && cached is { } c ? Math.Max(0, i - c) : input,
+                            OutputTokens: GetInt(usage, "output_tokens"),
+                            CacheReadTokens: cached);
 
                     case "turn.failed" when root.TryGetProperty("error", out JsonElement error):
                         return new CliEvent(CliEventKind.Final, GetString(error, "message"), IsError: true);

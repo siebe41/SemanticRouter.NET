@@ -423,6 +423,8 @@ When a backend speaks the client's protocol, the body passes through untouched (
 | `parallel_tool_calls: false` | ✓ | `disable_parallel_tool_use` | ✓ | dropped |
 | Stop reasons (length, refusal, tool use) | ✓ | ✓ (`refusal`, `pause_turn`) | ✓ (`incomplete`) | end of turn, or tool use with prompted tools |
 | Hosted tools (`web_search`, …) | dropped | dropped | ✓ | dropped |
+| `prompt_cache_key` | ✓ | not needed (caches by prefix) | ✓ | not needed |
+| Cached-token counts in the reply | `prompt_tokens_details.cached_tokens` | `cache_read_input_tokens`, `cache_creation_input_tokens` (also on a streamed `message_delta`) | `input_tokens_details.cached_tokens` | read from the CLI's usage (claude, codex) |
 | Protocol-only features (`cache_control`, documents, `logprobs`, `n` > 1, audio, `previous_response_id`, reasoning items) | dropped | dropped | dropped | dropped |
 
 Notes:

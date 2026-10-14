@@ -215,6 +215,18 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
                     w.WriteNumber("input_tokens", input);
                 }
 
+                // message_start went out before the backend reported usage; the cache counts arrive here, as
+                // Anthropic's own message_delta carries them.
+                if (usage.CacheReadTokens is { } read)
+                {
+                    w.WriteNumber("cache_read_input_tokens", read);
+                }
+
+                if (usage.CacheCreationTokens is { } created)
+                {
+                    w.WriteNumber("cache_creation_input_tokens", created);
+                }
+
                 w.WriteEndObject();
             }, cancellationToken).ConfigureAwait(false);
             await WriteEventAsync("message_stop", null, cancellationToken).ConfigureAwait(false);
