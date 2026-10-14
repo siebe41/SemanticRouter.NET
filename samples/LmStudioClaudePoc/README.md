@@ -12,7 +12,7 @@ If Claude is unavailable (not signed in, or out of its session limit), hard prom
 
 ## Prerequisites
 
-1. **.NET 9 SDK.** Check with `dotnet --version`.
+1. **.NET 10 SDK.** Check with `dotnet --version`.
 2. **LM Studio** with a chat model loaded and the local server started (Developer tab, or `lms server start`). The default port is `1234`.
 3. **Claude Code**, installed and signed in:
    ```bash

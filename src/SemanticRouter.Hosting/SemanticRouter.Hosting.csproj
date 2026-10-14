@@ -5,7 +5,7 @@
     host, the configuration directory, init, doctor, models, the background service and the running-instance record.
   -->
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <OutputType>Library</OutputType>
     <RootNamespace>SemanticRouter.Host</RootNamespace>
     <IsPackable>false</IsPackable>

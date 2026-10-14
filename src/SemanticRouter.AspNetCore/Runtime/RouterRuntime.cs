@@ -453,7 +453,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                 long started = System.Diagnostics.Stopwatch.GetTimestamp();
                 await runtime.Classifier.WarmUpAsync(CancellationToken.None).ConfigureAwait(false);
                 runtime.WarmedUp = true;
-                LogWarmedUp(_logger, runtime.Version, System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                double elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+                LogWarmedUp(_logger, runtime.Version, elapsed);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {

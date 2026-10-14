@@ -4,7 +4,7 @@
 
 ## Install and start
 
-Prerequisite: the [.NET 9 runtime or SDK](https://dotnet.microsoft.com/download/dotnet/9.0).
+Prerequisite: the [.NET 10 runtime or SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```bash
 dotnet tool install -g SemanticRouter.Host

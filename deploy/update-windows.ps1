@@ -11,7 +11,7 @@
     5. Starts the background service again, or installs it with -InstallService (run by the desktop app as
        SemanticRouter.exe --headless, with no console window), then starts the desktop app.
 
-    Run it from anywhere; it finds the repository from its own location. It needs the .NET 9 SDK and git. Your
+    Run it from anywhere; it finds the repository from its own location. It needs the .NET 10 SDK and git. Your
     configuration (%APPDATA%\semantic-router) is never touched.
 
 .EXAMPLE
@@ -94,10 +94,10 @@ Push-Location $repo
 try {
     Write-Step 'Checking prerequisites'
     if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-        throw 'dotnet was not found. Install the .NET 9 SDK: https://dotnet.microsoft.com/download/dotnet/9.0'
+        throw 'dotnet was not found. Install the .NET 10 SDK: https://dotnet.microsoft.com/download/dotnet/10.0'
     }
-    if (-not (dotnet --list-sdks | Select-String -Pattern '^9\.' -Quiet)) {
-        throw 'The .NET 9 SDK is not installed (dotnet --list-sdks). Install it from https://dotnet.microsoft.com/download/dotnet/9.0'
+    if (-not (dotnet --list-sdks | Select-String -Pattern '^10\.' -Quiet)) {
+        throw 'The .NET 10 SDK is not installed (dotnet --list-sdks). Install it from https://dotnet.microsoft.com/download/dotnet/10.0'
     }
     Write-Host "Repository: $repo"
     Write-Host "Runtime:    $runtime"

@@ -10,7 +10,7 @@ const { spawn } = require('child_process');
 const port = Number(process.env.E2E_PORT || 5190);
 const stubPort = port + 1;
 const dll = process.env.E2E_ROUTER_DLL
-  || path.resolve(__dirname, '../../src/SemanticRouter.Host/bin/Release/net9.0/semantic-router.dll');
+  || path.resolve(__dirname, '../../src/SemanticRouter.Host/bin/Release/net10.0/semantic-router.dll');
 
 // The stub model: answers every chat request with the same sentence, streamed or not.
 const reply = 'Hello from the stub backend.';

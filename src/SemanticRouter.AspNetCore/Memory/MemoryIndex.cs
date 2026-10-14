@@ -237,7 +237,8 @@ internal sealed partial class MemoryIndex : IDisposable
         Volatile.Write(ref _current, snapshot);
         if (sources.Count > 0)
         {
-            LogLoaded(_logger, snapshot.Notes.Count(n => !n.Missing), snapshot.Links.Count, sources.Count, snapshot.LoadMilliseconds);
+            int notes = snapshot.Notes.Count(n => !n.Missing);
+            LogLoaded(_logger, notes, snapshot.Links.Count, sources.Count, snapshot.LoadMilliseconds);
         }
 
         return snapshot;
