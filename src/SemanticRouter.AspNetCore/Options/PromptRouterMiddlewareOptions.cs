@@ -170,10 +170,18 @@ public sealed class PromptRouterMiddlewareOptions
     public LocalOnlySignals LocalOnlyWhen { get; set; } = new();
 
     /// <summary>
-    /// Ignore <c>&lt;system-reminder&gt;</c> blocks that agentic clients inject into user messages when classifying,
-    /// so routing reflects what the person asked. Default true.
+    /// Ignore the context blocks that agentic clients inject into user messages when classifying, so routing reflects
+    /// what the person asked: Claude Code's <c>&lt;system-reminder&gt;</c>, the GitHub Copilot app's
+    /// <c>&lt;system_reminder&gt;</c>, <c>&lt;current_datetime&gt;</c> and <c>&lt;copilot_tauri_workspace&gt;</c>, and
+    /// <see cref="InjectedTags"/>. Default true.
     /// </summary>
     public bool StripSystemReminders { get; set; } = true;
+
+    /// <summary>
+    /// More tags (names without angle brackets, e.g. <c>environment_details</c>) whose blocks a client injects into
+    /// user messages and that are ignored when classifying, besides the built-in ones. Empty by default.
+    /// </summary>
+    public IList<string> InjectedTags { get; } = new List<string>();
 
     /// <summary>Largest request body (bytes) the middleware will buffer; larger requests receive 413. Default 8 MiB.</summary>
     public long MaxRequestBodyBytes { get; set; } = 8 * 1024 * 1024;

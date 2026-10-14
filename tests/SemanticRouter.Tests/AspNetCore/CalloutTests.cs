@@ -179,6 +179,19 @@ public sealed class CalloutTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Callouts_work_past_the_copilot_apps_context_blocks()
+    {
+        HttpClient client = await StartDispatchAsync();
+        string prompt = "<current_datetime>2026-10-12T11:19:05-05:00</current_datetime>\n<copilot_tauri_workspace>\nproject_session_id: 30fa\n</copilot_tauri_workspace>\n@opus why is the build slow?";
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Chat("auto", prompt));
+
+        (Header(response, "Model"), Header(response, "Reason")).Should().Be(("claude-opus", "ExplicitCallout"));
+        string forwarded = _sentToCloud.Should().ContainSingle().Subject;
+        forwarded.Should().NotContain("@opus").And.Contain("why is the build slow?").And.Contain("copilot_tauri_workspace");
+    }
+
+    [Fact]
     public async Task Own_short_names_and_switching_callouts_off()
     {
         HttpClient client = await StartDispatchAsync(o => o.Callouts.Names["deep"] = "family:opus");
