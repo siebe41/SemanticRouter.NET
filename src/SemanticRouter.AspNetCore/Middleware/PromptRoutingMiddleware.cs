@@ -235,6 +235,17 @@ internal sealed partial class PromptRoutingMiddleware
             _conversations!.Forget(conversationKey);
         }
 
+        // A conversation that was kept local stays local on every later turn: follow-ups that match no local-only route,
+        // tool loops, and the client's own compaction and title requests about it. A first turn starts afresh, but not a
+        // title request sent alongside it.
+        string? localKey = _conversations is not null ? ConversationTracker.LocalKey(retryClient, chat) : null;
+        if (localKey is not null && firstTurn && clientTurn is null)
+        {
+            _conversations!.ForgetLocalOnly(localKey);
+        }
+
+        bool keptLocal = localKey is not null && !(firstTurn && clientTurn is null) && _conversations!.IsLocalOnly(localKey);
+
         // The decision this turn may judge (feedback): the conversation's previous turn.
         DecisionRecord? previousTurn = feedback && conversationKey is not null && !firstTurn ? _conversations!.Last(conversationKey, conversation) : null;
 
@@ -289,7 +300,7 @@ internal sealed partial class PromptRoutingMiddleware
             MinimumTier = minimumTier,
             ExplicitTier = explicitTurn ? choice!.Tier : null,
             Profile = profile.Profile,
-            LocalOnly = profile.LocalOnly || choice is { Clear: false, Local: true },
+            LocalOnly = profile.LocalOnly || choice is { Clear: false, Local: true } || keptLocal,
             Prompt = prompt,
             EstimatedInputTokens = chat.EstimatedInputTokens,
             AdditionalCapabilities = ImpliedCapabilities(chat),
@@ -300,6 +311,11 @@ internal sealed partial class PromptRoutingMiddleware
         };
 
         RoutingPlan plan = await RouteAsync(runtime, routingRequest, options.FailOpen, context.RequestAborted).ConfigureAwait(false);
+        if (localKey is not null && plan.Requirements.LocalOnly)
+        {
+            _conversations!.MarkLocalOnly(localKey);
+        }
+
         string? calloutNote = callout is { Clear: true } ? callout.Tag : null;
         if (explicitTurn)
         {

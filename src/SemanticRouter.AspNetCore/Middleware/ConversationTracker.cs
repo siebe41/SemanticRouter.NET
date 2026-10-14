@@ -19,7 +19,11 @@ internal sealed class ConversationTracker
 {
     private const int PruneAbove = 4096;
 
+    /// <summary>How long a conversation stays local-only after its last local-only turn.</summary>
+    private static readonly TimeSpan LocalOnlyMemory = TimeSpan.FromDays(1);
+
     private readonly ConcurrentDictionary<string, State> _conversations = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _localOnly = new(StringComparer.Ordinal);
     private readonly TimeProvider _time;
 
     public ConversationTracker(TimeProvider? time = null) => _time = time ?? TimeProvider.System;
@@ -39,6 +43,40 @@ internal sealed class ConversationTracker
         string system = string.Join("\n", chat.Messages.Where(m => m.Role is "system" or "developer").Select(m => m.Content));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(client + "\n" + system + "\n" + first.Content)));
     }
+
+    /// <summary>
+    /// The conversation a request belongs to for keeping it local: the client and the first user message only. A
+    /// client's own requests about the conversation (a compaction summary, a title) carry its messages under another
+    /// system prompt, and must stay local too. <see langword="null"/> when the request has no user message.
+    /// </summary>
+    public static string? LocalKey(string client, ChatCompletionRequest chat) =>
+        chat.Messages.FirstOrDefault(m => m.Role == "user") is { } first
+            ? Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("local\n" + client + "\n" + first.Content)))
+            : null;
+
+    /// <summary>Whether an earlier turn of the conversation was kept local, so every later turn must be.</summary>
+    public bool IsLocalOnly(string localKey) =>
+        _localOnly.TryGetValue(localKey, out DateTimeOffset at) && _time.GetUtcNow() - at <= LocalOnlyMemory;
+
+    /// <summary>Keeps the conversation's later turns local (a local-only route, profile, signal or callout matched).</summary>
+    public void MarkLocalOnly(string localKey)
+    {
+        DateTimeOffset now = _time.GetUtcNow();
+        _localOnly[localKey] = now;
+        if (_localOnly.Count > PruneAbove)
+        {
+            foreach ((string key, DateTimeOffset at) in _localOnly)
+            {
+                if (now - at > LocalOnlyMemory)
+                {
+                    _localOnly.TryRemove(key, out _);
+                }
+            }
+        }
+    }
+
+    /// <summary>A first turn starts afresh: another conversation may have opened with the same message.</summary>
+    public void ForgetLocalOnly(string localKey) => _localOnly.TryRemove(localKey, out _);
 
     /// <summary>A message short enough to be a follow-up ("yes", "continue", "try again") rather than a new request.</summary>
     public static bool IsFollowUp(string prompt, ConversationRoutingOptions options)

@@ -230,4 +230,77 @@ public sealed class ConversationRoutingTests : RouterHostTest
 
         tracker.Lookup("c", "looks good, commit it", options).Should().Be(new ConversationContext(4, "cloud", FollowUp: true));
     }
+
+    private const string Customer = "look up the customer record for account 4471";
+
+    private void CustomersStayLocal(SemanticRouterOptions o)
+    {
+        RouteDefinition customers = TestEmbeddings.Route("customers", 1, Customer);
+        customers.LocalOnly = true;
+        o.Routes.Add(customers);
+        Classifier.Setup(c => c.ClassifyAsync(It.Is<string>(p => p.Contains("customer", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PromptClassificationResult
+            {
+                RequiredTier = 1,
+                Reason = RoutingReason.SemanticMatch,
+                RouteName = "customers",
+                LocalOnly = true,
+                Complexity = new ComplexityAnalysis { Score = 0.1, EstimatedTokens = 10 },
+            });
+    }
+
+    [Fact]
+    public async Task A_conversation_kept_local_stays_local_on_later_turns_and_its_compaction()
+    {
+        HttpClient client = await StartDispatchAsync(routing: CustomersStayLocal);
+
+        HttpResponseMessage first = await client.PostAsync("/v1/chat/completions", Conversation("auto", Customer));
+        HttpResponseMessage later = await client.PostAsync("/v1/chat/completions", Conversation("auto", Customer, Task));
+        string compaction = JsonSerializer.Serialize(new
+        {
+            model = "auto",
+            messages = new object[]
+            {
+                new { role = "system", content = "You are a helpful AI assistant tasked with summarizing conversations." },
+                new { role = "user", content = Customer },
+                new { role = "assistant", content = "Done: 0" },
+                new { role = "user", content = Task + ". Now summarise this conversation." },
+            },
+        });
+        HttpResponseMessage summary = await client.PostAsync("/v1/chat/completions", new StringContent(compaction, Encoding.UTF8, "application/json"));
+        HttpResponseMessage other = await client.PostAsync("/v1/chat/completions", Conversation("auto", Task));
+
+        Header(first, "Model").Should().Be("local");
+        Header(later, "Model").Should().Be("local", "the refactor would go to the cloud, but this conversation started on a local-only route");
+        Header(summary, "Model").Should().Be("local", "a compaction request carries the conversation under another system prompt");
+        Header(other, "Model").Should().Be("cloud", "another conversation is not affected");
+        CloudHttp.Requests.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task A_first_turn_starts_afresh()
+    {
+        HttpClient client = await StartDispatchAsync(routing: CustomersStayLocal);
+        const string Opening = "hello there";
+
+        await client.PostAsync("/v1/chat/completions", Conversation("auto", Opening, Customer));
+        HttpResponseMessage fresh = await client.PostAsync("/v1/chat/completions", Conversation("auto", Opening));
+        HttpResponseMessage next = await client.PostAsync("/v1/chat/completions", Conversation("auto", Opening, Task));
+
+        Header(fresh, "Model").Should().Be("local", "small talk is tier 1 anyway");
+        Header(next, "Model").Should().Be("cloud", "a new conversation that opened the same way is not kept local");
+    }
+
+    [Fact]
+    public async Task Naming_a_cloud_model_does_not_take_a_local_only_prompt_off_the_machine()
+    {
+        HttpClient client = await StartDispatchAsync(routing: CustomersStayLocal);
+
+        HttpResponseMessage named = await client.PostAsync("/v1/chat/completions", Conversation("cloud", Customer));
+        HttpResponseMessage allowed = await client.PostAsync("/v1/chat/completions", Conversation("cloud", Task));
+
+        Header(named, "Model").Should().Be("local");
+        Header(allowed, "Model").Should().Be("cloud", "a prompt no local-only route covers still goes to the model the client named");
+        Header(allowed, "Reason").Should().Be("ModelOverride");
+    }
 }
