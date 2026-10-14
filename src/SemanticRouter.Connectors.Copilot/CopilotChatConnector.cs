@@ -98,7 +98,7 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
         using var firstOutput = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         firstOutput.CancelAfter(_options.EffectiveTimeout);
         int calls = 0;
-        int? input = null, output = null, cached = null;
+        int? input = null, output = null, cached = null, written = null;
         try
         {
             await foreach (CopilotUpdate update in _backend.RunAsync(turn, firstOutput.Token).ConfigureAwait(false))
@@ -124,6 +124,7 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
                         input = Sum(input, usage.InputTokens);
                         output = Sum(output, usage.OutputTokens);
                         cached = Sum(cached, usage.CacheReadTokens);
+                        written = Sum(written, usage.CacheWriteTokens);
                         break;
                     case CopilotUpdate.Error error when !writer.HasStarted:
                         return Failure(error);
@@ -158,7 +159,7 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
             return ConnectorResult.Failed(ModelFailureKind.Unavailable, "empty reply");
         }
 
-        await writer.CompleteAsync(calls > 0 ? ChatStopReason.ToolUse : ChatStopReason.EndTurn, new ChatUsage(input, output, cached), cancellationToken)
+        await writer.CompleteAsync(calls > 0 ? ChatStopReason.ToolUse : ChatStopReason.EndTurn, new ChatUsage(input, output, cached, written), cancellationToken)
             .ConfigureAwait(false);
         return ConnectorResult.Completed;
     }

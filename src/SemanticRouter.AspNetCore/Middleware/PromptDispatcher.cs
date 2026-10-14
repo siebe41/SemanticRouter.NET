@@ -258,8 +258,9 @@ internal sealed partial class PromptDispatcher
             ? runtime.Configuration.Models.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase))
             : null;
 
-        // At the reference model's prices the cache tokens would have been ordinary input.
-        decimal referenceCost = reference?.Cost(input + cacheRead + cacheWrite, output) ?? cost;
+        // The same request at the reference model's prices, cache included: the reference model would have cached the
+        // conversation too, so a cache discount is not a saving of routing.
+        decimal referenceCost = reference?.Cost(input, output, cacheRead, cacheWrite) ?? cost;
         _metrics.RecordUsage(model.Name, connector, usage, cost);
         if (activity is not null)
         {

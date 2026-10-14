@@ -307,6 +307,8 @@ internal static class AnthropicResponseReader
                             {
                                 outputTokens = deltaUsage.GetInt("output_tokens") ?? outputTokens;
                                 inputTokens = deltaUsage.GetInt("input_tokens") ?? inputTokens;
+                                cacheRead = deltaUsage.GetInt("cache_read_input_tokens") ?? cacheRead;
+                                cacheCreate = deltaUsage.GetInt("cache_creation_input_tokens") ?? cacheCreate;
                             }
 
                             break;

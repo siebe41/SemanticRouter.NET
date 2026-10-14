@@ -259,7 +259,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
 
         if (succeeded)
         {
-            var usage = new ChatUsage(final?.InputTokens, final?.OutputTokens);
+            var usage = new ChatUsage(final?.InputTokens, final?.OutputTokens, final?.CacheReadTokens, final?.CacheCreationTokens);
             if (prompted is not null)
             {
                 // Without streamed deltas (plain-text CLIs, or streaming off), the whole reply goes through now; with them,

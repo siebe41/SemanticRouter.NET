@@ -136,7 +136,7 @@ public sealed class UsageAndTelemetryTests : RouterHostTest
         totals["outputTokens"]!.GetValue<long>().Should().Be(5 + 5 + 7 + 3);
         totals["cacheReadTokens"]!.GetValue<long>().Should().Be(4 + 4 + 100);
         totals["costUsd"]!.GetValue<decimal>().Should().Be(entries.Sum(e => e.CostUsd ?? 0));
-        totals["referenceCostUsd"]!.GetValue<decimal>().Should().Be((15 + 15 + 127 + 15) * 100m / 1_000_000m, "every request priced at the reference model, cache tokens as input");
+        totals["referenceCostUsd"]!.GetValue<decimal>().Should().Be((15 + 15 + 127 + 15) * 100m / 1_000_000m, "every request priced at the reference model; it has no cache prices, so cache tokens cost its input price");
         usage["groups"]!.AsArray().Select(g => g!["key"]!.GetValue<string>()).Should().BeEquivalentTo("local", "cloud", "native", "claude-cli");
     }
 
