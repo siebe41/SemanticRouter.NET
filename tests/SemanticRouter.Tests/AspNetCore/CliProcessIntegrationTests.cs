@@ -205,4 +205,50 @@ public sealed class CliProcessIntegrationTests : IDisposable
         CliExecutableLocator.Find("gemini", path, windows: true).Problem("g").Should().Contain("not found on PATH");
         CliExecutableLocator.Find(FakeCli).Found.Should().BeTrue();
     }
+
+    [Fact]
+    public void Locator_skips_relative_and_empty_path_entries()
+    {
+        string bin = Directory.CreateDirectory(Path.Combine(_scratch, "bin")).FullName;
+        File.WriteAllText(Path.Combine(bin, "tool"), string.Empty);
+        string relative = Path.GetRelativePath(Environment.CurrentDirectory, bin);
+        if (Path.IsPathRooted(relative))
+        {
+            return; // on another drive than the current directory (Windows): there is no relative form
+        }
+
+        CliExecutableLocator.Find("tool", relative, windows: false).Found.Should().BeFalse("a relative entry depends on the current directory");
+        CliExecutableLocator.Find("tool", string.Join(Path.PathSeparator, ".", string.Empty, relative, bin), windows: false)
+            .Path.Should().Be(Path.Combine(bin, "tool"));
+    }
+
+    [Fact]
+    public void The_runner_starts_the_resolved_full_path_never_a_file_in_the_current_directory()
+    {
+        // .NET (and Windows) would start a bare name found in the current directory before searching PATH.
+        string name = "sr-planted-" + Guid.NewGuid().ToString("N");
+        string planted = Path.Combine(Environment.CurrentDirectory, name);
+        File.WriteAllText(planted, "#!/bin/sh\necho planted\n");
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(planted, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            }
+
+            Action start = () => SystemCliProcessRunner.CreateStartInfo(Invocation(name));
+            start.Should().Throw<FileNotFoundException>().WithMessage($"*'{name}'*not found*");
+            CliExecutableLocator.Find(name, ".", OperatingSystem.IsWindows()).Found.Should().BeFalse();
+        }
+        finally
+        {
+            File.Delete(planted);
+        }
+
+        SystemCliProcessRunner.CreateStartInfo(Invocation(FakeCli)).FileName.Should().Be(FakeCli);
+        string shell = SystemCliProcessRunner.CreateStartInfo(Invocation(OperatingSystem.IsWindows() ? "cmd" : "sh")).FileName;
+        Path.IsPathFullyQualified(shell).Should().BeTrue(shell);
+
+        CliInvocation Invocation(string executable) => new() { Executable = executable, Arguments = [], WorkingDirectory = _scratch };
+    }
 }

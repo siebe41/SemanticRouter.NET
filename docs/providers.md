@@ -284,7 +284,7 @@ The `Custom` preset runs any command:
 }
 ```
 
-The executable is started directly, never through a shell, so prompts cannot inject commands.
+The executable is started directly, never through a shell, so prompts cannot inject commands. A bare name (`llm`) is looked up on the absolute `PATH` entries only and started by its full path, never from the current directory; a relative path with a folder (`tools/llm`) is taken relative to the router's current directory.
 
 ## OpenAI API
 
