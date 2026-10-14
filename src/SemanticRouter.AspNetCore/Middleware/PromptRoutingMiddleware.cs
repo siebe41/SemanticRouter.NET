@@ -105,6 +105,14 @@ internal sealed partial class PromptRoutingMiddleware
             return;
         }
 
+        if (client is null && GatewayGuard.For(context).Refusal(context) is { } refusal)
+        {
+            LogGatewayRequestRefused(_logger, context.Request.Path, refusal);
+            await ProtocolErrors.WriteAsync(context, protocol, StatusCodes.Status403Forbidden, "Forbidden", refusal, context.RequestAborted)
+                .ConfigureAwait(false);
+            return;
+        }
+
         using Activity? routeSpan = RouterTelemetry.Source.StartActivity("semantic_router.route");
         routeSpan?.SetTag("semantic_router.protocol", protocol.ToString());
         routeSpan?.SetTag("semantic_router.client", client);
@@ -875,6 +883,9 @@ internal sealed partial class PromptRoutingMiddleware
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Refused a gateway request from {Remote} to {Path}: no valid gateway key.")]
     private static partial void LogGatewayKeyMissing(ILogger logger, string remote, PathString path);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Refused a gateway request to {Path}: {Reason}")]
+    private static partial void LogGatewayRequestRefused(ILogger logger, PathString path, string reason);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "No prompt found in JSON request to {Path}; passing through.")]
     private static partial void LogNoPrompt(ILogger logger, PathString path);

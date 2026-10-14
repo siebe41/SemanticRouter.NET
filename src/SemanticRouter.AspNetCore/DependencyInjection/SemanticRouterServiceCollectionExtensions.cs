@@ -69,6 +69,8 @@ public static class SemanticRouterServiceCollectionExtensions
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BudgetGate>>()));
         services.TryAddSingleton<IToolCallAffinity, ToolCallAffinity>();
         services.TryAddSingleton<RoutingActivityLog>();
+        services.TryAddSingleton(sp => new GatewayGuard(
+            sp.GetService<IOptions<Microsoft.AspNetCore.Builder.RouterDashboardOptions>>()?.Value.PublicOrigins ?? []));
         services.TryAddSingleton<RoutingFeedbackLog>();
         services.TryAddSingleton(sp => new ModelLatencyTracker(sp.GetRequiredService<RoutingActivityLog>(), sp.GetService<TimeProvider>()));
         services.TryAddSingleton<IModelLatency>(sp => sp.GetRequiredService<ModelLatencyTracker>());

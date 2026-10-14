@@ -322,6 +322,77 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Web_pages_cannot_use_the_gateway_through_dns_rebinding_or_from_other_sites()
+    {
+        HttpClient client = await StartAsync(remote: false, middleware: o => o.GatewayKeys["laptop"] = "gw-laptop-key-123");
+
+        HttpRequestMessage Chat(string? host = null, string? origin = null, string? key = null)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = Json(ChatJson) };
+            if (host is not null)
+            {
+                request.Headers.Host = host;
+            }
+
+            if (origin is not null)
+            {
+                request.Headers.Add("Origin", origin);
+            }
+
+            if (key is not null)
+            {
+                request.Headers.Add("x-api-key", key);
+            }
+
+            return request;
+        }
+
+        // A page on evil.example whose name now resolves to 127.0.0.1 is same-origin with the gateway.
+        HttpResponseMessage rebound = await client.SendAsync(Chat(host: "evil.example:5080", origin: "http://evil.example:5080"));
+        rebound.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await rebound.Content.ReadAsStringAsync()).Should().Contain("is not this machine");
+        (await client.SendAsync(Chat(origin: "http://evil.example"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.SendAsync(Chat(origin: "null"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        LocalHttp.Requests.Should().BeEmpty("no refused request reaches a backend");
+
+        (await client.SendAsync(Chat())).StatusCode.Should().Be(HttpStatusCode.OK, "SDKs and CLIs send no Origin");
+        (await client.SendAsync(Chat(origin: "http://localhost"))).StatusCode.Should().Be(HttpStatusCode.OK, "the dashboard's prompt tester is same-origin");
+        (await client.SendAsync(Chat(host: "router.internal:5080", key: "gw-laptop-key-123"))).StatusCode
+            .Should().Be(HttpStatusCode.OK, "a page has no gateway key, so a request with one is not checked");
+
+        var models = new HttpRequestMessage(HttpMethod.Get, "/v1/models");
+        models.Headers.Host = "evil.example:5080";
+        (await client.SendAsync(models)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var classify = new HttpRequestMessage(HttpMethod.Post, "/semantic-router/classify") { Content = JsonContent.Create(new { prompt = "hello" }) };
+        classify.Headers.Host = "evil.example:5080";
+        (await client.SendAsync(classify)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var count = new HttpRequestMessage(HttpMethod.Post, "/v1/messages/count_tokens")
+        {
+            Content = Json("""{"model":"x","messages":[{"role":"user","content":"hi"}]}"""),
+        };
+        count.Headers.Add("Origin", "http://evil.example");
+        (await client.SendAsync(count)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.GetAsync("/v1/models")).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Classify_models_and_token_counts_need_a_gateway_key_from_remote_clients()
+    {
+        HttpClient client = await StartAsync(middleware: o => o.GatewayKeys["laptop"] = "gw-laptop-key-123");
+
+        (await client.PostAsJsonAsync("/semantic-router/classify", new { prompt = "hello" })).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await client.GetAsync("/v1/models")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        HttpResponseMessage count = await client.PostAsync(
+            "/v1/messages/count_tokens", Json("""{"model":"x","messages":[{"role":"user","content":"hi"}]}"""));
+        count.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await count.Content.ReadAsStringAsync()).Should().Contain("authentication_error");
+
+        var withKey = new HttpRequestMessage(HttpMethod.Post, "/semantic-router/classify") { Content = JsonContent.Create(new { prompt = "hello" }) };
+        withKey.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "gw-laptop-key-123");
+        (await client.SendAsync(withKey)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task Unauthenticated_remote_access_must_be_asked_for_explicitly()
     {
         HttpClient client = await StartAsync(o =>

@@ -21,7 +21,8 @@ public static class PromptRouterApplicationBuilderExtensions
 
     /// <summary>
     /// Maps a diagnostics endpoint that routes <c>{"prompt":"…"}</c> and returns the full decision (requirements,
-    /// route candidates and the ranked models) without calling any model. Protect or omit it in production.
+    /// route candidates and the ranked models) without calling any model. It needs a gateway key where the chat
+    /// endpoints do, and refuses web pages on other sites.
     /// </summary>
     public static RouteHandlerBuilder MapPromptClassification(
         this IEndpointRouteBuilder endpoints,
@@ -54,7 +55,8 @@ public static class PromptRouterApplicationBuilderExtensions
                 return Results.Ok(PromptClassificationResponse.From(plan));
             })
             .WithName("ClassifyPrompt")
-            .WithSummary("Routes a prompt and explains the decision without calling a model.");
+            .WithSummary("Routes a prompt and explains the decision without calling a model.")
+            .RequireGatewayAccess(ChatProtocol.OpenAI);
     }
 
     /// <summary>
@@ -75,7 +77,8 @@ public static class PromptRouterApplicationBuilderExtensions
                 return Results.Ok(new TokenCountResponse(request.EstimatedInputTokens));
             })
             .WithName("CountAnthropicTokens")
-            .WithSummary("Estimates the input tokens of an Anthropic Messages request.");
+            .WithSummary("Estimates the input tokens of an Anthropic Messages request.")
+            .RequireGatewayAccess(ChatProtocol.Anthropic);
     }
 
     /// <summary>
@@ -105,7 +108,8 @@ public static class PromptRouterApplicationBuilderExtensions
                 return Results.Ok(new RouterModelList("list", data));
             })
             .WithName("ListRouterModels")
-            .WithSummary("Lists routing aliases and catalog models.");
+            .WithSummary("Lists routing aliases and catalog models.")
+            .RequireGatewayAccess(ChatProtocol.OpenAI);
     }
 }
 
