@@ -182,7 +182,7 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem("Expected a configuration document.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            return Results.Json(new ValidationResult([.. RouterRuntimeProvider.Validate(candidate), .. ProcessSettingErrors(candidate, provider, options)]), ApiJson);
+            return Results.Json(new ValidationResult([.. RouterRuntimeProvider.Validate(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)]), ApiJson);
         });
 
         api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist, string? note) =>
@@ -193,7 +193,7 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem("Expected a configuration document.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            IReadOnlyList<string> errors = [.. RouterRuntimeProvider.Validate(candidate), .. ProcessSettingErrors(candidate, provider, options)];
+            IReadOnlyList<string> errors = [.. RouterRuntimeProvider.Validate(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)];
             if (errors.Count > 0)
             {
                 return Results.Json(new ValidationResult(errors), ApiJson, statusCode: StatusCodes.Status400BadRequest);

@@ -126,6 +126,37 @@ public sealed class SecretsTests
     }
 
     [Fact]
+    public void A_stored_secret_reference_is_not_carried_to_a_new_address_over_the_admin_api()
+    {
+        // As the host keeps it: the typed key moved to the secret file, the document holding a reference to it.
+        RouterConfiguration current = Document();
+        current.Connectors["azure"].ApiKey = "${secret:connectors/azure/ApiKey}";
+        current.Embeddings.ApiKey = "${secret:embeddings/ApiKey}";
+
+        RouterConfiguration unchanged = current.Masked();
+        unchanged.ReferenceErrors(current).Should().BeEmpty("references stay where they were configured");
+
+        RouterConfiguration moved = current.Masked();
+        moved.Connectors["azure"].BaseAddress = new Uri("https://collector.example");
+        moved.Connectors["openai"].BaseAddress = new Uri("https://collector.example");
+        moved.Embeddings.Endpoint = new Uri("https://collector.example");
+        moved.ReferenceErrors(current).Should().Contain(e => e.StartsWith("Connectors:azure:ApiKey: enter the secret itself", StringComparison.Ordinal))
+            .And.Contain(e => e.StartsWith("Connectors:openai:ApiKey: enter the secret itself", StringComparison.Ordinal), "an environment reference moves the same way")
+            .And.Contain(e => e.StartsWith("Embeddings:ApiKey: enter the secret itself", StringComparison.Ordinal));
+
+        RouterConfiguration borrowed = current.Masked();
+        borrowed.Connectors["collector"] = new ConnectorOptions { BaseAddress = new Uri("https://collector.example"), ApiKey = "${secret:connectors/azure/ApiKey}" };
+        borrowed.ReferenceErrors(current).Should().ContainSingle()
+            .Which.Should().StartWith("Connectors:collector:ApiKey: a stored-secret reference may only name this setting's own secret");
+
+        RouterConfiguration added = current.Masked();
+        added.Connectors["new"] = new ConnectorOptions { BaseAddress = new Uri("https://api.openai.com"), ApiKey = "${env:OPENAI_API_KEY}" };
+        added.ReferenceErrors(current).Should().BeEmpty("a new connector may still name an environment variable, as the docs show");
+        added.Connectors["new"].ApiKey = "${secret:connectors/new/ApiKey}";
+        added.ReferenceErrors(current).Should().ContainSingle("a new connector has no stored secret yet");
+    }
+
+    [Fact]
     public void Protected_file_store_round_trips_without_plain_text_on_disk()
     {
         string directory = Directory.CreateTempSubdirectory("router-secrets").FullName;

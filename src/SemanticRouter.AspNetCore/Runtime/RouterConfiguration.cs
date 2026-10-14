@@ -658,6 +658,49 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         && a.EnvironmentVariables.Count == b.EnvironmentVariables.Count
         && a.EnvironmentVariables.All(v => b.EnvironmentVariables.TryGetValue(v.Key, out string? value) && (v.Value == value || v.Value == MaskedSecret));
 
+    /// <summary>
+    /// Errors for secret references a request to the admin API may not carry, checked against the running
+    /// configuration: a <c>${secret:…}</c> reference to another setting's stored secret, a stored secret in a connector
+    /// that has none yet, and any reference in a connector (or the embeddings) that now has another type, address or
+    /// program. Otherwise a caller who cannot see a key could have it sent to an address of its choosing by naming it.
+    /// </summary>
+    internal IReadOnlyList<string> ReferenceErrors(RouterConfiguration current)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        var errors = new List<string>();
+        foreach (SecretSlot slot in Slots(secretsOnly: true))
+        {
+            (string Scheme, string Name)[] references = [.. SecretReference.References(slot.Get())];
+            if (references.Length == 0)
+            {
+                continue;
+            }
+
+            if (references.Any(r => r.Scheme == "secret" && !string.Equals(r.Name, slot.StoreName, StringComparison.Ordinal)))
+            {
+                errors.Add($"{slot.Setting}: a stored-secret reference may only name this setting's own secret ({SecretReference.ForStore(slot.StoreName)}).");
+                continue;
+            }
+
+            string[] parts = slot.Setting.Split(':');
+            bool added = parts[0] == "Connectors" && !current.Connectors.ContainsKey(parts[1]);
+            bool moved = parts[0] switch
+            {
+                "Connectors" => current.Connectors.TryGetValue(parts[1], out ConnectorOptions? existing) && !SameDestination(Connectors[parts[1]], existing),
+                "Embeddings" => Embeddings.Provider != current.Embeddings.Provider || !Equals(Embeddings.Endpoint, current.Embeddings.Endpoint),
+                _ => false,
+            };
+            if (moved || (added && references.Any(r => r.Scheme == "secret")))
+            {
+                errors.Add(
+                    $"{slot.Setting}: enter the secret itself. A {(moved ? "connector that now has another type, address or program" : "new connector")} " +
+                    "cannot take a stored or environment secret over the admin API; change the configuration file to do that.");
+            }
+        }
+
+        return errors;
+    }
+
     /// <summary>Whether two versions of a connector send their secrets to the same place.</summary>
     private static bool SameDestination(ConnectorOptions a, ConnectorOptions b) =>
         a.Type == b.Type && Equals(a.BaseAddress, b.BaseAddress) && a.Preset == b.Preset
