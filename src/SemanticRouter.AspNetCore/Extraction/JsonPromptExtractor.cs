@@ -17,17 +17,23 @@ public sealed class JsonPromptExtractor : IPromptExtractor
 {
     private readonly PromptMessageSelection _selection;
     private readonly bool _stripSystemReminders;
+    private readonly string[] _injectedTags;
 
     /// <summary>Creates an extractor.</summary>
     /// <param name="selection">Which messages contribute.</param>
     /// <param name="stripSystemReminders">
-    /// Remove <c>&lt;system-reminder&gt;…&lt;/system-reminder&gt;</c> blocks that agentic clients (Claude Code) inject
-    /// into user messages, so the prompt reflects what the person asked.
+    /// Remove the context blocks agentic clients inject into user messages (Claude Code's
+    /// <c>&lt;system-reminder&gt;</c>, the GitHub Copilot app's <c>&lt;system_reminder&gt;</c>,
+    /// <c>&lt;current_datetime&gt;</c> and <c>&lt;copilot_tauri_workspace&gt;</c>), so the prompt reflects what the
+    /// person asked.
     /// </param>
-    public JsonPromptExtractor(PromptMessageSelection selection = PromptMessageSelection.LastUserMessage, bool stripSystemReminders = true)
+    /// <param name="injectedTags">More tags whose blocks are removed, besides the built-in ones.</param>
+    public JsonPromptExtractor(
+        PromptMessageSelection selection = PromptMessageSelection.LastUserMessage, bool stripSystemReminders = true, IEnumerable<string>? injectedTags = null)
     {
         _selection = selection;
         _stripSystemReminders = stripSystemReminders;
+        _injectedTags = injectedTags?.ToArray() ?? [];
     }
 
     /// <inheritdoc />
@@ -40,7 +46,7 @@ public sealed class JsonPromptExtractor : IPromptExtractor
 
         if (body.TryGetProperty("messages", out JsonElement messages) && messages.ValueKind == JsonValueKind.Array)
         {
-            string? fromMessages = Clean(ExtractFromMessages(messages));
+            string? fromMessages = ExtractFromMessages(messages);
             if (!string.IsNullOrWhiteSpace(fromMessages))
             {
                 return fromMessages;
@@ -49,7 +55,7 @@ public sealed class JsonPromptExtractor : IPromptExtractor
 
         // Responses API: "input" is a list of items; messages among them have roles like chat messages.
         if (body.TryGetProperty("input", out JsonElement items) && items.ValueKind == JsonValueKind.Array
-            && Clean(ExtractFromMessages(items)) is { Length: > 0 } fromItems)
+            && ExtractFromMessages(items) is { Length: > 0 } fromItems)
         {
             return fromItems;
         }
@@ -65,40 +71,27 @@ public sealed class JsonPromptExtractor : IPromptExtractor
         return null;
     }
 
-    /// <summary>Removes injected <c>&lt;system-reminder&gt;</c> blocks and trims the result.</summary>
-    public static string? StripSystemReminders(string? text)
+    /// <summary>Removes injected context blocks (<c>&lt;system-reminder&gt;</c> and the like) and trims the result.</summary>
+    public static string? StripSystemReminders(string? text) => StripInjectedBlocks(text, null);
+
+    /// <summary>Removes injected context blocks, the built-in tags and <paramref name="extraTags"/>, and trims the result.</summary>
+    public static string? StripInjectedBlocks(string? text, IEnumerable<string>? extraTags)
     {
-        if (string.IsNullOrEmpty(text) || !text.Contains("<system-reminder>", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(text))
         {
             return text;
         }
 
-        var builder = new StringBuilder(text.Length);
-        int position = 0;
-        while (true)
-        {
-            int start = text.IndexOf("<system-reminder>", position, StringComparison.OrdinalIgnoreCase);
-            if (start < 0)
-            {
-                builder.Append(text, position, text.Length - position);
-                break;
-            }
-
-            builder.Append(text, position, start - position);
-            int end = text.IndexOf("</system-reminder>", start, StringComparison.OrdinalIgnoreCase);
-            if (end < 0)
-            {
-                break;
-            }
-
-            position = end + "</system-reminder>".Length;
-        }
-
-        return builder.ToString().Trim();
+        string stripped = InjectedBlocks.Remove(text, extraTags);
+        return ReferenceEquals(stripped, text) ? text : stripped.Trim();
     }
 
-    private string? Clean(string? text) => _stripSystemReminders ? StripSystemReminders(text) : text;
+    private string? Clean(string? text) => _stripSystemReminders ? StripInjectedBlocks(text, _injectedTags) : text;
 
+    /// <summary>
+    /// The text of the selected messages, each cleaned on its own: a user message that is nothing but injected context
+    /// (a client notice sent after the person's message) does not hide the message before it.
+    /// </summary>
     private string? ExtractFromMessages(JsonElement messages)
     {
         if (_selection == PromptMessageSelection.LastUserMessage)
@@ -106,7 +99,7 @@ public sealed class JsonPromptExtractor : IPromptExtractor
             string? last = null;
             foreach (JsonElement message in messages.EnumerateArray())
             {
-                if (IsRole(message, "user") && ReadContent(message) is { Length: > 0 } text)
+                if (IsRole(message, "user") && Clean(ReadContent(message)) is { Length: > 0 } text)
                 {
                     last = text;
                 }
@@ -123,7 +116,7 @@ public sealed class JsonPromptExtractor : IPromptExtractor
                 continue;
             }
 
-            if (ReadContent(message) is { Length: > 0 } text)
+            if (Clean(ReadContent(message)) is { Length: > 0 } text)
             {
                 if (builder.Length > 0)
                 {

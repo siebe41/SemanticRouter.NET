@@ -36,7 +36,7 @@ internal enum ClientTurnKind
 /// <remarks>
 /// The patterns follow the clients' own prompts (<see cref="ClientTurnTable"/>: built in, overridable by a
 /// <c>client-turns.json</c> next to the configuration) and are matched on the latest user message (injected
-/// <c>&lt;system-reminder&gt;</c> blocks removed) and on the system prompt. They are deliberately specific: an ordinary
+/// context blocks such as <c>&lt;system-reminder&gt;</c> removed) and on the system prompt. They are deliberately specific: an ordinary
 /// request that merely asks for a title or a summary is classified as usual.
 /// </remarks>
 internal static partial class ClientTurns
@@ -111,8 +111,5 @@ internal static partial class ClientTurns
         string.Join("\n", chat.Messages.Where(m => m.Role is "system" or "developer").Select(m => m.Content));
 
     private static string OpeningMessage(ChatCompletionRequest chat) =>
-        chat.Messages.FirstOrDefault(m => m.Role == "user") is { } opening ? ReminderBlock().Replace(opening.Content, string.Empty).TrimStart() : string.Empty;
-
-    [GeneratedRegex(@"<system-reminder>.*?</system-reminder>", RegexOptions.Singleline)]
-    private static partial Regex ReminderBlock();
+        chat.Messages.FirstOrDefault(m => m.Role == "user") is { } opening ? InjectedBlocks.Remove(opening.Content).TrimStart() : string.Empty;
 }

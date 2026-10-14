@@ -54,6 +54,45 @@ public class JsonPromptExtractorTests
     }
 
     [Theory]
+    [InlineData("<system_reminder>\nIMPORTANT: The tools listed below are deferred.\n</system_reminder>\nsing me a song", "sing me a song")]
+    [InlineData("<current_datetime>2026-10-12T11:19:05.499-05:00</current_datetime>\n<copilot_tauri_workspace>\nproject_session_id: 30fa247c\n</copilot_tauri_workspace>\n\ntell me a joke", "tell me a joke")]
+    [InlineData("<System-Reminder note=\"x\">a</System-Reminder>ask <system-reminder>b</system-reminder>me", "ask me")]
+    [InlineData("<context>keep this</context> please", "<context>keep this</context> please")]
+    public void Ignores_context_blocks_clients_inject(string content, string expected)
+    {
+        string json = JsonSerializer.Serialize(new { messages = new[] { new { role = "user", content } } });
+        Extract(json).Should().Be(expected, "the router classifies what the person typed, not the client's boilerplate");
+    }
+
+    [Fact]
+    public void A_user_message_that_is_only_injected_context_does_not_hide_the_one_before_it()
+    {
+        string json = JsonSerializer.Serialize(new
+        {
+            messages = new[]
+            {
+                new { role = "system", content = "You are Copilot." },
+                new { role = "user", content = "<current_datetime>2026-10-12T11:19:05-05:00</current_datetime>\ntell me a joke" },
+                new { role = "user", content = "<system_reminder>\nIMPORTANT: The tools listed below are deferred.\n</system_reminder>" },
+            },
+        });
+
+        Extract(json).Should().Be("tell me a joke");
+        Extract(json, PromptMessageSelection.AllMessages).Should().Be("You are Copilot.\n\ntell me a joke");
+    }
+
+    [Fact]
+    public void Configured_tags_are_ignored_too()
+    {
+        string json = JsonSerializer.Serialize(new { messages = new[] { new { role = "user", content = "<environment_details>cwd: /src</environment_details>\nfix the build" } } });
+        using JsonDocument document = JsonDocument.Parse(json);
+
+        new JsonPromptExtractor(injectedTags: ["<environment_details>", "not a tag!"]).ExtractPrompt(new DefaultHttpContext(), document.RootElement)
+            .Should().Be("fix the build");
+        Extract(json).Should().StartWith("<environment_details>", "only the configured extra tags are added to the built-in ones");
+    }
+
+    [Theory]
     [InlineData("""[ "not", "an", "object" ]""")]
     [InlineData("""{ "model": "x" }""")]
     [InlineData("""{ "messages": "nope" }""")]

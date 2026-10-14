@@ -383,7 +383,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         IModelSelector modelSelector = ResolveCustom<IModelSelector>() ?? new DefaultModelSelector(configuration.Selection, latency);
         IModelHealth health = _services.GetRequiredService<IModelHealth>();
         IPromptRouter router = ResolveCustom<IPromptRouter>() ?? new PromptRouter(classifier, configuration, modelSelector, health, reliability: _services.GetService<IModelReliability>(), latency: latency);
-        IPromptExtractor extractor = ResolveCustom<IPromptExtractor>() ?? new JsonPromptExtractor(configuration.Middleware.MessageSelection);
+        IPromptExtractor extractor = ResolveCustom<IPromptExtractor>() ?? new JsonPromptExtractor(
+            configuration.Middleware.MessageSelection, configuration.Middleware.StripSystemReminders, configuration.Middleware.InjectedTags);
 
         var redactor = new SecretRedactor(resolved.SecretValues());
         var connectors = new ConnectorCatalog(

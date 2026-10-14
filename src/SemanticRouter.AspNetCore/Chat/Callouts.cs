@@ -22,10 +22,8 @@ internal sealed record Callout(string Tag, string? Model = null, SelectionStrate
 /// </summary>
 internal static partial class Callouts
 {
-    private const string Reminder = "</system-reminder>";
-
     /// <summary>
-    /// The <c>@tag</c> a message starts with (after whitespace and any injected <c>&lt;system-reminder&gt;</c> blocks),
+    /// The <c>@tag</c> a message starts with (after whitespace and any injected context blocks such as <c>&lt;system-reminder&gt;</c>),
     /// without the <c>@</c>; <see langword="null"/> when it does not start with one.
     /// </summary>
     public static string? LeadingTag(string text) => Leading(text) is { } found ? found.Tag : null;
@@ -170,7 +168,7 @@ internal static partial class Callouts
                             continue;
                         }
 
-                        if (Leading(partContent) is { } leading)
+                        if (Leading(partContent, runtime.Configuration.Middleware.InjectedTags) is { } leading)
                         {
                             if (StripText(partContent, runtime, leading) is { } strippedPart)
                             {
@@ -181,7 +179,7 @@ internal static partial class Callouts
                             break;
                         }
 
-                        if (WithoutReminders(partContent).Trim().Length > 0)
+                        if (InjectedBlocks.Remove(partContent, runtime.Configuration.Middleware.InjectedTags).Trim().Length > 0)
                         {
                             break;
                         }
@@ -200,38 +198,22 @@ internal static partial class Callouts
     /// <summary><paramref name="text"/> without its leading callout, or <see langword="null"/> to leave it as it is.</summary>
     private static string? StripText(string text, RouterRuntime runtime, (string Tag, int Start, int End)? found = null)
     {
-        if ((found ?? Leading(text)) is not { } leading || Resolve(leading.Tag, runtime) is null)
+        if ((found ?? Leading(text, runtime.Configuration.Middleware.InjectedTags)) is not { } leading || Resolve(leading.Tag, runtime) is null)
         {
             return null;
         }
 
         string stripped = text[..leading.Start] + text[leading.End..];
-        return WithoutReminders(stripped).Trim().Length == 0 ? null : stripped;
+        return InjectedBlocks.Remove(stripped, runtime.Configuration.Middleware.InjectedTags).Trim().Length == 0 ? null : stripped;
     }
 
     /// <summary>Where a leading <c>@tag</c> is: its name and the span to remove (the tag and the whitespace after it).</summary>
-    private static (string Tag, int Start, int End)? Leading(string text)
+    private static (string Tag, int Start, int End)? Leading(string text, IEnumerable<string>? injectedTags = null)
     {
-        int position = 0;
-        while (true)
+        int position = InjectedBlocks.SkipLeading(text, injectedTags);
+        if (position < 0)
         {
-            while (position < text.Length && char.IsWhiteSpace(text[position]))
-            {
-                position++;
-            }
-
-            if (string.CompareOrdinal(text, position, "<system-reminder>", 0, "<system-reminder>".Length) != 0)
-            {
-                break;
-            }
-
-            int end = text.IndexOf(Reminder, position, StringComparison.Ordinal);
-            if (end < 0)
-            {
-                return null;
-            }
-
-            position = end + Reminder.Length;
+            return null;
         }
 
         if (position >= text.Length || text[position] != '@')
@@ -259,13 +241,8 @@ internal static partial class Callouts
         return (text[(position + 1)..nameEnd], position, removeEnd);
     }
 
-    private static string WithoutReminders(string text) => ReminderBlock().Replace(text, string.Empty);
-
     [GeneratedRegex(@"^tier(?<tier>[1-9])$", RegexOptions.IgnoreCase)]
     private static partial Regex TierTag();
-
-    [GeneratedRegex(@"<system-reminder>.*?</system-reminder>", RegexOptions.Singleline)]
-    private static partial Regex ReminderBlock();
 }
 
 /// <summary>Finds a catalog model by family, such as <c>opus</c> or <c>qwen</c>, for callouts and <c>family:</c> aliases.</summary>
