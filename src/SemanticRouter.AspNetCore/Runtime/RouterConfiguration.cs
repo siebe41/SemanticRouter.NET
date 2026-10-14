@@ -623,6 +623,41 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             .Select(s => $"{s.Setting}: enter the secret again. A stored secret is only sent where it was configured, and this " +
                          "connector (or the embeddings) now has another type, address or program.");
 
+    /// <summary>
+    /// The CLI and Copilot connectors whose process settings (program, arguments, environment variables, home directory)
+    /// differ from <paramref name="current"/>, other than a plain preset started from PATH.
+    /// </summary>
+    internal IReadOnlyList<string> ProcessSettingChanges(RouterConfiguration current)
+    {
+        var changed = new List<string>();
+        foreach ((string name, ConnectorOptions connector) in Connectors)
+        {
+            if (connector.Type is not (ConnectorType.Cli or ConnectorType.Copilot)
+                || (current.Connectors.TryGetValue(name, out ConnectorOptions? existing) && SameProcess(connector, existing)))
+            {
+                continue;
+            }
+
+            bool plainPreset = (connector.Type == ConnectorType.Copilot || connector.Preset != CliPreset.Custom)
+                && string.IsNullOrEmpty(connector.Executable) && connector.Arguments is not { Count: > 0 }
+                && connector.EnvironmentVariables.Count == 0 && string.IsNullOrEmpty(connector.HomeDirectory);
+            if (!plainPreset)
+            {
+                changed.Add(name);
+            }
+        }
+
+        return changed;
+    }
+
+    private static bool SameProcess(ConnectorOptions a, ConnectorOptions b) =>
+        a.Type == b.Type && a.Preset == b.Preset
+        && string.Equals(a.Executable, b.Executable, StringComparison.Ordinal)
+        && string.Equals(a.HomeDirectory, b.HomeDirectory, StringComparison.Ordinal)
+        && (a.Arguments ?? []).SequenceEqual(b.Arguments ?? [], StringComparer.Ordinal)
+        && a.EnvironmentVariables.Count == b.EnvironmentVariables.Count
+        && a.EnvironmentVariables.All(v => b.EnvironmentVariables.TryGetValue(v.Key, out string? value) && (v.Value == value || v.Value == MaskedSecret));
+
     /// <summary>Whether two versions of a connector send their secrets to the same place.</summary>
     private static bool SameDestination(ConnectorOptions a, ConnectorOptions b) =>
         a.Type == b.Type && Equals(a.BaseAddress, b.BaseAddress) && a.Preset == b.Preset

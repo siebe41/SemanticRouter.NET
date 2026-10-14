@@ -411,6 +411,33 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
+    public async Task What_a_cli_runs_cannot_be_changed_over_the_admin_api_unless_allowed()
+    {
+        HttpClient client = await StartAsync(remote: false);
+
+        async Task<HttpResponseMessage> PutWithAsync(HttpClient http, string name, string connector)
+        {
+            JsonNode config = JsonNode.Parse(await http.GetStringAsync("/router/api/config"))!["config"]!;
+            config["Connectors"]![name] = JsonNode.Parse(connector);
+            return await http.PutAsync("/router/api/config?persist=false", new StringContent(config.ToJsonString(), Encoding.UTF8, "application/json"));
+        }
+
+        HttpResponseMessage shell = await PutWithAsync(client, "evil", """{"Type":"Cli","Preset":"Custom","Executable":"/bin/sh","Arguments":["-c","id"]}""");
+        HttpResponseMessage preload = await PutWithAsync(client, "claude", """{"Type":"Cli","Preset":"ClaudeCode","EnvironmentVariables":{"LD_PRELOAD":"/tmp/x.so"}}""");
+        HttpResponseMessage preset = await PutWithAsync(client, "claude", """{"Type":"Cli","Preset":"ClaudeCode"}""");
+
+        shell.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await shell.Content.ReadAsStringAsync()).Should().Contain("Connectors:evil").And.Contain("AllowProcessSettings");
+        preload.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        preset.StatusCode.Should().Be(HttpStatusCode.OK, "a preset started from PATH runs the vendor's own CLI");
+        await DisposeAsync();
+
+        HttpClient allowed = await StartAsync(o => o.AllowProcessSettings = true, remote: false);
+        (await PutWithAsync(allowed, "custom", """{"Type":"Cli","Preset":"Custom","Executable":"/usr/local/bin/llm"}""")).StatusCode
+            .Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task No_other_site_may_frame_the_dashboard()
     {
         HttpClient client = await StartAsync(remote: false);

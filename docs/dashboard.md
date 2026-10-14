@@ -193,6 +193,7 @@ The same settings are on `RouterDashboardOptions` (`app.MapRouterDashboard("/rou
 Whatever the setup:
 
 - **Writes must come from the dashboard's own origin.** `PUT`, `POST` and `DELETE` with an `Origin` other than the request's host (or a `PublicOrigins` entry), or with `Sec-Fetch-Site: cross-site`, get `403`. Scripts that send no `Origin` (curl) are unaffected.
+- **What a CLI runs is changed in the configuration file, not over the API.** Loopback clients are admin without a token, so the admin API refuses changes to a CLI or Copilot connector's `Executable`, `Arguments`, `EnvironmentVariables` and `HomeDirectory`; otherwise any program on the machine could make the router run anything it liked. Adding a preset started from `PATH` (Claude Code, Codex, Copilot) still works from the dashboard. `AllowProcessSettings: true` lifts this.
 - **A reverse proxy on this machine makes every request look local.** Use ASP.NET Core's forwarded-headers middleware so the real client address is seen, or set `RequireTokenForLocalClients: true`.
 - **Subscription CLI connectors stay loopback-only** (`AllowRemoteClients: false`) whatever the dashboard allows: a remote client's request falls through to an API-key or local model. Serving other people from your personal subscription is what [TERMS.md](TERMS.md) rules out.
 
