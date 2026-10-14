@@ -278,6 +278,7 @@ internal sealed partial class PromptRoutingMiddleware
         {
             ConversationFloor = conversationContext.Floor,
             PreferredModel = conversationContext.PreferredModel,
+            WarmCaches = conversationContext.WarmCaches ?? [],
             MinimumTier = minimumTier,
             ExplicitTier = explicitTurn ? choice!.Tier : null,
             Profile = profile.Profile,
@@ -472,6 +473,9 @@ internal sealed partial class PromptRoutingMiddleware
             {
                 _conversations!.Touch(conversationKey, answeredBy, conversation);
             }
+
+            // The model that answered now holds the conversation's prompt in its cache, as far as its backend says.
+            _conversations!.Warmed(conversationKey, answeredBy, (entry.CacheReadTokens ?? 0) + (entry.CacheCreationTokens ?? 0), conversation);
         }
 
         if (rateLimit is not null && (entry.InputTokens is not null || entry.OutputTokens is not null))

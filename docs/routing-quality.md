@@ -67,6 +67,7 @@ The classifier looks at the latest message, but a conversation is more than that
 - **Short follow-ups keep the full floor.** A message of up to `ShortFollowUpLength` characters (default 60, without code blocks), such as "yes", "try again" or "looks good, commit it", is not classified on its own.
 - **It decays.** Every `DecayTurns` turns (default 3) that need less than the conversation's peak lower the floor by one tier, so a conversation that moved on to simpler work gets cheaper models again. A harder turn raises the peak at once. After `IdleTimeout` (default 30 minutes) without a turn, the conversation is forgotten.
 - **It sticks to a model.** While the model that answered the last turn is available and exactly on the required tier, it is tried first (`X-Prompt-Route-Sticky: true`, and **sticky** on the Activity page): answers stay coherent and the provider's prompt cache keeps working.
+- **It weighs the prompt cache.** A prompt cache belongs to one model, so moving a conversation to another model re-sends its whole context at full price and caches it again there. With `KeepWarmCaches` (on by default), the router remembers which models hold the conversation's cache (the cache reads and writes their backends reported) for `PromptCacheLifetime` (default 5 minutes, Anthropic's default). When a turn's tier drops, or after a failover, a model holding the cache goes first if reading it is cheaper than moving, even above the required tier. The comparison uses the catalog's prices, cache prices included, so it moves when the move is cheaper anyway: an 80k-token Claude Code conversation stays on Opus 5.5 rather than re-sending it to Sonnet 5.5 (about $0.03 against $0.21 a turn), but moves from Sonnet 5.5 to Haiku 5.5. The activity entry and the `X-Prompt-Route-Selection` header say why: `prompt cache: opus (80,000 tokens cached) over sonnet, which would cost $0.1749 more this turn`. It applies to the `CheapestCapable` and `Balanced` strategies. OpenAI-compatible backends report cache reads only, so their cache counts from the second turn of a conversation.
 
 What it leaves alone:
 
@@ -77,7 +78,7 @@ What it leaves alone:
 A conversation is recognised by a hash of the client, the system prompt and the first user message, which chat clients resend on every turn. No prompt text is kept, the state is in memory, and the activity log shows only a short prefix of the hash. Clients that send only the newest message (relying on a server-side history) start a new conversation on each turn, so they are routed per message as before.
 
 ```jsonc
-"Middleware": { "Conversation": { "Enabled": true, "DecayTurns": 3, "IdleTimeout": "00:30:00", "ShortFollowUpLength": 60, "StickToModel": true } }
+"Middleware": { "Conversation": { "Enabled": true, "DecayTurns": 3, "IdleTimeout": "00:30:00", "ShortFollowUpLength": 60, "StickToModel": true, "KeepWarmCaches": true, "PromptCacheLifetime": "00:05:00" } }
 ```
 
 ## Feedback

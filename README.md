@@ -477,6 +477,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:PinToolCallingTurns` | `true` | Requests carrying tool results go to the model that issued the tool calls. |
 | `Middleware:Conversation:Enabled` | `true` | Route by the conversation: keep the tier recent turns needed and stay on the model that answered. See [docs/routing-quality.md](docs/routing-quality.md#conversations). |
 | `Middleware:Conversation:DecayTurns` / `IdleTimeout` / `ShortFollowUpLength` / `StickToModel` | `3` / `00:30:00` / `60` / `true` | Simpler turns before the floor drops a tier; how long an idle conversation is remembered; the length (characters) below which a message is a follow-up that keeps the full floor; whether to prefer the previous model. |
+| `Middleware:Conversation:KeepWarmCaches` / `PromptCacheLifetime` | `true` / `00:05:00` | Keep a conversation on the model holding its prompt cache while that is cheaper than moving, even above the required tier; how long a backend keeps a cache. See [routing-quality.md](docs/routing-quality.md#conversations). |
 | `Middleware:RetryEscalation:Enabled` / `Window` | `false` / `00:02:00` | A prompt repeated by the same client within the window goes one tier up. See [docs/routing-quality.md](docs/routing-quality.md#retry-escalation). |
 | `Middleware:StripSystemReminders` | `true` | Ignore `<system-reminder>` blocks when classifying. |
 | `Middleware:MaxRequestBodyBytes` | `8388608` | Larger bodies get 413. Agentic clients send 100 KB+ requests. |

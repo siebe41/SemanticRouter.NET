@@ -276,6 +276,20 @@ public sealed class ConversationRoutingOptions
     /// coherent and prompt caches keep working. Default <see langword="true"/>.
     /// </summary>
     public bool StickToModel { get; set; } = true;
+
+    /// <summary>
+    /// Keep a conversation on the model that holds its prompt cache while that is cheaper than moving, even above the
+    /// required tier: a prompt cache belongs to one model, so moving re-sends (and re-caches) the whole conversation.
+    /// Weighed with the catalog's cache prices, for the <c>CheapestCapable</c> and <c>Balanced</c> strategies.
+    /// Default <see langword="true"/>.
+    /// </summary>
+    public bool KeepWarmCaches { get; set; } = true;
+
+    /// <summary>
+    /// How long a backend keeps a prompt cache after the last request that read or wrote it. Anthropic's default
+    /// entries live 5 minutes (1 hour when requested); OpenAI's about as long. Default 5 minutes.
+    /// </summary>
+    public TimeSpan PromptCacheLifetime { get; set; } = TimeSpan.FromMinutes(5);
 }
 
 /// <summary>

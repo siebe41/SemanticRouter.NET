@@ -8,7 +8,7 @@ namespace SemanticRouter.AspNetCore;
 /// What the router knows about a conversation when a new turn arrives: the tier floor to keep, the model to prefer,
 /// and whether the turn is a short follow-up.
 /// </summary>
-internal readonly record struct ConversationContext(int? Floor, string? PreferredModel, bool FollowUp);
+internal readonly record struct ConversationContext(int? Floor, string? PreferredModel, bool FollowUp, IReadOnlyList<WarmCache>? WarmCaches = null);
 
 /// <summary>
 /// Remembers, per conversation, the highest tier recent turns needed and the model that answered last
@@ -64,7 +64,7 @@ internal sealed class ConversationTracker
             }
 
             int floor = followUp ? state.Peak : state.Peak - (state.TurnsBelow / options.DecayTurns);
-            return new ConversationContext(floor >= 1 ? floor : null, options.StickToModel ? state.Model : null, followUp);
+            return new ConversationContext(floor >= 1 ? floor : null, options.StickToModel ? state.Model : null, followUp, options.KeepWarmCaches && Warm(state) is { Count: > 0 } warm ? warm : null);
         }
     }
 
@@ -97,6 +97,23 @@ internal sealed class ConversationTracker
         }
 
         Prune(now, options.IdleTimeout);
+    }
+
+    /// <summary>
+    /// Records that <paramref name="model"/> now holds <paramref name="cachedTokens"/> of the conversation's prompt in
+    /// its prompt cache (the turn's cache reads and writes), alive for <see cref="ConversationRoutingOptions.PromptCacheLifetime"/>.
+    /// </summary>
+    public void Warmed(string key, string model, int cachedTokens, ConversationRoutingOptions options)
+    {
+        if (cachedTokens <= 0 || !_conversations.TryGetValue(key, out State? state))
+        {
+            return;
+        }
+
+        lock (state)
+        {
+            state.Warm[model] = (cachedTokens, _time.GetUtcNow() + options.PromptCacheLifetime);
+        }
     }
 
     /// <summary>Forgets a conversation: a first turn starts it afresh (another conversation may have opened the same way).</summary>
@@ -186,6 +203,18 @@ internal sealed class ConversationTracker
         }
     }
 
+    /// <summary>The prompt caches still alive; expired ones are dropped. Called under the state's lock.</summary>
+    private List<WarmCache> Warm(State state)
+    {
+        DateTimeOffset now = _time.GetUtcNow();
+        foreach (string expired in state.Warm.Where(w => w.Value.Expires <= now).Select(w => w.Key).ToArray())
+        {
+            state.Warm.Remove(expired);
+        }
+
+        return [.. state.Warm.Select(w => new WarmCache(w.Key, w.Value.Tokens))];
+    }
+
     private void Prune(DateTimeOffset now, TimeSpan idle)
     {
         if (_conversations.Count <= PruneAbove)
@@ -211,5 +240,6 @@ internal sealed class ConversationTracker
         public DecisionRecord? Last;
         public int ToolErrorTurns;
         public DateTimeOffset At;
+        public Dictionary<string, (int Tokens, DateTimeOffset Expires)> Warm { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 }

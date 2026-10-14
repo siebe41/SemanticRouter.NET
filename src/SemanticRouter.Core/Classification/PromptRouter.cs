@@ -54,6 +54,14 @@ public sealed record PromptRoutingRequest
     public string? PreferredModel { get; init; }
 
     /// <summary>
+    /// The prompt caches this conversation has warmed and that are still alive, by model. With the
+    /// <see cref="SelectionStrategy.CheapestCapable"/> and <see cref="SelectionStrategy.Balanced"/> strategies, a model
+    /// whose cache would make the turn cheaper than the ranking's first choice goes first, even above the required tier
+    /// (<see cref="RoutingPlan.Sticky"/>): caches belong to one model, so moving re-sends the whole conversation.
+    /// </summary>
+    public IReadOnlyList<WarmCache> WarmCaches { get; init; } = [];
+
+    /// <summary>
     /// The <see cref="SemanticRouterOptions.Profiles"/> entry to route under: it narrows the models, clamps the tier and can
     /// keep the request local. An explicit model it does not allow is ignored (the request is routed as <c>auto</c>).
     /// </summary>
@@ -75,6 +83,11 @@ public sealed record PromptRoutingRequest
     /// </summary>
     public PromptClassificationResult? Classification { get; init; }
 }
+
+/// <summary>A prompt cache a conversation has warmed on a model.</summary>
+/// <param name="Model">The catalog model holding the cache.</param>
+/// <param name="CachedTokens">How many tokens of the conversation's prompt it has cached (the last turn's cache reads and writes).</param>
+public sealed record WarmCache(string Model, int CachedTokens);
 
 /// <summary>The routing outcome: requirements, and the models to try in order.</summary>
 /// <param name="Classification">Why the requirements are what they are.</param>
@@ -137,6 +150,7 @@ public sealed class PromptRouter : IPromptRouter
     private readonly Dictionary<string, string> _routeModels;
     private readonly IModelLatency? _latency;
     private readonly SelectionStrategy _strategy;
+    private readonly int _outputTokens;
     private readonly TimeZoneInfo _zone;
     private readonly TimeProvider _time;
 
@@ -159,6 +173,7 @@ public sealed class PromptRouter : IPromptRouter
         _reliability = reliability;
         _latency = latency;
         _strategy = options.Selection.Strategy;
+        _outputTokens = options.Selection.EstimatedOutputTokens;
         _models = options.Models.ToArray();
         _profiles = new Dictionary<string, RoutingProfile>(options.Profiles, StringComparer.OrdinalIgnoreCase);
         _followConversation = new HashSet<string>(options.Routes.Where(r => r.FollowsConversation).Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
@@ -309,6 +324,7 @@ public sealed class PromptRouter : IPromptRouter
 
         // Stay on the conversation's model while it is exactly what the turn needs: available, and on the required
         // tier (not above it, so a conversation that no longer needs it moves to a cheaper model).
+        bool kept = false;
         if (request.PreferredModel is { } preferred
             && candidates.FirstOrDefault(c => string.Equals(c.Model.Name, preferred, StringComparison.OrdinalIgnoreCase)) is { } previous
             && previous != candidates[0]
@@ -316,7 +332,21 @@ public sealed class PromptRouter : IPromptRouter
             && previous.Model.Tier <= requirements.RequiredTier
             && _health.IsAvailable(previous.Model))
         {
-            return new RoutingPlan(classification, requirements, [previous, .. candidates.Where(c => c != previous)]) { Sticky = true, Unreliable = unreliable };
+            (candidates, kept) = ([previous, .. candidates.Where(c => c != previous)], true);
+        }
+
+        // A model holding the conversation's prompt cache goes first while that makes the turn cheaper, even above the
+        // tier; after a failover that is the model the conversation left, once it is available again.
+        SelectionStrategy strategy = requirements.Strategy ?? _strategy;
+        if (trial is null && request.WarmCaches.Count > 0 && strategy is SelectionStrategy.CheapestCapable or SelectionStrategy.Balanced
+            && KeepWarm(request.WarmCaches, candidates, requirements.EstimatedInputTokens) is { } warm)
+        {
+            return new RoutingPlan(classification, requirements, warm.Candidates) { Sticky = true, Unreliable = unreliable, SelectionNote = warm.Note };
+        }
+
+        if (kept)
+        {
+            return new RoutingPlan(classification, requirements, candidates) { Sticky = true, Unreliable = unreliable };
         }
 
         bool sticky = request.PreferredModel is { } same && candidates.Count > 0 && string.Equals(candidates[0].Model.Name, same, StringComparison.OrdinalIgnoreCase);
@@ -326,8 +356,62 @@ public sealed class PromptRouter : IPromptRouter
             Sticky = sticky,
             RouteModel = routeModel,
             Trial = trial,
-            SelectionNote = sticky || routeModel is not null || trial is not null ? null : SelectionNote(requirements.Strategy ?? _strategy, candidates),
+            SelectionNote = sticky || routeModel is not null || trial is not null ? null : SelectionNote(strategy, candidates),
         };
+    }
+
+    /// <summary>
+    /// The candidates with a warm-cache model first, when its cache makes the turn cheaper than the first candidate
+    /// would be; <see langword="null"/> when the first candidate is as cheap or cheaper. Only available models that
+    /// meet the required tier are kept for their cache.
+    /// </summary>
+    private (IReadOnlyList<ModelCandidate> Candidates, string Note)? KeepWarm(
+        IReadOnlyList<WarmCache> caches, IReadOnlyList<ModelCandidate> candidates, int inputTokens)
+    {
+        if (candidates.Count < 2)
+        {
+            return null;
+        }
+
+        int prefix = Math.Min(caches.Max(c => c.CachedTokens), inputTokens);
+        ModelCandidate first = candidates[0];
+        decimal firstCost = TurnCost(first.Model);
+        (ModelCandidate Candidate, int Cached, decimal Cost)? best = null;
+        foreach (ModelCandidate candidate in candidates.Skip(1))
+        {
+            int cached = Cached(candidate.Model);
+            if (cached == 0 || !candidate.MeetsRequiredTier || !_health.IsAvailable(candidate.Model))
+            {
+                continue;
+            }
+
+            decimal cost = TurnCost(candidate.Model);
+            if (cost < firstCost && (best is null || cost < best.Value.Cost))
+            {
+                best = (candidate, cached, cost);
+            }
+        }
+
+        if (best is not { } keep)
+        {
+            return null;
+        }
+
+        string note = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"prompt cache: {keep.Candidate.Model.Name} ({keep.Cached:N0} tokens cached) over {first.Model.Name}, which would cost ${firstCost - keep.Cost:0.####} more this turn");
+        return ([keep.Candidate, .. candidates.Where(c => c != keep.Candidate)], note);
+
+        int Cached(ModelDefinition model) =>
+            Math.Min(caches.FirstOrDefault(c => string.Equals(c.Model, model.Name, StringComparison.OrdinalIgnoreCase))?.CachedTokens ?? 0, inputTokens);
+
+        // A model with the cache reads it; another re-sends the prefix, and writes it to its own cache when it prices
+        // cache writes (a cheaper model pays that once, then reads like the first one did).
+        decimal TurnCost(ModelDefinition model) => Cached(model) is > 0 and var cached
+            ? model.Cost(inputTokens - cached, _outputTokens, cacheReadTokens: cached)
+            : model.CacheWriteCostPerMillionTokens is not null
+                ? model.Cost(inputTokens - prefix, _outputTokens, cacheWriteTokens: prefix)
+                : model.Cost(inputTokens, _outputTokens);
     }
 
     /// <summary>For a latency-aware strategy: the chosen model's time to first byte, and the cheaper model it was chosen over.</summary>

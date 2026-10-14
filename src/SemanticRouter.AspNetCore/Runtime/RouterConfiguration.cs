@@ -230,9 +230,9 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         }
 
         ConversationRoutingOptions conversation = Middleware.Conversation;
-        if (conversation.Enabled && (conversation.DecayTurns < 1 || conversation.IdleTimeout <= TimeSpan.Zero || conversation.ShortFollowUpLength < 0))
+        if (conversation.Enabled && (conversation.DecayTurns < 1 || conversation.IdleTimeout <= TimeSpan.Zero || conversation.ShortFollowUpLength < 0 || conversation.PromptCacheLifetime <= TimeSpan.Zero))
         {
-            errors.Add("Middleware:Conversation needs DecayTurns of at least 1, a positive IdleTimeout and a ShortFollowUpLength of 0 or more.");
+            errors.Add("Middleware:Conversation needs DecayTurns of at least 1, a positive IdleTimeout and PromptCacheLifetime, and a ShortFollowUpLength of 0 or more.");
         }
 
         ReliabilityOptions reliability = Middleware.Reliability;
