@@ -191,7 +191,7 @@ Uses your own Claude subscription. **Read [TERMS.md](TERMS.md#anthropic-claude-c
 The `haiku`, `sonnet` and `opus` aliases follow Anthropic's latest model of each family; add `claude-fable-5-1` on tier 5 if your plan includes it ([Model lineups](#model-lineups-several-models-per-provider)).
 
 What the preset does:
-- **Command line.** It runs `claude -p <prompt> --output-format stream-json --verbose --include-partial-messages --tools "" --disallowedTools "mcp__*" --strict-mcp-config --no-session-persistence --permission-mode dontAsk [--model …] [--system-prompt …]` in an empty temporary directory. These flags were checked against Claude Code 2.1.293.
+- **Command line.** It runs `claude -p <prompt> --output-format stream-json --verbose --include-partial-messages --tools "" --disallowedTools "mcp__*" --strict-mcp-config --no-session-persistence --permission-mode dontAsk [--model …] [--system-prompt …]` in an empty directory that only you can write to. These flags were checked against Claude Code 2.1.293.
 - **Tools.** Add `"ToolCalling": "Prompted"` (and `tools` to the models' capabilities) to let agentic clients such as Claude Code use this connector for tool-bearing turns; see [Tool calling and agentic clients](#tool-calling-and-agentic-clients).
 - **Long prompts.** Prompts longer than `MaxArgumentLength` go on stdin.
 - **System messages.** Client system messages replace Claude Code's default system prompt.
@@ -200,6 +200,8 @@ What the preset does:
 - **Extra flags** go in `Arguments`, e.g. `[ "--effort", "low" ]`.
 
 Your user-level Claude settings (for example `~/.claude/CLAUDE.md`) still apply.
+
+**Where CLIs run.** Every CLI run (and `doctor`'s checks) gets a fresh directory under a parent that only you can write to, because a CLI reads instructions, settings and hooks from its working directory, and Claude Code reads `CLAUDE.md` from every directory above it. On Linux the parent is `$XDG_RUNTIME_DIR/semantic-router`, or `~/.cache/semantic-router` (`$XDG_CACHE_HOME`) when there is no runtime directory; it is never under the shared `/tmp`. On macOS it is under your own `$TMPDIR`, and on Windows under `%TEMP%`. On Linux and macOS the parent is created with mode 0700, and a CLI request fails (with a message naming the directory) if it, or a directory above it, can be written to by other users.
 
 ## GitHub Copilot CLI
 
