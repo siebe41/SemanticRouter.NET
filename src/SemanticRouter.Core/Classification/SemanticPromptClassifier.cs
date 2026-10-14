@@ -126,6 +126,27 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
         return result;
     }
 
+    /// <inheritdoc />
+    public ValueTask<PromptClassificationResult> ClassifyWithoutEmbeddingAsync(string prompt, CancellationToken cancellationToken = default)
+    {
+        long started = Stopwatch.GetTimestamp();
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            return ValueTask.FromResult(PromptClassificationResult.Bypass(_options.FallbackTier, RoutingReason.EmptyPrompt));
+        }
+
+        ComplexityAnalysis complexity = _complexityAnalyzer.Analyze(prompt);
+        RouteDecision decision = _routeSelector.SelectRoute([], complexity);
+        return ValueTask.FromResult(new PromptClassificationResult
+        {
+            RequiredTier = decision.RequiredTier,
+            Reason = decision.Reason,
+            RequiredCapabilities = decision.RequiredCapabilities,
+            Complexity = complexity,
+            Elapsed = Stopwatch.GetElapsedTime(started),
+        });
+    }
+
     private Task<SemanticRouteIndex> GetIndexAsync(CancellationToken cancellationToken)
     {
         Task<SemanticRouteIndex>? task = Volatile.Read(ref _indexTask);

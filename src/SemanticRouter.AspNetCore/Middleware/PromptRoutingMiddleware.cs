@@ -293,6 +293,8 @@ internal sealed partial class PromptRoutingMiddleware
             ? _conversations!.Lookup(conversationKey, prompt, conversation)
             : default;
 
+        bool localOnly = profile.LocalOnly || choice is { Clear: false, Local: true } || keptLocal
+            || (profile.Profile is { } named && runtime.Router.Profiles.TryGetValue(named, out RoutingProfile? rules) && rules.LocalOnly);
         var routingRequest = new PromptRoutingRequest
         {
             ConversationFloor = conversationContext.Floor,
@@ -300,7 +302,8 @@ internal sealed partial class PromptRoutingMiddleware
             MinimumTier = minimumTier,
             ExplicitTier = explicitTurn ? choice!.Tier : null,
             Profile = profile.Profile,
-            LocalOnly = profile.LocalOnly || choice is { Clear: false, Local: true } || keptLocal,
+            LocalOnly = localOnly,
+            EmbeddingsAllowed = !localOnly || runtime.Configuration.Embeddings.KeepsPromptsLocal,
             Prompt = prompt,
             EstimatedInputTokens = chat.EstimatedInputTokens,
             AdditionalCapabilities = ImpliedCapabilities(chat),
@@ -551,7 +554,7 @@ internal sealed partial class PromptRoutingMiddleware
         {
             AddFeedback(entry, FeedbackKind.Corrected, previousTurn, client, Above(previousTurn.Tier), $"corrected in request {entry.Id}");
         }
-        else if (classifiedTurn && callout is null)
+        else if (classifiedTurn && callout is null && (!entry.LocalOnly || runtime.Configuration.Embeddings.KeepsPromptsLocal))
         {
             // Other wording or another language: compared by meaning, after the request has gone on.
             _corrections?.CheckInBackground(prompt, () =>

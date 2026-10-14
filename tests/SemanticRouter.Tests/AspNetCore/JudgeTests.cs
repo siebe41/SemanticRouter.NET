@@ -45,7 +45,8 @@ public sealed class JudgeTests : RouterHostTest
 
     private AnswerJudge Judge => Services.GetRequiredService<AnswerJudge>();
 
-    private Task<HttpClient> StartJudgedAsync(Action<JudgeOptions> judge, Action<PromptRouterMiddlewareOptions>? middleware = null) =>
+    private Task<HttpClient> StartJudgedAsync(
+        Action<JudgeOptions> judge, Action<PromptRouterMiddlewareOptions>? middleware = null, Action<SemanticRouterOptions>? routing = null) =>
         StartAsync(
             o =>
             {
@@ -63,6 +64,7 @@ public sealed class JudgeTests : RouterHostTest
                 cloud.Model = "cloud-judge-1";
                 o.Models.Add(local);
                 o.Models.Add(cloud);
+                routing?.Invoke(o);
             },
             services: s => s.AddSingleton<TimeProvider>(_time));
 
@@ -228,6 +230,24 @@ public sealed class JudgeTests : RouterHostTest
         JudgeCalls(CloudHttp, "cloud-judge-1").Should().Be(1);
         Latest.Grade.Should().Be(4);
         Services.GetRequiredService<RoutingFeedbackLog>().Recent().Should().BeEmpty("a good grade is not feedback");
+    }
+
+    [Fact]
+    public async Task A_judge_the_routing_profile_does_not_allow_never_sees_its_requests()
+    {
+        HttpClient client = await StartJudgedAsync(
+            j => (j.Enabled, j.SampleRate, j.Model) = (true, 1, "cloud-judge"),
+            routing: o =>
+            {
+                var residency = new RoutingProfile();
+                residency.DeniedConnectors.Add("anthropic");
+                o.Profiles["residency"] = residency;
+            });
+
+        await AskAsync(client, model: "auto@residency");
+
+        JudgeCalls(CloudHttp, "cloud-judge-1").Should().Be(0, "the profile keeps this client's data off that connector");
+        Latest.Grade.Should().BeNull();
     }
 
     [Fact]

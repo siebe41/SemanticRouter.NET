@@ -65,6 +65,7 @@ internal static class EvaluationApi
             }
 
             RouterRuntime runtime = provider.Current;
+            cases = LocalOnlyKept(cases, runtime.Configuration.Embeddings);
             var evaluator = new RoutingEvaluator(runtime.EmbeddingProvider, runtime.Configuration);
             PreparedEvaluation prepared;
             try
@@ -131,9 +132,10 @@ internal static class EvaluationApi
             async Task<CompareSide> RunAsync(string label, IEmbeddingProvider embeddings, EmbeddingProviderOptions settings)
             {
                 var evaluator = new RoutingEvaluator(embeddings, runtime.Configuration);
+                IReadOnlyList<EvaluationCase> sent = LocalOnlyKept(cases, settings);
                 try
                 {
-                    PreparedEvaluation prepared = await evaluator.PrepareAsync(cases, context.RequestAborted).ConfigureAwait(false);
+                    PreparedEvaluation prepared = await evaluator.PrepareAsync(sent, context.RequestAborted).ConfigureAwait(false);
                     EvaluationReport report = evaluator.Evaluate(prepared);
                     CalibrationReport calibration = evaluator.Calibrate(prepared);
                     return new CompareSide(label, Describe(settings), null, EvaluationResponse.From(report, calibration, prepared.EmbeddingTime, settings));
@@ -262,6 +264,10 @@ internal static class EvaluationApi
 
         return false;
     }
+
+    /// <summary>The cases that may be embedded with <paramref name="settings"/>: local-only ones only when it keeps prompts local.</summary>
+    private static IReadOnlyList<EvaluationCase> LocalOnlyKept(IReadOnlyList<EvaluationCase> cases, EmbeddingProviderOptions settings) =>
+        settings.KeepsPromptsLocal ? cases : [.. cases.Where(c => !c.LocalOnly)];
 
     private static string Describe(EmbeddingProviderOptions settings) => settings.Provider switch
     {

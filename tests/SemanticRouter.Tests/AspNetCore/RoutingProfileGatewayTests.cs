@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Tests.Support;
 using static SemanticRouter.Tests.Support.TestEmbeddings;
@@ -247,4 +248,34 @@ public sealed class RoutingProfileGatewayTests : RouterHostTest
         Services.GetRequiredService<RoutingActivityLog>().Recent(2).Select(e => e.Detail ?? string.Empty)
             .Should().Contain(d => d.Contains("MaxQueue 0", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public async Task A_local_only_request_is_not_sent_to_an_embedding_endpoint_off_this_machine()
+    {
+        Classifier.Setup(c => c.ClassifyWithoutEmbeddingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PromptClassificationResult.Bypass(1, RoutingReason.NoMatchFallback));
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+            },
+            o => o.Profiles["private"] = new RoutingProfile { LocalOnly = true },
+            services: s => s.Configure<EmbeddingProviderOptions>(e =>
+            {
+                e.Provider = EmbeddingProviderKind.OpenAICompatible;
+                e.Endpoint = new Uri("https://api.openai.com");
+                e.Model = "text-embedding-3-small";
+            }));
+
+        HttpResponseMessage local = await client.PostAsync("/v1/chat/completions", Chat("look up account 4471", "auto@private"));
+        Classifier.Verify(c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never());
+        await client.PostAsync("/v1/chat/completions", Chat("hello"));
+
+        local.StatusCode.Should().Be(HttpStatusCode.OK);
+        Classifier.Verify(c => c.ClassifyWithoutEmbeddingAsync("look up account 4471", It.IsAny<CancellationToken>()), Times.Once());
+        Classifier.Verify(c => c.ClassifyAsync("hello", It.IsAny<CancellationToken>()), Times.Once(), "other requests are classified as usual");
+        Services.GetRequiredService<RouterRuntimeProvider>().Current.Warnings.Should().Contain(w => w.Contains("not on this machine", StringComparison.Ordinal));
+    }
 }
+

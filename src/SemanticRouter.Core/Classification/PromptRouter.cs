@@ -64,6 +64,12 @@ public sealed record PromptRoutingRequest
     public bool LocalOnly { get; init; }
 
     /// <summary>
+    /// <see langword="false"/> when the prompt may not go to the embedding provider (a local-only request, and embeddings
+    /// that are not on this machine): it is classified by its complexity alone. Default <see langword="true"/>.
+    /// </summary>
+    public bool EmbeddingsAllowed { get; init; } = true;
+
+    /// <summary>
     /// A cheaper model to try first on a plain route match (a trial of whether it does the route's work as well), when it
     /// can serve the request; the usual candidates stay behind it (<see cref="RoutingPlan.Trial"/>).
     /// </summary>
@@ -227,7 +233,9 @@ public sealed class PromptRouter : IPromptRouter
         PromptClassificationResult classification;
         using (System.Diagnostics.Activity? classify = RouterTelemetry.Source.StartActivity("semantic_router.classify"))
         {
-            classification = await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false);
+            classification = request.EmbeddingsAllowed
+                ? await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false)
+                : await _classifier.ClassifyWithoutEmbeddingAsync(request.Prompt, cancellationToken).ConfigureAwait(false);
             if (request.ConversationFloor is { } conversation
                 && (conversation > classification.RequiredTier || (classification.RouteName is { } route && _followConversation.Contains(route) && classification.Reason == RoutingReason.SemanticMatch)))
             {

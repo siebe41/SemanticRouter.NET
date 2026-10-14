@@ -449,6 +449,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | Key | Default | Description |
 |---|---|---|
 | `Embeddings:Provider` | `Hashing` | `Hashing` (dev only), `Onnx` (in-process model, see below) or `OpenAICompatible` (`Endpoint`, `Model`, `ApiKey`, `RequestPath`, `MaxBatchSize`, `Timeout`). |
+| `Embeddings:IsLocal` | loopback `Endpoint` only | Whether an `OpenAICompatible` endpoint keeps prompts on this machine (or a server you control). When it does not, requests already known to be local-only (a local-only profile, `LocalOnlyWhen`, `@local`, a conversation kept local) are classified by complexity alone instead of being sent to it, tuning and evaluation leave local-only prompts out, and a warning says that local-only routes still need every prompt embedded there first. |
 | `Embeddings:Model` / `ModelPath` / `Pooling` | | For `Onnx`: `all-MiniLM-L6-v2` (default) or `bge-small-en-v1.5`, downloaded on first use; or `ModelPath`, a directory with your own `model.onnx` and `vocab.txt`, with `Pooling` `Mean` or `Cls`. Needs the `SemanticRouter.Embeddings.Onnx` package (`.AddOnnxEmbeddings()` / `.UseOnnxEmbeddings()`); the tool includes it. |
 | `Embeddings:WarmUpOnStartup` | `true` | Embed utterances in the background at startup. |
 | `Middleware:Mode` | `Annotate` | `Annotate` or `Dispatch`. |
