@@ -181,6 +181,26 @@ test('the prompt tester classifies and sends a prompt through the gateway', asyn
   await expect(page.locator('.tester')).toContainText('Hello from the stub backend.');
 });
 
+test('the endpoints card and the top bar show the host in use, its state and figures', async ({ page }) => {
+  const stub = `127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`;
+  await open(page, 'overview');
+  await page.locator('#tester-prompt').fill('hello there, how are you?');
+  await page.locator('[data-action="tester-send"]').click();
+  await expect(page.locator('.tester')).toContainText('Hello from the stub backend.');
+  await page.reload();
+
+  const row = page.locator('#endpoints tr').filter({ has: page.locator('td:first-child b', { hasText: /^local$/ }) });
+  await expect(row).toContainText(stub);
+  await expect(row).toContainText('in use');
+  await expect(row.locator('.badge.ok').first()).toHaveText('ok');
+  await expect(row).toContainText('100%');
+  await expect(page.locator('#status-pill .endpoint-now')).toContainText(stub);
+
+  await row.locator('[data-action="endpoint-check"]').click();
+  await expect(row).toContainText('passed');
+  await expect(page.locator('#endpoints')).not.toContainText('sk-e2e-not-a-real-key');
+});
+
 test('router learned runs tuning, pauses and resumes learning', async ({ page }) => {
   await open(page, 'learned');
   await expect(page.locator('#view')).toContainText('applies changes');

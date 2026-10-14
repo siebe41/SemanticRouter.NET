@@ -1,6 +1,7 @@
 /* Semantic Router dashboard: Loading, the sidebar and top bar, themes, rendering and hash routing. */
 import { $, $$, api, banner, h, isDirty, PREFIX, readOnly, state, THEME_KEY, THEMES, views } from './core.js';
 import { loadDigest } from './digest.js';
+import { endpointPill } from './endpoints.js';
 import { loadTuning } from './learned.js';
 import { scheduleLive } from './live.js';
 import { graph, mounts, readPalette, unmount } from './memory.js';
@@ -50,12 +51,15 @@ export async function refreshStatus() {
 export function renderChrome() {
   const s = state.status;
   if (s) {
-    $('#brand-sub').textContent = `v${s.version} · ${s.source.toLowerCase()}`;
+    $('#brand-sub').textContent = `v${s.version} · ${s.source.toLowerCase()}${s.machine ? ' · ' + s.machine : ''}`;
+    $('#brand-sub').title = s.machine ? `Running on ${s.machine}` : '';
     $('#lib-version').textContent = 'SemanticRouter ' + s.libraryVersion;
     const cooling = s.models.filter((m) => m.coolingDownUntil).length;
     const warm = s.warmedUp ? 'ok' : (s.warmUpError ? 'danger' : 'warn');
+    const now = endpointPill();
     $('#status-pill').innerHTML =
-      `<span class="dot ${warm}"></span> ${h(s.gateway.mode)} mode · ${s.models.filter((m) => m.enabled).length} models` +
+      `<span class="dot ${warm}"></span> <span class="pill-detail">${h(s.gateway.mode)} mode · ${s.models.filter((m) => m.enabled).length} models${now ? ' ·' : ''}</span>` +
+      (now ? ' ' + now : '') +
       (cooling ? ` · <span class="badge warn">${cooling} cooling down</span>` : '') +
       (s.warmedUp ? '' : (s.warmUpError ? ` · <span class="badge danger" title="${h(s.warmUpError)}">embeddings failed</span>` : ' · <span class="badge info">warming up</span>'));
   }
