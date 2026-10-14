@@ -3,6 +3,7 @@ import { fmtMs, trendsCard } from './charts.js';
 import { tierOptions } from './config.js';
 import { h, num, readOnly, state, tierName, views, when } from './core.js';
 import { digestCard, noticesCard } from './digest.js';
+import { endpointsCard } from './endpoints.js';
 import { learnedBadge, learnedCard } from './learned.js';
 import { unreliableBadge } from './reliability.js';
 import { isLocalModel } from './live.js';
@@ -27,6 +28,7 @@ views.overview = () => {
       <div class="card stat"><span class="value">${s.models.filter((m) => m.enabled).length}<span class="muted" style="font-size:14px"> / ${s.models.length}</span></span><span class="label">models enabled</span></div>
       <div class="card stat"><span class="value">${s.routes.length}</span><span class="label">routes · ${s.routes.reduce((n, r) => n + r.utterances, 0)} utterances</span></div>
     </div>
+    ${endpointsCard()}
     ${trendsCard()}
     ${learnedCard()}
 
@@ -63,10 +65,6 @@ views.overview = () => {
       <div class="card"><div class="card-head"><h2>Served by</h2></div>${bars(byModel)}</div>
       <div class="card"><div class="card-head"><h2>Required tier</h2></div>${bars(byTier, (k) => tierName(parseInt(k, 10)), true)}</div>
     </div>
-    ${(a.latency || []).length ? `<div class="card section"><div class="card-head"><h2>Latency by connector</h2><span class="muted small">Served requests in the activity log. First byte is when the client starts seeing the reply.</span></div>
-      <div class="table-wrap"><table><tr><th>Connector</th><th class="num">Requests</th><th class="num">With tools</th><th class="num">First byte p50</th><th class="num">First byte p95</th><th class="num">Total p50</th></tr>
-      ${a.latency.map((l) => `<tr><td>${h(l.connector)} <span class="faint small">${h(l.kind || '')}</span></td><td class="num">${l.requests}</td><td class="num">${l.withTools}</td><td class="num">${l.firstByteP50 != null ? num(l.firstByteP50, 0) + ' ms' : '—'}</td><td class="num">${l.firstByteP95 != null ? num(l.firstByteP95, 0) + ' ms' : '—'}</td><td class="num">${l.totalP50 != null ? num(l.totalP50, 0) + ' ms' : '—'}</td></tr>`).join('')}
-      </table></div></div>` : ''}
 
     <div class="card section tester">
       <div class="card-head"><h2>Try a prompt</h2><span class="muted small">Classification calls no model. “Send” goes through the gateway for real${s.gateway.mode !== 'Dispatch' ? ' (Annotate mode: your endpoint answers)' : ''}.</span></div>

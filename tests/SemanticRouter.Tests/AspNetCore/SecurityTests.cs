@@ -60,6 +60,29 @@ public sealed class SecretHandlingTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_key_in_a_connector_address_is_not_shown_in_status_or_check_messages()
+    {
+        HttpClient client = await StartDispatchAsync(s =>
+            s.PostConfigure<SemanticRouterConnectorsOptions>(o =>
+                o.Connectors["anthropic"].BaseAddress = new Uri("https://user:sk-in-userinfo@api.anthropic.example/v1?api-key=sk-in-query#sk-in-fragment")));
+
+        string status = await client.GetStringAsync("/router/api/status");
+        string check = await (await client.PostAsync("/router/api/connectors/anthropic/check", null)).Content.ReadAsStringAsync();
+
+        foreach (string text in new[] { status, check })
+        {
+            text.Should().NotContain("sk-in-userinfo").And.NotContain("sk-in-query").And.NotContain("sk-in-fragment");
+        }
+
+        JsonNode node = JsonNode.Parse(status)!;
+        node["connectors"]!.AsArray().Single(c => c!["name"]!.GetValue<string>() == "anthropic")!["target"]!.GetValue<string>()
+            .Should().Be("https://api.anthropic.example/v1");
+        node["endpoints"]!.AsArray().Single(c => c!["connector"]!.GetValue<string>() == "anthropic")!["host"]!.GetValue<string>()
+            .Should().Be("api.anthropic.example");
+        JsonNode.Parse(check)!["messages"]!.AsArray().Should().NotBeEmpty();
+    }
+
+    [Fact]
     public async Task An_unset_reference_is_reported_in_status_and_the_log()
     {
         HttpClient client = await StartDispatchAsync(s =>

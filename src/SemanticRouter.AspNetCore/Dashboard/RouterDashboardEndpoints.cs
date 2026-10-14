@@ -162,8 +162,8 @@ public static partial class RouterDashboardEndpoints
             })
             .WithMetadata(DashboardAnonymousMetadata.Instance);
 
-        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories, ClientRateLimiter rateLimits) =>
-            Results.Json(BuildStatus(provider, health, activity, budgets, factories, rateLimits), ApiJson));
+        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories, ClientRateLimiter rateLimits, IServiceProvider services) =>
+            Results.Json(BuildStatus(provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>()), ApiJson));
 
         api.MapGet("/config", (RouterRuntimeProvider provider) =>
         {
@@ -389,6 +389,20 @@ public static partial class RouterDashboardEndpoints
             }
 
             return Results.Json(DiscoverResponse.From(report), ApiJson);
+        });
+
+        api.MapPost("/connectors/{name}/check", async (string name, IServiceProvider services, RouterRuntimeProvider provider) =>
+        {
+            EndpointChecks? checks = services.GetService<EndpointChecks>();
+            if (checks is null || !provider.Current.Configuration.Connectors.ContainsKey(name))
+            {
+                return Results.Problem($"Connector '{name}' is not configured.", statusCode: StatusCodes.Status404NotFound);
+            }
+
+            // Kept with where the connector pointed, so the result is forgotten once it points somewhere else.
+            string target = EndpointHealth.TargetKey(provider.Current.Configuration, name);
+            EndpointCheck result = await checks.RunAsync(name, target, () => RouterDoctor.CheckConnectorAsync(services, name)).ConfigureAwait(false);
+            return Results.Json(result, ApiJson);
         });
 
         EvaluationApi.Map(api, ApiJson, Actor);
@@ -639,7 +653,7 @@ public static partial class RouterDashboardEndpoints
 
     private static StatusResponse BuildStatus(
         RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories,
-        ClientRateLimiter rateLimits)
+        ClientRateLimiter rateLimits, ConnectorIncidents? incidents, EndpointChecks? checks)
     {
         RouterRuntime runtime = provider.Current;
         RouterConfiguration config = runtime.Configuration;
@@ -657,7 +671,7 @@ public static partial class RouterDashboardEndpoints
             runtime.Warnings,
             (typeof(RouterDashboardEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "dev").Split('+')[0],
             new EmbeddingsStatus(
-                config.Embeddings.Provider.ToString(), config.Embeddings.Model, config.Embeddings.Endpoint?.ToString(), config.Embeddings.Dimensions,
+                config.Embeddings.Provider.ToString(), config.Embeddings.Model, AddressDisplay.Show(config.Embeddings.Endpoint), config.Embeddings.Dimensions,
                 [nameof(EmbeddingProviderKind.Hashing), nameof(EmbeddingProviderKind.OpenAICompatible), .. factories.Select(f => f.Kind.ToString()).Distinct()],
                 factories.SelectMany(f => f.Models.Select(m => new EmbeddingModelStatus(f.Kind.ToString(), m.Name, m.Description, m.SuggestedThreshold, m.DownloadBytes))).ToArray(),
                 (runtime.Classifier as SemanticPromptClassifier)?.IndexStatistics is { } index
@@ -672,7 +686,7 @@ public static partial class RouterDashboardEndpoints
                 config.Connectors.TryGetValue(m.Connector, out ConnectorOptions? c) ? c.Type.ToString() : null)).ToArray(),
             config.Connectors.Select(kv => new ConnectorStatus(
                 kv.Key, kv.Value.Type.ToString(), kv.Value.Type == ConnectorType.Cli ? kv.Value.Preset.ToString() : null,
-                kv.Value.Type is ConnectorType.Cli or ConnectorType.Copilot ? kv.Value.Executable : kv.Value.BaseAddress?.ToString(),
+                kv.Value.Type is ConnectorType.Cli or ConnectorType.Copilot ? kv.Value.Executable : AddressDisplay.Show(kv.Value.BaseAddress),
                 kv.Value.Type == ConnectorType.Cli ? kv.Value.ToolCalling.ToString() : "Native",
                 !string.IsNullOrEmpty(runtime.Resolved.Connectors.TryGetValue(kv.Key, out ConnectorOptions? resolved) ? resolved.ApiKey : null),
                 config.Models.Count(m => string.Equals(m.Connector, kv.Key, StringComparison.OrdinalIgnoreCase)))).ToArray(),
@@ -705,7 +719,9 @@ public static partial class RouterDashboardEndpoints
                         Percentile(g.Select(e => e.TotalMilliseconds), 0.5)))
                     .OrderBy(l => l.Connector, StringComparer.OrdinalIgnoreCase)
                     .ToArray()),
-            budgets.Status(config.Usage));
+            budgets.Status(config.Usage),
+            EndpointHealth.Build(config, cooldowns, recent, incidents, checks),
+            Environment.MachineName);
     }
 
     private static double? Percentile(IEnumerable<double?> values, double quantile)
@@ -849,7 +865,9 @@ public static partial class RouterDashboardEndpoints
         IReadOnlyList<RouteStatus> Routes,
         GatewayStatus Gateway,
         ActivitySummary Activity,
-        IReadOnlyList<BudgetStatus> Budgets);
+        IReadOnlyList<BudgetStatus> Budgets,
+        IReadOnlyList<EndpointStatus> Endpoints,
+        string Machine);
 
     /// <summary>Embedding provider in use.</summary>
     public sealed record EmbeddingsStatus(

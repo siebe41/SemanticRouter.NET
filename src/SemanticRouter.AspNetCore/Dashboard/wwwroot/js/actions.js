@@ -103,6 +103,18 @@ export const actions = {
   },
   async 'tuning-pause'() { await api('POST', '/tuning/pause'); await afterTuning(); toast('Learning paused.', 'ok'); },
   async 'tuning-resume'() { await api('POST', '/tuning/resume'); await afterTuning(); toast('Learning resumed.', 'ok'); },
+  async 'endpoint-check'(el) {
+    const name = el.dataset.name;
+    state.checking.add(name); render();
+    try {
+      const r = await api('POST', `/connectors/${encodeURIComponent(name)}/check`);
+      toast(`${name}: ${r.messages[0] || r.status}`, r.status === 'Failed' ? 'danger' : r.status === 'Ok' ? 'ok' : '');
+    } finally {
+      state.checking.delete(name);
+      await refreshStatus();
+      render();
+    }
+  },
   async 'reset-health'() { await api('POST', '/health/reset'); await refreshStatus(); toast('Cooldowns cleared.', 'ok'); },
 
   'tiers-customize'() { state.config.Tiers = tiers().map((t) => ({ Level: t.Level, Name: t.Name, Description: t.Description || null })); render(); },

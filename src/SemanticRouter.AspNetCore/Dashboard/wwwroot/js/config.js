@@ -1,4 +1,5 @@
 /* Semantic Router dashboard: Configuration pages: tiers, routes, models, connectors, routing rules, embeddings, gateway, clients, history. */
+import { connectorStateBadge } from './endpoints.js';
 import { reliabilityBadges, reliabilityCard } from './reliability.js';
 import { CAPABILITY_HINTS, CONNECTOR_TYPES, MESSAGE_SELECTION, PRESETS, SCORING, STRATEGIES, connectorNames, csv, h, isReference, kv, lineupFor, lines, readOnly, state, tiers, views } from './core.js';
 
@@ -179,7 +180,7 @@ views.connectors = () => {
       return `<div class="item ${state.open.has(key) ? 'open' : ''}" data-key="${key}">
         <div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
           <span class="chev">▶</span><span class="title">${h(name)}</span>
-          <span class="meta"><span class="badge accent">${h(type)}${type === 'Cli' ? ' / ' + h(c.Preset || 'Custom') : ''}</span><span class="mono">${h(type === 'Cli' ? (c.Executable || '(preset default)') : type === 'Copilot' ? (c.Executable || 'copilot') : (c.BaseAddress || ''))}</span><span>${models.length} model${models.length === 1 ? '' : 's'}</span>${c.ApiKey === '***' ? '<span class="badge ok">key set</span>' : (isReference(c.ApiKey) ? '<span class="badge ok" title="' + h(c.ApiKey) + '">key: reference</span>' : '')}${type === 'Cli' && c.ToolCalling === 'Prompted' ? '<span class="badge info">prompted tools</span>' : ''}</span>
+          <span class="meta"><span class="badge accent">${h(type)}${type === 'Cli' ? ' / ' + h(c.Preset || 'Custom') : ''}</span><span class="mono">${h(type === 'Cli' ? (c.Executable || '(preset default)') : type === 'Copilot' ? (c.Executable || 'copilot') : (c.BaseAddress || ''))}</span><span>${models.length} model${models.length === 1 ? '' : 's'}</span>${connectorStateBadge(name)}${c.ApiKey === '***' ? '<span class="badge ok">key set</span>' : (isReference(c.ApiKey) ? '<span class="badge ok" title="' + h(c.ApiKey) + '">key: reference</span>' : '')}${type === 'Cli' && c.ToolCalling === 'Prompted' ? '<span class="badge info">prompted tools</span>' : ''}</span>
         </div>
         <div class="item-body"><div class="form-grid">
           <label class="field"><span class="name">Name</span><input type="text" data-action-input="connector-rename" data-name="${h(name)}" value="${h(name)}"><span class="hint">Models refer to it by this name; renaming updates them.</span></label>

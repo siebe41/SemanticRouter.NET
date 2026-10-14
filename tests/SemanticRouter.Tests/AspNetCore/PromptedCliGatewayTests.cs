@@ -150,6 +150,33 @@ public sealed class PromptedCliGatewayTests : RouterHostTest
         latency.GetProperty("firstByteP50").GetDouble().Should().BeGreaterThanOrEqualTo(0);
     }
 
+    [Fact]
+    public async Task The_overview_reports_each_endpoint_and_checks_one_on_demand()
+    {
+        HttpClient client = await StartPromptedAsync();
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        JsonElement status = JsonDocument.Parse(await client.GetStringAsync("/router/api/status")).RootElement;
+        JsonElement claude = status.GetProperty("endpoints").EnumerateArray().Single(e => e.GetProperty("connector").GetString() == "claude");
+        claude.GetProperty("program").GetString().Should().Be("claude");
+        claude.GetProperty("via").GetString().Should().Be("Anthropic");
+        claude.GetProperty("state").GetString().Should().Be("ok");
+        claude.GetProperty("attempts").GetInt32().Should().Be(1);
+        claude.GetProperty("successRate").GetDouble().Should().Be(1);
+        status.GetProperty("machine").GetString().Should().Be(Environment.MachineName);
+
+        HttpResponseMessage check = await client.PostAsync("/router/api/connectors/claude/check", null);
+        check.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+        JsonElement result = JsonDocument.Parse(await check.Content.ReadAsStringAsync()).RootElement;
+        result.GetProperty("messages").GetArrayLength().Should().BeGreaterThan(0);
+        JsonElement after = JsonDocument.Parse(await client.GetStringAsync("/router/api/status")).RootElement
+            .GetProperty("endpoints").EnumerateArray().Single(e => e.GetProperty("connector").GetString() == "claude");
+        after.GetProperty("check").GetProperty("status").GetString().Should().Be(result.GetProperty("status").GetString());
+
+        (await client.PostAsync("/router/api/connectors/nope/check", null)).StatusCode.Should().Be(System.Net.HttpStatusCode.NotFound);
+    }
+
     /// <summary>A CLI that writes some lines, then waits for the test before writing the rest.</summary>
     private sealed class GatedCliProcess(IReadOnlyList<string> first, Task gate, IReadOnlyList<string> rest) : ICliProcess
     {

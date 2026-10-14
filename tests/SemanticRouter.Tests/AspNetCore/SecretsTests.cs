@@ -156,6 +156,33 @@ public sealed class SecretsTests
         added.ReferenceErrors(current).Should().ContainSingle("a new connector has no stored secret yet");
     }
 
+    [Theory]
+    [InlineData("https://user:sk-secret@api.example.com/v1?api-key=sk-query#sk-fragment", "https://api.example.com/v1")]
+    [InlineData("http://localhost:1234", "http://localhost:1234/")]
+    [InlineData("https://x.openai.azure.com:8443/openai/deployments/gpt?api-version=2024", "https://x.openai.azure.com:8443/openai/deployments/gpt")]
+    public void Addresses_are_shown_without_credentials_query_or_fragment(string address, string shown) =>
+        AddressDisplay.Show(new Uri(address)).Should().Be(shown);
+
+    [Fact]
+    public async Task A_probe_names_the_address_without_its_credentials()
+    {
+        var connector = new ConnectorOptions { BaseAddress = new Uri("https://user:sk-in-userinfo@api.example.com/?key=sk-in-query") };
+        using var answers = new HttpClient(new StubHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("""{"data":[{"id":"m"}]}""") }));
+        using var refuses = new HttpClient(new StubHandler(_ => throw new HttpRequestException("Connection refused (api.example.com:443)")));
+
+        ConnectorProbeResult ok = await ConnectorProbe.ListModelsAsync("x", connector, answers, TimeSpan.FromSeconds(5));
+        ConnectorProbeResult down = await ConnectorProbe.ListModelsAsync("x", connector, refuses, TimeSpan.FromSeconds(5));
+
+        ok.Message.Should().Be("https://api.example.com/v1/models: 1 model(s).");
+        down.Message.Should().StartWith("https://api.example.com/v1/models is not reachable").And.NotContain("sk-in-userinfo");
+    }
+
+    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> answer) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(answer(request));
+    }
+
     [Fact]
     public void Protected_file_store_round_trips_without_plain_text_on_disk()
     {

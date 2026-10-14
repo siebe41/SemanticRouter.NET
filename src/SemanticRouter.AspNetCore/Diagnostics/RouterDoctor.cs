@@ -48,43 +48,59 @@ public static class RouterDoctor
 
         checks.Add(await CheckEmbeddingsAsync(runtime, cancellationToken).ConfigureAwait(false));
 
-        IHttpClientFactory http = services.GetRequiredService<IHttpClientFactory>();
-        ICliProcessRunner runner = services.GetRequiredService<ICliProcessRunner>();
-        foreach ((string name, ConnectorOptions connector) in resolved.Connectors.OrderBy(c => c.Key, StringComparer.OrdinalIgnoreCase))
+        foreach (string name in resolved.Connectors.Keys.Order(StringComparer.OrdinalIgnoreCase))
         {
-            ModelDefinition[] models = resolved.Models
-                .Where(m => m.Enabled && string.Equals(m.Connector, name, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-            if (models.Length == 0)
-            {
-                if (connector.Type is ConnectorType.Cli or ConnectorType.Copilot)
-                {
-                    checks.Add(new RouterCheck($"connector {name}", RouterCheckStatus.Ok, "no enabled model uses it; not checked."));
-                    continue;
-                }
-
-                // Still worth a probe (it is cheap): it shows whether the server is up and accepts the credentials.
-                foreach (RouterCheck check in await CheckHttpAsync(name, connector, [], resolved, http, cancellationToken).ConfigureAwait(false))
-                {
-                    checks.Add(check with
-                    {
-                        Status = check.Status == RouterCheckStatus.Failed ? RouterCheckStatus.Warning : check.Status,
-                        Message = check.Message + " (No enabled model uses it yet.)",
-                    });
-                }
-
-                continue;
-            }
-
-            checks.AddRange(connector.Type switch
-            {
-                ConnectorType.Cli => await CheckCliAsync(name, connector, runner, cancellationToken).ConfigureAwait(false),
-                ConnectorType.Copilot => [await CheckCopilotAsync(name, runtime, models, cancellationToken).ConfigureAwait(false)],
-                _ => await CheckHttpAsync(name, connector, models, resolved, http, cancellationToken).ConfigureAwait(false),
-            });
+            checks.AddRange(await CheckConnectorAsync(services, runtime, name, cancellationToken).ConfigureAwait(false));
         }
 
         return checks;
+    }
+
+    /// <summary>
+    /// Runs the checks of one connector: reachable and credentials accepted (HTTP), installed and signed in (CLI), the
+    /// runtime starts (Copilot). The dashboard's endpoint check runs this.
+    /// </summary>
+    /// <exception cref="KeyNotFoundException">No connector of that name is configured.</exception>
+    public static Task<IReadOnlyList<RouterCheck>> CheckConnectorAsync(IServiceProvider services, string name, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        RouterRuntime runtime = services.GetRequiredService<RouterRuntimeProvider>().Current;
+        return runtime.Resolved.Connectors.ContainsKey(name)
+            ? CheckConnectorAsync(services, runtime, name, cancellationToken)
+            : throw new KeyNotFoundException($"Connector '{name}' is not configured.");
+    }
+
+    private static async Task<IReadOnlyList<RouterCheck>> CheckConnectorAsync(
+        IServiceProvider services, RouterRuntime runtime, string name, CancellationToken cancellationToken)
+    {
+        RouterConfiguration resolved = runtime.Resolved;
+        ConnectorOptions connector = resolved.Connectors[name];
+        IHttpClientFactory http = services.GetRequiredService<IHttpClientFactory>();
+        ModelDefinition[] models = resolved.Models
+            .Where(m => m.Enabled && string.Equals(m.Connector, name, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (models.Length == 0)
+        {
+            if (connector.Type is ConnectorType.Cli or ConnectorType.Copilot)
+            {
+                return [new RouterCheck($"connector {name}", RouterCheckStatus.Ok, "no enabled model uses it; not checked.")];
+            }
+
+            // Still worth a probe (it is cheap): it shows whether the server is up and accepts the credentials.
+            return [.. (await CheckHttpAsync(name, connector, [], resolved, http, cancellationToken).ConfigureAwait(false)).Select(check => check with
+            {
+                Status = check.Status == RouterCheckStatus.Failed ? RouterCheckStatus.Warning : check.Status,
+                Message = check.Message + " (No enabled model uses it yet.)",
+            })];
+        }
+
+        return connector.Type switch
+        {
+            ConnectorType.Cli => [.. await CheckCliAsync(name, connector, services.GetRequiredService<ICliProcessRunner>(), cancellationToken).ConfigureAwait(false)],
+            ConnectorType.Copilot => [await CheckCopilotAsync(name, runtime, models, cancellationToken).ConfigureAwait(false)],
+            _ => [.. await CheckHttpAsync(name, connector, models, resolved, http, cancellationToken).ConfigureAwait(false)],
+        };
     }
 
     /// <summary>Lists the account's models through the SDK: proves the runtime starts and the sign-in works.</summary>
@@ -132,7 +148,7 @@ public static class RouterDoctor
         }
 
         bool onnx = embeddings.Provider == EmbeddingProviderKind.Onnx;
-        string what = onnx ? $"ONNX model {embeddings.ModelPath ?? embeddings.Model ?? "all-MiniLM-L6-v2"}" : $"{embeddings.Model} at {embeddings.Endpoint}";
+        string what = onnx ? $"ONNX model {embeddings.ModelPath ?? embeddings.Model ?? "all-MiniLM-L6-v2"}" : $"{embeddings.Model} at {AddressDisplay.Show(embeddings.Endpoint)}";
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
