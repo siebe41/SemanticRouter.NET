@@ -475,3 +475,34 @@ public sealed class DashboardAccessTests : RouterHostTest
         (await strict.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 }
+
+/// <summary>The HTTP clients that carry keys.</summary>
+public sealed class KeyedHttpClientTests
+{
+    [Theory]
+    [InlineData(OpenAICompatibleConnector.HttpClientNamePrefix + "openai")]
+    [InlineData(WebhookNotifier.ClientName)]
+    [InlineData("SemanticRouter.Embeddings")]
+    public void Clients_that_carry_keys_do_not_follow_redirects(string name)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSemanticPromptRouting(_ => { });
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        HttpMessageHandler? handler = provider.GetRequiredService<IHttpMessageHandlerFactory>().CreateHandler(name);
+        while (handler is DelegatingHandler delegating)
+        {
+            handler = delegating.InnerHandler;
+        }
+
+        bool? follows = handler switch
+        {
+            SocketsHttpHandler sockets => sockets.AllowAutoRedirect,
+            HttpClientHandler client => client.AllowAutoRedirect,
+            _ => null,
+        };
+        follows.Should().BeFalse("a redirect would carry x-api-key and other key headers to another host");
+    }
+}
+

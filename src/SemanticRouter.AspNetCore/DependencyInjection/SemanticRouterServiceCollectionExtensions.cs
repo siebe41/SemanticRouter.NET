@@ -116,7 +116,8 @@ public static class SemanticRouterServiceCollectionExtensions
         services.AddHttpClient(EmbeddingsClientName)
             .ConfigureHttpClient((sp, client) =>
                 client.Timeout = sp.GetRequiredService<RouterRuntimeProvider>().Current.Configuration.Embeddings.Timeout);
-        services.AddHttpClient(WebhookNotifier.ClientName).ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(10));
+        // A webhook URL carries its token in the path, which the client factory would log with every request.
+        services.AddHttpClient(WebhookNotifier.ClientName).ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(10)).RemoveAllLoggers();
 
         return new SemanticRouterBuilder(services);
     }
@@ -133,9 +134,28 @@ public static class SemanticRouterServiceCollectionExtensions
     {
         public void Configure(string? name, HttpClientFactoryOptions options)
         {
-            if (name?.StartsWith(OpenAICompatibleConnector.HttpClientNamePrefix, StringComparison.Ordinal) == true)
+            bool connector = name?.StartsWith(OpenAICompatibleConnector.HttpClientNamePrefix, StringComparison.Ordinal) == true;
+            if (connector)
             {
                 options.HttpClientActions.Add(client => client.Timeout = Timeout.InfiniteTimeSpan);
+            }
+
+            // These requests carry keys, and a redirect drops only the Authorization header: x-api-key, api-key and other
+            // key headers would go to whatever host the redirect names. No backend needs one, so none is followed.
+            if (connector || name is EmbeddingsClientName or WebhookNotifier.ClientName)
+            {
+                options.HttpMessageHandlerBuilderActions.Add(builder =>
+                {
+                    switch (builder.PrimaryHandler)
+                    {
+                        case HttpClientHandler handler:
+                            handler.AllowAutoRedirect = false;
+                            break;
+                        case SocketsHttpHandler sockets:
+                            sockets.AllowAutoRedirect = false;
+                            break;
+                    }
+                });
             }
         }
 
