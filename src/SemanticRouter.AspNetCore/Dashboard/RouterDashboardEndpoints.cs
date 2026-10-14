@@ -96,6 +96,16 @@ public static partial class RouterDashboardEndpoints
         var themes = new ThemeCatalog(options.ThemesDirectory ?? (endpoints.ServiceProvider.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store
             ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Location))!, "themes")
             : null));
+        // No other site may frame the dashboard: inside a frame, clicks a page tricks the user into are same-origin writes.
+        group.AddEndpointFilter((invocation, next) =>
+        {
+            IHeaderDictionary headers = invocation.HttpContext.Response.Headers;
+            headers.ContentSecurityPolicy = "frame-ancestors 'none'";
+            headers.XFrameOptions = "DENY";
+            headers.XContentTypeOptions = "nosniff";
+            headers["Referrer-Policy"] = "no-referrer";
+            return next(invocation);
+        });
         group.AddEndpointFilter(access.FilterAsync);
 
         group.MapGet("/", (HttpContext context) => Asset(context, "index.html", "text/html; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);

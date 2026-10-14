@@ -411,6 +411,20 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
+    public async Task No_other_site_may_frame_the_dashboard()
+    {
+        HttpClient client = await StartAsync(remote: false);
+
+        foreach (string path in new[] { "/router", "/router/api/status", "/router/js/app.js" })
+        {
+            HttpResponseMessage response = await client.GetAsync(path);
+            response.Headers.GetValues("X-Frame-Options").Should().Equal("DENY");
+            response.Headers.GetValues("Content-Security-Policy").Should().Equal("frame-ancestors 'none'");
+            response.Headers.GetValues("X-Content-Type-Options").Should().Equal("nosniff");
+        }
+    }
+
+    [Fact]
     public async Task Unauthenticated_remote_access_must_be_asked_for_explicitly()
     {
         HttpClient client = await StartAsync(o =>
