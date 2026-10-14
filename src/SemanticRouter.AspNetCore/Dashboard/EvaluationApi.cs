@@ -119,7 +119,8 @@ internal static class EvaluationApi
             RouterConfiguration candidate = runtime.Configuration.Clone();
             candidate.Embeddings = request.Embeddings;
             candidate.UnmaskFrom(runtime.Configuration);
-            if (RouterRuntimeProvider.Validate(candidate) is { Count: > 0 } errors && errors.FirstOrDefault(e => e.StartsWith("Embeddings", StringComparison.Ordinal)) is { } problem)
+            IEnumerable<string> errors = RouterRuntimeProvider.Validate(candidate).Concat(candidate.ReferenceErrors(runtime.Configuration));
+            if (errors.FirstOrDefault(e => e.StartsWith("Embeddings", StringComparison.Ordinal)) is { } problem)
             {
                 return Results.Problem(problem, statusCode: StatusCodes.Status400BadRequest);
             }

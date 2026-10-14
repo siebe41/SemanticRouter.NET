@@ -82,6 +82,12 @@ public static partial class SecretReference
         });
     }
 
+    /// <summary>The references in <paramref name="value"/>: scheme (<c>env</c> or <c>secret</c>, lower case) and name.</summary>
+    internal static IEnumerable<(string Scheme, string Name)> References(string? value) =>
+        string.IsNullOrEmpty(value)
+            ? []
+            : Pattern().Matches(value).Select(m => (m.Groups["scheme"].Value.ToLowerInvariant(), m.Groups["name"].Value));
+
     [GeneratedRegex(@"\$\{(?<scheme>env|secret):(?<name>[^}]+)\}", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex Pattern();
 }
