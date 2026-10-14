@@ -393,6 +393,24 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
+    public async Task The_configuration_history_keeps_no_keys_and_rollback_takes_them_from_the_running_router()
+    {
+        HttpClient client = await StartAsync(remote: false);
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        _ = provider.Current;
+        IRouterConfigurationHistory history = provider.History!;
+        long startup = history.List(1).Single().Id;
+
+        history.GetVersion(startup)!.ToJson().Should().NotContain("sk-test");
+        HttpResponseMessage rollback = await client.PostAsync($"/router/api/config/history/{startup}/rollback", null);
+
+        rollback.StatusCode.Should().Be(HttpStatusCode.OK);
+        provider.Current.Configuration.Connectors["anthropic"].ApiKey.Should().Be("sk-test");
+        history.List(1).Single().Id.Should().BeGreaterThan(startup);
+        history.GetVersion(history.List(1).Single().Id)!.ToJson().Should().NotContain("sk-test");
+    }
+
+    [Fact]
     public async Task Unauthenticated_remote_access_must_be_asked_for_explicitly()
     {
         HttpClient client = await StartAsync(o =>

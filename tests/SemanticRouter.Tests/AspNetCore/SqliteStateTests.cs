@@ -69,6 +69,32 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void Configuration_history_written_with_keys_in_plain_text_is_masked_once()
+    {
+        var history = new SqliteConfigurationHistory(Open());
+        var document = new RouterConfiguration();
+        document.Connectors["openai"] = new ConnectorOptions { BaseAddress = new Uri("https://api.openai.com"), ApiKey = "sk-inherited-from-env" };
+        history.Record(document.Masked(), "startup");
+        using (var connection = new SqliteConnection($"Data Source={DbPath}"))
+        {
+            // What a router from before masking left behind.
+            connection.Open();
+            using SqliteCommand legacy = connection.CreateCommand();
+            legacy.CommandText = "INSERT INTO config_history (timestamp_ticks, source, document) VALUES (0, 'startup', $doc); DELETE FROM meta WHERE key = 'history_masked';";
+            legacy.Parameters.AddWithValue("$doc", document.ToJson());
+            legacy.ExecuteNonQuery();
+        }
+
+        SqliteConnection.ClearAllPools();
+        var reopened = new SqliteConfigurationHistory(Open());
+
+        reopened.List().Should().HaveCount(2);
+        reopened.List().Select(v => reopened.GetVersion(v.Id)!.Connectors["openai"].ApiKey).Should().AllBe("***");
+        SqliteConnection.ClearAllPools();
+        File.ReadAllText(DbPath).Should().NotContain("sk-inherited-from-env", "the old pages are rewritten");
+    }
+
+    [Fact]
     public void A_restart_during_a_quota_cooldown_keeps_the_original_expiry()
     {
         ModelDefinition claude = Model("claude", 4);

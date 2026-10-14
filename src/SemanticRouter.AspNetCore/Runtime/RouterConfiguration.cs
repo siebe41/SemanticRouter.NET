@@ -441,6 +441,14 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                     connector.Headers[header] = value;
                 }
             }
+
+            foreach ((string variable, string value) in baseline.EnvironmentVariables)
+            {
+                if (!connector.EnvironmentVariables.TryGetValue(variable, out string? current) || current == MaskedSecret)
+                {
+                    connector.EnvironmentVariables[variable] = value;
+                }
+            }
         }
 
         if (string.IsNullOrEmpty(document.Embeddings.ApiKey) || document.Embeddings.ApiKey == MaskedSecret)
@@ -484,16 +492,38 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         return copy;
     }
 
-    /// <summary>Replaces <see cref="MaskedSecret"/> placeholders in this document with the real values from <paramref name="current"/>.</summary>
+    /// <summary>
+    /// Replaces <see cref="MaskedSecret"/> placeholders in this document with the real values from <paramref name="current"/>.
+    /// A secret only goes where it was configured to go: when a connector now has another type, address or program (or
+    /// the embeddings another provider or endpoint), its placeholders are left in place, and validation asks for the
+    /// secret to be entered again rather than sending the stored one to the new destination.
+    /// </summary>
     public void UnmaskFrom(RouterConfiguration current)
     {
         ArgumentNullException.ThrowIfNull(current);
         foreach ((string name, ConnectorOptions connector) in Connectors)
         {
             current.Connectors.TryGetValue(name, out ConnectorOptions? existing);
+            if (existing is not null && !SameDestination(connector, existing))
+            {
+                continue;
+            }
+
             if (connector.ApiKey == MaskedSecret)
             {
                 connector.ApiKey = existing?.ApiKey;
+            }
+
+            foreach (string variable in connector.EnvironmentVariables.Where(v => v.Value == MaskedSecret).Select(v => v.Key).ToArray())
+            {
+                if (existing is not null && existing.EnvironmentVariables.TryGetValue(variable, out string? value))
+                {
+                    connector.EnvironmentVariables[variable] = value;
+                }
+                else
+                {
+                    connector.EnvironmentVariables.Remove(variable);
+                }
             }
 
             foreach (string header in connector.Headers.Where(h => h.Value == MaskedSecret).Select(h => h.Key).ToArray())
@@ -509,7 +539,8 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
-        if (Embeddings.ApiKey == MaskedSecret)
+        if (Embeddings.ApiKey == MaskedSecret
+            && Embeddings.Provider == current.Embeddings.Provider && Equals(Embeddings.Endpoint, current.Embeddings.Endpoint))
         {
             Embeddings.ApiKey = current.Embeddings.ApiKey;
         }
@@ -582,6 +613,21 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         return moved;
     }
 
+    /// <summary>
+    /// Errors for secrets still masked after <see cref="UnmaskFrom"/>: their connector or the embeddings now point
+    /// somewhere else, so the stored secret is not sent there.
+    /// </summary>
+    internal IEnumerable<string> MaskedSecretErrors() =>
+        Slots(secretsOnly: true)
+            .Where(s => s.Get() == MaskedSecret)
+            .Select(s => $"{s.Setting}: enter the secret again. A stored secret is only sent where it was configured, and this " +
+                         "connector (or the embeddings) now has another type, address or program.");
+
+    /// <summary>Whether two versions of a connector send their secrets to the same place.</summary>
+    private static bool SameDestination(ConnectorOptions a, ConnectorOptions b) =>
+        a.Type == b.Type && Equals(a.BaseAddress, b.BaseAddress) && a.Preset == b.Preset
+        && string.Equals(a.Executable, b.Executable, StringComparison.Ordinal);
+
     /// <summary>The settings that hold a secret written out in full (rather than a reference).</summary>
     public IReadOnlyList<string> LiteralSecretSettings() =>
         Slots(secretsOnly: true).Where(s => IsLiteralSecret(s.Get())).Select(s => s.Setting).ToArray();
@@ -589,7 +635,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
     /// <summary>Every non-empty secret value in this (resolved) document, for redaction.</summary>
     internal IEnumerable<string> SecretValues() =>
         Slots(secretsOnly: false)
-            .Where(s => s.IsSecret || s.Setting.Contains(":EnvironmentVariables:", StringComparison.Ordinal))
+            .Where(s => s.IsSecret)
             .Select(s => s.Get())
             .Where(v => !string.IsNullOrEmpty(v) && v != MaskedSecret)
             .Cast<string>();
@@ -599,8 +645,8 @@ public sealed class RouterConfiguration : SemanticRouterOptions
 
     /// <summary>
     /// The configuration values that may hold secrets or references to them. With <paramref name="secretsOnly"/>, only
-    /// the ones that are masked and moved to the secret store: API keys, secret-looking header values, gateway keys and
-    /// webhook URLs.
+    /// the ones that are masked and moved to the secret store: API keys, secret-looking header values, CLI environment
+    /// variables, gateway keys and webhook URLs.
     /// </summary>
     private List<SecretSlot> Slots(bool secretsOnly)
     {
@@ -619,15 +665,13 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 }
             }
 
-            if (!secretsOnly)
+            // A CLI's environment carries its credentials (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN, …), so every value is a secret.
+            foreach (string variable in connector.EnvironmentVariables.Keys.ToArray())
             {
-                foreach (string variable in connector.EnvironmentVariables.Keys.ToArray())
-                {
-                    slots.Add(new SecretSlot(
-                        $"Connectors:{name}:EnvironmentVariables:{variable}", $"connectors/{name}/env/{variable}", false,
-                        () => connector.EnvironmentVariables.TryGetValue(variable, out string? v) ? v : null,
-                        v => connector.EnvironmentVariables[variable] = v ?? string.Empty));
-                }
+                slots.Add(new SecretSlot(
+                    $"Connectors:{name}:EnvironmentVariables:{variable}", $"connectors/{name}/env/{variable}", true,
+                    () => connector.EnvironmentVariables.TryGetValue(variable, out string? v) ? v : null,
+                    v => connector.EnvironmentVariables[variable] = v ?? string.Empty));
             }
         }
 
@@ -649,11 +693,9 @@ public sealed class RouterConfiguration : SemanticRouterOptions
 
     private sealed record SecretSlot(string Setting, string StoreName, bool IsSecret, Func<string?> Get, Action<string?> Set);
 
-    private static bool IsSecretHeader(string name) =>
-        name.Contains("key", StringComparison.OrdinalIgnoreCase)
-        || name.Contains("token", StringComparison.OrdinalIgnoreCase)
-        || name.Contains("secret", StringComparison.OrdinalIgnoreCase)
-        || name.Contains("authorization", StringComparison.OrdinalIgnoreCase);
+    private static readonly string[] SecretHeaderWords = ["key", "token", "secret", "auth", "cookie", "password", "credential", "session", "signature"];
+
+    private static bool IsSecretHeader(string name) => SecretHeaderWords.Any(word => name.Contains(word, StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary>Where a <see cref="RouterConfiguration"/> is kept between restarts.</summary>

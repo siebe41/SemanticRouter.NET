@@ -223,6 +223,8 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem($"Version {id} is not in the history.", statusCode: StatusCodes.Status404NotFound);
             }
 
+            // The history keeps no secrets: they come from the running configuration.
+            document.UnmaskFrom(provider.Current.Configuration);
             IReadOnlyList<string> errors = RouterRuntimeProvider.Validate(document);
             if (errors.Count > 0)
             {

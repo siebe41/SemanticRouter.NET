@@ -240,7 +240,77 @@ internal sealed partial class SqliteRouterDatabase
             }
         }
 
+        bool scrubbed = MaskHistory(connection, transaction);
         transaction.Commit();
+
+        if (scrubbed)
+        {
+            // The plain-text documents are still in free pages and the WAL until the file is rewritten.
+            using SqliteCommand vacuum = Command(connection, "VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");
+            vacuum.ExecuteNonQuery();
+        }
+    }
+
+    /// <summary>
+    /// Masks the secrets in configuration history written before the history was masked: those documents kept keys
+    /// inherited from environment variables and user-secrets in plain text. Runs once; returns whether anything changed.
+    /// </summary>
+    private static bool MaskHistory(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        const string Done = "history_masked";
+        using (SqliteCommand check = Command(connection, "SELECT value FROM meta WHERE key = $key;", ("$key", Done)))
+        {
+            check.Transaction = transaction;
+            if (check.ExecuteScalar() is not null)
+            {
+                return false;
+            }
+        }
+
+        var rows = new List<(long Id, string Document)>();
+        using (SqliteCommand read = Command(connection, "SELECT id, document FROM config_history;"))
+        {
+            read.Transaction = transaction;
+            using SqliteDataReader reader = read.ExecuteReader();
+            while (reader.Read())
+            {
+                rows.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+        }
+
+        bool changed = false;
+        foreach ((long id, string document) in rows)
+        {
+            string? masked;
+            try
+            {
+                masked = RouterConfiguration.FromJson(document).Masked().ToJson();
+            }
+            catch (Exception ex) when (ex is JsonException or InvalidOperationException or NotSupportedException)
+            {
+                masked = null; // unreadable: it cannot be masked, so it goes
+            }
+
+            if (masked == document)
+            {
+                continue;
+            }
+
+            using SqliteCommand write = masked is null
+                ? Command(connection, "DELETE FROM config_history WHERE id = $id;", ("$id", id))
+                : Command(connection, "UPDATE config_history SET document = $document WHERE id = $id;", ("$id", id), ("$document", masked));
+            write.Transaction = transaction;
+            write.ExecuteNonQuery();
+            changed = true;
+        }
+
+        using (SqliteCommand mark = Command(connection, "INSERT INTO meta (key, value) VALUES ($key, '1');", ("$key", Done)))
+        {
+            mark.Transaction = transaction;
+            mark.ExecuteNonQuery();
+        }
+
+        return changed;
     }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Router state database {Path} cannot be used ({Error}); cooldowns, tool-call affinity, activity and configuration history stay in memory and are lost on restart.")]
