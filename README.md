@@ -122,7 +122,7 @@ These combine with a noisy-OR, `1 − Π(1 − weightᵢ·signalᵢ)`, so a sing
 | Complexity ≥ `ComplexityShortCircuitThreshold` *(skipped while any route is local-only)* | tier from complexity alone, **no embedding call** | `ComplexityShortCircuit` |
 | Request names a catalog model | that model only | `ModelOverride` |
 | The message (or an earlier one in the conversation) starts with a callout such as `@opus` or `@tier2` | what the callout asks | `ExplicitCallout` |
-| Classifier failed and `FailOpen` is on | `FallbackTier` | `ClassifierFailure` |
+| Classifier failed and `FailOpen` is on | `FallbackTier`, local-only while any route is local-only | `ClassifierFailure` |
 | The conversation needed a higher tier on recent turns, e.g. "ok, go ahead" in the middle of a task (`Middleware:Conversation`, on by default) | the conversation's floor, which decays as it moves on to simpler work | `ConversationFloor` |
 | The same client repeats a prompt soon after it was answered (`Middleware:RetryEscalation`, off by default) | one tier above the model that answered | `RetryEscalation` |
 | A request an agentic client makes for itself, recognised by its wording: a session title, a topic check, a compaction summary, a warm-up ping, a shell command check (`Middleware:Housekeeping`, on by default) | `Housekeeping:Tier` (1), **no embedding call** | `ClientHousekeeping` |

@@ -801,7 +801,12 @@ internal sealed partial class PromptRoutingMiddleware
         {
             int fallbackTier = runtime.Configuration.FallbackTier;
             LogClassificationFailed(_logger, fallbackTier, ex);
-            return runtime.Router.Plan(PromptClassificationResult.Bypass(fallbackTier, RoutingReason.ClassifierFailure), request);
+
+            // Unclassified, the prompt may be one a local-only route would have kept on this machine, so while any
+            // route is local-only the fallback is too: it goes to a local model or fails, never to the cloud.
+            bool localOnly = runtime.Configuration.Routes.Any(r => r.LocalOnly);
+            return runtime.Router.Plan(
+                PromptClassificationResult.Bypass(fallbackTier, RoutingReason.ClassifierFailure) with { LocalOnly = localOnly }, request);
         }
     }
 
