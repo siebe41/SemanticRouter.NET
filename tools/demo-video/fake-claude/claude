@@ -1,0 +1,28 @@
+#!/usr/bin/env node
+// Stands in for the `claude` CLI in the demo video: answers in Claude Code's print-mode stream-json format, a little
+// slower than the local models. While the file named by DEMO_CLAUDE_LIMIT_FILE exists it answers the way Claude Code
+// does at its session limit, so the router's quota cooldown and failover are the real ones.
+const fs = require('fs');
+
+const args = process.argv.slice(2);
+const model = args.includes('--model') ? args[args.indexOf('--model') + 1] : 'sonnet';
+const limitFile = process.env.DEMO_CLAUDE_LIMIT_FILE;
+const write = (o) => process.stdout.write(JSON.stringify(o) + '\n');
+
+process.stdin.resume();
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => {
+  setTimeout(() => {
+    if (limitFile && fs.existsSync(limitFile)) {
+      write({ type: 'result', subtype: 'success', is_error: true, result: "You've hit your session limit · resets 5pm" });
+      process.exit(1);
+    }
+
+    const text = model === 'opus' ? 'Here is the plan, then the change across every file.' : 'Here is a careful answer, step by step.';
+    write({ type: 'system', subtype: 'init', model });
+    for (const word of text.split(/(?= )/)) {
+      write({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: word } } });
+    }
+    write({ type: 'result', subtype: 'success', is_error: false, result: text, usage: { input_tokens: 40, output_tokens: 12 } });
+  }, 650 + Math.random() * 450);
+});
