@@ -3,7 +3,10 @@
 # on the machine itself for those.
 #
 #   docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router .
-#   docker run -p 5080:8080 -v semantic-router:/data -e ROUTER_ADMIN_TOKEN=... semantic-router
+#   docker run -p 127.0.0.1:5080:8080 -v semantic-router:/data -e ROUTER_ADMIN_TOKEN=... -e ROUTER_GATEWAY_KEY=... semantic-router
+#
+# Clients send ROUTER_GATEWAY_KEY as their API key (ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY). Publish the port beyond
+# 127.0.0.1 only on a network you trust, and see docs/host.md for HTTPS.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY global.json nuget.config Directory.Build.props Directory.Packages.props .editorconfig ./
@@ -15,13 +18,15 @@ WORKDIR /app
 COPY --from=build /app .
 
 # Configuration, the encrypted secrets file and the data-protection keys that decrypt it live on one volume.
-# Port-mapped requests arrive from the container network, so the dashboard treats them as remote: it needs a token
-# (ROUTER_ADMIN_TOKEN, resolved at start-up through the ${env:...} reference) and refuses everyone without one.
+# Port-mapped requests arrive from the container network, so the router treats them as remote: the dashboard needs a
+# token (ROUTER_ADMIN_TOKEN) and the gateway a key (ROUTER_GATEWAY_KEY), both resolved at start-up through ${env:...}
+# references. Without them, everyone is refused.
 ENV SEMANTIC_ROUTER_HOME=/data \
     SEMANTIC_ROUTER_KEYS_DIR=/data/keys \
     ASPNETCORE_URLS=http://0.0.0.0:8080 \
     SemanticRouter__Dashboard__RequireLocalClient=false \
-    SemanticRouter__Dashboard__AdminToken=\${env:ROUTER_ADMIN_TOKEN}
+    SemanticRouter__Dashboard__AdminToken=\${env:ROUTER_ADMIN_TOKEN} \
+    SemanticRouter__Middleware__GatewayKeys__default=\${env:ROUTER_GATEWAY_KEY}
 RUN mkdir -p /data && chown "$APP_UID" /data
 VOLUME /data
 EXPOSE 8080

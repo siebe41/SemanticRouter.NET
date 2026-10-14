@@ -110,21 +110,51 @@ The tool binds to `http://localhost:5080`. With `--urls http://0.0.0.0:5080` (or
 
 - **Subscription CLI connectors still answer only local requests.** Remote callers fall through to API-key or local models ([TERMS.md](TERMS.md)).
 - **The dashboard refuses remote callers** until you set `SemanticRouter:Dashboard:AdminToken` and `RequireLocalClient: false` ([dashboard.md](dashboard.md#access-and-security)).
-- **Clients cannot be told apart** until you set `SemanticRouter:Middleware:GatewayKeys`.
+- **The gateway refuses other machines** with `401` until you set `SemanticRouter:Middleware:GatewayKeys`. Each client then sends its key as its API key (`ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`), and its name shows in Activity. Without this, anyone who can reach the port could spend your API keys. Clients on this machine need no key unless `RequireGatewayKeyForLocalClients` is on.
 
 `semantic-router doctor` reports the same.
+
+`Middleware:AllowUnauthenticatedRemoteClients: true` serves other machines without a key while none is configured. Use it only behind a reverse proxy that authenticates every request; the router logs a warning at start-up. Once any gateway key is set, it has no effect.
+
+### Serving over HTTPS
+
+Gateway keys, dashboard tokens and prompts cross the network in clear text over `http://`. For anything beyond this machine, put HTTPS in front:
+
+- **Kestrel directly.** Give it a certificate in `appsettings.json` in the configuration directory, and listen with `--urls https://0.0.0.0:5443`:
+
+  ```json
+  {
+    "Kestrel": {
+      "Certificates": {
+        "Default": { "Path": "/etc/semantic-router/router.pfx", "Password": "${env:ROUTER_CERT_PASSWORD}" }
+      }
+    }
+  }
+  ```
+
+  `Path` and `KeyPath` also take PEM files. See [Configure endpoints for Kestrel](https://learn.microsoft.com/aspnet/core/fundamentals/servers/kestrel/endpoints).
+
+- **A reverse proxy** (Caddy, nginx, Traefik) that terminates TLS and forwards to the router on `localhost`. Requests then arrive from loopback, so turn on `RequireGatewayKeyForLocalClients` (and `RequireTokenForLocalClients` for the dashboard), or the proxy's clients are treated as local. Add the proxy's public address to `Dashboard:PublicOrigins`. With Caddy:
+
+  ```
+  router.example.com {
+      reverse_proxy localhost:5080
+  }
+  ```
 
 ## Container
 
 The image runs the same host for API-key connectors and local model servers.
 
 ```bash
-ROUTER_ADMIN_TOKEN=$(openssl rand -hex 24) OPENAI_API_KEY=sk-... docker compose -f deploy/compose.yaml up
+ROUTER_ADMIN_TOKEN=$(openssl rand -hex 24) ROUTER_GATEWAY_KEY=$(openssl rand -hex 24) OPENAI_API_KEY=sk-... \
+  docker compose -f deploy/compose.yaml up
 ```
 
 - It listens on port `8080` and keeps the configuration, the encrypted secrets, the data-protection keys and the state database on the `/data` volume.
 - The compose example publishes the port on `127.0.0.1` only.
-- Requests that come in through the port mapping arrive from the container network, so the dashboard treats them as remote. It asks for `ROUTER_ADMIN_TOKEN`, and without one it refuses everyone.
+- Requests that come in through the port mapping arrive from the container network, so the router treats them as remote. The dashboard asks for `ROUTER_ADMIN_TOKEN` and the gateway for `ROUTER_GATEWAY_KEY` (clients send it as `ANTHROPIC_AUTH_TOKEN` or `OPENAI_API_KEY`); without them, everyone is refused.
+- With `docker run`, publish the port as `-p 127.0.0.1:5080:8080`. Plain `-p 5080:8080` opens it to every network the machine is on.
 - Keep API keys in the environment and refer to them from the configuration: `"ApiKey": "${env:OPENAI_API_KEY}"`.
 - A model server on the host machine is `http://host.docker.internal:1234` (LM Studio) or `:11434` (Ollama).
 

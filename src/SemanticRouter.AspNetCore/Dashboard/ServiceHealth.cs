@@ -38,7 +38,8 @@ internal static class ServiceHealth
             bound,
             addresses,
             addresses.Any(a => !a.Local),
-            runtime.GatewayKeys.Count > 0,
+            runtime.Configuration.Middleware.GatewayKeys.Count > 0 || !runtime.Configuration.Middleware.AllowUnauthenticatedRemoteClients,
+            runtime.Configuration.Middleware.GatewayKeys.Count > 0,
             state,
             note,
             problems,
@@ -229,7 +230,8 @@ internal static class ServiceHealth
 /// <param name="Listening">The addresses the server listens on, as bound (<c>http://[::]:5080</c>).</param>
 /// <param name="Addresses">Base addresses clients point at: on this machine, then from other machines.</param>
 /// <param name="Remote">Whether other machines can reach it.</param>
-/// <param name="GatewayKeyRequired">Whether clients on other machines must send a gateway key.</param>
+/// <param name="GatewayKeyRequired">Whether clients on other machines must send a gateway key (they are refused while none is configured).</param>
+/// <param name="GatewayKeysConfigured">Whether any gateway key is configured.</param>
 /// <param name="State"><c>ok</c>, <c>starting</c>, <c>degraded</c> or <c>failing</c>.</param>
 /// <param name="StateNote">Why, when it is not ok.</param>
 /// <param name="Problems">Everything that needs a look: warm-up, connectors failing or down, configuration warnings.</param>
@@ -238,7 +240,7 @@ internal static class ServiceHealth
 /// <param name="LastServed">The latest request a model answered.</param>
 public sealed record ServiceStatus(
     string Machine, int ProcessId, string? Program, DateTimeOffset StartedAt, string Runtime, string OperatingSystem,
-    IReadOnlyList<string> Listening, IReadOnlyList<ClientAddress> Addresses, bool Remote, bool GatewayKeyRequired,
+    IReadOnlyList<string> Listening, IReadOnlyList<ClientAddress> Addresses, bool Remote, bool GatewayKeyRequired, bool GatewayKeysConfigured,
     string State, string? StateNote, IReadOnlyList<string> Problems,
     DateTimeOffset? LastRequest, string? LastOutcome, DateTimeOffset? LastServed);
 

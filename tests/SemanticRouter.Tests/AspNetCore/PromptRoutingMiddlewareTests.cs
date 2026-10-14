@@ -623,13 +623,19 @@ public sealed class DispatchModeTests : RouterHostTest
     public async Task Subscription_cli_is_never_used_for_remote_clients()
     {
         ClassifyAs(tier: 4);
-        HttpClient client = await StartDispatchAsync(
-            withCli: true,
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+                o.AllowUnauthenticatedRemoteClients = true;
+            },
             beforeRouter: app => app.Use((context, next) =>
             {
                 context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.7");
                 return next(context);
-            }));
+            }),
+            withCli: true);
 
         (await (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).Content.ReadAsStringAsync())
             .Should().Be("""{"from":"cloud"}""");

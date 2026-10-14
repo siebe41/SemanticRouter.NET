@@ -523,6 +523,63 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Remote_clients_are_refused_while_no_gateway_key_is_configured()
+    {
+        HttpClient client = await StartAsync();
+
+        HttpResponseMessage chat = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+        HttpResponseMessage anthropic = await client.PostAsync("/v1/messages", Json("""{"model":"x","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}"""));
+
+        chat.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await chat.Content.ReadAsStringAsync()).Should().Contain("none is configured").And.Contain("GatewayKeys");
+        anthropic.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await anthropic.Content.ReadAsStringAsync()).Should().Contain("authentication_error");
+        (await client.GetAsync("/v1/models")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await client.PostAsJsonAsync("/semantic-router/classify", new { prompt = "hello" })).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        LocalHttp.Requests.Should().BeEmpty();
+        CloudHttp.Requests.Should().BeEmpty();
+        _logs.All.Should().Contain("no valid gateway key");
+        await DisposeAsync();
+
+        HttpClient local = await StartAsync(remote: false);
+        (await local.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode.Should().Be(HttpStatusCode.OK, "this machine needs no key");
+    }
+
+    [Fact]
+    public async Task Unauthenticated_remote_gateway_clients_must_be_asked_for_explicitly()
+    {
+        HttpClient client = await StartAsync(middleware: o => o.AllowUnauthenticatedRemoteClients = true);
+
+        (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode.Should().Be(HttpStatusCode.OK);
+        _logs.All.Should().Contain("serves other machines without a key");
+        await DisposeAsync();
+
+        HttpClient keyed = await StartAsync(middleware: o =>
+        {
+            o.AllowUnauthenticatedRemoteClients = true;
+            o.GatewayKeys["laptop"] = "gw-laptop-key-123";
+        });
+        (await keyed.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode
+            .Should().Be(HttpStatusCode.Unauthorized, "once a key is configured, every remote client needs one");
+    }
+
+    [Fact]
+    public async Task A_gateway_key_whose_variable_is_unset_does_not_open_the_gateway()
+    {
+        string variable = "SR_TEST_GATEWAY_" + Guid.NewGuid().ToString("N");
+        HttpClient client = await StartAsync(remote: false, middleware: o =>
+        {
+            o.GatewayKeys["laptop"] = "${env:" + variable + "}";
+            o.RequireGatewayKeyForLocalClients = true;
+        });
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("requires a gateway key");
+    }
+
+    [Fact]
     public async Task Local_clients_may_omit_the_gateway_key_unless_required()
     {
         HttpClient lenient = await StartAsync(remote: false, middleware: o => o.GatewayKeys["laptop"] = "gw-laptop-key-123");

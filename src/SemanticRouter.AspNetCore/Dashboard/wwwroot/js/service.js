@@ -34,9 +34,12 @@ function reach(sv) {
     return `<span class="badge">this machine only</span> <span class="faint small">It listens on loopback. Run it with <span class="mono">--urls http://0.0.0.0:${h(port)}</span> to serve other machines.</span>`;
   }
   const cli = (state.status.endpoints || []).some((e) => e.program && e.via) ? ' Subscription CLI connectors still answer only this machine.' : '';
-  return sv.gatewayKeyRequired
+  if (!sv.gatewayKeyRequired) {
+    return `<span class="badge warn">open to your network</span> <span class="faint small">Anything that can reach this machine can use your models (unauthenticated remote clients are allowed). Add gateway keys under <a href="#/gateway">Gateway</a>.${cli}</span>`;
+  }
+  return sv.gatewayKeysConfigured
     ? `<span class="badge ok">gateway key required</span> <span class="faint small">Clients on other machines send one (<span class="mono">Authorization: Bearer</span> or <span class="mono">x-api-key</span>).${cli}</span>`
-    : `<span class="badge warn">open to your network</span> <span class="faint small">Anything that can reach this machine can use your models. Add gateway keys under <a href="#/gateway">Gateway</a>.${cli}</span>`;
+    : `<span class="badge warn">other machines refused</span> <span class="faint small">Clients on other machines get 401 until you add gateway keys under <a href="#/gateway">Gateway</a>.${cli}</span>`;
 }
 
 /* Overview: where the router runs, the base URLs to give clients, and its health. */

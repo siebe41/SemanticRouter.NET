@@ -160,11 +160,19 @@ internal static class RouterHost
                 .AppendLine("  Listening beyond this machine:")
                 .AppendLine("  - Subscription CLI connectors (claude, codex, copilot) still answer only requests from this machine (docs/TERMS.md).")
                 .AppendLine("  - The dashboard needs SemanticRouter:Dashboard:AdminToken and RequireLocalClient=false for remote use.")
-                .AppendLine("  - Set SemanticRouter:Middleware:GatewayKeys so remote clients identify themselves (docs/dashboard.md).");
+                .AppendLine(CultureInfo.InvariantCulture, $"  - {RemoteGatewayAccess(app.Services.GetRequiredService<RouterRuntimeProvider>().Current.Configuration.Middleware)}");
         }
 
         await output.WriteLineAsync(banner.ToString()).ConfigureAwait(false);
     }
+
+    /// <summary>What clients on other machines need to use the gateway, for the banner and <c>doctor</c>.</summary>
+    internal static string RemoteGatewayAccess(PromptRouterMiddlewareOptions middleware) =>
+        middleware.GatewayKeys.Count > 0
+            ? "Clients on other machines must send a gateway key (SemanticRouter:Middleware:GatewayKeys)."
+            : middleware.AllowUnauthenticatedRemoteClients
+                ? "Clients on other machines can use the gateway without a key (AllowUnauthenticatedRemoteClients): only behind a proxy that authenticates them."
+                : "Clients on other machines are refused until you set SemanticRouter:Middleware:GatewayKeys (docs/host.md).";
 
     /// <summary>The address to print for clients on this machine: a wildcard bind is reached through localhost.</summary>
     internal static string LocalAddress(string url)

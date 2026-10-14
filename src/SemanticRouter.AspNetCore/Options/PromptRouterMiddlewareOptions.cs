@@ -206,9 +206,18 @@ public sealed class PromptRouterMiddlewareOptions
     /// When any are configured, requests from other machines must send one as <c>Authorization: Bearer {key}</c> or
     /// <c>x-api-key: {key}</c> (what <c>ANTHROPIC_AUTH_TOKEN</c>, <c>ANTHROPIC_API_KEY</c> and <c>OPENAI_API_KEY</c> send),
     /// and the client name is recorded in the activity log. Keys are compared, never forwarded: credentials for the
-    /// backends always come from the connector configuration. Empty by default (no gateway authentication).
+    /// backends always come from the connector configuration. Empty by default: clients on this machine need no key, and
+    /// other machines are refused (see <see cref="AllowUnauthenticatedRemoteClients"/>).
     /// </summary>
     public IDictionary<string, string> GatewayKeys { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Serve requests from other machines without a gateway key while <see cref="GatewayKeys"/> is empty. Default
+    /// <see langword="false"/>: with no keys configured, remote clients get a 401, because anyone who can reach the port
+    /// could otherwise spend the connectors' keys and subscriptions. Turn this on only behind a reverse proxy that
+    /// authenticates every request. Ignored once any gateway key is configured.
+    /// </summary>
+    public bool AllowUnauthenticatedRemoteClients { get; set; }
 
     /// <summary>
     /// Require a gateway key from clients on this machine too. Default <see langword="false"/>: loopback clients may
