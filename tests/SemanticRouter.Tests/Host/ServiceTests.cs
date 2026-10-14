@@ -324,10 +324,11 @@ public sealed class ServiceTests : IDisposable
     {
         string bin = Directory.CreateDirectory(Path.Combine(_directory, "bin")).FullName;
         string name = "sr-tool-" + Guid.NewGuid().ToString("N");
-        File.WriteAllText(Path.Combine(bin, name), string.Empty);
+        string file = Path.Combine(bin, OperatingSystem.IsWindows() ? name + ".exe" : name); // Windows runs only a native .exe
+        File.WriteAllText(file, string.Empty);
         string relative = Path.GetRelativePath(Environment.CurrentDirectory, bin);
 
-        ServicePlatform.SystemTool(name, bin).Should().Be(Path.Combine(bin, name));
+        ServicePlatform.SystemTool(name, bin).Should().Be(file);
         if (!Path.IsPathRooted(relative))
         {
             ServicePlatform.SystemTool(name, relative).Should().BeNull("a relative PATH entry depends on the current directory");
