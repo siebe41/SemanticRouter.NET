@@ -209,6 +209,7 @@ export const actions = {
   'json-download'() { const blob = new Blob([JSON.stringify(state.config, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'semantic-router.json'; a.click(); },
   async 'json-baseline'() { const b = await api('GET', '/config/baseline'); $('#json-editor').value = JSON.stringify(b.config, null, 2); toast('Showing the application baseline (not the draft).'); },
   copy(el) { const code = el.parentElement.querySelector('code').textContent; navigator.clipboard.writeText(code).then(() => toast('Copied.', 'ok')); },
+  'copy-text'(el) { navigator.clipboard.writeText(el.dataset.text).then(() => toast('Copied.', 'ok')); },
 
   async 'eval-run'(el) {
     const ev = state.evaluation; ev.busy = true; ev.addFor = null; render();

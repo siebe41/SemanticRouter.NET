@@ -6,6 +6,7 @@ import { digestCard, noticesCard } from './digest.js';
 import { endpointsCard } from './endpoints.js';
 import { learnedBadge, learnedCard } from './learned.js';
 import { unreliableBadge } from './reliability.js';
+import { serviceCard } from './service.js';
 import { isLocalModel } from './live.js';
 import { int, usd } from './usage.js';
 
@@ -21,6 +22,7 @@ views.overview = () => {
   return `
     <div class="section-head"><h1>Overview</h1><span class="muted">What the router is doing right now.</span></div>
     ${noticesCard()}
+    ${serviceCard()}
     ${digestCard()}
     <div class="grid cols-4 section">
       <div class="card stat"><span class="value">${a.total}</span><span class="label">routed (last ${a.total >= 500 ? '500' : a.total})</span></div>
