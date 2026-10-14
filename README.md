@@ -434,12 +434,12 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Preset` | CLI | `Custom` | `ClaudeCode`, `GitHubCopilot`, `Codex` or `Custom`. |
 | `Executable` | CLI | preset's command | Started directly, never through a shell, by its full path: a bare name is looked up on the absolute `PATH` entries only, never in the current directory. On Windows use the `.exe`. |
 | `Arguments[]` | CLI | | Custom: the full template (`{model}`, `{prompt}`). Presets: extra arguments appended. |
-| `PromptInput` | CLI (custom) | `Stdin` | `Stdin` or `Argument`. |
+| `PromptInput` | CLI | `Stdin` | `Stdin` or `Argument`. `Argument` puts the prompt on the command line (Custom: the `{prompt}` placeholder), where other users of the machine can read it while the CLI runs. Codex always uses stdin. |
 | `QuotaErrorPatterns[]` | CLI | preset patterns | Extra output fragments that mean "quota exhausted". |
 | `EnvironmentVariables`, `RemoveEnvironmentVariables[]` | CLI | preset defaults | The presets remove API-key variables that would switch billing away from your subscription. |
 | `MaxConcurrency` | CLI, Copilot | `2` | Simultaneous processes (Copilot: simultaneous turns). |
 | `MaxQueue` | CLI, Copilot | `null` (always wait) | When this many requests are already waiting for a process, the next goes to another model. |
-| `MaxArgumentLength` | CLI | `24000` | Longer prompts are sent on stdin. |
+| `MaxArgumentLength` | CLI | `24000` | With `PromptInput: Argument`, longer prompts are sent on stdin. Longer Claude Code system prompts are moved into the conversation. |
 | `Executable`, `HomeDirectory` | Copilot | `copilot`, `~/.copilot` | The Copilot CLI the SDK runs as its runtime, and its `COPILOT_HOME`. |
 | `AllowRemoteClients` | CLI, Copilot | `false` | See [TERMS.md](docs/TERMS.md) before changing this. |
 | `Timeout` | all | HTTP 100 s · CLI 5 min | Time to first output. Streams are not cut off. |

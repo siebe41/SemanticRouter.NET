@@ -9,15 +9,19 @@ public sealed class CliAdapterTests : IDisposable
 
     public void Dispose() => Directory.Delete(_workingDirectory, recursive: true);
 
-    private CliRequest Request(string? model, params ChatMessage[] messages) =>
-        new(model, messages, _workingDirectory, new ConnectorOptions { Type = ConnectorType.Cli, MaxArgumentLength = 100 });
+    private CliRequest Request(string? model, params ChatMessage[] messages) => Request(CliPromptInput.Stdin, model, messages);
+
+    private CliRequest Request(CliPromptInput input, string? model, params ChatMessage[] messages) =>
+        new(model, messages, _workingDirectory, new ConnectorOptions { Type = ConnectorType.Cli, MaxArgumentLength = 100, PromptInput = input });
 
     [Fact]
-    public void Claude_puts_the_prompt_straight_after_print_and_disables_every_tool()
+    public void Claude_reads_the_prompt_from_stdin_and_disables_every_tool()
     {
         (List<string> args, string? stdin) = new ClaudeCodeCliAdapter().Build(Request("sonnet", new ChatMessage("user", "hello there")));
 
-        args.Take(2).Should().Equal("-p", "hello there");
+        args.Take(2).Should().Equal(["-p", "--output-format"], "the prompt is not on the command line, where other users could read it");
+        args.Should().NotContain(a => a.Contains("hello there", StringComparison.Ordinal));
+        stdin.Should().Be("hello there");
         args.Should().ContainInOrder("--output-format", "stream-json", "--verbose", "--include-partial-messages");
         args.Should().ContainInOrder("--tools", string.Empty);
         args.Should().ContainInOrder("--disallowedTools", "mcp__*");
@@ -25,6 +29,15 @@ public sealed class CliAdapterTests : IDisposable
         args.Should().ContainInOrder("--permission-mode", "dontAsk");
         args.Should().ContainInOrder("--model", "sonnet");
         args.Should().NotContain("--bare", "bare mode never uses the subscription login");
+    }
+
+    [Fact]
+    public void Claude_puts_an_argument_prompt_straight_after_print()
+    {
+        (List<string> args, string? stdin) = new ClaudeCodeCliAdapter().Build(
+            Request(CliPromptInput.Argument, "sonnet", new ChatMessage("user", "hello there")));
+
+        args.Take(2).Should().Equal("-p", "hello there");
         stdin.Should().BeNull();
     }
 
@@ -52,20 +65,20 @@ public sealed class CliAdapterTests : IDisposable
     }
 
     [Fact]
-    public void Claude_moves_long_prompts_to_standard_input()
+    public void Claude_moves_prompts_too_long_for_an_argument_to_standard_input()
     {
         string prompt = new('x', 500);
 
-        (List<string> args, string? stdin) = new ClaudeCodeCliAdapter().Build(Request(null, new ChatMessage("user", prompt)));
+        (List<string> args, string? stdin) = new ClaudeCodeCliAdapter().Build(Request(CliPromptInput.Argument, null, new ChatMessage("user", prompt)));
 
-        args[1].Should().Contain("standard input");
+        args[1].Should().Be("--output-format");
         stdin.Should().Be(prompt);
     }
 
     [Fact]
     public void Prompts_starting_with_a_dash_are_not_read_as_options()
     {
-        (List<string> args, _) = new ClaudeCodeCliAdapter().Build(Request(null, new ChatMessage("user", "--help me")));
+        (List<string> args, _) = new ClaudeCodeCliAdapter().Build(Request(CliPromptInput.Argument, null, new ChatMessage("user", "--help me")));
 
         args[1].Should().Be(" --help me");
     }
@@ -100,15 +113,25 @@ public sealed class CliAdapterTests : IDisposable
     }
 
     [Fact]
-    public void Copilot_uses_single_token_prompt_and_denies_tools()
+    public void Copilot_reads_the_prompt_from_stdin_and_denies_tools()
     {
         (List<string> args, string? stdin) = new CopilotCliAdapter().Build(Request("claude-sonnet-5.5",
             new ChatMessage("system", "Be terse."), new ChatMessage("user", "-hi")));
 
-        args[0].Should().Be("--prompt=[system]\nBe terse.\n\n-hi");
+        stdin.Should().Be("[system]\nBe terse.\n\n-hi");
+        args.Should().NotContain(a => a.StartsWith("--prompt", StringComparison.Ordinal) || a.Contains("Be terse", StringComparison.Ordinal));
         args.Should().Contain(["-s", "--no-color", "--no-ask-user", "--deny-tool=shell", "--deny-tool=write",
             "--deny-tool=url", "--disable-builtin-mcps", "--no-custom-instructions", "--model=claude-sonnet-5.5"]);
         args.Should().NotContain("--allow-all-tools");
+    }
+
+    [Fact]
+    public void Copilot_passes_an_argument_prompt_as_a_single_token()
+    {
+        (List<string> args, string? stdin) = new CopilotCliAdapter().Build(Request(CliPromptInput.Argument, null,
+            new ChatMessage("system", "Be terse."), new ChatMessage("user", "-hi")));
+
+        args[0].Should().Be("--prompt=[system]\nBe terse.\n\n-hi");
         stdin.Should().BeNull();
     }
 

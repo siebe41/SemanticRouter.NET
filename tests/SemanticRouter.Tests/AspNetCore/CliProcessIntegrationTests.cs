@@ -73,11 +73,11 @@ public sealed class CliProcessIntegrationTests : IDisposable
 
             result.Outcome.Should().Be(ConnectorOutcome.Completed);
             using JsonDocument report = JsonDocument.Parse(Content(body));
-            report.RootElement.GetProperty("prompt").GetString().Should().Be("hello there");
+            report.RootElement.GetProperty("prompt").GetString().Should().BeNull("the prompt is not on the command line");
+            report.RootElement.GetProperty("stdin").GetString().Should().Be("hello there");
             report.RootElement.GetProperty("secret").GetString().Should().Be("unset", "RemoveEnvironmentVariables is honoured");
             report.RootElement.GetProperty("set").GetString().Should().Be("yes");
             report.RootElement.GetProperty("files").GetInt32().Should().Be(0, "each run gets a fresh empty directory");
-            report.RootElement.GetProperty("stdinLength").GetInt32().Should().Be(0);
         }
         finally
         {
@@ -86,9 +86,24 @@ public sealed class CliProcessIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task Argument_prompts_arrive_after_print()
+    {
+        ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);
+        options.PromptInput = CliPromptInput.Argument;
+        using var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
+
+        (_, string body) = await SendAsync(connector, "hello there");
+
+        using JsonDocument report = JsonDocument.Parse(Content(body));
+        report.RootElement.GetProperty("prompt").GetString().Should().Be("hello there");
+        report.RootElement.GetProperty("stdinLength").GetInt32().Should().Be(0);
+    }
+
+    [Fact]
     public async Task Long_non_ascii_prompts_go_through_stdin_and_system_prompts_as_arguments()
     {
         ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);
+        options.PromptInput = CliPromptInput.Argument;
         options.MaxArgumentLength = 50;
         using var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
         string prompt = string.Concat(Enumerable.Repeat("Grüße, 世界 — ", 400));

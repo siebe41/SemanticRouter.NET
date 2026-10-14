@@ -66,14 +66,18 @@ public enum CliPreset
     Codex = 3,
 }
 
-/// <summary>How a custom CLI receives the prompt.</summary>
+/// <summary>How a CLI receives the prompt.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<CliPromptInput>))]
 public enum CliPromptInput
 {
-    /// <summary>The prompt is written to standard input.</summary>
+    /// <summary>The prompt is written to standard input, where other local users cannot read it.</summary>
     Stdin = 0,
 
-    /// <summary>The prompt replaces the <c>{prompt}</c> placeholder in <see cref="ConnectorOptions.Arguments"/>.</summary>
+    /// <summary>
+    /// The prompt is a command-line argument, which other local users can read while the process runs: it replaces the
+    /// <c>{prompt}</c> placeholder in <see cref="ConnectorOptions.Arguments"/> (custom), follows <c>-p</c> (Claude Code) or
+    /// is <c>--prompt=</c> (Copilot), up to <see cref="ConnectorOptions.MaxArgumentLength"/>. Codex always reads stdin.
+    /// </summary>
     Argument = 1,
 }
 
@@ -129,7 +133,7 @@ public sealed class ConnectorOptions
     public IList<string>? Arguments { get; set; }
 #pragma warning restore CA2227
 
-    /// <summary>CLI (custom only): how the prompt is passed. Default <see cref="CliPromptInput.Stdin"/>.</summary>
+    /// <summary>CLI: how the prompt is passed. Default <see cref="CliPromptInput.Stdin"/>.</summary>
     public CliPromptInput PromptInput { get; set; } = CliPromptInput.Stdin;
 
     /// <summary>CLI: what to do with requests that offer tools. Default <see cref="CliToolCalling.None"/>.</summary>
@@ -167,8 +171,9 @@ public sealed class ConnectorOptions
 #pragma warning restore CA2227
 
     /// <summary>
-    /// CLI: prompts longer than this many characters are sent on standard input instead of as an argument (where the
-    /// CLI supports it) to stay within operating-system command-line limits. Default 24,000.
+    /// CLI: with <see cref="CliPromptInput.Argument"/>, prompts longer than this many characters are sent on standard
+    /// input instead, to stay within operating-system command-line limits. A Claude Code system prompt longer than this
+    /// is moved into the conversation text. Default 24,000.
     /// </summary>
     public int MaxArgumentLength { get; set; } = 24_000;
 
