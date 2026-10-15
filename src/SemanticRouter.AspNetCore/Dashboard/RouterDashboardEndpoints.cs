@@ -179,6 +179,11 @@ public static partial class RouterDashboardEndpoints
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), null);
         });
 
+        // The machine policy an administrator set, which the configuration cannot override (empty when there is none).
+        api.MapGet("/policy", (RouterRuntimeProvider provider) => Results.Text(
+            $$"""{"source":{{System.Text.Json.JsonSerializer.Serialize(provider.Policy.Source)}},"policy":{{provider.Policy.ToJson()}}}""",
+            "application/json"));
+
         api.MapGet("/config/baseline", (RouterRuntimeProvider provider) =>
             ConfigEnvelope(provider.Current, provider, provider.Baseline.Masked(), null));
 
@@ -190,7 +195,7 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem("Expected a configuration document.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            return Results.Json(new ValidationResult([.. RouterRuntimeProvider.Validate(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)]), ApiJson);
+            return Results.Json(new ValidationResult([.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)]), ApiJson);
         });
 
         api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist, string? note) =>
@@ -201,7 +206,7 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem("Expected a configuration document.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            IReadOnlyList<string> errors = [.. RouterRuntimeProvider.Validate(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)];
+            IReadOnlyList<string> errors = [.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)];
             if (errors.Count > 0)
             {
                 return Results.Json(new ValidationResult(errors), ApiJson, statusCode: StatusCodes.Status400BadRequest);
@@ -251,7 +256,7 @@ public static partial class RouterDashboardEndpoints
 
             // The history keeps no secrets: they come from the running configuration.
             document.UnmaskFrom(provider.Current.Configuration);
-            IReadOnlyList<string> errors = RouterRuntimeProvider.Validate(document);
+            IReadOnlyList<string> errors = provider.ValidateChange(document);
             if (errors.Count > 0)
             {
                 return Results.Json(new ValidationResult(errors), ApiJson, statusCode: StatusCodes.Status400BadRequest);
@@ -565,7 +570,7 @@ public static partial class RouterDashboardEndpoints
             throw new InvalidOperationException("SemanticRouter:Dashboard:AdminToken and ReadOnlyToken must differ.");
         }
 
-        var access = new DashboardAccess(options, admin, readOnly);
+        var access = new DashboardAccess(options, admin, readOnly, services.GetService<MachinePolicy>()?.Dashboard ?? DashboardPolicy.Default);
         ILogger logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("SemanticRouter.Dashboard");
         foreach (string problem in problems)
         {

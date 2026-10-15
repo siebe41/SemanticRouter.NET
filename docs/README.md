@@ -11,6 +11,7 @@
 | [routing-profiles.md](routing-profiles.md) | Route by context, not only by prompt: profiles per project, client or tool set, virtual models, keeping secrets local, budgets per profile, active hours. |
 | [memory.md](memory.md) | Map an Obsidian vault, Claude Code's memory or an MCP memory graph, and see which notes reach local and cloud models. |
 | [providers.md](providers.md) | Configure a provider: LM Studio, Ollama, the subscription CLIs, OpenAI, Anthropic, Gemini, Azure, OpenRouter; tool calling per connector. |
+| [enterprise.md](enterprise.md) | Set a machine-wide policy, as an administrator, that users' configuration cannot override: connector types, allowed endpoints, local hosts, the dashboard, updates, features. |
 | [network.md](network.md) | See every host the router contacts and when, how to turn each off, and what to put on a firewall allowlist. |
 | [architecture.md](architecture.md) | Follow a request through the code, understand hot reload, or find the right extension point. |
 | [roadmap.md](roadmap.md) | See where the project is going and why in that order. |

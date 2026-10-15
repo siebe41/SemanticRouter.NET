@@ -1,3 +1,4 @@
+using SemanticRouter.AspNetCore;
 using SemanticRouter.Host;
 using Velopack;
 using Velopack.Sources;
@@ -12,6 +13,8 @@ namespace SemanticRouter.Desktop;
 /// </summary>
 /// <remarks>
 /// <c>SEMANTICROUTER_UPDATE_SOURCE</c> points the updater at another feed (a URL or a folder of packages), for testing.
+/// The machine policy (<see cref="MachinePolicy.Updates"/>) can turn updates off or pin them to an internal feed; the
+/// user's preference and the variable cannot override it. A feed over plain HTTP (other than to this machine) is refused.
 /// </remarks>
 internal sealed class DesktopUpdater(UpdateManager? manager, ServicePlatform? platform, TextWriter log, IReadOnlyList<string>? hostArguments = null)
 {
@@ -23,11 +26,30 @@ internal sealed class DesktopUpdater(UpdateManager? manager, ServicePlatform? pl
     /// <summary>The updater for this app, or one that does nothing when the app was not installed.</summary>
     public static DesktopUpdater Create(HostSettings settings, Func<string, string?> environment, TextWriter log)
     {
+        UpdatePolicy policy;
+        try
+        {
+            policy = MachinePolicyLoader.Load().Updates;
+        }
+        catch (InvalidDataException ex)
+        {
+            // An administrator set a policy that cannot be read: do not update past it.
+            log.WriteLine($"Updates are off: {ex.Message}");
+            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings));
+        }
+
+        (string? feed, string? off) = Feed(policy, environment);
+        if (off is not null)
+        {
+            log.WriteLine($"Updates are off: {off}.");
+            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings));
+        }
+
         UpdateManager? manager = null;
         try
         {
-            manager = environment("SEMANTICROUTER_UPDATE_SOURCE") is { Length: > 0 } source
-                ? new UpdateManager(source)
+            manager = feed is not null
+                ? new UpdateManager(feed)
                 : new UpdateManager(new GithubSource(ProjectLinks.Repository, null, false));
             if (!manager.IsInstalled)
             {
@@ -41,6 +63,23 @@ internal sealed class DesktopUpdater(UpdateManager? manager, ServicePlatform? pl
         }
 
         return new DesktopUpdater(manager, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings));
+    }
+
+    /// <summary>
+    /// Where updates come from: the policy's feed, else <c>SEMANTICROUTER_UPDATE_SOURCE</c>, else GitHub Releases
+    /// (<see langword="null"/>); or why there are none.
+    /// </summary>
+    internal static (string? Feed, string? Off) Feed(UpdatePolicy policy, Func<string, string?> environment)
+    {
+        if (policy.Mode == UpdateMode.Off)
+        {
+            return (null, "turned off by your organization's policy");
+        }
+
+        string? feed = policy.Mode == UpdateMode.Feed ? policy.Feed : environment("SEMANTICROUTER_UPDATE_SOURCE") is { Length: > 0 } source ? source : null;
+        return feed is not null && Uri.TryCreate(feed, UriKind.Absolute, out Uri? address) && address.Scheme == Uri.UriSchemeHttp && !address.IsLoopback
+            ? (null, $"the update feed {address.Authority} is not HTTPS")
+            : (feed, null);
     }
 
     /// <summary>
