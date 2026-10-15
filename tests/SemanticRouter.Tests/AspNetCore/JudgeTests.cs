@@ -111,6 +111,7 @@ public sealed class JudgeTests : RouterHostTest
         RoutingActivityEntry entry = Latest;
         entry.PromptPreview.Should().EndWith("…", "the preview holds only the start of the prompt");
         entry.PromptKey.Should().Be(JudgeAgreement.KeyOf(longPrompt));
+        _time.Advance(DateTimeOffset.UtcNow - _time.GetUtcNow()); // a slow start can put the turn past the clock
         using JsonDocument agreement = JsonDocument.Parse(await client.GetStringAsync("/router/api/judge/agreement"));
         JsonElement root = agreement.RootElement;
         (root.GetProperty("pairs").GetInt32(), root.GetProperty("agreeing").GetInt32()).Should().Be((1, 1), "graded 2 at tier 1 and labelled tier 3: the label confirms the low grade");

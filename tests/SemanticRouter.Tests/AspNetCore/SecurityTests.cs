@@ -229,11 +229,13 @@ public sealed class DashboardAccessTests : RouterHostTest
     private static readonly IPAddress Remote = IPAddress.Parse("203.0.113.7");
 
     private readonly CapturingLoggerProvider _logs = new();
+    private readonly ManualTimeProvider _time = new();
 
     private Task<HttpClient> StartAsync(
         Action<RouterDashboardOptions>? dashboard = null,
         bool remote = true,
-        Action<PromptRouterMiddlewareOptions>? middleware = null) =>
+        Action<PromptRouterMiddlewareOptions>? middleware = null,
+        bool manualTime = false) =>
         StartAsync(
             o =>
             {
@@ -247,6 +249,11 @@ public sealed class DashboardAccessTests : RouterHostTest
                 if (dashboard is not null)
                 {
                     s.Configure(dashboard);
+                }
+
+                if (manualTime)
+                {
+                    s.AddSingleton<TimeProvider>(_time);
                 }
             },
             beforeRouter: remote
@@ -303,7 +310,7 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
-    public async Task The_read_only_token_can_look_but_not_change()
+    public async Task The_read_only_token_can_look_but_not_change_or_spend()
     {
         HttpClient client = await StartAsync(WithTokens);
         string config = JsonNode.Parse(await (await client.SendAsync(Get("/router/api/config", ReadOnlyToken))).Content.ReadAsStringAsync())!["config"]!.ToJsonString();
@@ -317,8 +324,30 @@ public sealed class DashboardAccessTests : RouterHostTest
 
         (await client.SendAsync(put)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await client.SendAsync(reset)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await client.SendAsync(classify)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.SendAsync(classify)).StatusCode.Should().Be(HttpStatusCode.Forbidden, "classifying embeds the prompt");
         (await client.SendAsync(Get("/router/api/activity", ReadOnlyToken))).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData("/router/api/classify", """{"prompt":"hello"}""")]
+    [InlineData("/router/api/evaluate", """{"text":""}""")]
+    [InlineData("/router/api/evaluate/compare", """{"embeddings":{"Provider":"Hashing"}}""")]
+    [InlineData("/router/api/embeddings/test", """{"text":"hello"}""")]
+    [InlineData("/router/api/connectors/local/discover", "")]
+    [InlineData("/router/api/connectors/local/check", "")]
+    [InlineData("/router/api/memory/refresh", "")]
+    public async Task The_read_only_token_cannot_spend_embedding_or_api_calls_or_scan_the_disk(string path, string body)
+    {
+        HttpClient client = await StartAsync(WithTokens);
+        HttpRequestMessage Post(string token)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            return request;
+        }
+
+        (await client.SendAsync(Post(ReadOnlyToken))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.SendAsync(Post(AdminToken))).StatusCode.Should().NotBe(HttpStatusCode.Forbidden).And.NotBe(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -339,6 +368,63 @@ public sealed class DashboardAccessTests : RouterHostTest
         request.Headers.Add("Cookie", cookie.Split(';')[0]);
         JsonNode session = JsonNode.Parse(await (await client.SendAsync(request)).Content.ReadAsStringAsync())!;
         session["role"]!.GetValue<string>().Should().Be("Admin");
+    }
+
+    [Fact]
+    public async Task A_session_lapses_after_its_lifetime_and_its_issue_time_cannot_be_moved()
+    {
+        HttpClient client = await StartAsync(o => { WithTokens(o); o.SessionLifetime = TimeSpan.FromHours(1); }, manualTime: true);
+        HttpResponseMessage signIn = await client.PostAsJsonAsync("/router/api/session", new { token = ReadOnlyToken });
+        string setCookie = signIn.Headers.GetValues("Set-Cookie").Single();
+        setCookie.Should().StartWith("semantic-router-session=r.").And.Contain("max-age=3600");
+        string cookie = setCookie.Split(';')[0];
+
+        async Task<HttpStatusCode> StatusWithAsync(string value)
+        {
+            HttpRequestMessage request = Get("/router/api/status");
+            request.Headers.Add("Cookie", value);
+            return (await client.SendAsync(request)).StatusCode;
+        }
+
+        (await StatusWithAsync(cookie)).Should().Be(HttpStatusCode.OK);
+        _time.Advance(TimeSpan.FromMinutes(59));
+        (await StatusWithAsync(cookie)).Should().Be(HttpStatusCode.OK);
+
+        string[] parts = cookie.Split('.');
+        string moved = $"{parts[0]}.{_time.GetUtcNow().ToUnixTimeSeconds()}.{parts[2]}";
+        (await StatusWithAsync(moved)).Should().Be(HttpStatusCode.Unauthorized, "the issue time is signed");
+        (await StatusWithAsync(cookie.Replace("session=r.", "session=a.", StringComparison.Ordinal))).Should().Be(HttpStatusCode.Unauthorized, "so is the role");
+
+        _time.Advance(TimeSpan.FromMinutes(2));
+        (await StatusWithAsync(cookie)).Should().Be(HttpStatusCode.Unauthorized, "the session lapsed");
+    }
+
+    [Fact]
+    public async Task Wrong_tokens_are_throttled_per_address_until_the_window_passes()
+    {
+        HttpClient client = await StartAsync(WithTokens, manualTime: true);
+        for (int i = 0; i < 3; i++)
+        {
+            (await client.PostAsJsonAsync("/router/api/session", new { token = AdminToken })).StatusCode.Should().Be(HttpStatusCode.OK, "a good token never counts");
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            (await client.PostAsJsonAsync("/router/api/session", new { token = "guess-guess-guess-" + i })).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+
+        _time.Advance(TimeSpan.FromMinutes(5));
+        (await client.SendAsync(Get("/router/api/status", "guess-guess-guess-bearer"))).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a wrong bearer token counts too");
+
+        HttpResponseMessage throttled = await client.PostAsJsonAsync("/router/api/session", new { token = AdminToken });
+        throttled.StatusCode.Should().Be(HttpStatusCode.TooManyRequests, "even the right token waits, or guessing would still tell");
+        throttled.Headers.RetryAfter!.Delta.Should().Be(TimeSpan.FromMinutes(10), "until the first failure is 15 minutes old");
+        (await throttled.Content.ReadAsStringAsync()).Should().Contain("Try again in 10 minute(s)");
+        (await client.SendAsync(Get("/router/api/status", AdminToken))).StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+
+        _time.Advance(TimeSpan.FromMinutes(10));
+        (await client.PostAsJsonAsync("/router/api/session", new { token = AdminToken })).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.SendAsync(Get("/router/api/status", AdminToken))).StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -490,6 +576,43 @@ public sealed class DashboardAccessTests : RouterHostTest
         HttpClient allowed = await StartAsync(o => o.AllowProcessSettings = true, remote: false);
         (await PutWithAsync(allowed, "custom", """{"Type":"Cli","Preset":"Custom","Executable":"/usr/local/bin/llm"}""")).StatusCode
             .Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Which_files_memory_sources_read_cannot_be_changed_over_the_admin_api_unless_allowed()
+    {
+        HttpClient client = await StartAsync(remote: false);
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        RouterConfiguration fromFile = provider.Current.Configuration.Clone();
+        fromFile.Memory.Sources.Add(new MemorySourceOptions { Name = "vault", Path = "/srv/notes" });
+        provider.Apply(fromFile, persist: false, "configuration file");
+
+        async Task<HttpResponseMessage> SendWithAsync(HttpClient http, string sources, string path = "/router/api/config?persist=false")
+        {
+            JsonNode config = JsonNode.Parse(await http.GetStringAsync("/router/api/config"))!["config"]!;
+            config["Memory"]!["Sources"] = JsonNode.Parse(sources);
+            var content = new StringContent(config.ToJsonString(), Encoding.UTF8, "application/json");
+            return path.Contains("validate", StringComparison.Ordinal) ? await http.PostAsync(path, content) : await http.PutAsync(path, content);
+        }
+
+        HttpResponseMessage added = await SendWithAsync(client, """[{"Name":"vault","Path":"/srv/notes"},{"Name":"keys","Path":"/home/me/.ssh"}]""");
+        HttpResponseMessage moved = await SendWithAsync(client, """[{"Name":"vault","Path":"/etc"}]""");
+        HttpResponseMessage retyped = await SendWithAsync(client, """[{"Name":"vault","Type":"KnowledgeGraph","Path":"/srv/notes"}]""");
+        HttpResponseMessage validated = await SendWithAsync(client, """[{"Name":"root","Path":"/"}]""", "/router/api/config/validate");
+
+        added.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await added.Content.ReadAsStringAsync()).Should().Contain("Memory:Sources:keys:Path").And.Contain("AllowProcessSettings").And.NotContain("Memory:Sources:vault");
+        moved.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await moved.Content.ReadAsStringAsync()).Should().Contain("Memory:Sources:vault:Path");
+        retyped.StatusCode.Should().Be(HttpStatusCode.BadRequest, "another type reads the same path differently");
+        (await validated.Content.ReadAsStringAsync()).Should().Contain("Memory:Sources:root:Path", "validation says so before applying");
+        (await SendWithAsync(client, """[{"Name":"notes","Path":"/srv/notes","Enabled":false}]""")).StatusCode
+            .Should().Be(HttpStatusCode.OK, "renaming or turning off a source reads nothing new");
+        (await SendWithAsync(client, """[{"Name":"claude","Type":"ClaudeCode"}]""")).StatusCode.Should().Be(HttpStatusCode.OK, "a source in its default place can be added");
+        await DisposeAsync();
+
+        HttpClient allowed = await StartAsync(o => o.AllowProcessSettings = true, remote: false);
+        (await SendWithAsync(allowed, """[{"Name":"vault","Path":"/srv/other"}]""")).StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]

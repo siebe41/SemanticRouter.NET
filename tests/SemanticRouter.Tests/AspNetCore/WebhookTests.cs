@@ -239,7 +239,10 @@ public sealed class WebhookTests : RouterHostTest
     [Fact]
     public async Task An_ntfy_title_outside_ascii_is_encoded_for_its_header()
     {
-        var notice = new RouterNotice("connector:down:café", NoticeKind.ConnectorDown, "Connector café is down", "Every request failed.", "#/connectors", DateTimeOffset.UtcNow);
+        var notice = new RouterNotice("connector:down:café", NoticeKind.ConnectorDown, "Connector café is down", "Every request failed.", "#/connectors", DateTimeOffset.UtcNow)
+        {
+            PlainDetail = "Every request failed.",
+        };
 
         using HttpContent content = WebhookNotifier.NoticeMessage(WebhookFormat.Ntfy, notice, cleared: false, dashboardUrl: null);
 
@@ -262,6 +265,79 @@ public sealed class WebhookTests : RouterHostTest
             "1,234 prompts routed, 62% served locally, $3.20 spent, $18.40 saved against opus.\n"
             + "10 raised a tier, 2 degraded, 0 failed.\n"
             + "No signs that a decision fell short.");
+    }
+
+    [Fact]
+    public async Task Webhook_messages_leave_out_prompt_and_reply_text_unless_details_are_included()
+    {
+        var suggestion = new TuningChange
+        {
+            Kind = TuningChangeKind.Utterance,
+            Route = "code",
+            Utterance = "refactor the billing module for ACME-PROJECT",
+            State = TuningChangeState.Suggested,
+        };
+        suggestion.PlainSummary.Should().Be("utterance for code");
+        var notice = new RouterNotice(
+            "down:cli",
+            NoticeKind.ConnectorDown,
+            "cli has been down for 2 hours",
+            "Every request to it has failed (latest: the model wrote ACME-PROJECT). Start it.",
+            "#/connectors",
+            DateTimeOffset.UtcNow)
+        {
+            PlainDetail = "Every request to it has failed. Start it.",
+        };
+        var unwritten = new RouterNotice("x", NoticeKind.ConnectorDown, "x is down", "latest: ACME-PROJECT", "#/connectors", DateTimeOffset.UtcNow);
+        var digest = new DigestResponse(
+            DateTimeOffset.UtcNow.AddDays(-7), DateTimeOffset.UtcNow, Prompts: 3, Served: 3, Local: 3, LocalShare: 1, CostUsd: 0, ReferenceCostUsd: 0, SavedUsd: 0,
+            ReferenceModel: null, Escalated: 0, HeldByConversation: 0, Degraded: 0, Failed: 0, Signals: 0, new Dictionary<FeedbackKind, int>(),
+            [new DigestChange(1, DateTimeOffset.UtcNow, suggestion.Summary, TuningChangeState.Applied, 2) { PlainSummary = suggestion.PlainSummary }],
+            Suggestions: 0, [notice], Notify: true);
+
+        foreach (WebhookFormat format in Enum.GetValues<WebhookFormat>())
+        {
+            string plainNotice = await TextOf(WebhookNotifier.NoticeMessage(format, notice, cleared: false, "http://router.lan/router"));
+            plainNotice.Should().NotContain("ACME-PROJECT", $"{format} notices carry no prompt or reply text by default")
+                .And.Contain("cli has been down for 2 hours").And.Contain("Every request to it has failed. Start it.");
+
+            (await TextOf(WebhookNotifier.NoticeMessage(format, unwritten, cleared: false, null))).Should().NotContain("ACME-PROJECT", "a notice without a plain detail has its detail left out");
+
+            string plainDigest = await TextOf(WebhookNotifier.DigestMessage(format, digest, null));
+            plainDigest.Should().NotContain("ACME-PROJECT", $"{format} digests carry no prompt or reply text by default").And.Contain("utterance for code");
+
+            (await TextOf(WebhookNotifier.NoticeMessage(format, notice, cleared: false, null, includeDetails: true))).Should().Contain("ACME-PROJECT");
+            (await TextOf(WebhookNotifier.DigestMessage(format, digest, null, includeDetails: true))).Should().Contain("ACME-PROJECT");
+        }
+
+        static async Task<string> TextOf(HttpContent content)
+        {
+            using (content)
+            {
+                string body = await content.ReadAsStringAsync();
+                return body + "\n" + string.Join("\n", content.Headers.Select(h => h.Key + ": " + string.Join(",", h.Value)));
+            }
+        }
+    }
+
+    [Fact]
+    public async Task A_suggested_utterance_reaches_a_webhook_without_its_text()
+    {
+        await StartWithAsync(n => n.Webhooks["json"] = new WebhookOptions { Url = "https://hooks.example/json" });
+        Services.GetRequiredService<ITuningStore>().Save(new TuningChange
+        {
+            Id = 1,
+            Timestamp = _time.GetUtcNow(),
+            Kind = TuningChangeKind.Utterance,
+            Route = "code",
+            Utterance = "refactor the billing module for ACME-PROJECT",
+            State = TuningChangeState.Suggested,
+        });
+
+        await CheckAsync();
+
+        string detail = JsonDocument.Parse(Single("https://hooks.example/json").Body).RootElement.GetProperty("detail").GetString()!;
+        detail.Should().Contain("utterance for code").And.NotContain("ACME-PROJECT");
     }
 
     private Delivery Single(string url) => _deliveries.Should().ContainSingle(d => d.Url == url).Subject;

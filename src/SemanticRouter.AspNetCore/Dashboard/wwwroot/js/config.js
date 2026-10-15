@@ -1,7 +1,7 @@
 /* Semantic Router dashboard: Configuration pages: tiers, routes, models, connectors, routing rules, embeddings, gateway, clients, history. */
 import { connectorStateBadge } from './endpoints.js';
 import { reliabilityBadges, reliabilityCard } from './reliability.js';
-import { CAPABILITY_HINTS, CONNECTOR_TYPES, MESSAGE_SELECTION, PRESETS, SCORING, STRATEGIES, connectorNames, csv, h, isReference, kv, lineupFor, lines, readOnly, state, tiers, views } from './core.js';
+import { CAPABILITY_HINTS, CONNECTOR_TYPES, MESSAGE_SELECTION, PRESETS, SCORING, STRATEGIES, adminOnly, connectorNames, csv, h, isReference, kv, lineupFor, lines, readOnly, state, tiers, views } from './core.js';
 
 views.tiers = () => {
   const c = state.config;
@@ -88,7 +88,7 @@ const modelItem = (m, i) => {
     <div class="item-body"><div class="form-grid">
       <label class="field"><span class="name">Name</span><input type="text" data-bind="Models.${i}.Name" value="${h(m.Name)}"><span class="hint">Clients can request it directly as <code>model</code>.</span></label>
       <label class="field"><span class="name">Connector</span><select data-bind="Models.${i}.Connector">${names.map((n) => `<option ${n === m.Connector ? 'selected' : ''}>${h(n)}</option>`).join('')}${names.includes(m.Connector) ? '' : `<option selected>${h(m.Connector)}</option>`}</select></label>
-      <label class="field"><span class="name">Provider model id</span><div class="inline"><input type="text" data-bind="Models.${i}.Model" data-kind="nulltext" value="${h(m.Model || '')}" placeholder="connector default" list="models-${i}"><button class="btn small" data-action="discover" data-connector="${h(m.Connector)}" data-index="${i}" title="Ask the connector which models it has">Discover</button></div><datalist id="models-${i}"></datalist></label>
+      <label class="field"><span class="name">Provider model id</span><div class="inline"><input type="text" data-bind="Models.${i}.Model" data-kind="nulltext" value="${h(m.Model || '')}" placeholder="connector default" list="models-${i}">${readOnly() ? '' : `<button class="btn small" data-action="discover" data-connector="${h(m.Connector)}" data-index="${i}" title="Ask the connector which models it has">Discover</button>`}</div><datalist id="models-${i}"></datalist></label>
       <label class="field"><span class="name">Tier</span><select data-bind="Models.${i}.Tier" data-kind="number">${tierOptions(m.Tier)}</select></label>
       <label class="field"><span class="name">Capabilities</span><input type="text" data-bind="Models.${i}.Capabilities" data-kind="csv" value="${h(csv(m.Capabilities))}" placeholder="chat, code, tools, vision, reasoning"><span class="hint">Declare <code>tools</code> only when the connector can carry them (HTTP, or a CLI with prompted tool calling).</span></label>
       <label class="field"><span class="name">Context window (tokens)</span><input type="number" min="0" data-bind="Models.${i}.ContextWindow" data-kind="number" value="${m.ContextWindow || 0}"><span class="hint">0 = unknown (never skipped).</span></label>
@@ -228,7 +228,7 @@ views.connectors = () => {
             <label class="field"><span class="name">Extra headers (Name=value)</span><textarea data-bind="${p}.Headers" data-kind="kv" rows="3">${h(kv(c.Headers))}</textarea><span class="hint">Azure: <code>api-key=…</code> · OpenAI org: <code>OpenAI-Organization=org_…</code></span></label>
             <label class="field"><span class="name">Forward client headers</span><textarea data-bind="${p}.ForwardHeaders" data-kind="lines" rows="3">${h(lines(c.ForwardHeaders))}</textarea><span class="hint">Copied from the client request (e.g. <code>anthropic-beta</code>). Authorization headers are never forwarded.</span></label>`}
         </div>
-        <div class="row-actions" style="margin-top:10px"><button class="btn small" data-action="lineup-discover" data-connector="${h(name)}">Discover models</button><button class="btn danger small" data-action="connector-remove" data-name="${h(name)}">Remove</button></div>
+        <div class="row-actions" style="margin-top:10px">${readOnly() ? '' : `<button class="btn small" data-action="lineup-discover" data-connector="${h(name)}">Discover models</button>`}<button class="btn danger small" data-action="connector-remove" data-name="${h(name)}">Remove</button></div>
         ${lineupPanel(name)}</div>
       </div>`;
     }).join('') || '<div class="card muted">No connectors yet.</div>'}`;
@@ -301,7 +301,7 @@ views.embeddings = () => {
         <label class="field"><span class="name">Timeout</span><input type="text" data-bind="Embeddings.Timeout" value="${h(e.Timeout || '00:00:10')}"><span class="hint">On the hot path of every request: keep it short.</span></label>`}
       <label class="check wide"><input type="checkbox" data-bind="Embeddings.WarmUpOnStartup" data-kind="bool" ${e.WarmUpOnStartup !== false ? 'checked' : ''}> Warm up on start-up (embed utterances in the background)</label>
     </div>
-    <div class="inline" style="margin-top:12px"><button class="btn" data-action="embeddings-test">Test current provider</button><span id="embeddings-result" class="small muted"></span></div>
+    <div class="inline" style="margin-top:12px"><button class="btn" data-action="embeddings-test" ${adminOnly()}>Test current provider</button><span id="embeddings-result" class="small muted"></span></div>
     <p class="muted small" style="margin-top:8px">The test uses the <b>applied</b> configuration. Apply your changes first.</p></div>`;
 };
 

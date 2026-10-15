@@ -8,7 +8,8 @@ namespace SemanticRouter.AspNetCore;
 
 /// <summary>
 /// Sends notices and the weekly digest to the configured webhooks (<see cref="NotificationOptions.Webhooks"/>): JSON,
-/// Slack-compatible or ntfy. A failed delivery is retried a few times with a growing pause, then logged; delivery runs
+/// Slack-compatible or ntfy. Unless <see cref="NotificationOptions.IncludeDetails"/> is on, messages leave out text that can
+/// come from prompts or replies (<see cref="RouterNotice.PlainDetail"/>). A failed delivery is retried a few times with a growing pause, then logged; delivery runs
 /// in the background and never holds up routing.
 /// </summary>
 internal sealed partial class WebhookNotifier(RouterRuntimeProvider provider, IHttpClientFactory clients, ILogger<WebhookNotifier> logger)
@@ -31,7 +32,7 @@ internal sealed partial class WebhookNotifier(RouterRuntimeProvider provider, IH
         NotificationOptions options = provider.Current.Resolved.Notifications;
         return Task.WhenAll(options.Webhooks
             .Where(h => h.Value.Notices && !string.IsNullOrEmpty(h.Value.Url))
-            .Select(h => DeliverAsync(h.Key, h.Value, () => NoticeMessage(h.Value.Format, notice, cleared, options.DashboardUrl), cancellationToken)));
+            .Select(h => DeliverAsync(h.Key, h.Value, () => NoticeMessage(h.Value.Format, notice, cleared, options.DashboardUrl, options.IncludeDetails), cancellationToken)));
     }
 
     /// <summary>Sends the digest to every webhook that takes it.</summary>
@@ -40,18 +41,19 @@ internal sealed partial class WebhookNotifier(RouterRuntimeProvider provider, IH
         NotificationOptions options = provider.Current.Resolved.Notifications;
         return Task.WhenAll(options.Webhooks
             .Where(h => h.Value.Digest && !string.IsNullOrEmpty(h.Value.Url))
-            .Select(h => DeliverAsync(h.Key, h.Value, () => DigestMessage(h.Value.Format, digest, options.DashboardUrl), cancellationToken)));
+            .Select(h => DeliverAsync(h.Key, h.Value, () => DigestMessage(h.Value.Format, digest, options.DashboardUrl, options.IncludeDetails), cancellationToken)));
     }
 
     /// <summary>A notice as a request body (and headers, for ntfy).</summary>
-    internal static HttpContent NoticeMessage(WebhookFormat format, RouterNotice notice, bool cleared, string? dashboardUrl)
+    internal static HttpContent NoticeMessage(WebhookFormat format, RouterNotice notice, bool cleared, string? dashboardUrl, bool includeDetails = false)
     {
+        notice = includeDetails ? notice : WithoutDetails(notice);
         string? link = Link(dashboardUrl, notice.Link);
         string title = cleared ? $"No longer needs a decision: {notice.Title}" : $"Needs a decision: {notice.Title}";
         return format switch
         {
-            WebhookFormat.Slack => JsonContent(new { text = cleared ? title : $"*{title}*\n{notice.Detail}" + (link is null ? string.Empty : $"\n<{link}|Decide on the dashboard>") }),
-            WebhookFormat.Ntfy => Ntfy(cleared ? notice.Title : notice.Detail, title, cleared ? "white_check_mark" : "warning", cleared ? 3 : 4, link),
+            WebhookFormat.Slack => JsonContent(new { text = cleared ? title : $"*{title}*" + (notice.Detail.Length == 0 ? string.Empty : $"\n{notice.Detail}") + (link is null ? string.Empty : $"\n<{link}|Decide on the dashboard>") }),
+            WebhookFormat.Ntfy => Ntfy(cleared || notice.Detail.Length == 0 ? notice.Title : notice.Detail, title, cleared ? "white_check_mark" : "warning", cleared ? 3 : 4, link),
             _ => JsonContent(new
             {
                 type = "notice",
@@ -67,8 +69,9 @@ internal sealed partial class WebhookNotifier(RouterRuntimeProvider provider, IH
     }
 
     /// <summary>The digest as a request body.</summary>
-    internal static HttpContent DigestMessage(WebhookFormat format, DigestResponse digest, string? dashboardUrl)
+    internal static HttpContent DigestMessage(WebhookFormat format, DigestResponse digest, string? dashboardUrl, bool includeDetails = false)
     {
+        digest = includeDetails ? digest : WithoutDetails(digest);
         string summary = DigestText(digest);
         string? link = Link(dashboardUrl, "#/overview");
         return format switch
@@ -106,6 +109,16 @@ internal sealed partial class WebhookNotifier(RouterRuntimeProvider provider, IH
 
         return string.Join("\n", lines);
     }
+
+    /// <summary>The notice with only its <see cref="RouterNotice.PlainDetail"/> (none when it has none).</summary>
+    internal static RouterNotice WithoutDetails(RouterNotice notice) => notice with { Detail = notice.PlainDetail ?? string.Empty };
+
+    /// <summary>The digest without learned utterances' text, and with its notices <see cref="WithoutDetails(RouterNotice)"/>.</summary>
+    internal static DigestResponse WithoutDetails(DigestResponse digest) => digest with
+    {
+        Learned = [.. digest.Learned.Select(l => l with { Summary = l.PlainSummary ?? "a learned change" })],
+        Notices = [.. digest.Notices.Select(WithoutDetails)],
+    };
 
     private static string? Link(string? dashboardUrl, string page) =>
         dashboardUrl is { Length: > 0 } dashboard ? dashboard.TrimEnd('/') + "/" + page : null;

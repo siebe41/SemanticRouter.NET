@@ -80,7 +80,7 @@ internal static class EvaluationApi
             EvaluationReport report = evaluator.Evaluate(prepared);
             CalibrationReport? calibration = calibrate == true ? evaluator.Calibrate(prepared) : null;
             return Results.Json(EvaluationResponse.From(report, calibration, prepared.EmbeddingTime, runtime.Configuration.Embeddings), json);
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance); // embeds every prompt in the set
 
         api.MapPost("/evaluate/compare", async (HttpContext context, RouterRuntimeProvider provider, IEvaluationSetStore store) =>
         {

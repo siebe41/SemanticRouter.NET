@@ -132,6 +132,28 @@ public sealed class RoutingProfileGatewayTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Without_a_project_header_the_project_is_a_hash_of_the_user_id_never_the_id()
+    {
+        const string userId = """{"device_id":"d-123","account_uuid":"acct-456","session_id":"s-789"}""";
+        string label = ProfileSelection.UserProject(userId)!;
+        label.Should().MatchRegex("^user:[0-9a-f]{12}$").And.Be(ProfileSelection.UserProject(userId), "it is stable");
+        ProfileSelection.UserProject("someone else").Should().NotBe(label);
+        ProfileSelection.UserProject(null).Should().BeNull();
+
+        HttpClient client = await StartProfilesAsync(o => o.ProfileRules.Add(new ProfileRule { Profile = "private", Projects = { label } }));
+        string body = $$"""{"model":"auto","user":{{JsonSerializer.Serialize(userId)}},"messages":[{"role":"user","content":"fix the build"}]}""";
+
+        HttpResponseMessage response = await PostAsync(client, Json(body));
+        HttpResponseMessage named = await PostAsync(client, Json(body), ("X-Router-Project", "acme-payments"));
+
+        Header(response, "X-Prompt-Route-Profile").Should().Be("private", "rules match the hashed label Activity shows");
+        named.Headers.Contains("X-Prompt-Route-Profile").Should().BeFalse("the header names the project as it is");
+        IReadOnlyList<RoutingActivityEntry> recent = Services.GetRequiredService<RoutingActivityLog>().Recent(2);
+        recent.Select(e => e.Project).Should().BeEquivalentTo([label, "acme-payments"]);
+        recent.Should().NotContain(e => e.Project!.Contains("acct-456"));
+    }
+
+    [Fact]
     public async Task A_secret_in_the_conversation_keeps_it_local_when_asked()
     {
         HttpClient client = await StartProfilesAsync(o => o.LocalOnlyWhen.Secrets = true);

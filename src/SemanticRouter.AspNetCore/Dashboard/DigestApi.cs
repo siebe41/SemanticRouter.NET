@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -30,7 +31,7 @@ internal static class DigestApi
         IReadOnlyList<RoutingFeedback> signals = feedback.Between(since, until);
         DigestChange[] learned = [.. tuner.Changes()
             .Where(c => c.Timestamp >= since && c.Timestamp < until && c.State is TuningChangeState.Applied or TuningChangeState.Undone)
-            .Select(c => new DigestChange(c.Id, c.Timestamp, c.Summary, c.State, c.Version))];
+            .Select(c => new DigestChange(c.Id, c.Timestamp, c.Summary, c.State, c.Version) { PlainSummary = c.PlainSummary })];
 
         return new DigestResponse(
             since,
@@ -100,4 +101,9 @@ internal sealed record DigestResponse(
     bool Notify);
 
 /// <summary>A change automatic tuning made: its id (for undo), when, what, and the configuration version it became.</summary>
-internal sealed record DigestChange(long Id, DateTimeOffset Timestamp, string Summary, TuningChangeState State, long? Version);
+internal sealed record DigestChange(long Id, DateTimeOffset Timestamp, string Summary, TuningChangeState State, long? Version)
+{
+    /// <summary>The summary without a learned utterance's text (<see cref="TuningChange.PlainSummary"/>), for webhooks.</summary>
+    [JsonIgnore]
+    public string? PlainSummary { get; init; }
+}

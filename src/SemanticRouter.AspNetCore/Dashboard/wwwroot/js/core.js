@@ -67,6 +67,8 @@ export const num = (v, d) => (v == null || v === '' ? '' : (typeof v === 'number
 export const when = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString(); };
 export const isDirty = () => state.config && JSON.stringify(state.config) !== state.original;
 export const readOnly = () => state.session.role === 'ReadOnly';
+// Attributes for a button that spends embedding or API calls: the read-only role sees it disabled.
+export const adminOnly = (busy) => (readOnly() ? 'disabled title="Needs the admin token"' : busy ? 'disabled' : '');
 export const isReference = (v) => typeof v === 'string' && /\$\{(env|secret):[^}]+\}/i.test(v);
 export const tierName = (level) => {
   const t = (state.status && state.status.tiers || []).find((x) => x.level === level);
