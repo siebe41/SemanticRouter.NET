@@ -164,7 +164,11 @@ module.exports = async function deepDive(k) {
   await k.stage('caption', 'Out of quota → cool down → the next model takes over', 'Overview → Endpoints');
   await sleep(1200);
   await k.dashScroll('h2:has-text("Endpoints")', 'start');
-  await k.highlight('.card:has(h2:has-text("Endpoints")) >> text=claude-cli >> xpath=ancestor::tr');
+  // The row grows when the cooldown shows (on the dashboard's next refresh); outline it once it has.
+  const claudeRow = '.card:has(h2:has-text("Endpoints")) >> text=claude-cli >> xpath=ancestor::tr';
+  await k.frame().locator(`${claudeRow} >> text=cooling down`).first().waitFor({ timeout: 15000 });
+  await sleep(300);
+  await k.highlight(claudeRow);
   await line;
   await sleep(800);
   await k.unhighlight();
