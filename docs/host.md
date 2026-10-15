@@ -125,6 +125,7 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | `semantic-router.db`, tables `cooldowns`, `affinity`, `warm_caches`, `tuning_changes` | Model cooldowns, which model issued each tool call (ids only), the size of each conversation's prompt cache per model (conversation hashes only), learned routing changes (which can include short utterances learned from prompt previews) | Until they expire, 24 hours, until they expire, until undone | Undo on **Router learned**, or delete the file |
 | `semantic-router.evaluation.jsonl` | Prompts you labelled, in full | Until you remove them | Edit or delete the file (the **Evaluate** page) |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted | Until removed from the configuration | Remove the key on the dashboard |
+| The data-protection key ring (see [The key ring](#the-key-ring)) | The keys that decrypt `semantic-router.secrets.json`; a new one every 90 days | Kept, so older secrets stay readable | Only with the secrets file: without its keys, the file cannot be read |
 | Logs (console, `logs/` for the Windows service) | Routing decisions and errors, with keys redacted. No prompt text, but a CLI run that fails logs the start of what it wrote, which can quote the model's reply | As your log setup keeps them | Delete the files |
 
 **Prompt previews.** `State:StorePrompts` decides how much of each prompt the activity log keeps:
@@ -138,6 +139,36 @@ The setting applies to new requests; delete earlier activity to remove previews 
 On Linux and macOS the configuration directory is kept at mode 0700 and the files the router writes in it at 0600, since they hold prompt previews and configuration; Windows profile folders are private already.
 
 Precedence, lowest first: the built-in template, `appsettings.json` in the configuration directory, `SemanticRouter__…` environment variables, command-line settings. A saved `semantic-router.json` then replaces the routing document as a whole. Secrets it leaves empty are still inherited from the layers below, so `SemanticRouter__Connectors__openai__ApiKey` keeps working.
+
+### The key ring
+
+`semantic-router.secrets.json` is encrypted with ASP.NET Core Data Protection. The keys that decrypt it, the key ring, are kept outside the configuration directory, so a copy of that directory alone carries no usable key. How they are protected depends on the platform:
+
+| | Where | Protected by |
+|---|---|---|
+| Windows | `%LOCALAPPDATA%\ASP.NET\DataProtection-Keys` | DPAPI, for your Windows account (ASP.NET Core's default) |
+| Windows, `SEMANTIC_ROUTER_KEYS_DIR` set | That folder | DPAPI, for your Windows account. ASP.NET Core leaves a folder set this way unencrypted; the router asks for DPAPI. |
+| macOS, Linux | `~/.aspnet/DataProtection-Keys` (shared with other ASP.NET Core apps you run) | File permissions only: the router keeps the folder at 0700 and the key files at 0600. |
+| Container | `/data/keys` (`SEMANTIC_ROUTER_KEYS_DIR`), on the same volume as the secrets | File permissions only |
+| Any of these, with `SemanticRouter:DataProtection:Certificate` | As above | Encryption to the certificate |
+
+Where only file permissions protect the keys, anyone who can read both the key ring and the secrets file can decrypt the keys you typed into the dashboard: a backup of your whole home directory, or a copy of the container's volume. `semantic-router doctor` says which case applies (the `key ring` line, a `[WARN]` for file permissions only), and the router logs a warning at start-up.
+
+**Encrypting the key ring with a certificate.** Set `SemanticRouter:DataProtection:Certificate` to an RSA certificate with its private key:
+
+- a PKCS#12 file (`.pfx`, `.p12`), with its password in `CertificatePassword`;
+- a PEM file with the certificate and its private key, or the certificate alone with the key file in `CertificateKey` (as Kubernetes mounts a TLS secret: `tls.crt` and `tls.key`); an encrypted key takes `CertificatePassword`;
+- or the thumbprint of a certificate in the `CurrentUser\My` store (on Windows, your personal certificate store).
+
+```json
+{ "SemanticRouter": { "DataProtection": { "Certificate": "/run/secrets/keyring.pfx", "CertificatePassword": "${env:KEYRING_PASSWORD}" } } }
+```
+
+It is a host setting, read at start-up: put it in `appsettings.json` in the configuration directory (which the tool, its background service and the desktop app all read), the environment (`SemanticRouter__DataProtection__Certificate`) or the command line. A relative path is resolved against the configuration directory, and `CertificatePassword` can be an `${env:…}` reference. A certificate that cannot be loaded, has no private key or is not RSA stops the router with the setting named; `doctor` shows it as `[FAIL] configuration`. In a container, mount the certificate from your secret store (read-only) next to the volume rather than on it.
+
+- **Existing secrets keep working.** ASP.NET Core reads each key as it was written, encrypted or not. At the next start the router adds a key encrypted to the certificate (or with DPAPI, for `SEMANTIC_ROUTER_KEYS_DIR` on Windows) and uses it from then on, and it re-encrypts each saved secret with that key when it reads it. The older keys stay in the folder, unencrypted, and `doctor` lists them. Once the router has started with the certificate they protect nothing it needs, and can be deleted, unless another ASP.NET Core app on your account uses the same folder.
+- **Keep the certificate.** Keys encrypted to it can be read only with its private key. Replace or lose it, and the secrets saved under those keys can no longer be decrypted: the router then treats them as missing, and you type them again on the dashboard. Its expiry date is not checked.
+- **Not the macOS Keychain or the Linux Secret Service.** .NET has no built-in access to either, and the packages that add it bring native dependencies or are not maintained. On a desktop, full-disk encryption (FileVault, BitLocker, LUKS) covers the key ring at rest; use a certificate where that is not enough.
 
 ## Listening beyond this machine
 
@@ -192,7 +223,7 @@ ROUTER_ADMIN_TOKEN=$(openssl rand -hex 24) ROUTER_GATEWAY_KEY=$(openssl rand -he
   docker compose -f deploy/compose.yaml up
 ```
 
-- It listens on port `8080` and keeps the configuration, the encrypted secrets, the data-protection keys and the state database on the `/data` volume.
+- It listens on port `8080` and keeps the configuration, the encrypted secrets, the data-protection keys and the state database on the `/data` volume. The keys are not encrypted unless you mount a certificate and set `SemanticRouter__DataProtection__Certificate` (see [The key ring](#the-key-ring)); otherwise protect the volume as you would the secrets themselves.
 - The compose example publishes the port on `127.0.0.1` only.
 - Requests that come in through the port mapping arrive from the container network, so the router treats them as remote. The dashboard asks for `ROUTER_ADMIN_TOKEN` and the gateway for `ROUTER_GATEWAY_KEY` (clients send it as `ANTHROPIC_AUTH_TOKEN` or `OPENAI_API_KEY`); without them, everyone is refused.
 - With `docker run`, publish the port as `-p 127.0.0.1:5080:8080`. Plain `-p 5080:8080` opens it to every network the machine is on.

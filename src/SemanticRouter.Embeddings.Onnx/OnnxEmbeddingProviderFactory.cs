@@ -70,10 +70,14 @@ internal sealed class OnnxEmbeddingProviderFactory : IEmbeddingProviderFactory, 
         }
 
         string models = ModelsDirectory;
+
+        // Offline mode or the machine policy's allowed endpoints can rule out the download: then the files must be there.
+        string? refused = MachinePolicy.Effective(_services.GetService<MachinePolicy>(), NetworkOptions.Of(_services))
+            .Refuses(model.ModelUrl);
         return new Shared(this, $"{model.Name}|{models}", model.Name, async cancellationToken =>
         {
             HttpClient http = _services.GetRequiredService<IHttpClientFactory>().CreateClient(OnnxEmbeddingOptions.HttpClientName);
-            (string modelFile, string vocabFile) = await OnnxModelDownloader.EnsureAsync(model, models, http, cancellationToken).ConfigureAwait(false);
+            (string modelFile, string vocabFile) = await OnnxModelDownloader.EnsureAsync(model, models, http, refused, cancellationToken).ConfigureAwait(false);
             return new OnnxEmbeddingProvider(modelFile, vocabFile, options.Pooling ?? model.Pooling, _options.MaxTokens);
         });
     }

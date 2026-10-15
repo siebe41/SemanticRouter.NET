@@ -223,6 +223,83 @@ public sealed class MachinePolicyTests : RouterHostTest
         }
     }
 
+    private static RouterConfiguration Reachable()
+    {
+        var configuration = new RouterConfiguration();
+        configuration.Connectors["claude"] = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        configuration.Connectors["gateway"] = new ConnectorOptions { BaseAddress = new Uri("https://llm.corp.example") };
+        configuration.Connectors["cloud"] = new ConnectorOptions { BaseAddress = new Uri("https://api.example.com") };
+        configuration.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
+        configuration.Models.Add(Model("claude-cli", 4, connector: "claude"));
+        configuration.Models.Add(Model("corp", 3, connector: "gateway"));
+        configuration.Models.Add(Model("cloud", 4, connector: "cloud"));
+        configuration.Models.Add(Model("local", 1, local: true, connector: "lmstudio"));
+        configuration.Embeddings.Provider = EmbeddingProviderKind.OpenAICompatible;
+        configuration.Embeddings.Endpoint = new Uri("https://api.example.com");
+        configuration.Notifications.Webhooks["slack"] = new WebhookOptions { Url = "https://hooks.example.com/T0/B0/x" };
+        return configuration;
+    }
+
+    [Fact]
+    public void Offline_mode_reaches_only_this_machine_and_the_allowed_hosts()
+    {
+        var network = new NetworkOptions { Offline = true };
+        network.AllowedHosts.Add("*.corp.example");
+        MachinePolicy offline = MachinePolicy.Effective(MachinePolicy.None, network);
+        RouterConfiguration configuration = Reachable();
+
+        IReadOnlyList<string> changes = offline.Enforce(configuration);
+
+        configuration.Models.Where(m => m.Enabled).Select(m => m.Name).Should().Equal("corp", "local");
+        configuration.Embeddings.Provider.Should().Be(EmbeddingProviderKind.Hashing);
+        configuration.Notifications.Webhooks.Should().BeEmpty();
+        changes.Should().Contain(c => c.Contains("'claude-cli'", StringComparison.Ordinal) && c.Contains("reach their vendor, so they are off in offline mode (Network:Offline)", StringComparison.Ordinal))
+            .And.Contain(c => c.Contains("'cloud'", StringComparison.Ordinal) && c.Contains("api.example.com is not reachable in offline mode", StringComparison.Ordinal))
+            .And.Contain(c => c.StartsWith("Webhook 'slack'", StringComparison.Ordinal));
+        MachinePolicy.Effective(MachinePolicy.None, new NetworkOptions()).Should().BeSameAs(MachinePolicy.None, "without offline mode nothing changes");
+    }
+
+    [Fact]
+    public void Offline_mode_set_by_the_machine_policy_is_not_widened_by_the_users_hosts()
+    {
+        var network = new NetworkOptions();
+        network.AllowedHosts.Add("*.corp.example");
+        MachinePolicy policy = MachinePolicy.Effective(MachinePolicy.FromJson("""{"Offline": true}"""), network);
+        RouterConfiguration configuration = Reachable();
+
+        IReadOnlyList<string> changes = policy.Enforce(configuration);
+
+        configuration.Models.Where(m => m.Enabled).Select(m => m.Name).Should().Equal("local");
+        changes.Should().Contain(c => c.Contains("llm.corp.example is not reachable in offline mode (your organization's policy)", StringComparison.Ordinal));
+
+        MachinePolicy listed = MachinePolicy.FromJson("""{"Offline": true, "AllowedEndpoints": ["*.corp.example"]}""");
+        listed.AllowsEndpoint(new Uri("https://llm.corp.example")).Should().BeTrue("the policy's own endpoints are reachable offline");
+    }
+
+    [Fact]
+    public async Task Offline_mode_holds_at_start_up_and_on_every_change()
+    {
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+            },
+            services: s => s.Configure<NetworkOptions>(n => n.Offline = true));
+
+        RouterRuntime runtime = Services.GetRequiredService<RouterRuntimeProvider>().Current;
+        runtime.Configuration.Models.Where(m => m.Enabled).Select(m => m.Name).Should().Equal("local");
+        runtime.Warnings.Should().Contain(w => w.Contains("api.example.com is not reachable in offline mode (Network:Offline)", StringComparison.Ordinal));
+
+        JsonNode config = (await ReadAsync(await client.GetAsync("/router/api/config")))["config"]!;
+        config["Models"]!.AsArray().Single(m => (string?)m!["Name"] == "cloud")!["Enabled"] = true;
+        HttpResponseMessage apply = await client.PutAsync("/router/api/config?persist=false", Body(config));
+        apply.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await apply.Content.ReadAsStringAsync()).Should().Contain("offline mode");
+
+        new NetworkOptionsValidator().Validate(null, new NetworkOptions { AllowedHosts = { "https://x/" } }).Failed.Should().BeTrue();
+    }
+
     [Fact]
     public void Desktop_updates_follow_the_policy_and_never_come_over_plain_HTTP()
     {

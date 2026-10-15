@@ -7,6 +7,9 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Description>In-process sentence embeddings for SemanticRouter with ONNX Runtime: routes prompts with no embedding server running. Downloads a small model (all-MiniLM-L6-v2 or bge-small-en-v1.5, checksum-verified) on first use, or loads one from disk.</Description>
     <PackageTags>$(PackageTags);onnx;onnxruntime;sentence-transformers</PackageTags>
+    <!-- The desktop app references it: restored for the app's runtimes too, built once (Directory.Build.props). -->
+    <RuntimeIdentifiers>$(DesktopRuntimeIdentifiers)</RuntimeIdentifiers>
+    <IsRidAgnostic>true</IsRidAgnostic>
   </PropertyGroup>
 
   <ItemGroup>

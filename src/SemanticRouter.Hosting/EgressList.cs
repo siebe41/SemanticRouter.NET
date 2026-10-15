@@ -21,7 +21,9 @@ internal static class EgressList
     /// </summary>
     public static IReadOnlyList<RouterCheck> For(IServiceProvider services, string configurationDirectory)
     {
-        RouterConfiguration resolved = services.GetRequiredService<RouterRuntimeProvider>().Current.Resolved;
+        RouterRuntimeProvider provider = services.GetRequiredService<RouterRuntimeProvider>();
+        RouterConfiguration resolved = provider.Current.Resolved;
+        MachinePolicy policy = provider.Policy;
         var lines = new List<RouterCheck>();
 
         foreach ((string name, ConnectorOptions connector) in resolved.Connectors.OrderBy(c => c.Key, StringComparer.OrdinalIgnoreCase))
@@ -33,12 +35,13 @@ internal static class EgressList
                 ConnectorType.Copilot => $"CLI: {(string.IsNullOrWhiteSpace(connector.Executable) ? "copilot" : connector.Executable)} (the Copilot SDK's runtime), which contacts GitHub",
                 _ => Host(connector.BaseAddress) ?? "no BaseAddress",
             };
-            lines.Add(Line($"connector {name}: {where}{(used ? string.Empty : " (no enabled model uses it yet)")}."));
+            string state = policy.Blocks(connector) is { } blocked ? $" (never contacted: {blocked})" : used ? string.Empty : " (no enabled model uses it yet)";
+            lines.Add(Line($"connector {name}: {where}{state}."));
         }
 
-        if (Embeddings(services, resolved.Embeddings, configurationDirectory) is { } embeddings)
+        if (Embeddings(services, resolved.Embeddings, configurationDirectory, policy) is ({ } embeddings, bool problem))
         {
-            lines.Add(Line($"embeddings: {embeddings}."));
+            lines.Add(new RouterCheck(Subject, problem ? RouterCheckStatus.Warning : RouterCheckStatus.Ok, $"embeddings: {embeddings}."));
         }
 
         foreach ((string name, WebhookOptions hook) in resolved.Notifications.Webhooks.OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase))
@@ -52,7 +55,11 @@ internal static class EgressList
             lines.Add(Line($"webhook {name}: {host}{(resolved.Notifications.Enabled ? string.Empty : " (Notifications:Enabled is off, so nothing is sent)")}."));
         }
 
-        lines.Add(Line($"desktop app updates: {UpdateHosts} (only the installed desktop app; untick Check for updates in its tray menu to turn this off)."));
+        // The desktop app follows the machine policy only, not this host's own Network:Offline.
+        MachinePolicy machine = services.GetService<MachinePolicy>() ?? MachinePolicy.None;
+        lines.Add(Line(machine.Offline || machine.Updates.Mode == UpdateMode.Off
+            ? "desktop app updates: off (your organization's policy)."
+            : $"desktop app updates: {(machine.Updates.Mode == UpdateMode.Feed ? machine.Updates.Feed : UpdateHosts)} (only the installed desktop app; untick Check for updates in its tray menu to turn this off)."));
 
         try
         {
@@ -86,23 +93,29 @@ internal static class EgressList
         ? address.Authority + (address.IsLoopback ? " (this machine)" : string.Empty)
         : null;
 
-    private static string? Embeddings(IServiceProvider services, EmbeddingProviderOptions embeddings, string configurationDirectory)
+    /// <summary>Where embedding requests go, and whether that needs attention (a model that is missing and may not be downloaded).</summary>
+    private static (string Text, bool Problem)? Embeddings(IServiceProvider services, EmbeddingProviderOptions embeddings, string configurationDirectory, MachinePolicy policy)
     {
         switch (embeddings.Provider)
         {
             case EmbeddingProviderKind.OpenAICompatible:
-                return Host(embeddings.Endpoint) ?? "no Endpoint";
+                return (Host(embeddings.Endpoint) ?? "no Endpoint", false);
             case EmbeddingProviderKind.Onnx when !string.IsNullOrWhiteSpace(embeddings.ModelPath):
-                return $"ONNX model at {embeddings.ModelPath}, on this machine; nothing is downloaded";
+                return ($"ONNX model at {embeddings.ModelPath}, on this machine; nothing is downloaded", false);
             case EmbeddingProviderKind.Onnx when OnnxEmbeddingModels.Find(embeddings.Model ?? OnnxEmbeddingModels.DefaultModel) is { } model:
                 // OnnxEmbeddingProviderFactory's default: a models directory next to the configuration file.
                 string models = services.GetService<IOptions<OnnxEmbeddingOptions>>()?.Value.ModelsDirectory ?? Path.Combine(configurationDirectory, "models");
                 string directory = Path.Combine(Path.GetFullPath(models), model.Name);
-                return File.Exists(Path.Combine(directory, "model.onnx")) && File.Exists(Path.Combine(directory, "vocab.txt"))
-                    ? $"ONNX model {model.Name} is in {directory}; nothing is downloaded"
-                    : $"{model.ModelUrl.Host}, once, to download ONNX model {model.Name} into {directory} (copy it there to skip the download)";
+                if (File.Exists(Path.Combine(directory, "model.onnx")) && File.Exists(Path.Combine(directory, "vocab.txt")))
+                {
+                    return ($"ONNX model {model.Name} is in {directory}; nothing is downloaded", false);
+                }
+
+                return policy.Refuses(model.ModelUrl) is { } refused
+                    ? ($"ONNX model {model.Name} is not in {directory} and is not downloaded ({refused}): place model.onnx and vocab.txt there", true)
+                    : ($"{model.ModelUrl.Host}, once, to download ONNX model {model.Name} into {directory} (copy it there to skip the download)", false);
             case EmbeddingProviderKind.Hashing:
-                return "Hashing, on this machine; nothing is sent";
+                return ("Hashing, on this machine; nothing is sent", false);
             default:
                 return null;
         }

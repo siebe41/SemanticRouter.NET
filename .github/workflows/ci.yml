@@ -66,7 +66,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', 'global.json') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', '**/packages.lock.json', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
 
       # The ONNX embedding tests download two small models (57 MB) once and reuse them.
@@ -75,8 +75,10 @@ jobs:
           path: ${{ github.workspace }}/.models
           key: onnx-models-${{ hashFiles('src/SemanticRouter.Embeddings.Onnx/OnnxEmbeddingModels.cs') }}
 
+      # Locked: fails if a package (direct or transitive) differs from the projects' packages.lock.json files. After
+      # changing a package version, run `dotnet restore` and commit the updated lock files.
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore --locked-mode
 
       # NuGet advisories for direct and transitive packages. The scheduled run catches advisories
       # published after a dependency was added.
@@ -138,7 +140,7 @@ jobs:
           cache-dependency-path: tests/dashboard-e2e/package-lock.json
 
       - name: Build the host
-        run: dotnet build src/SemanticRouter.Host --configuration Release
+        run: dotnet build src/SemanticRouter.Host --configuration Release -p:RestoreLockedMode=true
 
       - name: Install Playwright and the screenshot fonts
         working-directory: tests/dashboard-e2e
@@ -181,7 +183,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', 'global.json') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', '**/packages.lock.json', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Install vpk

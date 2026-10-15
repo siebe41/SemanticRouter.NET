@@ -4,8 +4,10 @@ using System.Reflection;
 using System.Text;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration.Json;
+using Microsoft.Extensions.Options;
 using SemanticRouter.AspNetCore;
 
 namespace SemanticRouter.Host;
@@ -63,12 +65,10 @@ internal static class RouterHost
         }
 
         // A fixed application name keeps the data-protection keys (and so the encrypted secrets) readable whatever
-        // directory the tool runs from; SEMANTIC_ROUTER_KEYS_DIR keeps them on a volume in containers.
+        // directory the tool runs from; SEMANTIC_ROUTER_KEYS_DIR keeps them on a volume in containers. KeyRing decides
+        // how they are encrypted at rest: DPAPI on Windows, or SemanticRouter:DataProtection:Certificate anywhere.
         IDataProtectionBuilder dataProtection = builder.Services.AddDataProtection().SetApplicationName("semantic-router");
-        if (Environment.GetEnvironmentVariable(HostSettings.KeysVariable) is { Length: > 0 } keys)
-        {
-            dataProtection.PersistKeysToFileSystem(new DirectoryInfo(keys));
-        }
+        KeyRing keyRing = KeyRing.Configure(dataProtection, builder.Configuration, settings.ConfigurationDirectory, settings.KeysDirectory);
 
         builder.Services
             .AddSemanticPromptRouting(builder.Configuration.GetSection(SemanticRouterOptions.SectionName))
@@ -83,6 +83,11 @@ internal static class RouterHost
         configure?.Invoke(builder);
 
         WebApplication app = builder.Build();
+        bool replacedKey = keyRing.ReplaceUnencryptedDefaultKey(
+            app.Services.GetRequiredService<IKeyManager>(),
+            app.Services.GetRequiredService<IOptions<KeyManagementOptions>>().Value.NewKeyLifetime,
+            DateTimeOffset.UtcNow);
+        keyRing.LogAtStart(app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("SemanticRouter.Host.KeyRing"), replacedKey);
         if (behindProxy)
         {
             // Also notes which requests came straight from a known proxy: only those may name the dashboard user.

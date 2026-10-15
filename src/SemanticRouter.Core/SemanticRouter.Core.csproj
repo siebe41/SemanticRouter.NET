@@ -5,6 +5,12 @@
     <RootNamespace>SemanticRouter</RootNamespace>
     <IsPackable>true</IsPackable>
     <IsAotCompatible>true</IsAotCompatible>
+    <!--
+      No packages.lock.json: Core references no packages. Its only one is the trim and AOT analyzer package that
+      IsAotCompatible adds implicitly (Microsoft.NET.ILLink.Tasks), at the version of the installed SDK's runtime, so a
+      lock file would fail every locked restore after an SDK patch release.
+    -->
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Description>Zero-dependency semantic prompt routing primitives: SIMD cosine similarity, complexity heuristics and route selection between local and cloud LLMs.</Description>
   </PropertyGroup>
