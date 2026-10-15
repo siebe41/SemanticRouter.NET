@@ -87,6 +87,36 @@
   #card .diagram .qn { position: absolute; top: -22px; left: 20px; width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: #0a1114; font-weight: 700; font-size: 22px; display: flex; align-items: center; justify-content: center; }
   #card .diagram .ans { margin-top: 14px; font-family: var(--font-mono); font-size: 19px; color: var(--accent-ink); }
   #card .diagram .arrow { font-size: 44px; color: var(--text-faint); }
+
+  /* The vertical (9:16) stage, stage.html?vertical: one window in the middle of the frame, a headline above it, the
+     routing decision and large word-by-word captions below it, all inside the area Shorts and Reels leave clear. */
+  html.v, html.v body { width: 1080px; height: 1920px; }
+  html.v body { background: radial-gradient(1000px 1400px at 50% 38%, #15222a 0%, var(--bg-sunken) 75%); }
+  #vtop, #vchip, #vsay { display: none; }
+  html.v #vtop, html.v #vchip, html.v #vsay { display: block; }
+  html.v #caption { display: none; }
+  #vtop { position: absolute; z-index: 6; top: 196px; left: 50px; right: 50px; text-align: center; }
+  #vtop .brand { font-size: 30px; font-weight: 600; color: var(--text-muted); letter-spacing: -0.01em; }
+  #vtop .brand b { color: var(--accent-ink); font-weight: 600; }
+  #vtop .headline { margin-top: 18px; font-size: 54px; line-height: 1.12; font-weight: 700; letter-spacing: -0.02em; min-height: 121px; transition: opacity 300ms ease; }
+  #vtop .headline.out { opacity: 0; }
+  #vchip { position: absolute; z-index: 6; top: 1262px; left: 40px; right: 40px; text-align: center; font-family: var(--font-mono); opacity: 0; transform: translateY(12px); transition: opacity 350ms ease, transform 350ms ease; }
+  #vchip.in { opacity: 1; transform: none; }
+  #vchip b { display: block; font-size: 36px; font-weight: 700; }
+  #vchip small { display: block; margin-top: 8px; font-size: 26px; color: var(--text-muted); }
+  #vchip .local { color: var(--accent-ink); } #vchip .cloud { color: var(--signal-ink); } #vchip .fail { color: var(--danger); text-decoration: line-through; font-weight: 400; }
+  #vsay { position: absolute; z-index: 11; top: 1392px; left: 60px; right: 60px; height: 150px; display: flex; align-items: center; justify-content: center; text-align: center;
+    font-size: 60px; line-height: 1.15; font-weight: 750; letter-spacing: -0.01em; color: #fff; text-shadow: 0 3px 0 #000, 0 0 18px rgba(0,0,0,.9); }
+  #vsay span { transition: color 120ms ease; }
+  #vsay span.on { color: var(--signal-ink); }
+  html.v #card { gap: 44px; padding: 0 60px; }
+  html.v #card .name { font-size: 76px; }
+  html.v #card .brand svg { width: 84px; height: 84px; }
+  html.v #card .tagline { font-size: 56px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; }
+  html.v #card .row { flex-direction: column; gap: 18px; width: 760px; }
+  html.v #card .pill b { font-size: 32px; } html.v #card .pill small { font-size: 24px; }
+  html.v #card code { font-size: 29px; padding: 22px 30px; }
+  html.v #card .url { font-size: 34px; } html.v #card .muted { font-size: 28px; }
 </style>
 </head>
 <body>
@@ -94,6 +124,9 @@
   <div class="win term off" id="w-claude"><div class="bar"><i></i><i></i><i></i><span>~/billing — claude</span></div><div class="body"><div class="scaler"><div id="t-claude"></div></div></div></div>
   <div class="win off" id="w-dash"><div class="bar"><i></i><i></i><i></i><div class="url">localhost:5080/router/#/live</div></div><div class="body"><div class="scaler"><iframe id="dash" src="about:blank"></iframe></div></div></div>
   <div id="caption" class="hidden"><div class="headline"></div><div class="sub"></div></div>
+  <div id="vtop"><div class="brand">SemanticRouter<b>.NET</b></div><div class="headline"></div></div>
+  <div id="vchip"></div>
+  <div id="vsay"></div>
   <div id="card"></div>
 
 <script src="/node_modules/@xterm/xterm/lib/xterm.js"></script>
@@ -121,7 +154,11 @@
     dash:    { router: [190, 50, 1540, 860, 'off'], claude: [-1010, 24, 1010, 892, 'off'], dash: [24, 24, 1872, 892, 1440] },
     // The same, drawn larger (the page is laid out 1200 px wide), for forms people should be able to read.
     zoom:    { router: [190, 50, 1540, 860, 'off'], claude: [-1010, 24, 1010, 892, 'off'], dash: [24, 24, 1872, 892, 1200] },
+    // The vertical stage: Claude Code alone, full width.
+    vterm:   { router: 'off', claude: [30, 420, 1020, 818], dash: 'off' },
   };
+  const vertical = new URLSearchParams(location.search).has('vertical');
+  if (vertical) document.documentElement.classList.add('v');
 
   function place(win, spec) {
     win.classList.toggle('off', spec === 'off' || spec[4] === 'off');
@@ -166,14 +203,44 @@
     /** The address bar only, for navigation inside the dashboard. */
     url(url) { $('w-dash').querySelector('.url').textContent = url.replace(/^https?:\/\//, ''); },
     async caption(headline, sub) {
+      if (vertical) {
+        const h = $('vtop').querySelector('.headline');
+        if (h.textContent !== headline) { h.classList.add('out'); await sleep(300); h.textContent = headline; h.classList.remove('out'); }
+        $('vchip').classList.remove('in');
+        if (sub) { await sleep(350); $('vchip').innerHTML = sub; $('vchip').classList.add('in'); }
+        return;
+      }
       const c = $('caption');
       c.querySelector('.headline').textContent = headline;
       const s = c.querySelector('.sub'); s.classList.remove('in'); s.innerHTML = '';
       c.classList.remove('hidden');
       if (sub) { s.innerHTML = sub; await sleep(30); s.classList.add('in'); }
     },
-    sub(html) { const s = $('caption').querySelector('.sub'); s.innerHTML = html; s.classList.add('in'); },
-    hideCaption() { $('caption').classList.add('hidden'); },
+    sub(html) {
+      if (vertical) { $('vchip').innerHTML = html; $('vchip').classList.add('in'); return; }
+      const s = $('caption').querySelector('.sub'); s.innerHTML = html; s.classList.add('in');
+    },
+    hideCaption() {
+      $('caption').classList.add('hidden');
+      $('vtop').querySelector('.headline').classList.add('out'); $('vchip').classList.remove('in');
+    },
+    /**
+     * Captions that follow the voice: phrases of a few words, [[words, [[start, end], ...]], ...] with times in seconds
+     * from now; each phrase shows from its first word until the next phrase, the word being spoken in colour.
+     */
+    speak(phrases) {
+      const box = $('vsay');
+      const t0 = performance.now();
+      const token = box.dataset.token = String(t0);
+      const at = (s, fn) => setTimeout(() => { if (box.dataset.token === token) fn(); }, Math.max(0, t0 + s * 1000 - performance.now()));
+      phrases.forEach(([words, times], p) => {
+        at(times[0][0], () => { box.dataset.phrase = `${token}:${p}`; box.innerHTML = words.map((w) => `<span>${w}</span>`).join(' '); });
+        words.forEach((_, i) => at(times[i][0], () => box.querySelectorAll('span').forEach((s, j) => s.classList.toggle('on', j === i))));
+        const next = phrases[p + 1];
+        const until = next ? Math.min(next[1][0][0], times[times.length - 1][1] + 0.6) : times[times.length - 1][1] + 0.5;
+        at(until, () => { if (box.dataset.phrase === `${token}:${p}`) box.innerHTML = ''; });
+      });
+    },
     /** The opening card; a video can give its own tagline and kicker (e.g. "Deep dive"). */
     async title(tagline = 'Every prompt goes to the cheapest model<br>that can answer it.', kicker = '', pills = true) {
       $('card').innerHTML = `

@@ -10,7 +10,7 @@ they can be re-recorded whenever the product changes.
 | 3 | **How-to: the settings** ([videos/settings.js](videos/settings.js), recorded) | ~2:10 | new users after `init` | How do I make it fit my models, my budget and my privacy rules? |
 
 Later candidates, each 1–2 minutes: per-client setup clips (Codex CLI, GitHub Copilot, Open WebUI, the OpenAI SDK);
-the memory map and privacy; a vertical cut of the intro for social media.
+the memory map and privacy; a vertical short for social media (those two are made: see the README).
 
 ## Voice
 

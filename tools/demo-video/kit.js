@@ -96,6 +96,35 @@ function glide(locator, block) {
 }
 
 /**
+ * The vertical cut's captions: each narration line as phrases of a few words, as they are read on a phone. A phrase
+ * ends at a comma or a sentence end, or after three words or about 16 characters; the product's name is one word.
+ */
+function captionPhrases(words) {
+  const result = {};
+  for (const [key, list] of Object.entries(words)) {
+    const merged = [];
+    for (let i = 0; i < list.length; i++) {
+      const [w, s, e] = list[i];
+      if (w === 'Semantic' && list[i + 1]?.[0] === 'Router' && list[i + 2]?.[0] === 'dot' && /^net/.test(list[i + 3]?.[0] ?? '')) {
+        merged.push([`SemanticRouter.NET${list[i + 3][0].slice(3)}`, s, list[i + 3][2]]);
+        i += 3;
+      } else merged.push([w, s, e]);
+    }
+    const phrases = [];
+    let phrase = []; let times = [];
+    const flush = () => { if (phrase.length) phrases.push([phrase, times]); phrase = []; times = []; };
+    for (const [w, s, e] of merged) {
+      if (phrase.length >= 3 || (phrase.length && [...phrase, w].join(' ').length > 18)) flush();
+      phrase.push(w); times.push([s, e]);
+      if (/[.,?!:]$/.test(w)) flush();
+    }
+    flush();
+    result[key] = phrases;
+  }
+  return result;
+}
+
+/**
  * Starts everything a video needs and returns the kit.
  *   out, voiceDir  where frames go, and the narration made by tts.py for this video
  *   shells         [[id, cols, rows], …] for the terminals on the stage (ids match stage.html: router, claude)
@@ -103,9 +132,15 @@ function glide(locator, block) {
  *   paidApi        model ids for a stand-in paid OpenAI-compatible API at http://paid-api.example:4000 (the name
  *                  needs an /etc/hosts entry, which this adds when it can: an address that is not this machine's,
  *                  so the router treats it as a cloud API, and a reserved domain, so nobody mistakes it for one)
+ *   vertical       record the 9:16 stage (1080×1920) for Shorts and Reels, with captions that follow the voice word by
+ *                  word (words.py times them into the voice folder's words.json)
  */
-async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], ['claude', 88, 34]], loaded, paidApi }) {
+async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], ['claude', 88, 34]], loaded, paidApi, vertical = false }) {
   const durations = JSON.parse(fs.readFileSync(path.join(voiceDir, 'durations.json'), 'utf8'));
+  const size = vertical ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
+  const wordsFile = path.join(voiceDir, 'words.json');
+  if (vertical && !fs.existsSync(wordsFile)) throw new Error(`No ${wordsFile}: run words.py on the voice folder first`);
+  const phrases = vertical ? captionPhrases(JSON.parse(fs.readFileSync(wordsFile, 'utf8'))) : {};
   prepareHome();
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
@@ -126,7 +161,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
   const stageServer = await serveStage();
 
   const browser = await chromium.launch();
-  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  const page = await browser.newPage({ viewport: size });
   // The dashboard forbids framing (frame-ancestors 'none'); lift that for its page loads on this stage only.
   await page.route(`${router}/router/**`, async (route) => {
     if (route.request().resourceType() !== 'document') return route.continue();
@@ -136,7 +171,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
     delete headers['x-frame-options'];
     return route.fulfill({ response, headers });
   });
-  await page.goto(`http://127.0.0.1:${stageServer.address().port}/stage.html`);
+  await page.goto(`http://127.0.0.1:${stageServer.address().port}/stage.html${vertical ? '?vertical' : ''}`);
   await page.waitForFunction(() => window.stage);
 
   // Shells, each mirrored into its xterm on the stage.
@@ -179,6 +214,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
     say(key) {
       if (!(key in durations)) throw new Error(`No narration line "${key}" in ${voiceDir}`);
       narration.push({ key, wall: Date.now() / 1000 });
+      if (phrases[key]) k.stage('speak', phrases[key]);
       return sleep(durations[key] * 1000);
     },
     /** Waits until the line started last with say(key) has this many seconds left, to time a beat to its last words. */
@@ -410,7 +446,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
         fs.writeFileSync(path.join(out, file), Buffer.from(data, 'base64'));
         try { await cdp.send('Page.screencastFrameAck', { sessionId }); } catch { /* closing */ }
       });
-      await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 92, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 });
+      await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 92, maxWidth: size.width, maxHeight: size.height, everyNthFrame: 1 });
       await sleep(300);
     },
 
@@ -437,6 +473,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       fs.writeFileSync(path.join(out, 'frames.txt'), lines.join('\n') + '\n');
       const timeline = narration.map((n) => ({ key: n.key, start: Math.max(0, +(n.wall - lag - t0).toFixed(3)), duration: durations[n.key] }));
       fs.writeFileSync(path.join(out, 'timeline.json'), JSON.stringify(timeline, null, 2));
+      fs.writeFileSync(path.join(out, 'stage.json'), JSON.stringify(size));
       console.log(`${frames.length} frames, ${(frames[frames.length - 1].t - t0).toFixed(1)} s; narration at ${timeline.map((n) => n.start.toFixed(1)).join(', ')}`);
     },
   };

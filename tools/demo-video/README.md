@@ -10,9 +10,12 @@ Records narrated videos of SemanticRouter.NET from scripts, so they can be re-re
 | **What it saves you**: a day of traffic (local, a Claude subscription, a paid API after the session limit), then Usage and the weekly digest; every figure is the router's own | [videos/savings.js](videos/savings.js) | [narration/savings.json](narration/savings.json) | ~0:45 |
 | **Privacy**: the Memory map of a notes vault, a note read by a local model and then sent to Opus, a credential keeping a conversation local, Activity as the record | [videos/privacy.js](videos/privacy.js) (vault: [notes.js](notes.js)) | [narration/privacy.json](narration/privacy.json) | ~1:00 |
 
-A vertical cut for Shorts, Reels and LinkedIn (1080×1920, ~50 s) is made from the intro, not recorded:
-`node vertical.js intro out/semantic-router-demo.mp4 out/semantic-router-short.mp4` ([vertical.js](vertical.js) lists
-the segments, cut between narration lines, with a headline above and large subtitles below).
+| **Short** (vertical, 1080×1920, for Shorts, Reels and LinkedIn): Claude Code full width, four turns routed and a failover in one take, the decision under the window, captions that follow the voice word by word | [videos/short.js](videos/short.js) | [narration/short.json](narration/short.json) | ~0:45 |
+
+The short records on the vertical stage (`stage.html?vertical`, chosen by `module.exports.vertical` in its script).
+Its captions are timed to the voice: after `tts.py`, run
+`NARRATION=narration/short.json python words.py out/voice-short` (speech-to-text, faster-whisper) to write the times
+of every word into the voice folder.
 
 [kit.js](kit.js) holds what they share (the demo user, the stand-in models, the shells, the stage, the dashboard
 helpers, the narration clock), [stage.html](stage.html) is what the camera sees, and [PLAN.md](PLAN.md) lists the

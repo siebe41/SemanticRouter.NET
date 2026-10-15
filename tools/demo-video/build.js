@@ -1,5 +1,6 @@
-// Turns a recording into the finished video: the frames from record.js as 1080p30 H.264, the narration from tts.py
-// mixed in at the times record.js logged, and an .srt with the narration as subtitles.
+// Turns a recording into the finished video: the frames from record.js as 30 fps H.264 at the stage's size (1920×1080,
+// or 1080×1920 for the vertical stage), the narration from tts.py mixed in at the times record.js logged, and an .srt
+// with the narration as subtitles.
 //   node build.js <frames-dir> <voice-dir> <out.mp4> [narration file, default narration/intro.json]
 const fs = require('fs');
 const path = require('path');
@@ -8,6 +9,7 @@ const { execFileSync } = require('child_process');
 const [frames, voice, output, narrationFile = path.join(__dirname, 'narration', 'intro.json')] = process.argv.slice(2).map((p) => path.resolve(p));
 const timeline = JSON.parse(fs.readFileSync(path.join(frames, 'timeline.json'), 'utf8'));
 const lines = JSON.parse(fs.readFileSync(narrationFile, 'utf8')).lines;
+const size = fs.existsSync(path.join(frames, 'stage.json')) ? JSON.parse(fs.readFileSync(path.join(frames, 'stage.json'), 'utf8')) : { width: 1920, height: 1080 };
 const ffmpeg = (args) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...args], { stdio: 'inherit' });
 
 // 1. Video.
@@ -19,7 +21,7 @@ const shown = [...framesText.matchAll(/^duration ([\d.]+)/gm)].reduce((sum, m) =
 const narrationEnd = Math.max(...timeline.map((n) => n.start + n.duration)) + 0.8;
 const hold = Math.max(0, narrationEnd - shown).toFixed(2);
 ffmpeg(['-f', 'concat', '-safe', '0', '-i', path.join(frames, 'frames.txt'),
-  '-vf', `fps=30,scale=1920:1080:flags=lanczos,format=yuv420p,tpad=stop_mode=clone:stop_duration=${hold}`, '-c:v', 'libx264', '-preset', 'slow', '-crf', '18', silent]);
+  '-vf', `fps=30,scale=${size.width}:${size.height}:flags=lanczos,format=yuv420p,tpad=stop_mode=clone:stop_duration=${hold}`, '-c:v', 'libx264', '-preset', 'slow', '-crf', '18', silent]);
 
 // 2. Narration: each line delayed to its start, mixed, levelled.
 const inputs = timeline.flatMap((n) => ['-i', path.join(voice, `${n.key}.wav`)]);
