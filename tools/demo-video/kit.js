@@ -72,6 +72,30 @@ function serveStage() {
 }
 
 /**
+ * Scrolls the dashboard so the element is at the top ('start'), middle or bottom ('end'), eased, setting the position
+ * every frame: the browser's own smooth scroll stops short when the dashboard re-renders mid-way, which shows as a jump.
+ */
+function glide(locator, block) {
+  return locator.evaluate((e, b) => new Promise((done) => {
+    const r = e.getBoundingClientRect();
+    const margin = 12;
+    const offset = b === 'start' ? r.top - margin : b === 'end' ? r.bottom - innerHeight + margin : r.top - (innerHeight - r.height) / 2;
+    const from = scrollY;
+    const to = Math.max(0, Math.min(document.documentElement.scrollHeight - innerHeight, from + offset));
+    if (Math.abs(to - from) < 2) { done(); return; }
+    const ms = Math.min(1100, 450 + Math.abs(to - from) * 0.4);
+    const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+    const start = performance.now();
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / ms);
+      window.scrollTo({ top: from + (to - from) * ease(t), behavior: 'instant' });
+      if (t < 1) requestAnimationFrame(step); else done();
+    };
+    requestAnimationFrame(step);
+  }), block);
+}
+
+/**
  * Starts everything a video needs and returns the kit.
  *   out, voiceDir  where frames go, and the narration made by tts.py for this video
  *   shells         [[id, cols, rows], …] for the terminals on the stage (ids match stage.html: router, claude)
@@ -245,8 +269,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
     /** Scrolls the dashboard to another part of the page; the current highlight belongs to the part it leaves. */
     async dashScroll(selector, block = 'center') {
       await k.unhighlight();
-      await k.frame().locator(selector).first().evaluate((e, b) => e.scrollIntoView({ behavior: 'smooth', block: b }), block);
-      await sleep(300);
+      await glide(k.frame().locator(selector).first(), block);
       await k.settle();
     },
     /**
@@ -258,10 +281,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       // Bring it into view first: the box follows a scroll, but a still page reads better.
       const target = k.frame().locator(selector).first();
       const visible = await target.evaluate((e) => { const b = e.getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; });
-      if (!visible) {
-        await target.evaluate((e) => e.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-        await sleep(300);
-      }
+      if (!visible) await glide(target, 'center');
       await k.settle();
       const scale = await page.evaluate(() => { const i = document.getElementById('dash'); return i.getBoundingClientRect().width / i.offsetWidth; });
       await target.evaluate((e, { pad, s }) => {
@@ -276,6 +296,8 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
         const p = pad / s;
         const draw = () => {
           if (window.demoHighlight !== hl) return;
+          // A re-render replaces the element; until it is found again, the box stays where it was.
+          if (!hl.el.isConnected) { requestAnimationFrame(draw); return; }
           const b = hl.el.getBoundingClientRect();
           Object.assign(box.style, { left: `${b.left - p}px`, top: `${b.top - p}px`, width: `${Math.min(b.width, innerWidth - b.left - 8) + 2 * p}px`, height: `${b.height + 2 * p}px` });
           requestAnimationFrame(draw);
@@ -284,7 +306,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
         requestAnimationFrame(() => { box.style.opacity = '1'; });
       }, { pad, s: scale });
       // A re-render can replace the element: point the box at whatever the selector finds now.
-      tracker = setInterval(() => target.evaluate((e) => { if (window.demoHighlight) window.demoHighlight.el = e; }).catch(() => {}), 200);
+      tracker = setInterval(() => target.evaluate((e) => { if (window.demoHighlight) window.demoHighlight.el = e; }).catch(() => {}), 100);
     },
     async unhighlight() {
       if (!tracker) return;
