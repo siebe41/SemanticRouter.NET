@@ -10,7 +10,7 @@ failover, and the dashboard on its own.
 | 0:13 | Setup takes about a minute… | `dotnet tool install -g SemanticRouter.Host` |
 | 0:17 | Then run init… | `semantic-router init` finds LM Studio's models and the Claude Code CLI |
 | 0:30 | Start the router… | `semantic-router` and its startup banner |
-| 0:37 | Point Claude Code at it… | a second terminal: `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `claude` |
+| 0:37 | Point Claude Code at the router… | a second terminal: `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `claude --model semantic-router` |
 | 0:49 | A simple question… | Claude Code on the left, the Live dashboard on the right; → local small model |
 | 0:55 | A small coding task… | → local coder model |
 | 1:03 | A hard debugging question… | → Claude Opus |
@@ -40,17 +40,21 @@ happened.
 ## Recording
 
 Needs Linux, the .NET 10 SDK, Node 22, Chromium for Playwright, ffmpeg with libx264, Claude Code, and Python for the
-narration ([Kokoro](https://github.com/thewh1teagle/kokoro-onnx), an open TTS model that runs offline).
+narration. The narration uses [Chatterbox](https://github.com/resemble-ai/chatterbox), an open (MIT) TTS model that
+runs locally and can speak in your own voice from a 10–30 second sample. [Kokoro](https://github.com/thewh1teagle/kokoro-onnx)
+is the lighter alternative.
 
 ```bash
 cd tools/demo-video
 npm install
 
 # 1. Narration (once, or after editing narration.json): writes out/voice/*.wav and durations.json.
-pip install kokoro-onnx soundfile
-curl -LO https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
-curl -LO https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
-python tts.py kokoro-v1.0.onnx voices-v1.0.bin out/voice
+#    About 10 minutes on a 4-core CPU. Add a voice sample to speak in that voice: tts.py chatterbox out/voice me.wav
+pip install chatterbox-tts
+python tts.py chatterbox out/voice
+#    or, faster and flatter: pip install kokoro-onnx soundfile, download kokoro-v1.0.onnx and voices-v1.0.bin from
+#    github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0, then
+#    python tts.py kokoro out/voice kokoro-v1.0.onnx voices-v1.0.bin
 
 # 2. The package to install on camera. Without DEMO_FEED the take installs the release on nuget.org.
 dotnet pack ../../src/SemanticRouter.Host -c Release -o out/feed -p:Version=0.3.0
@@ -68,4 +72,17 @@ machine. The demo shells get a minimal environment: none of your variables or cr
 the Claude Code binary if `claude` on your `PATH` is not it.
 
 To change the story, edit the lines in [narration.json](narration.json) (then run `tts.py` again; every beat waits
-for its line), the prompts and captions in [record.js](record.js), and the answers in [replies.js](replies.js).
+for its line, and `TTS_ONLY=hello,code` redoes just those lines), the prompts and captions in [record.js](record.js),
+and the answers in [replies.js](replies.js). Narration reads best written the way people talk: short sentences,
+contractions, a question now and then.
+
+The voice sample for cloning: 15–30 seconds of you talking, one take, a quiet room, a headset or phone mic at normal
+distance, as if explaining the router to a colleague. WAV or M4A, no music or other voices.
+
+[PLAN.md](PLAN.md) outlines the next videos: a deep dive on routing and a how-to on the settings.
+
+### Claude Code's header
+
+`claude --model semantic-router` makes Claude Code's header say who picks the model (any name the router doesn't know
+routes as `auto`), and `CLAUDE_CODE_MAX_CONTEXT_TOKENS` tells it the context window it can't look up for that name,
+which otherwise produces an "isn't recognized" warning. #128 proposes doing this properly.

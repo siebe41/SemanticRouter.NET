@@ -1,16 +1,16 @@
 {
   "voice": "af_heart",
   "lines": {
-    "title": "Most prompts don't need a frontier model. Semantic Router dot net sends each one to the cheapest model that can answer it: a local model, your Claude subscription, or a paid API.",
-    "install": "Setup takes about a minute. Install it as a dot net tool.",
-    "init": "Then run in-it. It finds what's already on your machine. Here, that's L M Studio with two local models, and the Claude Code C L I you're signed in to. It writes a configuration with a capability tier for each model.",
-    "start": "Start the router. It speaks the OpenAI and Anthropic APIs, and prints exactly how to connect.",
-    "connect": "In a second terminal, point Claude Code at it with two environment variables. Claude Code works exactly as before. The router just decides which model answers each turn.",
-    "hello": "A simple question goes to a small local model. It's free, and it never leaves your machine.",
-    "code": "A small coding task goes to the local coder model.",
-    "hard": "A hard debugging question goes to Claude, where your subscription is worth spending.",
-    "limit": "And when you hit your Claude session limit, the router cools Claude down and keeps you working on local models. You don't change a thing.",
-    "dashboard": "The dashboard shows every decision as it happens: which route matched, which model answered, and how much stayed on your machine. Any OpenAI or Anthropic client can use the same endpoint.",
-    "end": "Semantic Router dot net. Open source, and MIT licensed. Install it with one command, and stop paying frontier prices for small prompts."
+    "title": "Most of what you ask an AI doesn't need the most expensive model. Semantic Router dot net looks at each prompt, and sends it to the cheapest model that can handle it. That might be a local model, your Claude subscription, or a paid API.",
+    "install": "Getting set up takes about a minute. First, install the dot net tool.",
+    "init": "Then run init. It looks at what's already on your machine. Here, it finds LM Studio with two local models, and the Claude Code CLI you're already signed in to. Then it writes a config that puts each model on a tier.",
+    "start": "Now start the router. It speaks both the OpenAI and the Anthropic API, and it tells you exactly how to connect.",
+    "connect": "In a second terminal, point Claude Code at the router, and pick semantic router as the model. Claude Code works just like before. The only difference? The router decides which model answers each turn.",
+    "hello": "Ask something simple, and a small local model answers. That's free, and it never leaves your machine.",
+    "code": "A quick coding task? That goes to the local coder.",
+    "hard": "But a tricky debugging question goes to Claude, where your subscription is actually worth spending.",
+    "limit": "And when you hit your Claude session limit? The router cools Claude down, and keeps you working on your local models. You don't change a thing.",
+    "dashboard": "The dashboard shows every decision as it happens: which route matched, which model answered, and how much of it stayed on your machine. And it's not just Claude Code. Any OpenAI or Anthropic client can use the same endpoint.",
+    "end": "That's Semantic Router dot net. It's open source and MIT licensed. Install it with one command, and stop paying frontier prices for small prompts."
   }
 }

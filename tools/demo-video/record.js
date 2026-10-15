@@ -206,10 +206,13 @@ function serveStage() {
   await stage('layout', 'connect');
   await sleep(500);
   line = say('connect');
-  await stage('caption', '4. Point Claude Code at it', 'two environment variables · Claude Code works exactly as before');
+  await stage('caption', '4. Point Claude Code at it', 'the router\'s address · "semantic-router" as the model · Claude Code works as before');
+  // The model name is what Claude Code shows in its header: "semantic-router" says who decides (any name the router
+  // does not know routes as auto). The context window it cannot look up for that name is declared, so it does not warn.
   await type('claude', `export ANTHROPIC_BASE_URL=${router}`);
   await type('claude', 'export ANTHROPIC_AUTH_TOKEN=semantic-router');
-  await type('claude', 'claude --model sonnet');
+  await type('claude', 'export CLAUDE_CODE_MAX_CONTEXT_TOKENS=200000');
+  await type('claude', 'claude --model semantic-router');
   await waitFor('claude', /Claude Code v/);
   await line;
   await stage('layout', 'split');
