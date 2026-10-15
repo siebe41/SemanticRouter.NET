@@ -48,7 +48,8 @@ internal static class ChatTranscript
     /// </summary>
     /// <param name="request">The parsed request.</param>
     /// <param name="describeTools">Append the prompted tool-calling instructions (off for backends with native tools).</param>
-    public static (string? System, string Prompt) Render(ChatCompletionRequest request, bool describeTools = true)
+    /// <param name="format">The fence label tool calls use; the plain <c>tool_call</c> by default.</param>
+    public static (string? System, string Prompt) Render(ChatCompletionRequest request, bool describeTools = true, PromptedToolFormat? format = null)
     {
         if (request.Tools.Count == 0 && !request.Turns.Any(t => t.Blocks.Any(b => b is ToolUseBlock or ToolResultBlock)))
         {
@@ -71,7 +72,7 @@ internal static class ChatTranscript
                 string part = block switch
                 {
                     TextBlock t => t.Text,
-                    ToolUseBlock u => PromptedToolCalls.RenderToolUse(u),
+                    ToolUseBlock u => PromptedToolCalls.RenderToolUse(u, format),
                     ToolResultBlock r => PromptedToolCalls.RenderToolResult(r),
                     ImageBlock => "[image omitted]",
                     _ => string.Empty,
@@ -97,7 +98,7 @@ internal static class ChatTranscript
 
         if (describeTools && request.Tools.Count > 0)
         {
-            AppendSystem(system, PromptedToolCalls.RenderInstructions(request.Tools, request.ToolChoice));
+            AppendSystem(system, PromptedToolCalls.RenderInstructions(request.Tools, request.ToolChoice, format));
         }
 
         string? systemPrompt = system.Length > 0 ? system.ToString() : null;
@@ -123,9 +124,9 @@ internal static class ChatTranscript
     }
 
     /// <summary>Renders the system prompt inline, for CLIs that have no separate system prompt option.</summary>
-    public static string RenderInline(ChatCompletionRequest request)
+    public static string RenderInline(ChatCompletionRequest request, PromptedToolFormat? format = null)
     {
-        (string? system, string prompt) = Render(request);
+        (string? system, string prompt) = Render(request, format: format);
         return Inline(system, prompt);
     }
 

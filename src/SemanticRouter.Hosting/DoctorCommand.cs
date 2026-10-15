@@ -65,7 +65,9 @@ internal static class DoctorCommand
         }
 
         yield return new RouterCheck("listen", RouterCheckStatus.Warning,
-            $"{urls} accepts other machines. Subscription CLI connectors still answer only local requests; consider SemanticRouter:Middleware:GatewayKeys.");
+            $"{urls} accepts other machines. Subscription CLI connectors still answer only local requests.");
+        PromptRouterMiddlewareOptions middleware = app.Services.GetRequiredService<RouterRuntimeProvider>().Current.Configuration.Middleware;
+        yield return new RouterCheck("gateway", middleware.GatewayKeys.Count > 0 ? RouterCheckStatus.Ok : RouterCheckStatus.Warning, RouterHost.RemoteGatewayAccess(middleware));
         if (!dashboard.RequireLocalClient && string.IsNullOrEmpty(dashboard.AdminToken) && string.IsNullOrEmpty(dashboard.ReadOnlyToken)
             && !dashboard.AllowUnauthenticatedRemoteClients)
         {

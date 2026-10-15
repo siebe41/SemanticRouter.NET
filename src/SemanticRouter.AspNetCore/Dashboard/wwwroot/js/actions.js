@@ -33,6 +33,13 @@ export const actions = {
     render();
     toast('Reset to baseline.', 'ok');
   },
+  async 'activity-purge'() {
+    if (!confirm('Delete every activity entry, with its prompt previews? This cannot be undone; usage, budgets and the configuration history are kept.')) return;
+    const result = await api('DELETE', '/activity');
+    state.activity = [];
+    render();
+    toast(`Deleted ${result.removed} activity entries.`, 'ok');
+  },
   async 'memory-refresh'() { await loadMemory(true); },
   async 'memory-reset'() {
     if (!confirm('Forget which notes were sent to which models? The notes themselves are not touched.')) return;

@@ -107,10 +107,12 @@ public static partial class RouterDashboardEndpoints
             ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Location))!, "themes")
             : null));
         // No other site may frame the dashboard: inside a frame, clicks a page tricks the user into are same-origin writes.
+        // The page loads nothing from other hosts and runs no inline script, so text an attacker gets into the page (a
+        // prompt preview, a model name) cannot run as script or send what it reads anywhere else.
         group.AddEndpointFilter((invocation, next) =>
         {
             IHeaderDictionary headers = invocation.HttpContext.Response.Headers;
-            headers.ContentSecurityPolicy = "frame-ancestors 'none'";
+            headers.ContentSecurityPolicy = ContentSecurityPolicy;
             headers.XFrameOptions = "DENY";
             headers.XContentTypeOptions = "nosniff";
             headers["Referrer-Policy"] = "no-referrer";
@@ -135,6 +137,10 @@ public static partial class RouterDashboardEndpoints
             .WithMetadata(DashboardAnonymousMetadata.Instance);
         group.MapGet("/js/{file}", (HttpContext context, string file) => ModuleName().IsMatch(file)
                 ? Asset(context, "js/" + file, "text/javascript; charset=utf-8", prefix)
+                : Results.NotFound())
+            .WithMetadata(DashboardAnonymousMetadata.Instance);
+        group.MapGet("/fonts/{file}", (HttpContext context, string file) => FontName().IsMatch(file)
+                ? Asset(context, "fonts/" + file, file.EndsWith(".woff2", StringComparison.Ordinal) ? "font/woff2" : "text/plain; charset=utf-8", prefix)
                 : Results.NotFound())
             .WithMetadata(DashboardAnonymousMetadata.Instance);
         group.MapGet("/graph.js", (HttpContext context) => Asset(context, "graph.js", "text/javascript; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
@@ -265,6 +271,12 @@ public static partial class RouterDashboardEndpoints
                 .ToDictionary(g => g.Key, g => (IReadOnlyList<FeedbackKind>)[.. g.Select(f => f.Kind).Distinct()]);
             return Results.Json(new ActivityResponse(entries, activity.NextId - 1, kinds), ApiJson);
         });
+
+        // Deletes activity (and its prompt previews) for good: everything, or since/until. The state database zeroes and
+        // compacts what it deleted, so the rows cannot be recovered from its files.
+        api.MapDelete("/activity", (RoutingActivityLog activity, DateTimeOffset? since, DateTimeOffset? until) =>
+            Results.Json(new { removed = activity.Purge(since ?? DateTimeOffset.MinValue, until ?? DateTimeOffset.MaxValue) }, ApiJson))
+            .WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapGet("/feedback", (RoutingFeedbackLog feedback, int? limit) =>
             Results.Json(feedback.Recent(Math.Clamp(limit ?? 200, 1, 5000)), ApiJson));
@@ -578,6 +590,17 @@ public static partial class RouterDashboardEndpoints
     [System.Text.RegularExpressions.GeneratedRegex("^[a-z0-9-]+\\.js$")]
     private static partial System.Text.RegularExpressions.Regex ModuleName();
 
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z0-9-]+\\.(woff2|txt)$")]
+    private static partial System.Text.RegularExpressions.Regex FontName();
+
+    /// <summary>
+    /// What dashboard pages may load: their own scripts, styles, fonts and API, and nothing from another host. Inline
+    /// style attributes are allowed (the views set widths and colours with them); inline script is not.
+    /// </summary>
+    internal const string ContentSecurityPolicy =
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; " +
+        "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+
     /// <summary>
     /// The period a usage window names (<c>day</c>, <c>week</c>, <c>month</c> in the budget time zone; <c>30d</c>; the last
     /// 7 days otherwise), shared by the Usage page and the digest so they add up the same requests.
@@ -701,7 +724,7 @@ public static partial class RouterDashboardEndpoints
                 config.Middleware.EffectiveResponsesPathPrefixes.ToArray(),
                 config.Middleware.ModelAliases.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
                 config.Selection.Strategy.ToString(),
-                rateLimits.Status(config.Middleware.RateLimits)),
+                rateLimits.Status(config.Middleware)),
             new ActivitySummary(
                 recent.Count,
                 recent.Count(e => e.Outcome == "served"),

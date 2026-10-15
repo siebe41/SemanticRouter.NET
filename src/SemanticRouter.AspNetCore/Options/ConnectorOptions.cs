@@ -49,6 +49,24 @@ public enum CliToolCalling
     Prompted = 1,
 }
 
+/// <summary>How strictly a prompted-tool-calling reply is read for tool calls.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<PromptedToolParsing>))]
+public enum PromptedToolParsing
+{
+    /// <summary>
+    /// Also accept the near-misses models write: another tool-ish fence label, a <c>json</c> or unlabelled fence or bare
+    /// JSON that names a tool, and calls in the middle of the reply. Default.
+    /// </summary>
+    Lenient = 0,
+
+    /// <summary>
+    /// Only a fence with the request's own label, which carries a random token the conversation has never shown, naming
+    /// a tool of the request, at the end of the reply. Anything else stays text. Harder for text a tool returned to pass
+    /// for a call; models that cannot follow the format answer in text instead.
+    /// </summary>
+    Strict = 1,
+}
+
 /// <summary>Ready-made settings for well-known CLIs. See <c>docs/providers.md</c>.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<CliPreset>))]
 public enum CliPreset
@@ -152,6 +170,9 @@ public sealed class ConnectorOptions
     /// </summary>
     public bool RepairToolCalls { get; set; } = true;
 
+    /// <summary>CLI, prompted tool calling: how strictly the reply is read for tool calls. Default <see cref="PromptedToolParsing.Lenient"/>.</summary>
+    public PromptedToolParsing PromptedToolParsing { get; set; } = PromptedToolParsing.Lenient;
+
     /// <summary>
     /// CLI: output fragments (case-insensitive) that mean "quota or rate limit exhausted". They put the model in the
     /// longer quota cooldown. Presets supply sensible defaults; entries here are added to them.
@@ -181,11 +202,19 @@ public sealed class ConnectorOptions
     public int MaxConcurrency { get; set; } = 2;
 
     /// <summary>
-    /// CLI only: when this many requests are already waiting for a free process, the next one goes to another model
-    /// instead of queueing (a long queue on a subscription CLI is slower than a different model). <see langword="null"/>:
-    /// always wait.
+    /// CLI and Copilot: when this many requests are already waiting for a free process, the next one goes to another
+    /// model instead of queueing (a long queue on a subscription CLI is slower than a different model, and an unbounded
+    /// one lets a burst of requests hold the router's memory and connections). <see langword="null"/>:
+    /// <see cref="DefaultMaxQueue"/>; 0: never wait.
     /// </summary>
     public int? MaxQueue { get; set; }
+
+    /// <summary>The queue length used when <see cref="MaxQueue"/> is not set.</summary>
+    public const int DefaultMaxQueue = 16;
+
+    /// <summary><see cref="MaxQueue"/>, or <see cref="DefaultMaxQueue"/> when it is not set.</summary>
+    [JsonIgnore]
+    public int EffectiveMaxQueue => MaxQueue ?? DefaultMaxQueue;
 
     /// <summary>
     /// Copilot only: the Copilot runtime's home directory (<c>COPILOT_HOME</c>): where its own sign-in lives when it is not

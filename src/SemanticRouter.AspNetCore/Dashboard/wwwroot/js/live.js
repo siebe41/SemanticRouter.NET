@@ -181,7 +181,7 @@ export function liveFeed() {
       <span class="tier">T${e.tier}</span>
       <span class="why">${h(e.reason)}${e.route ? ' · ' + h(e.route) + (e.similarity != null ? ' ' + num(e.similarity, 2) : '') : ''}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.attempt > 1 ? ' · try ' + e.attempt : ''}${e.degraded ? ' · degraded' : ''}</span>
       <span class="ms">${pending ? '…' : num(e.totalMilliseconds, 0) + ' ms'}</span>
-      <div class="prompt">${h(e.promptPreview)}</div>
+      <div class="prompt">${e.promptPreview ? h(e.promptPreview) : '<span class="faint">prompt not stored</span>'}</div>
       ${notes.length ? `<div class="mem">${notes.slice(0, 6).map((r) => `<a href="#/memory" data-action="memory-open" data-id="${h(r.id)}" class="note-chip ${r.kind === 'Content' ? (toCloud ? 'cloud' : 'local') : 'ref'}" title="${h(r.source)} · ${r.kind === 'Content' ? r.lines + ' of ' + r.totalLines + ' lines' : 'mentioned'}">${h(r.title)}</a>`).join('')}${notes.length > 6 ? ` <span class="faint">+${notes.length - 6}</span>` : ''}</div>` : ''}
     </div>`;
   }).join('');

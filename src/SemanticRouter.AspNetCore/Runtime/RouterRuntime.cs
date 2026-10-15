@@ -167,7 +167,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                         _services.GetService<IOptions<UsageOptions>>()?.Value ?? new UsageOptions(),
                         _services.GetService<IOptions<MemoryOptions>>()?.Value,
                         _services.GetService<IOptions<TuningOptions>>()?.Value,
-                        _services.GetService<IOptions<NotificationOptions>>()?.Value);
+                        _services.GetService<IOptions<NotificationOptions>>()?.Value,
+                        _services.GetService<IOptions<StateOptions>>()?.Value);
                 }
             }
 
@@ -345,6 +346,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
         IModelLatency? latency = _services.GetService<IModelLatency>();
         (latency as ModelLatencyTracker)?.Configure(configuration.Selection);
+        _services.GetService<IStateRetention>()?.Apply(configuration.State.Retention);
 
         var warnings = new List<string>();
         if (configuration.Middleware.Mode == PromptRouterMode.Dispatch && !configuration.Models.Any(m => m.Enabled))
@@ -360,6 +362,13 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                 $"Embeddings go to {AddressDisplay.Show(configuration.Embeddings.Endpoint)}, which is not on this machine. Requests already known to be local-only " +
                 "are classified without it, but local-only routes are found by embedding the prompt, so every prompt reaches that endpoint " +
                 "first. Use Onnx or a local embedding server, or set Embeddings:IsLocal if the server is yours.");
+        }
+
+        if (configuration.Middleware.AllowUnauthenticatedRemoteClients && configuration.Middleware.GatewayKeys.Count == 0)
+        {
+            warnings.Add(
+                "The gateway serves other machines without a key (Middleware:AllowUnauthenticatedRemoteClients), so anyone who can reach it " +
+                "can use the connectors' keys. Make sure a reverse proxy authenticates every request, or set Middleware:GatewayKeys.");
         }
 
         foreach (RouteDefinition route in configuration.Routes.Where(r => r.PreferredModel is { Length: > 0 }))

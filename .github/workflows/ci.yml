@@ -275,14 +275,39 @@ jobs:
 
       - name: Smoke test
         run: |
+          status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          ready() { for i in $(seq 1 30); do [ "$(status http://localhost:5080/v1/models)" != "000" ] && return; sleep 1; done; }
+
+          # Only the admin token: port-mapped requests are remote, so the gateway refuses them without a key.
           docker run -d --name router -p 5080:8080 -e ROUTER_ADMIN_TOKEN=ci-admin-token-0123456789 semantic-router:ci
-          for i in $(seq 1 30); do curl -sf http://localhost:5080/v1/models > /dev/null && break; sleep 1; done
-          curl -sf http://localhost:5080/v1/models | grep -q '"auto"'
-          # Port-mapped requests are remote: the admin API wants the token.
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5080/router/api/status)" = "401"
+          ready
+          test "$(status http://localhost:5080/v1/models)" = "401"
+          test "$(status http://localhost:5080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"auto","messages":[{"role":"user","content":"hi"}]}')" = "401"
+          # The admin API wants the token.
+          test "$(status http://localhost:5080/router/api/status)" = "401"
           curl -sf -H 'Authorization: Bearer ci-admin-token-0123456789' http://localhost:5080/router/api/status | grep -q '"version"'
-          docker exec router test -f /data/semantic-router.json
+          # The chiseled image has no shell or coreutils to exec; copy the file out instead.
+          docker cp router:/data/semantic-router.json "$RUNNER_TEMP/semantic-router.json"
           docker logs router
+          docker rm -f router
+
+          # With a gateway key, clients that send it are served.
+          docker run -d --name router -p 5080:8080 -e ROUTER_ADMIN_TOKEN=ci-admin-token-0123456789 -e ROUTER_GATEWAY_KEY=ci-gateway-key-0123456789 semantic-router:ci
+          ready
+          test "$(status http://localhost:5080/v1/models)" = "401"
+          curl -sf -H 'Authorization: Bearer ci-gateway-key-0123456789' http://localhost:5080/v1/models | grep -q '"auto"'
+          docker logs router
+
+      # Fails on a high or critical vulnerability that has a fix: in the base image (Dependabot moves its digest) or in a
+      # NuGet package. Unfixed ones are not actionable here and are left out.
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: semantic-router:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
 
       - name: Logs on failure
         if: failure()

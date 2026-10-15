@@ -16,7 +16,6 @@ namespace SemanticRouter.AspNetCore;
 internal sealed partial class PromptRoutingMiddleware
 {
     private const int ReadChunkSize = 16 * 1024;
-    private const int PreviewLength = 160;
 
     private readonly RequestDelegate _next;
     private readonly RouterRuntimeProvider _runtime;
@@ -90,28 +89,24 @@ internal sealed partial class PromptRoutingMiddleware
             return;
         }
 
-        string? client = runtime.GatewayKeys.Count > 0 ? IdentifyClient(context.Request, runtime.GatewayKeys) : null;
-        if (client is null && runtime.GatewayKeys.Count > 0
-            && (!DashboardAccess.IsLocal(context) || options.RequireGatewayKeyForLocalClients))
+        GatewayAdmission gateway = GatewayAuthentication.Admit(context, runtime);
+        if (gateway.Refused)
         {
-            LogGatewayKeyMissing(_logger, context.Connection.RemoteIpAddress?.ToString() ?? "unknown", context.Request.Path);
-            await ProtocolErrors.WriteAsync(
-                context, protocol,
-                StatusCodes.Status401Unauthorized,
-                "Gateway key required",
-                "This router requires a gateway key: send it as 'Authorization: Bearer <key>' or 'x-api-key: <key>' " +
-                "(ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY or OPENAI_API_KEY in most clients).",
-                context.RequestAborted).ConfigureAwait(false);
-            return;
-        }
+            if (gateway.KeyMissing)
+            {
+                LogGatewayKeyMissing(_logger, context.Connection.RemoteIpAddress?.ToString() ?? "unknown", context.Request.Path);
+            }
+            else
+            {
+                LogGatewayRequestRefused(_logger, context.Request.Path, gateway.Detail!);
+            }
 
-        if (client is null && GatewayGuard.For(context).Refusal(context) is { } refusal)
-        {
-            LogGatewayRequestRefused(_logger, context.Request.Path, refusal);
-            await ProtocolErrors.WriteAsync(context, protocol, StatusCodes.Status403Forbidden, "Forbidden", refusal, context.RequestAborted)
+            await ProtocolErrors.WriteAsync(context, protocol, gateway.Status, gateway.Title!, gateway.Detail!, context.RequestAborted)
                 .ConfigureAwait(false);
             return;
         }
+
+        string? client = gateway.Client;
 
         using Activity? routeSpan = RouterTelemetry.Source.StartActivity("semantic_router.route");
         routeSpan?.SetTag("semantic_router.protocol", protocol.ToString());
@@ -189,10 +184,11 @@ internal sealed partial class PromptRoutingMiddleware
         // A client over its rate limit is turned away before anything is spent on it. A client without a gateway key is
         // counted by its address.
         string rateClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
-        (string Name, RateLimitOptions Limit)? rateLimit = _rateLimiter is null ? null : ClientRateLimiter.LimitFor(options.RateLimits, client);
+        bool remoteClient = !DashboardAccess.IsLocal(context);
+        (string Name, RateLimitOptions Limit)? rateLimit = _rateLimiter is null ? null : ClientRateLimiter.LimitFor(options, client, remoteClient);
         if (rateLimit is { } limit)
         {
-            RateLimitDecision admission = _rateLimiter!.TryAdmit(rateClient, limit.Limit, chat.EstimatedInputTokens);
+            RateLimitDecision admission = _rateLimiter!.TryAdmit(rateClient, limit.Limit, chat.EstimatedInputTokens, remoteClient);
             if (!admission.Admitted)
             {
                 await RejectRateLimitedAsync(context, protocol, client, rateClient, chat, prompt, profile.Profile, admission).ConfigureAwait(false);
@@ -381,7 +377,7 @@ internal sealed partial class PromptRoutingMiddleware
             Path = context.Request.Path.Value ?? string.Empty,
             Client = client,
             RequestedModel = chat.Model,
-            PromptPreview = prompt.Length <= PreviewLength ? prompt : prompt[..PreviewLength] + "…",
+            PromptPreview = PromptPreviews.Of(prompt, runtime.Configuration.State.StorePrompts),
             Tier = result.RequiredTier,
             Reason = result.Reason,
             Route = result.RouteName,
@@ -888,7 +884,7 @@ internal sealed partial class PromptRoutingMiddleware
             Path = context.Request.Path.Value ?? string.Empty,
             Client = client,
             RequestedModel = chat.Model,
-            PromptPreview = prompt.Length <= PreviewLength ? prompt : prompt[..PreviewLength] + "…",
+            PromptPreview = PromptPreviews.Of(prompt, _runtime.Current.Configuration.State.StorePrompts),
             Reason = RoutingReason.RateLimited,
             Profile = profile,
             HasTools = chat.HasTools,

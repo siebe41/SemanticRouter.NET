@@ -299,7 +299,7 @@ public static class RouterDoctor
                 Executable = executable,
                 Arguments = arguments,
                 WorkingDirectory = directory,
-                SetEnvironment = new Dictionary<string, string>(connector.EnvironmentVariables),
+                SetEnvironment = CliAdapter.For(connector.Preset).EnvironmentFor(connector),
                 RemoveEnvironment = ((IEnumerable<string>?)connector.RemoveEnvironmentVariables ?? CliAdapter.For(connector.Preset).DefaultRemovedEnvironment).ToArray(),
             };
 

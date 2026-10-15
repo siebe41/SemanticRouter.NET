@@ -13,16 +13,18 @@ namespace SemanticRouter.AspNetCore;
 /// Besides the requested <c>```tool_call</c> fence, it accepts the near-misses models produce: another tool-ish fence
 /// label (<c>tool_use</c>, <c>function_call</c>, …), a <c>```json</c> or unlabelled fence or a bare JSON object that names
 /// one of the request's tools, an array of calls, OpenAI-style <c>{"function": {"name", "arguments"}}</c> objects with
-/// string arguments, and trailing commas.
+/// string arguments, and trailing commas. With <see cref="PromptedToolParsing.Strict"/> only a fence with the request's
+/// own label counts, and only at the end of the reply: calls followed by text are kept as text.
 /// </remarks>
-internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames = null)
+internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames = null, PromptedToolFormat? format = null)
 {
     private static readonly string[] ToolLabels = [PromptedToolCalls.Fence, "tool_calls", "tool_use", "tool", "function_call", "function", "call"];
     private static readonly JsonDocumentOptions Lenient = new() { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip };
 
+    private readonly PromptedToolFormat _format = format ?? PromptedToolFormat.Default;
     private readonly StringBuilder _reply = new(); // the undecided rest of the reply
 
-    private readonly List<(string Text, bool Malformed)> _held = [];
+    private readonly List<(string Text, HeldKind Kind)> _held = [];
     private readonly List<ToolUseBlock> _calls = [];
     private readonly List<MalformedToolCall> _malformed = [];
     private int _position;
@@ -31,6 +33,15 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
     private string _pendingWhitespace = string.Empty;
     private bool _holdAll;
     private bool _inCodeBlock;
+
+    private enum HeldKind
+    {
+        Text,
+        Malformed,
+        Call,
+    }
+
+    private bool Strict => _format.Parsing == PromptedToolParsing.Strict;
 
     /// <summary>Adds a fragment of the reply and returns the text that can go to the client now.</summary>
     public string Feed(string delta)
@@ -48,18 +59,29 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
     public PromptedReply Finish()
     {
         string tail = Advance(final: true) + _pendingWhitespace;
+
+        // Strict: a call must end the reply. Text after one (another call aside) makes them all text again.
+        int first = _held.FindIndex(h => h.Kind == HeldKind.Call);
+        bool misplaced = Strict && first >= 0 && _held.Skip(first).Any(h => h.Kind != HeldKind.Call && !string.IsNullOrWhiteSpace(h.Text));
         var text = new StringBuilder(tail);
         var clean = new StringBuilder(tail);
-        foreach ((string held, bool malformed) in _held)
+        foreach ((string held, HeldKind kind) in _held)
         {
+            if (kind == HeldKind.Call && !misplaced)
+            {
+                continue;
+            }
+
             text.Append(held);
-            if (!malformed)
+            if (kind != HeldKind.Malformed)
             {
                 clean.Append(held);
             }
         }
 
-        return new PromptedReply(text.ToString(), clean.ToString(), _calls, _malformed);
+        return misplaced
+            ? new PromptedReply(text.ToString(), clean.ToString(), [], _malformed, "tool call not at the end of the reply, kept as text")
+            : new PromptedReply(text.ToString(), clean.ToString(), _calls, _malformed);
     }
 
     private string Advance(bool final)
@@ -113,7 +135,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
 
         if (_holdAll)
         {
-            _held.Add((text, malformed));
+            _held.Add((text, malformed ? HeldKind.Malformed : HeldKind.Text));
             return;
         }
 
@@ -149,7 +171,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
             int newline = reply.IndexOf('\n', line);
             ReadOnlySpan<char> content = (newline < 0 ? reply.AsSpan(line) : reply.AsSpan(line, newline - line)).TrimStart(" \t");
             if (content.StartsWith("```", StringComparison.Ordinal)
-                || (!_inCodeBlock && (content.StartsWith("{", StringComparison.Ordinal) || content.StartsWith("[{", StringComparison.Ordinal))))
+                || (!_inCodeBlock && !Strict && (content.StartsWith("{", StringComparison.Ordinal) || content.StartsWith("[{", StringComparison.Ordinal))))
             {
                 return line;
             }
@@ -157,7 +179,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
             if (newline < 0)
             {
                 // The last line is still arriving: hold it while it could still become a fence or a JSON array.
-                bool undecided = !final && ("```".AsSpan().StartsWith(content, StringComparison.Ordinal) || (!_inCodeBlock && content is "["));
+                bool undecided = !final && ("```".AsSpan().StartsWith(content, StringComparison.Ordinal) || (!_inCodeBlock && !Strict && content is "["));
                 return undecided ? line : -1;
             }
 
@@ -203,7 +225,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
 
         if (toolNames is not null && TryParseCalls(reply[open..end], requireKnownName: true, out List<ToolUseBlock> calls, out _))
         {
-            Accept(calls);
+            Accept(calls, reply[start..end]);
         }
         else
         {
@@ -230,8 +252,10 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
         }
 
         string label = firstLine.TrimStart('`').Trim();
-        bool toolish = ToolLabels.Contains(label, StringComparer.OrdinalIgnoreCase);
-        bool mayBeCall = toolish || label.Length == 0 || label.Equals("json", StringComparison.OrdinalIgnoreCase);
+        bool toolish = Strict
+            ? string.Equals(label, _format.Label, StringComparison.Ordinal)
+            : string.Equals(label, _format.Label, StringComparison.OrdinalIgnoreCase) || ToolLabels.Contains(label, StringComparer.OrdinalIgnoreCase);
+        bool mayBeCall = toolish || (!Strict && (label.Length == 0 || label.Equals("json", StringComparison.OrdinalIgnoreCase)));
         if (!mayBeCall || lineEnd < 0)
         {
             // An ordinary code block (```python): it streams like text.
@@ -252,7 +276,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
         string block = reply[start..after];
         if (TryParseCalls(body, requireKnownName: !toolish, out List<ToolUseBlock> calls, out string? problem))
         {
-            Accept(calls);
+            Accept(calls, block);
         }
         else if (toolish)
         {
@@ -268,9 +292,10 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
         return after;
     }
 
-    private void Accept(List<ToolUseBlock> calls)
+    private void Accept(List<ToolUseBlock> calls, string block)
     {
         _calls.AddRange(calls);
+        _held.Add((block, HeldKind.Call)); // its text, should the calls turn out not to end the reply
         _holdAll = true;
     }
 
@@ -468,7 +493,9 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
 /// <param name="TextWithoutMalformed">The same without the malformed blocks (when a repair replaced them).</param>
 /// <param name="Calls">The tool calls, in order.</param>
 /// <param name="Malformed">Blocks labelled as tool calls that could not be read.</param>
-internal sealed record PromptedReply(string Text, string TextWithoutMalformed, IReadOnlyList<ToolUseBlock> Calls, IReadOnlyList<MalformedToolCall> Malformed);
+/// <param name="Ignored">Why calls the reply did contain were kept as text (strict parsing), if they were.</param>
+internal sealed record PromptedReply(
+    string Text, string TextWithoutMalformed, IReadOnlyList<ToolUseBlock> Calls, IReadOnlyList<MalformedToolCall> Malformed, string? Ignored = null);
 
 /// <summary>A block the model meant as a tool call that could not be read, and why.</summary>
 internal sealed record MalformedToolCall(string Block, string Problem);

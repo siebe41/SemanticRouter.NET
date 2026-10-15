@@ -31,6 +31,9 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
     /// <summary>The entry that applies to every client without its own.</summary>
     public const string Everyone = "*";
 
+    /// <summary>The name shown for <see cref="PromptRouterMiddlewareOptions.RemoteRequestsPerMinute"/>.</summary>
+    public const string RemoteDefault = "remote default";
+
     private const int SweepAbove = 1000;
 
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
@@ -50,13 +53,24 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
         return limits.TryGetValue(Everyone, out RateLimitOptions? everyone) ? (Everyone, everyone) : null;
     }
 
+    /// <summary>
+    /// The limit for <paramref name="client"/>: its own entry, else <c>*</c>, else for a client on another machine
+    /// <see cref="PromptRouterMiddlewareOptions.RemoteRequestsPerMinute"/>; <see langword="null"/> when none applies.
+    /// </summary>
+    public static (string Name, RateLimitOptions Limit)? LimitFor(PromptRouterMiddlewareOptions options, string? client, bool remote) =>
+        LimitFor(options.RateLimits, client)
+        ?? (remote && options.RemoteRequestsPerMinute > 0
+            ? (RemoteDefault, new RateLimitOptions { RequestsPerMinute = options.RemoteRequestsPerMinute })
+            : null);
+
     /// <summary>Admits a request from <paramref name="client"/> and charges it, or says when to retry.</summary>
-    public RateLimitDecision TryAdmit(string client, RateLimitOptions limit, int estimatedTokens)
+    public RateLimitDecision TryAdmit(string client, RateLimitOptions limit, int estimatedTokens, bool remote = false)
     {
         DateTimeOffset now = _time.GetUtcNow();
         lock (_gate)
         {
             Usage usage = UsageOf(client, now);
+            usage.Remote |= remote;
             TimeSpan wait = TimeSpan.Zero;
             string? detail = null;
             if (limit.RequestsPerMinute is { } requests && usage.Requests >= requests)
@@ -107,7 +121,7 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
     }
 
     /// <summary>Every client seen whose limit still applies, with what it used in the last minute.</summary>
-    public IReadOnlyList<RateLimitStatus> Status(IDictionary<string, RateLimitOptions> limits)
+    public IReadOnlyList<RateLimitStatus> Status(PromptRouterMiddlewareOptions options)
     {
         DateTimeOffset now = _time.GetUtcNow();
         lock (_gate)
@@ -116,7 +130,7 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
             foreach ((string client, Usage usage) in _clients.OrderBy(c => c.Key, StringComparer.OrdinalIgnoreCase))
             {
                 usage.Prune(now);
-                if (LimitFor(limits, client) is { } limit)
+                if (LimitFor(options, client, usage.Remote) is { } limit)
                 {
                     status.Add(new RateLimitStatus(
                         client, limit.Name, limit.Limit.RequestsPerMinute, limit.Limit.TokensPerMinute, usage.Requests, usage.Tokens, usage.Limited, usage.LastLimited));
@@ -174,6 +188,9 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
         public long Tokens { get; private set; }
 
         public long Limited { get; set; }
+
+        /// <summary>Whether the client has sent requests from another machine.</summary>
+        public bool Remote { get; set; }
 
         public DateTimeOffset? LastLimited { get; set; }
 

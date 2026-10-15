@@ -46,6 +46,9 @@ public sealed class RouterConfiguration : SemanticRouterOptions
     /// <summary>When the router asks for a person's attention.</summary>
     public NotificationOptions Notifications { get; set; } = new();
 
+    /// <summary>What the router keeps about requests (prompt previews), and for how long.</summary>
+    public StateOptions State { get; set; } = new();
+
     /// <summary>Serializes a document (secrets included).</summary>
     public string ToJson() => JsonSerializer.Serialize(this, Json);
 
@@ -94,7 +97,19 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         UsageOptions usage,
         MemoryOptions? memory,
         TuningOptions? tuning,
-        NotificationOptions? notifications)
+        NotificationOptions? notifications) => Compose(routing, connectors, embeddings, middleware, usage, memory, tuning, notifications, state: null);
+
+    /// <summary>Builds a document from separately bound option objects, including every optional section.</summary>
+    public static RouterConfiguration Compose(
+        SemanticRouterOptions routing,
+        IReadOnlyDictionary<string, ConnectorOptions> connectors,
+        EmbeddingProviderOptions embeddings,
+        PromptRouterMiddlewareOptions middleware,
+        UsageOptions usage,
+        MemoryOptions? memory,
+        TuningOptions? tuning,
+        NotificationOptions? notifications,
+        StateOptions? state)
     {
         ArgumentNullException.ThrowIfNull(usage);
         ArgumentNullException.ThrowIfNull(routing);
@@ -125,6 +140,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         if (notifications is not null)
         {
             document.Notifications = JsonSerializer.Deserialize<NotificationOptions>(JsonSerializer.Serialize(notifications, Json), Json)!;
+        }
+
+        if (state is not null)
+        {
+            document.State = JsonSerializer.Deserialize<StateOptions>(JsonSerializer.Serialize(state, Json), Json)!;
         }
 
         return document;
@@ -283,6 +303,12 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             errors.Add("Middleware:RetryEscalation:Window must be positive.");
         }
 
+        StateRetentionOptions retention = State.Retention;
+        if (retention.ActivityDays is < 1 || retention.ActivityEntries is < 1 || retention.UsageDays is < 1 || retention.ConfigurationVersions is < 1)
+        {
+            errors.Add("State:Retention values must be at least 1 (leave one out for the default).");
+        }
+
         foreach ((string client, string key) in Middleware.GatewayKeys)
         {
             if (string.IsNullOrWhiteSpace(client))
@@ -298,6 +324,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         if (Middleware.Feedback.CorrectionSimilarity is < 0 or > 1 || Middleware.Feedback.CorrectionMargin is < 0 or > 1)
         {
             errors.Add("Middleware:Feedback:CorrectionSimilarity and CorrectionMargin must be from 0 to 1.");
+        }
+
+        if (Middleware.RemoteRequestsPerMinute < 0)
+        {
+            errors.Add("Middleware:RemoteRequestsPerMinute must not be negative (0 turns it off).");
         }
 
         foreach ((string client, RateLimitOptions limit) in Middleware.RateLimits)
@@ -416,7 +447,12 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         return errors;
     }
 
-    /// <summary>Fills secrets that <paramref name="document"/> leaves empty from <paramref name="defaults"/> (same connector name).</summary>
+    /// <summary>
+    /// Fills secrets that <paramref name="document"/> leaves empty from <paramref name="defaults"/> (same connector name),
+    /// and adds the gateway keys <paramref name="defaults"/> has and the document does not name: a key given in
+    /// <c>appsettings.json</c> or an environment variable (<c>SemanticRouter__Middleware__GatewayKeys__laptop</c>, the
+    /// container's <c>ROUTER_GATEWAY_KEY</c>) always applies, as a dashboard token does.
+    /// </summary>
     public static void InheritSecrets(RouterConfiguration document, RouterConfiguration defaults)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -458,7 +494,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
 
         foreach ((string client, string key) in defaults.Middleware.GatewayKeys)
         {
-            if (document.Middleware.GatewayKeys.TryGetValue(client, out string? current) && (string.IsNullOrEmpty(current) || current == MaskedSecret))
+            if (!document.Middleware.GatewayKeys.TryGetValue(client, out string? current) || string.IsNullOrEmpty(current) || current == MaskedSecret)
             {
                 document.Middleware.GatewayKeys[client] = key;
             }
@@ -489,6 +525,13 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
+        // Keys written into an address (https://user:key@host, ?api-key=…) are secrets too.
+        foreach (ConnectorOptions connector in copy.Connectors.Values)
+        {
+            connector.BaseAddress = AddressDisplay.Mask(connector.BaseAddress);
+        }
+
+        copy.Embeddings.Endpoint = AddressDisplay.Mask(copy.Embeddings.Endpoint);
         return copy;
     }
 
@@ -504,6 +547,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         foreach ((string name, ConnectorOptions connector) in Connectors)
         {
             current.Connectors.TryGetValue(name, out ConnectorOptions? existing);
+            connector.BaseAddress = AddressDisplay.Unmask(connector.BaseAddress, existing?.BaseAddress);
             if (existing is not null && !SameDestination(connector, existing))
             {
                 continue;
@@ -539,6 +583,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
+        Embeddings.Endpoint = AddressDisplay.Unmask(Embeddings.Endpoint, current.Embeddings.Endpoint);
         if (Embeddings.ApiKey == MaskedSecret
             && Embeddings.Provider == current.Embeddings.Provider && Equals(Embeddings.Endpoint, current.Embeddings.Endpoint))
         {
@@ -615,13 +660,26 @@ public sealed class RouterConfiguration : SemanticRouterOptions
 
     /// <summary>
     /// Errors for secrets still masked after <see cref="UnmaskFrom"/>: their connector or the embeddings now point
-    /// somewhere else, so the stored secret is not sent there.
+    /// somewhere else, so the stored secret is not sent there, or an address with credentials in it was edited.
     /// </summary>
-    internal IEnumerable<string> MaskedSecretErrors() =>
-        Slots(secretsOnly: true)
-            .Where(s => s.Get() == MaskedSecret)
-            .Select(s => $"{s.Setting}: enter the secret again. A stored secret is only sent where it was configured, and this " +
-                         "connector (or the embeddings) now has another type, address or program.");
+    internal IEnumerable<string> MaskedSecretErrors()
+    {
+        foreach (SecretSlot slot in Slots(secretsOnly: true).Where(s => s.Get() == MaskedSecret))
+        {
+            yield return $"{slot.Setting}: enter the secret again. A stored secret is only sent where it was configured, and this " +
+                         "connector (or the embeddings) now has another type, address or program.";
+        }
+
+        foreach (string name in Connectors.Where(c => AddressDisplay.HasMask(c.Value.BaseAddress)).Select(c => c.Key))
+        {
+            yield return $"Connectors:{name}:BaseAddress: the address was changed, so enter the credentials in it (shown as ***) again.";
+        }
+
+        if (AddressDisplay.HasMask(Embeddings.Endpoint))
+        {
+            yield return "Embeddings:Endpoint: the address was changed, so enter the credentials in it (shown as ***) again.";
+        }
+    }
 
     /// <summary>
     /// The CLI and Copilot connectors whose process settings (program, arguments, environment variables, home directory)

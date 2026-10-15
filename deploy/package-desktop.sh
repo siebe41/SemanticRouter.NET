@@ -16,10 +16,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-dotnet publish "$root/src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj" \
-  --configuration Release --runtime "$rid" --self-contained \
-  -p:Version="$version" -p:DebugType=none \
-  --output "$work/publish"
+"$root/deploy/publish-desktop.sh" "$rid" "$version" "$work/publish"
 
 name="SemanticRouter-$version-$rid"
 case "$rid" in

@@ -340,7 +340,7 @@ public sealed class DurableStateHostTests : RouterHostTest
 {
     private readonly string _directory = Directory.CreateTempSubdirectory("router-durable").FullName;
 
-    private Task<HttpClient> StartDurableAsync() =>
+    private Task<HttpClient> StartDurableAsync(Action<StateOptions>? state = null) =>
         StartAsync(
             o =>
             {
@@ -351,9 +351,105 @@ public sealed class DurableStateHostTests : RouterHostTest
             {
                 s.AddSingleton<IRouterConfigurationStore>(new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")));
                 new SemanticRouterBuilder(s).UseSqliteState(Path.Combine(_directory, "state.db"));
+                if (state is not null)
+                {
+                    s.Configure(state);
+                }
             });
 
     private static StringContent JsonBody(JsonNode node) => new(node.ToJsonString(), Encoding.UTF8, "application/json");
+
+    private static StringContent Chat(string prompt) =>
+        JsonBody(new JsonObject { ["model"] = "auto", ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = prompt }) });
+
+    /// <summary>Everything the state database's files hold, as text, read while the router still has them open.</summary>
+    private string DatabaseFiles()
+    {
+        var text = new StringBuilder();
+        foreach (string file in Directory.GetFiles(_directory, "state.db*"))
+        {
+            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream, Encoding.Latin1);
+            text.Append(reader.ReadToEnd());
+        }
+
+        return text.ToString();
+    }
+
+    /// <summary>Waits until <paramref name="count"/> entries are in the store: an entry is stored once its request finishes, which can be just after the client has the reply.</summary>
+    private async Task WaitForStoredActivityAsync(int count)
+    {
+        IRoutingActivityStore store = Services.GetRequiredService<IRoutingActivityStore>();
+        for (int i = 0; i < 200 && store.Recent(count).Count < count; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        store.Recent(count).Should().HaveCount(count);
+    }
+
+    private static async Task<string> LastPreviewAsync(HttpClient client) =>
+        JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray()[0]!["promptPreview"]!.GetValue<string>();
+
+    [Fact]
+    public async Task Prompt_previews_mask_credentials_by_default_and_can_be_turned_off()
+    {
+        const string key = "sk-ant-api03-q1w2e3r4t5y6u7i8o9p0a1s2d3f4";
+        HttpClient client = await StartDurableAsync();
+        await client.PostAsync("/v1/chat/completions", Chat($"why does {key} get a 401?"));
+        await WaitForStoredActivityAsync(1);
+
+        (await LastPreviewAsync(client)).Should().Be("why does *** get a 401?");
+        DatabaseFiles().Should().NotContain(key);
+        await DisposeAsync();
+
+        HttpClient off = await StartDurableAsync(o => o.StorePrompts = PromptStorage.Off);
+        await off.PostAsync("/v1/chat/completions", Chat("the quarterly numbers for project nightingale"));
+        await WaitForStoredActivityAsync(2);
+
+        (await LastPreviewAsync(off)).Should().BeEmpty();
+        string export = await off.GetStringAsync("/router/api/activity/export?format=jsonl&prompts=true");
+        export.Should().NotContain("nightingale");
+        DatabaseFiles().Should().NotContain("nightingale");
+    }
+
+    [Fact]
+    public async Task Retention_comes_from_the_configuration_document()
+    {
+        await StartDurableAsync(o =>
+        {
+            o.Retention.ActivityDays = 7;
+            o.Retention.ConfigurationVersions = 3;
+        });
+        _ = Services.GetRequiredService<RouterRuntimeProvider>().Current;
+        SqliteRouterDatabase database = Services.GetRequiredService<SqliteRouterDatabase>();
+
+        database.ActivityMaxAge.Should().Be(TimeSpan.FromDays(7));
+        database.HistoryMaxEntries.Should().Be(3);
+        database.UsageRetention.Should().Be(TimeSpan.FromDays(400), "unset values keep the store's default");
+
+        RouterConfiguration document = RouterConfiguration.FromJson("""{ "State": { "StorePrompts": "Off", "Retention": { "UsageDays": 90, "ActivityEntries": 0 } } }""");
+        document.State.StorePrompts.Should().Be(PromptStorage.Off);
+        document.State.Retention.UsageDays.Should().Be(90);
+        document.GetDocumentValidationErrors().Should().Contain(e => e.StartsWith("State:Retention", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Purged_activity_cannot_be_recovered_from_the_database_files()
+    {
+        HttpClient client = await StartDurableAsync(o => o.StorePrompts = PromptStorage.On);
+        await client.PostAsync("/v1/chat/completions", Chat("purge-me 7a1c: the draft of the merger memo"));
+        await client.PostAsync("/v1/chat/completions", Chat("purge-me 7a1c: and the second draft"));
+        await WaitForStoredActivityAsync(2);
+        DatabaseFiles().Should().Contain("purge-me 7a1c", "the previews were stored");
+
+        HttpResponseMessage purge = await client.DeleteAsync("/router/api/activity");
+
+        purge.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode.Parse(await purge.Content.ReadAsStringAsync())!["removed"]!.GetValue<int>().Should().Be(2);
+        JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray().Should().BeEmpty();
+        DatabaseFiles().Should().NotContain("purge-me 7a1c");
+    }
 
     [Fact]
     public async Task Activity_from_before_a_restart_is_still_on_the_dashboard()

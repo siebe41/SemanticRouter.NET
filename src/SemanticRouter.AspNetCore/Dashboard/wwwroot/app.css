@@ -5,6 +5,15 @@
    doubles as the fallback for unknown theme ids and for tokens a theme leaves out.
    ------------------------------------------------------------------------------------------------ */
 
+/* Bundled fonts (SIL OFL 1.1; licences in fonts/), Latin only: other scripts fall back to the system font. The
+   dashboard loads nothing from other hosts, so it works offline and tells no third party it is open. */
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/inter-latin-400.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 500; font-display: swap; src: url("fonts/inter-latin-500.woff2") format("woff2"); }
+@font-face { font-family: "Inter"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/inter-latin-600.woff2") format("woff2"); }
+@font-face { font-family: "Fira Sans"; font-style: normal; font-weight: 400; font-display: swap; src: url("fonts/fira-sans-latin-400.woff2") format("woff2"); }
+@font-face { font-family: "Fira Sans"; font-style: normal; font-weight: 500; font-display: swap; src: url("fonts/fira-sans-latin-500.woff2") format("woff2"); }
+@font-face { font-family: "Fira Sans"; font-style: normal; font-weight: 600; font-display: swap; src: url("fonts/fira-sans-latin-600.woff2") format("woff2"); }
+
 :root,
 :root[data-theme="machine-dark"] {
   /* "Machine Dark": near-black surfaces with a cool teal bias. Blue (#228fa7) is the working colour:

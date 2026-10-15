@@ -92,13 +92,34 @@ On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not
 |---|---|
 | Configuration directory | `SEMANTIC_ROUTER_HOME` if set; otherwise `%APPDATA%\semantic-router` (Windows), `~/Library/Application Support/semantic-router` (macOS) or `$XDG_CONFIG_HOME/semantic-router`, default `~/.config/semantic-router` (Linux). |
 | `semantic-router.json` | The configuration. The dashboard's **Apply & save** writes it. |
-| `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. |
+| `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. See [What the router stores](#what-the-router-stores). |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [dashboard.md](dashboard.md#keeping-secrets-out-of-the-file). |
 | `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [routing-quality.md](routing-quality.md). |
 | `semantic-router.instance.json` | The running router's process id, addresses, start time and version. Removed when it stops. |
 | `semantic-router.service.json`, `logs/` | Windows background service only: what the sign-in entry starts, and what it logs. |
 | `models/` | Downloaded ONNX embedding models, one directory per model. Copy a `models/{name}` directory here to run without internet access. |
 | `appsettings.json` (optional) | Host settings: logging, Kestrel, `SemanticRouter:Dashboard`, overrides. |
+
+### What the router stores
+
+| Where | What | Kept for | How to delete it |
+|---|---|---|---|
+| `semantic-router.db`, table `activity` | One entry per request: time, client name, models, tiers, tokens, cost, notes, and a **prompt preview** (see below) | 30 days or 10,000 entries (`State:Retention:ActivityDays`, `ActivityEntries`) | **Gateway → Stored prompts → Delete all activity**, or `DELETE /router/api/activity?since=…&until=…` |
+| `semantic-router.db`, table `feedback` | Retries, corrections, labels and grades per request: tiers and short notes, no prompt text | As activity | With the activity it belongs to ageing out |
+| `semantic-router.db`, table `usage` | Tokens and cost per request, by model, connector, route, client and profile; no prompt text | 400 days (`State:Retention:UsageDays`) | Delete the file |
+| `semantic-router.db`, table `config_history` | Every applied configuration, with secrets masked | 200 versions (`State:Retention:ConfigurationVersions`) | Delete the file |
+| `semantic-router.db`, tables `cooldowns`, `affinity`, `tuning_changes` | Model cooldowns, which model issued each tool call (ids only), learned routing changes (which can include short utterances learned from prompt previews) | Until they expire, 24 hours, until undone | Undo on **Router learned**, or delete the file |
+| `semantic-router.evaluation.jsonl` | Prompts you labelled, in full | Until you remove them | Edit or delete the file (the **Evaluate** page) |
+| `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted | Until removed from the configuration | Remove the key on the dashboard |
+| Logs (console, `logs/` for the Windows service) | Routing decisions and errors, with keys redacted. No prompt text, but a CLI run that fails logs the start of what it wrote, which can quote the model's reply | As your log setup keeps them | Delete the files |
+
+**Prompt previews.** `State:StorePrompts` decides how much of each prompt the activity log keeps:
+
+- `Redacted` (default): the first 160 characters, with API keys, tokens and private keys masked as `***` (the patterns `LocalOnlyWhen: Secrets` looks for).
+- `On`: the first 160 characters as they are.
+- `Off`: none. The activity page, its exports and the live view show no prompt text, and automatic tuning learns no utterances from activity.
+
+The setting applies to new requests; delete earlier activity to remove previews already stored. The database is opened with `secure_delete` and its write-ahead log is truncated after each prune, so deleted rows are overwritten rather than left in free pages. A purge also compacts the file (`VACUUM`). The evaluation set is not affected: it holds what you chose to label.
 
 On Linux and macOS the configuration directory is kept at mode 0700 and the files the router writes in it at 0600, since they hold prompt previews and configuration; Windows profile folders are private already.
 
@@ -110,21 +131,58 @@ The tool binds to `http://localhost:5080`. With `--urls http://0.0.0.0:5080` (or
 
 - **Subscription CLI connectors still answer only local requests.** Remote callers fall through to API-key or local models ([TERMS.md](TERMS.md)).
 - **The dashboard refuses remote callers** until you set `SemanticRouter:Dashboard:AdminToken` and `RequireLocalClient: false` ([dashboard.md](dashboard.md#access-and-security)).
-- **Clients cannot be told apart** until you set `SemanticRouter:Middleware:GatewayKeys`.
+- **The gateway refuses other machines** with `401` until you set `SemanticRouter:Middleware:GatewayKeys`. Each client then sends its key as its API key (`ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`), and its name shows in Activity. Without this, anyone who can reach the port could spend your API keys. Clients on this machine need no key unless `RequireGatewayKeyForLocalClients` is on.
 
 `semantic-router doctor` reports the same.
+
+`Middleware:AllowUnauthenticatedRemoteClients: true` serves other machines without a key while none is configured. Use it only behind a reverse proxy that authenticates every request; the router logs a warning at start-up. Once any gateway key is set, it has no effect.
+
+### Serving over HTTPS
+
+Gateway keys, dashboard tokens and prompts cross the network in clear text over `http://`. For anything beyond this machine, put HTTPS in front:
+
+- **Kestrel directly.** Give it a certificate in `appsettings.json` in the configuration directory, and listen with `--urls https://0.0.0.0:5443`:
+
+  ```json
+  {
+    "Kestrel": {
+      "Certificates": {
+        "Default": { "Path": "/etc/semantic-router/router.pfx", "Password": "${env:ROUTER_CERT_PASSWORD}" }
+      }
+    }
+  }
+  ```
+
+  `Path` and `KeyPath` also take PEM files. See [Configure endpoints for Kestrel](https://learn.microsoft.com/aspnet/core/fundamentals/servers/kestrel/endpoints).
+
+- **A reverse proxy** (Caddy, nginx, Traefik) that terminates TLS and forwards to the router. Name the proxy in `appsettings.json`, so the router takes the client's address and scheme from its `X-Forwarded-For` and `X-Forwarded-Proto` headers:
+
+  ```json
+  { "SemanticRouter": { "ForwardedHeaders": { "KnownProxies": [ "127.0.0.1" ], "KnownNetworks": [ "10.0.0.0/8" ] } } }
+  ```
+
+  Only these proxies are believed; the headers from anyone else are ignored. Without this, every request arrives from the proxy, so clients share one rate limit, and a proxy on this machine makes them all look local: then turn on `RequireGatewayKeyForLocalClients` (and `RequireTokenForLocalClients` for the dashboard). Add the proxy's public address to `Dashboard:PublicOrigins`. With Caddy:
+
+  ```
+  router.example.com {
+      reverse_proxy localhost:5080
+  }
+  ```
 
 ## Container
 
 The image runs the same host for API-key connectors and local model servers.
 
 ```bash
-ROUTER_ADMIN_TOKEN=$(openssl rand -hex 24) OPENAI_API_KEY=sk-... docker compose -f deploy/compose.yaml up
+ROUTER_ADMIN_TOKEN=$(openssl rand -hex 24) ROUTER_GATEWAY_KEY=$(openssl rand -hex 24) OPENAI_API_KEY=sk-... \
+  docker compose -f deploy/compose.yaml up
 ```
 
 - It listens on port `8080` and keeps the configuration, the encrypted secrets, the data-protection keys and the state database on the `/data` volume.
 - The compose example publishes the port on `127.0.0.1` only.
-- Requests that come in through the port mapping arrive from the container network, so the dashboard treats them as remote. It asks for `ROUTER_ADMIN_TOKEN`, and without one it refuses everyone.
+- Requests that come in through the port mapping arrive from the container network, so the router treats them as remote. The dashboard asks for `ROUTER_ADMIN_TOKEN` and the gateway for `ROUTER_GATEWAY_KEY` (clients send it as `ANTHROPIC_AUTH_TOKEN` or `OPENAI_API_KEY`); without them, everyone is refused.
+- With `docker run`, publish the port as `-p 127.0.0.1:5080:8080`. Plain `-p 5080:8080` opens it to every network the machine is on.
+- The image is Ubuntu chiseled: no shell or package manager, so `docker exec … sh` does not work. Use `docker cp` to read or replace files on the volume, and `docker logs` for the log. Base images are pinned by digest and scanned before each release.
 - Keep API keys in the environment and refer to them from the configuration: `"ApiKey": "${env:OPENAI_API_KEY}"`.
 - A model server on the host machine is `http://host.docker.internal:1234` (LM Studio) or `:11434` (Ollama).
 

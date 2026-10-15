@@ -499,6 +499,7 @@ public sealed class DispatchModeTests : RouterHostTest
         invocation.Executable.Should().Be("claude");
         invocation.Arguments.Should().ContainInOrder("--model", "sonnet");
         invocation.RemoveEnvironment.Should().Contain("ANTHROPIC_API_KEY");
+        invocation.SetEnvironment.Should().Contain("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1").And.Contain("DISABLE_AUTOUPDATER", "1");
         Directory.Exists(invocation.WorkingDirectory).Should().BeFalse("the scratch directory is deleted after the run");
         CloudHttp.Requests.Should().BeEmpty("the flat-rate subscription is cheaper than the paid API at the same tier");
     }
@@ -623,13 +624,19 @@ public sealed class DispatchModeTests : RouterHostTest
     public async Task Subscription_cli_is_never_used_for_remote_clients()
     {
         ClassifyAs(tier: 4);
-        HttpClient client = await StartDispatchAsync(
-            withCli: true,
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+                o.AllowUnauthenticatedRemoteClients = true;
+            },
             beforeRouter: app => app.Use((context, next) =>
             {
                 context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.7");
                 return next(context);
-            }));
+            }),
+            withCli: true);
 
         (await (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).Content.ReadAsStringAsync())
             .Should().Be("""{"from":"cloud"}""");

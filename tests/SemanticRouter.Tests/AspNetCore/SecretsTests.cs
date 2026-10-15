@@ -41,6 +41,21 @@ public sealed class SecretsTests
     }
 
     [Fact]
+    public void Gateway_keys_from_the_environment_apply_over_a_saved_file()
+    {
+        var saved = new RouterConfiguration();
+        saved.Middleware.GatewayKeys["laptop"] = "gw-laptop-key";
+        var baseline = new RouterConfiguration();
+        baseline.Middleware.GatewayKeys["default"] = "${env:ROUTER_GATEWAY_KEY}";
+        baseline.Middleware.GatewayKeys["laptop"] = "gw-from-env";
+
+        RouterConfiguration.InheritSecrets(saved, baseline);
+
+        saved.Middleware.GatewayKeys.Should().Contain("default", "${env:ROUTER_GATEWAY_KEY}")
+            .And.Contain("laptop", "gw-laptop-key", "the file's own key wins");
+    }
+
+    [Fact]
     public void Masking_keeps_references_visible_and_hides_literal_secrets()
     {
         RouterConfiguration document = Document();

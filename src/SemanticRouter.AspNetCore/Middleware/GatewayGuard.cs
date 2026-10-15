@@ -67,33 +67,77 @@ internal static class LocalHosts
             StringComparer.OrdinalIgnoreCase);
 }
 
+/// <summary>Whether a gateway request may go on, and as which client.</summary>
+/// <param name="Client">The gateway client its key names, or <see langword="null"/> when it sent no valid key.</param>
+/// <param name="Status">The status to refuse it with; 0 when it may go on.</param>
+/// <param name="Title">A short reason for the refusal.</param>
+/// <param name="Detail">What to do about it.</param>
+internal readonly record struct GatewayAdmission(string? Client, int Status = 0, string? Title = null, string? Detail = null)
+{
+    public bool Refused => Status != 0;
+
+    /// <summary>The key check that refused it (401), rather than the web-page check (403).</summary>
+    public bool KeyMissing => Status == StatusCodes.Status401Unauthorized;
+}
+
+/// <summary>Who may use the gateway: the same rule for the chat endpoints and the ones the middleware does not intercept.</summary>
+internal static class GatewayAuthentication
+{
+    /// <summary>
+    /// Admits a request with a valid gateway key as its client. Without one, a request from another machine is refused
+    /// (with no keys configured too, unless <c>AllowUnauthenticatedRemoteClients</c> is on), as is one from this machine
+    /// when <c>RequireGatewayKeyForLocalClients</c> is on; a web page is refused by <see cref="GatewayGuard"/>.
+    /// </summary>
+    public static GatewayAdmission Admit(HttpContext context, RouterRuntime runtime)
+    {
+        string? client = runtime.GatewayKeys.Count > 0 ? PromptRoutingMiddleware.IdentifyClient(context.Request, runtime.GatewayKeys) : null;
+        if (client is not null)
+        {
+            return new GatewayAdmission(client);
+        }
+
+        PromptRouterMiddlewareOptions options = runtime.Configuration.Middleware;
+
+        // Configured keys count even when their references did not resolve: a missing variable must not open the gateway.
+        bool keysConfigured = options.GatewayKeys.Count > 0;
+        if (!DashboardAccess.IsLocal(context) || options.RequireGatewayKeyForLocalClients)
+        {
+            if (keysConfigured)
+            {
+                return new GatewayAdmission(
+                    null, StatusCodes.Status401Unauthorized, "Gateway key required",
+                    "This router requires a gateway key: send it as 'Authorization: Bearer <key>' or 'x-api-key: <key>' " +
+                    "(ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY or OPENAI_API_KEY in most clients).");
+            }
+
+            if (!options.AllowUnauthenticatedRemoteClients)
+            {
+                return new GatewayAdmission(
+                    null, StatusCodes.Status401Unauthorized, "Gateway key required",
+                    "This router serves other machines only with a gateway key, and none is configured. Set " +
+                    "SemanticRouter:Middleware:GatewayKeys and send the key as 'Authorization: Bearer <key>' or 'x-api-key: <key>', " +
+                    "or set Middleware:AllowUnauthenticatedRemoteClients behind a proxy that authenticates callers.");
+            }
+        }
+
+        return GatewayGuard.For(context).Refusal(context) is { } refusal
+            ? new GatewayAdmission(null, StatusCodes.Status403Forbidden, "Forbidden", refusal)
+            : new GatewayAdmission(null);
+    }
+}
+
 /// <summary>Applies the gateway's key and web-page checks to endpoints the middleware does not intercept.</summary>
 internal static class GatewayEndpointAccess
 {
-    /// <summary>
-    /// Requires a gateway key where the middleware would (remote clients, or every client with
-    /// <c>RequireGatewayKeyForLocalClients</c>), and refuses web pages without one (<see cref="GatewayGuard"/>).
-    /// </summary>
+    /// <summary>Applies <see cref="GatewayAuthentication.Admit"/>, answering a refusal in <paramref name="protocol"/>'s error format.</summary>
     public static RouteHandlerBuilder RequireGatewayAccess(this RouteHandlerBuilder builder, ChatProtocol protocol) =>
         builder.AddEndpointFilter(async (invocation, next) =>
         {
             HttpContext context = invocation.HttpContext;
             RouterRuntime? runtime = context.RequestServices.GetService<RouterRuntimeProvider>()?.Current;
-            IReadOnlyDictionary<string, string> keys = runtime?.GatewayKeys ?? new Dictionary<string, string>();
-            string? client = keys.Count > 0 ? PromptRoutingMiddleware.IdentifyClient(context.Request, keys) : null;
-            if (client is null && keys.Count > 0
-                && (!DashboardAccess.IsLocal(context) || runtime!.Configuration.Middleware.RequireGatewayKeyForLocalClients))
+            if (runtime is not null && GatewayAuthentication.Admit(context, runtime) is { Refused: true } refused)
             {
-                await ProtocolErrors.WriteAsync(
-                    context, protocol, StatusCodes.Status401Unauthorized, "Gateway key required",
-                    "This router requires a gateway key: send it as 'Authorization: Bearer <key>' or 'x-api-key: <key>'.",
-                    context.RequestAborted).ConfigureAwait(false);
-                return Results.Empty;
-            }
-
-            if (client is null && GatewayGuard.For(context).Refusal(context) is { } refusal)
-            {
-                await ProtocolErrors.WriteAsync(context, protocol, StatusCodes.Status403Forbidden, "Forbidden", refusal, context.RequestAborted)
+                await ProtocolErrors.WriteAsync(context, protocol, refused.Status, refused.Title!, refused.Detail!, context.RequestAborted)
                     .ConfigureAwait(false);
                 return Results.Empty;
             }

@@ -83,6 +83,38 @@ public sealed class SecretHandlingTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_key_in_a_connector_address_is_masked_in_the_admin_api_and_kept_when_sent_back()
+    {
+        var address = new Uri("https://user:sk-in-userinfo@api.anthropic.example/v1?api-version=2024-10-21&api-key=sk-in-query");
+        HttpClient client = await StartDispatchAsync(s =>
+            s.PostConfigure<SemanticRouterConnectorsOptions>(o => o.Connectors["anthropic"].BaseAddress = address));
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+
+        JsonNode config = (await ReadNodeAsync(await client.GetAsync("/router/api/config")))["config"]!;
+        string shown = config["Connectors"]!["anthropic"]!["BaseAddress"]!.GetValue<string>();
+
+        shown.Should().NotContain("sk-in-userinfo").And.NotContain("sk-in-query").And.Contain("api-version=2024-10-21").And.Contain("***");
+        provider.History!.GetVersion(provider.History.List(1).Single().Id)!.ToJson().Should().NotContain("sk-in-");
+
+        (await client.PutAsync("/router/api/config?persist=false", JsonBody(config))).StatusCode.Should().Be(HttpStatusCode.OK);
+        provider.Current.Configuration.Connectors["anthropic"].BaseAddress.Should().Be(address);
+        provider.Current.Configuration.Connectors["anthropic"].BaseAddress!.UserInfo.Should().Be("user:sk-in-userinfo");
+
+        config["Connectors"]!["anthropic"]!["BaseAddress"] = shown.Replace("api.anthropic.example", "collector.example", StringComparison.Ordinal);
+        HttpResponseMessage moved = await client.PutAsync("/router/api/config?persist=false", JsonBody(config));
+        moved.StatusCode.Should().Be(HttpStatusCode.BadRequest, "the credentials are not carried to another address");
+        (await moved.Content.ReadAsStringAsync()).Should().Contain("Connectors:anthropic:BaseAddress");
+    }
+
+    [Theory]
+    [InlineData("https://api.example/v1", "https://api.example/v1")]
+    [InlineData("https://api.example/v1?api-version=1", "https://api.example/v1?api-version=1")]
+    [InlineData("https://u:p@api.example/v1", "https://***@api.example/v1")]
+    [InlineData("https://api.example/v1?key=abc&x=1&sig=def", "https://api.example/v1?key=***&x=1&sig=***")]
+    public void Addresses_show_their_credentials_as_stars(string address, string masked) =>
+        Uri.UnescapeDataString(AddressDisplay.Mask(new Uri(address))!.AbsoluteUri).Should().Be(masked);
+
+    [Fact]
     public async Task An_unset_reference_is_reported_in_status_and_the_log()
     {
         HttpClient client = await StartDispatchAsync(s =>
@@ -469,7 +501,7 @@ public sealed class DashboardAccessTests : RouterHostTest
         {
             HttpResponseMessage response = await client.GetAsync(path);
             response.Headers.GetValues("X-Frame-Options").Should().Equal("DENY");
-            response.Headers.GetValues("Content-Security-Policy").Should().Equal("frame-ancestors 'none'");
+            response.Headers.GetValues("Content-Security-Policy").Single().Should().Contain("frame-ancestors 'none'").And.Contain("script-src 'self';");
             response.Headers.GetValues("X-Content-Type-Options").Should().Equal("nosniff");
         }
     }
@@ -520,6 +552,63 @@ public sealed class DashboardAccessTests : RouterHostTest
         RoutingActivityLog log = Services.GetRequiredService<RoutingActivityLog>();
         log.Recent().Single().Client.Should().Be("laptop");
         _logs.All.Should().NotContain("gw-laptop-key-123");
+    }
+
+    [Fact]
+    public async Task Remote_clients_are_refused_while_no_gateway_key_is_configured()
+    {
+        HttpClient client = await StartAsync();
+
+        HttpResponseMessage chat = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+        HttpResponseMessage anthropic = await client.PostAsync("/v1/messages", Json("""{"model":"x","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}"""));
+
+        chat.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await chat.Content.ReadAsStringAsync()).Should().Contain("none is configured").And.Contain("GatewayKeys");
+        anthropic.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await anthropic.Content.ReadAsStringAsync()).Should().Contain("authentication_error");
+        (await client.GetAsync("/v1/models")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await client.PostAsJsonAsync("/semantic-router/classify", new { prompt = "hello" })).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        LocalHttp.Requests.Should().BeEmpty();
+        CloudHttp.Requests.Should().BeEmpty();
+        _logs.All.Should().Contain("no valid gateway key");
+        await DisposeAsync();
+
+        HttpClient local = await StartAsync(remote: false);
+        (await local.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode.Should().Be(HttpStatusCode.OK, "this machine needs no key");
+    }
+
+    [Fact]
+    public async Task Unauthenticated_remote_gateway_clients_must_be_asked_for_explicitly()
+    {
+        HttpClient client = await StartAsync(middleware: o => o.AllowUnauthenticatedRemoteClients = true);
+
+        (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode.Should().Be(HttpStatusCode.OK);
+        _logs.All.Should().Contain("serves other machines without a key");
+        await DisposeAsync();
+
+        HttpClient keyed = await StartAsync(middleware: o =>
+        {
+            o.AllowUnauthenticatedRemoteClients = true;
+            o.GatewayKeys["laptop"] = "gw-laptop-key-123";
+        });
+        (await keyed.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode
+            .Should().Be(HttpStatusCode.Unauthorized, "once a key is configured, every remote client needs one");
+    }
+
+    [Fact]
+    public async Task A_gateway_key_whose_variable_is_unset_does_not_open_the_gateway()
+    {
+        string variable = "SR_TEST_GATEWAY_" + Guid.NewGuid().ToString("N");
+        HttpClient client = await StartAsync(remote: false, middleware: o =>
+        {
+            o.GatewayKeys["laptop"] = "${env:" + variable + "}";
+            o.RequireGatewayKeyForLocalClients = true;
+        });
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("requires a gateway key");
     }
 
     [Fact]

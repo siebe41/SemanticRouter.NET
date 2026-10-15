@@ -138,15 +138,21 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         HttpResponseMessage outside = await client.GetAsync("/router/js/..%2Fapp.css");
         HttpResponseMessage css = await client.GetAsync("/router/app.css");
         HttpResponseMessage graph = await client.GetAsync("/router/graph.js");
+        HttpResponseMessage font = await client.GetAsync("/router/fonts/inter-latin-400.woff2");
+        HttpResponseMessage fontLicence = await client.GetAsync("/router/fonts/Inter-OFL.txt");
 
         page.StatusCode.Should().Be(HttpStatusCode.OK);
         page.Content.Headers.ContentType!.MediaType.Should().Be("text/html");
         string html = await page.Content.ReadAsStringAsync();
-        html.Should().Contain("window.ROUTER_PREFIX = \"/router\"").And.Contain("data-theme=\"machine-dark\"").And.NotContain("__ROUTER_PREFIX__");
+        html.Should().Contain("<meta name=\"router-prefix\" content=\"/router\">").And.Contain("data-theme=\"machine-dark\"").And.NotContain("__ROUTER_PREFIX__");
         script.Content.Headers.ContentType!.MediaType.Should().Be("text/javascript");
         (await script.Content.ReadAsStringAsync()).Should().Contain("import './overview.js';");
         (await module.Content.ReadAsStringAsync()).Should().Contain("export const state");
         outside.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        font.Content.Headers.ContentType!.MediaType.Should().Be("font/woff2");
+        (await font.Content.ReadAsByteArrayAsync()).Take(4).Should().Equal("wOF2"u8.ToArray());
+        (await fontLicence.Content.ReadAsStringAsync()).Should().Contain("SIL Open Font License");
+        html.Should().NotContain("<link rel=\"stylesheet\" href=\"https://", "the page loads nothing from other hosts").And.NotContain("<script>");
         html.Should().Contain("<script type=\"module\" src=\"/router/js/app.js\">");
         (await graph.Content.ReadAsStringAsync()).Should().Contain("window.MemoryGraph");
         html.Should().Contain("/router/graph.js");

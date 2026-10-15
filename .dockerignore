@@ -1,0 +1,16 @@
+# The image is built from the sources and build settings only. Anything else in a working copy (a local
+# semantic-router.json, state database, secrets file, test output) stays out of the build context.
+*
+!src/
+!Directory.Build.props
+!Directory.Build.targets
+!Directory.Packages.props
+!global.json
+!nuget.config
+!.editorconfig
+**/bin/
+**/obj/
+**/*.db
+**/*.db-*
+**/*.secrets.json
+**/semantic-router.json

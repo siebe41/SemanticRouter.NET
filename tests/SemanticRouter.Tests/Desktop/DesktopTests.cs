@@ -478,4 +478,15 @@ public sealed class DesktopTests : IDisposable
         probe.Start();
         return ((IPEndPoint)probe.LocalEndpoint).Port;
     }
+
+    [Fact]
+    public void Notifications_start_their_tool_by_full_path()
+    {
+        string? tool = DesktopNotifier.Tool();
+
+        if (tool is not null)
+        {
+            Path.IsPathFullyQualified(tool).Should().BeTrue("a bare name could start a file of that name in the current directory");
+        }
+    }
 }
