@@ -376,6 +376,7 @@ public sealed class UsageAndTelemetryTests : RouterHostTest
             measurements.Should().Contain(m => m.Instrument == SemanticRouterDiagnostics.FailoversInstrument && (string?)m.Tags["model"] == "local");
             measurements.Should().Contain(m => m.Instrument == SemanticRouterDiagnostics.CooldownsInstrument && (string?)m.Tags["kind"] == "Unavailable");
             measurements.Should().Contain(m => m.Instrument == SemanticRouterDiagnostics.TimeToFirstByteInstrument && (string?)m.Tags["model"] == "cloud");
+            measurements.Should().Contain(m => m.Instrument == SemanticRouterDiagnostics.AttemptTimeToFirstByteInstrument && (string?)m.Tags["model"] == "cloud");
             measurements.Should().Contain(m => m.Instrument == SemanticRouterDiagnostics.RequestDurationInstrument && (string?)m.Tags["outcome"] == "served");
         }
     }
