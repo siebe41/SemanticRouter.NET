@@ -15,6 +15,7 @@ With no policy, nothing changes: single-user installs keep working with no extra
 - **At start-up, what breaks the policy is turned off, not refused.** A model on a connector the policy does not allow is disabled, a feature the policy switches off is turned off, and so on. Each change is listed with the router's warnings: on the dashboard, in the log and in `semantic-router doctor`. A connector the policy blocks is never started, even if a model still names it.
 - **A change that would break it is refused.** `PUT /router/api/config`, **Validate** and **Apply** on the dashboard, a rollback to an older version and the router's own tuning all go through the same check, which answers `400` and names each setting, e.g. `Not allowed: Model 'claude-cli' is turned off: connector 'claude': Cli connectors are turned off by your organization's policy.`
 - **A policy that cannot be read stops the router.** A file that is not valid JSON, or a setting with a misspelt name, is an error with the file named, never "no policy": the router does not run without restrictions an administrator meant to set. The desktop app turns updates off in that case.
+- `semantic-router init` does not add (or ask about) a CLI the policy turns off, even with `--yes`; it says which ones it left out.
 - `semantic-router doctor` prints the policy and where it came from, and `GET /router/api/policy` returns it.
 
 ## Settings
@@ -109,7 +110,6 @@ The router reads the managed preferences with macOS's own `plutil` and ignores t
 
 ## Not covered yet
 
-- `semantic-router init` does not consult the policy yet; the connectors it adds are turned off at start-up when the policy disallows them.
 - Settings are shown as locked only through the warnings; the editors do not grey them out.
 - The ONNX embedding model download (from Hugging Face) is not limited by `AllowedEndpoints`; see [network.md](network.md) for how to place the model yourself.
 - There are no ADMX templates for Group Policy yet.
