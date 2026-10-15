@@ -49,9 +49,18 @@ public sealed record PromptRoutingRequest
     /// <summary>
     /// The model that answered this conversation's last turn. It is tried first while it is available and exactly on
     /// the required tier, so a conversation stays on one model (coherent answers, prompt-cache hits) until it needs a
-    /// stronger one or can make do with a cheaper one (<see cref="RoutingPlan.Sticky"/>).
+    /// stronger one or can make do with a cheaper one (<see cref="RoutingPlan.Sticky"/>). <see cref="WarmCaches"/>
+    /// decide instead when one of them can serve the turn.
     /// </summary>
     public string? PreferredModel { get; init; }
+
+    /// <summary>
+    /// The prompt caches this conversation has on models. When one that has not expired is on a model that meets the
+    /// required tier (above it too), the turn stays there if that costs less than moving to the ranking's first choice,
+    /// which has to send and write the whole context again (<see cref="RoutingPlan.Sticky"/>,
+    /// <see cref="RoutingPlan.SelectionNote"/>).
+    /// </summary>
+    public IReadOnlyList<WarmCache> WarmCaches { get; init; } = [];
 
     /// <summary>
     /// The <see cref="SemanticRouterOptions.Profiles"/> entry to route under: it narrows the models, clamps the tier and can
@@ -91,7 +100,10 @@ public sealed record RoutingPlan(
     ModelRequirements Requirements,
     IReadOnlyList<ModelCandidate> Candidates)
 {
-    /// <summary>The first candidate is the conversation's previous model (<see cref="PromptRoutingRequest.PreferredModel"/>), moved ahead of the ranking.</summary>
+    /// <summary>
+    /// The first candidate is the conversation's previous model (<see cref="PromptRoutingRequest.PreferredModel"/>) or
+    /// the model with its warm prompt cache (<see cref="PromptRoutingRequest.WarmCaches"/>), moved ahead of the ranking.
+    /// </summary>
     public bool Sticky { get; init; }
 
     /// <summary>Models left out because <see cref="IModelReliability"/> says they are unreliable for this kind of work.</summary>
@@ -105,7 +117,9 @@ public sealed record RoutingPlan(
 
     /// <summary>
     /// Why a latency-aware strategy (<see cref="SelectionStrategy.Fastest"/>, <see cref="SelectionStrategy.Balanced"/>)
-    /// chose the first candidate, e.g. <c>fastest: qwen-small (310 ms to first byte) over cheaper llama (1,420 ms)</c>.
+    /// chose the first candidate, e.g. <c>fastest: qwen-small (310 ms to first byte) over cheaper llama (1,420 ms)</c>;
+    /// or why a warm prompt cache kept the conversation on its model or did not, e.g. <c>cache: stayed on opus (80k
+    /// cached); moving to sonnet would cost $0.18 more</c>.
     /// </summary>
     public string? SelectionNote { get; init; }
 }
@@ -144,6 +158,7 @@ public sealed class PromptRouter : IPromptRouter
     private readonly Dictionary<string, string> _routeModels;
     private readonly IModelLatency? _latency;
     private readonly SelectionStrategy _strategy;
+    private readonly int _outputTokens;
     private readonly TimeZoneInfo _zone;
     private readonly TimeProvider _time;
 
@@ -166,6 +181,7 @@ public sealed class PromptRouter : IPromptRouter
         _reliability = reliability;
         _latency = latency;
         _strategy = options.Selection.Strategy;
+        _outputTokens = options.Selection.EstimatedOutputTokens;
         _models = options.Models.ToArray();
         _profiles = new Dictionary<string, RoutingProfile>(options.Profiles, StringComparer.OrdinalIgnoreCase);
         _followConversation = new HashSet<string>(options.Routes.Where(r => r.FollowsConversation).Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
@@ -327,8 +343,25 @@ public sealed class PromptRouter : IPromptRouter
             }
         }
 
-        // Stay on the conversation's model while it is exactly what the turn needs: available, and on the required
-        // tier (not above it, so a conversation that no longer needs it moves to a cheaper model).
+        // A warm prompt cache decides by cost: its model, on the required tier or above it, against the ranking's
+        // first choice, which sends and writes the whole context again.
+        if (WeighWarmCaches(request, requirements, candidates) is { } warm)
+        {
+            bool first = warm.Stay == candidates[0], stays = first || warm.StayCost < warm.MoveCost;
+            return new RoutingPlan(classification, requirements, stays ? [warm.Stay, .. candidates.Where(c => c != warm.Stay)] : candidates)
+            {
+                Unreliable = unreliable,
+                Sticky = stays,
+                RouteModel = stays && !first ? null : routeModel,
+                Trial = stays && !first ? null : trial,
+                SelectionNote = first ? null
+                    : stays ? $"cache: stayed on {warm.Stay.Model.Name} ({Tokens(warm.CachedTokens)} cached); moving to {candidates[0].Model.Name} would cost {Usd(warm.MoveCost - warm.StayCost)} more"
+                    : $"cache: moved to {candidates[0].Model.Name}, {Usd(warm.MoveCost)} a turn against {Usd(warm.StayCost)} on {warm.Stay.Model.Name} with {Tokens(warm.CachedTokens)} cached",
+            };
+        }
+
+        // Without one, stay on the conversation's model while it is exactly what the turn needs: available, and on the
+        // required tier (not above it, so a conversation that no longer needs it moves to a cheaper model).
         if (request.PreferredModel is { } preferred
             && candidates.FirstOrDefault(c => string.Equals(c.Model.Name, preferred, StringComparison.OrdinalIgnoreCase)) is { } previous
             && previous != candidates[0]
@@ -349,6 +382,57 @@ public sealed class PromptRouter : IPromptRouter
             SelectionNote = sticky || routeModel is not null || trial is not null ? null : SelectionNote(requirements.Strategy ?? _strategy, candidates),
         };
     }
+
+    /// <summary>
+    /// The conversation's cheapest warm prompt cache on a model that can serve the turn (available, on the required tier
+    /// or above it), with what this turn would cost there and on the ranking's first choice; <see langword="null"/>
+    /// when there is none. Staying reads the cached prefix and sends the rest; a model without a warm cache sends the
+    /// whole context and writes it to its cache.
+    /// </summary>
+    private (ModelCandidate Stay, int CachedTokens, decimal StayCost, decimal MoveCost)? WeighWarmCaches(
+        PromptRoutingRequest request, ModelRequirements requirements, IReadOnlyList<ModelCandidate> candidates)
+    {
+        DateTimeOffset now = _time.GetUtcNow();
+        WarmCache[] alive = [.. request.WarmCaches.Where(c => c.ExpiresAt > now && c.CachedTokens > 0)];
+        if (alive.Length == 0 || candidates.Count == 0)
+        {
+            return null;
+        }
+
+        // The context is at least as long as what is already cached of it.
+        int context = Math.Max(requirements.EstimatedInputTokens, alive.Max(c => c.CachedTokens));
+        (ModelCandidate Stay, int CachedTokens, decimal StayCost)? best = null;
+        foreach (ModelCandidate candidate in candidates)
+        {
+            if (!candidate.MeetsRequiredTier || candidate.Model.Tier < requirements.RequiredTier || !_health.IsAvailable(candidate.Model)
+                || Cached(candidate.Model) is not int cached)
+            {
+                continue;
+            }
+
+            decimal cost = Turn(candidate.Model);
+            if (best is null || cost < best.Value.StayCost)
+            {
+                best = (candidate, cached, cost);
+            }
+        }
+
+        return best is { } stay ? (stay.Stay, stay.CachedTokens, stay.StayCost, Turn(candidates[0].Model)) : null;
+
+        int? Cached(ModelDefinition model) =>
+            alive.Where(c => string.Equals(c.Model, model.Name, StringComparison.OrdinalIgnoreCase)).Select(c => (int?)Math.Min(c.CachedTokens, context)).Max();
+
+        decimal Turn(ModelDefinition model) => Cached(model) is int cached
+            ? model.Cost(context - cached, _outputTokens, cacheReadTokens: cached)
+            : model.Cost(0, _outputTokens, cacheWriteTokens: context);
+    }
+
+    private static string Tokens(int tokens) =>
+        tokens >= 1000 ? (tokens / 1000m).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "k" : tokens.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>Dollars to three significant digits (at least two decimals): <c>$0.184</c>, <c>$0.0102</c>, <c>$1.23</c>.</summary>
+    private static string Usd(decimal value) => value <= 0 ? "$0"
+        : "$" + Math.Round(value, Math.Clamp(2 - (int)Math.Floor(Math.Log10((double)value)), 2, 8)).ToString("0.00######", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>For a latency-aware strategy: the chosen model's time to first byte, and the cheaper model it was chosen over.</summary>
     private string? SelectionNote(SelectionStrategy strategy, IReadOnlyList<ModelCandidate> candidates)

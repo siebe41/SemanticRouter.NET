@@ -141,6 +141,21 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void Warm_prompt_caches_survive_a_restart_until_they_expire()
+    {
+        var opus = new WarmCache("opus", 80_000, _time.GetUtcNow().AddMinutes(5));
+        var before = new SqliteWarmCaches(Open());
+        before.Remember("conversation", opus);
+        before.Remember("conversation", new WarmCache("sonnet", 20_000, _time.GetUtcNow().AddMinutes(5)));
+        before.Forget("conversation", "SONNET");
+
+        new SqliteWarmCaches(Open()).Lookup("conversation").Should().Equal(opus);
+        new SqliteWarmCaches(Open()).Lookup("another").Should().BeEmpty();
+        _time.Advance(TimeSpan.FromMinutes(6));
+        new SqliteWarmCaches(Open()).Lookup("conversation").Should().BeEmpty("expired");
+    }
+
+    [Fact]
     public void The_activity_log_is_seeded_from_disk_and_continues_its_ids()
     {
         var store = new SqliteActivityStore(Open());

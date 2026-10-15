@@ -70,6 +70,7 @@ public static class SemanticRouterServiceCollectionExtensions
             sp.GetRequiredService<IUsageLedger>(), sp.GetService<TimeProvider>() ?? TimeProvider.System,
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BudgetGate>>()));
         services.TryAddSingleton<IToolCallAffinity, ToolCallAffinity>();
+        services.TryAddSingleton<IWarmCacheStore>(sp => new WarmCacheStore(sp.GetService<TimeProvider>()));
         services.TryAddSingleton<RoutingActivityLog>();
         services.TryAddSingleton(sp => new GatewayGuard(
             sp.GetService<IOptions<Microsoft.AspNetCore.Builder.RouterDashboardOptions>>()?.Value.PublicOrigins ?? []));

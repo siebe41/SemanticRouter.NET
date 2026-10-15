@@ -68,13 +68,18 @@ public sealed class ReliabilityTests : RouterHostTest
     {
         get
         {
-            TimeSpan behind = DateTimeOffset.UtcNow - _time.GetUtcNow();
-            if (behind > TimeSpan.Zero)
-            {
-                _time.Advance(behind);
-            }
-
+            CatchUpClock();
             return Services.GetRequiredService<ModelReliabilityTracker>();
+        }
+    }
+
+    /// <summary>Moves the test clock up to the real one (see <see cref="Tracker"/>); for reads through the API too.</summary>
+    private void CatchUpClock()
+    {
+        TimeSpan behind = DateTimeOffset.UtcNow - _time.GetUtcNow();
+        if (behind > TimeSpan.Zero)
+        {
+            _time.Advance(behind);
         }
     }
 
@@ -136,6 +141,7 @@ public sealed class ReliabilityTests : RouterHostTest
         HttpClient client = await StartDispatchAsync();
         await FailFourTasksAsync(client);
 
+        CatchUpClock();
         JsonElement reliability = JsonDocument.Parse(await client.GetStringAsync("/router/api/reliability")).RootElement;
         JsonElement left = reliability.GetProperty("models").EnumerateArray().Single(m => m.GetProperty("excludedUntil").ValueKind != JsonValueKind.Null);
         (left.GetProperty("model").GetString(), left.GetProperty("route").GetString()).Should().Be(("local", "agentic"));

@@ -162,6 +162,45 @@ public sealed class ConversationRoutingTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_conversation_stays_on_its_warm_prompt_cache_across_a_restart_until_it_expires()
+    {
+        // The cloud model reports 80k tokens read from its cache; "mid" is a cheaper tier-3 model without one.
+        CloudHttp = StubHttpMessageHandler.Json("""{"id":"r","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":80100,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":80000}}}""");
+        Classifier.Setup(c => c.ClassifyAsync(It.Is<string>(p => p.Contains("tests", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PromptClassificationResult
+            {
+                RequiredTier = 3,
+                Reason = RoutingReason.SemanticMatch,
+                RouteName = "testing",
+                Complexity = new ComplexityAnalysis { Score = 0.4, EstimatedTokens = 10 },
+            });
+        static void Catalog(SemanticRouterOptions o)
+        {
+            o.Models.Single(m => m.Name == "cloud").CacheReadCostPerMillionTokens = 0.3m;
+            o.Models.Add(TestEmbeddings.Model("mid", 3, costPerMillion: 1m, connector: "lmstudio"));
+        }
+
+        var time = new ManualTimeProvider();
+        var caches = new WarmCacheStore(time);
+        void Services(IServiceCollection s) => s.AddSingleton<IWarmCacheStore>(caches).AddSingleton<TimeProvider>(time);
+        HttpClient client = await StartDispatchAsync(routing: Catalog, services: Services);
+        Header(await client.PostAsync("/v1/chat/completions", Conversation("auto", Task)), "Model").Should().Be("cloud");
+
+        // A restart forgets the conversation's floor, but not its warm cache.
+        await DisposeAsync();
+        client = await StartDispatchAsync(routing: Catalog, services: Services);
+        HttpResponseMessage tests = await client.PostAsync("/v1/chat/completions", Conversation("auto", Task, "now write the tests for it"));
+
+        (Header(tests, "Tier"), Header(tests, "Model"), Header(tests, "Sticky")).Should().Be(("3", "cloud", "true"), "reading 80k from cloud's cache costs less than sending it to mid");
+        Header(tests, "Selection").Should().StartWith("cache: stayed on cloud (80k cached); moving to mid would cost $0.05");
+
+        // Once the cache has expired, the conversation moves to the cheaper model.
+        time.Advance(TimeSpan.FromMinutes(6));
+        HttpResponseMessage later = await client.PostAsync("/v1/chat/completions", Conversation("auto", Task, "now write the tests for it", "and the tests for the ledger"));
+        (Header(later, "Model"), Header(later, "Sticky"), Header(later, "Selection")).Should().Be(("mid", "(none)", "(none)"));
+    }
+
+    [Fact]
     public async Task A_tool_loop_without_assistant_text_keeps_the_conversation_and_its_callout()
     {
         CloudHttp = StubHttpMessageHandler.Json("""{"id":"r","object":"chat.completion","model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}""");
