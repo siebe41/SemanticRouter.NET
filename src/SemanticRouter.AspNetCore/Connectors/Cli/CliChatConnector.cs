@@ -142,8 +142,12 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     {
         DroppedFeatures.Report(context, DroppedFeatures.ForCli(request.Chat));
         bool prompted = request.Chat.HasTools || request.Chat.Turns.Any(t => t.Blocks.Any(b => b is ToolUseBlock or ToolResultBlock));
-        // A fresh fence label per run: a tool result or file written before it cannot hold a call the parser accepts.
-        PromptedToolFormat toolFormat = PromptedToolFormat.ForRequest(_options.PromptedToolParsing);
+        // A fresh fence label per run: a tool result or file written before it cannot hold a call the parser accepts. A
+        // call the tool results do hold, repeated by the model, stays text. Without tools there is nothing to parse, and
+        // earlier calls are shown with the plain label.
+        PromptedToolFormat toolFormat = request.Chat.HasTools
+            ? PromptedToolFormat.ForRequest(_options.PromptedToolParsing) with { QuotedCalls = PromptedToolCalls.QuotedCalls(request.Chat) }
+            : PromptedToolFormat.Default;
         CliInvocation invocation = Invocation(new CliRequest(
             request.Model.Model, request.Chat.Messages, workingDirectory, _options, prompted ? request.Chat : null, toolFormat));
 
@@ -351,6 +355,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         {
             // Calls read out of the model's text rather than a native tool API: worth finding when auditing what ran.
             AttemptNotes.Report(context, "prompted tool calls: " + Truncate(string.Join(", ", calls.Select(c => c.Name)), 120));
+            AttemptNotes.ReportPromptedToolCalls(context, calls.Count);
         }
 
         // Text already sent ended where the held part begins; trailing whitespace before the calls is noise.
