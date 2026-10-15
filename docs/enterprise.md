@@ -109,6 +109,10 @@ A configuration profile payload for the domain `io.github.siebe41.semantic-route
 
 The router reads the managed preferences with macOS's own `plutil` and ignores the `Payload…` keys.
 
+## The key ring
+
+The policy does not cover how the data-protection keys that decrypt the user's secrets file are protected. On macOS, on Linux and in containers only file permissions protect them unless `SemanticRouter:DataProtection:Certificate` names a certificate to encrypt them to. Set it as a host setting: in `appsettings.json` in the user's configuration directory (read by the tool, its background service and the desktop app alike), or as the `SemanticRouter__DataProtection__Certificate` environment variable for a container. On Windows they are encrypted with DPAPI already. See [host.md](host.md#the-key-ring); `semantic-router doctor` shows how they are protected.
+
 ## Not covered yet
 
 - Settings are shown as locked only through the warnings; the editors do not grey them out.
