@@ -65,6 +65,14 @@ views.routes = () => {
     }).join('') || '<div class="card muted">No routes. Without routes every prompt gets the fallback tier (plus complexity escalation).</div>'}`;
 };
 
+/* The input price with recent prompt-cache reads and writes at the cache prices, next to the list price, when the router knows it and it differs. */
+const effectiveCostBadge = (m) => {
+  const s = state.status && (state.status.models || []).find((x) => x.name.toLowerCase() === String(m.Name || '').toLowerCase());
+  if (!s || s.effectiveInputCostPerMillionTokens == null || !s.cacheShare || s.effectiveInputCostPerMillionTokens === s.inputCostPerMillionTokens) return '';
+  const pct = (v) => Math.round(v * 100) + '%';
+  return `<span class="badge info" title="Recent turns read ${pct(s.cacheShare.read)} of their input from the prompt cache and wrote ${pct(s.cacheShare.write)}; cost estimates and trials use this price">$${+s.effectiveInputCostPerMillionTokens.toPrecision(3)} input per M with cache (${pct(s.cacheShare.read)} cached)</span>`;
+};
+
 const modelItem = (m, i) => {
   const key = 'model:' + i;
   const names = connectorNames();
@@ -74,7 +82,7 @@ const modelItem = (m, i) => {
     <div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
       <span class="chev">▶</span><span class="title">${h(m.Name || '(unnamed)')}</span>
       <span class="meta"><span class="tier">T${m.Tier}</span><span class="mono">${h(m.Model || '')}</span><span>via ${h(m.Connector)}${conn ? ` <span class="faint">(${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? '/' + h(conn.Preset || 'Custom') : ''})</span>` : ' <span class="badge danger">unknown connector</span>'}</span>
-      ${m.IsLocal ? '<span class="badge info">local</span>' : ''}${reliabilityBadges(m.Name)}${free ? '<span class="badge ok">free</span>' : `<span class="badge">$${m.InputCostPerMillionTokens}/$${m.OutputCostPerMillionTokens} per M</span>`}${(m.Capabilities || []).map((c) => `<span class="badge">${h(c)}</span>`).join('')}</span>
+      ${m.IsLocal ? '<span class="badge info">local</span>' : ''}${reliabilityBadges(m.Name)}${free ? '<span class="badge ok">free</span>' : `<span class="badge">$${m.InputCostPerMillionTokens}/$${m.OutputCostPerMillionTokens} per M</span>${effectiveCostBadge(m)}`}${(m.Capabilities || []).map((c) => `<span class="badge">${h(c)}</span>`).join('')}</span>
       <span class="spacer"></span><label class="check" data-no-action><input type="checkbox" data-bind="Models.${i}.Enabled" data-kind="bool" ${m.Enabled !== false ? 'checked' : ''}> enabled</label>
     </div>
     <div class="item-body"><div class="form-grid">

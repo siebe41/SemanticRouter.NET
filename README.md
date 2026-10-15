@@ -153,6 +153,8 @@ Eligible models that meet the required tier are ordered by the strategy:
 
 A model's typical time to first byte is the median over its served turns in the last `LatencyWindow` (a day), once it has `LatencySamples` (5) of them. A model without enough turns counts as the median of the others; with no data at all, `Fastest` and `Balanced` order by cost. They pick the model and record why: the Activity page shows it, and Dispatch sends it as `X-Prompt-Route-Selection`, e.g. `fastest: quick (300 ms to first byte) over cheaper cloud (1,500 ms to first byte)`.
 
+**Estimated cost counts the prompt cache.** A model that reads most of a long conversation from its prompt cache at a tenth of the input price can cost less than one with a lower list price and no cache. So the estimate splits the request's input by the share each model read from and wrote to its cache on recent served turns (`CacheShareWindow`, a day): that part at `CacheReadCostPerMillionTokens` and `CacheWriteCostPerMillionTokens`, the rest at the input price. The share is learned per route once a model has `CacheShareSamples` (5) turns with reported usage there, otherwise over all its turns; with fewer, the list prices apply, as they do for a model without cache prices. Every strategy's cost ordering uses this estimate, and so do the [per-route model trials](docs/routing-quality.md#cheaper-models-per-route). The Models page shows the effective input price next to the list price.
+
 With `AllowBelowRequiredTier` (the default), the remaining eligible models follow, most capable first. When every tier-4 model is out of quota, a hard prompt still gets the best answer available rather than an error.
 
 **Failover.** In Dispatch mode the router tries up to `MaxAttempts` candidates. Failover is only possible **before** any output reaches the client; once tokens are streaming, that model owns the response. Failures put the model into cooldown:
@@ -384,6 +386,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Selection:Strategy` | `CheapestCapable` | `CheapestCapable`, `MostCapable`, `Priority`, `Fastest` or `Balanced`. |
 | `Selection:BalancedLatencyFactor` | `1.5` | For `Balanced`: how many times slower than the fastest model a cheaper model may be. |
 | `Selection:LatencyWindow` / `LatencySamples` | `1.00:00:00` / `5` | The recent served turns a model's typical time to first byte is taken from, and how many it needs. |
+| `Selection:CacheShareWindow` / `CacheShareSamples` | `1.00:00:00` / `5` | The recent served turns the share of input a model reads from and writes to its prompt cache is taken from, and how many it needs (per route, or over all its turns), for cost estimates. |
 | `Selection:AllowBelowRequiredTier` | `true` | Degrade to the best available model instead of failing. |
 | `Selection:MaxAttempts` | `3` | Models tried per request. |
 | `Selection:QuotaCooldown` / `FailureCooldown` | `00:15:00` / `00:00:30` | How long failed models are skipped. |
@@ -415,7 +418,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `IsLocal` | `false` | Data stays on your machine. |
 | `ContextWindow` | `0` (unknown) | Tokens. Models too small for a request are skipped. |
 | `InputCostPerMillionTokens` / `OutputCostPerMillionTokens` | `0` | Marginal USD cost. Use 0 for local models and flat-rate subscriptions. |
-| `CacheReadCostPerMillionTokens` / `CacheWriteCostPerMillionTokens` | input price | Prompt-cache prices, for the usage and cost figures. |
+| `CacheReadCostPerMillionTokens` / `CacheWriteCostPerMillionTokens` | input price | Prompt-cache prices, for the usage and cost figures and for cost estimates once the model's cache share is known. |
 | `Priority` | `0` | Lower is preferred. Breaks ties; primary key for the `Priority` strategy. |
 | `Enabled` | `true` | |
 | `ActiveHours` | `null` (always) | `HH:mm-HH:mm`, may cross midnight. Outside the window the model is not tried. |

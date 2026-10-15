@@ -171,7 +171,7 @@ public static partial class RouterDashboardEndpoints
             .WithMetadata(DashboardAnonymousMetadata.Instance);
 
         api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories, ClientRateLimiter rateLimits, IServiceProvider services) =>
-            Results.Json(BuildStatus(provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>(), Listening(services), options.PublicOrigins), ApiJson));
+            Results.Json(BuildStatus(provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>(), services.GetService<IModelCacheShare>(), Listening(services), options.PublicOrigins), ApiJson));
 
         api.MapGet("/config", (RouterRuntimeProvider provider) =>
         {
@@ -678,7 +678,8 @@ public static partial class RouterDashboardEndpoints
 
     private static StatusResponse BuildStatus(
         RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories,
-        ClientRateLimiter rateLimits, ConnectorIncidents? incidents, EndpointChecks? checks, IEnumerable<string> listening, IEnumerable<string> publicOrigins)
+        ClientRateLimiter rateLimits, ConnectorIncidents? incidents, EndpointChecks? checks, IModelCacheShare? cache, IEnumerable<string> listening,
+        IEnumerable<string> publicOrigins)
     {
         RouterRuntime runtime = provider.Current;
         RouterConfiguration config = runtime.Configuration;
@@ -709,7 +710,11 @@ public static partial class RouterDashboardEndpoints
                 m.Name, m.Connector, m.Model, m.Tier, m.Capabilities.ToArray(), m.IsLocal, m.Enabled, m.Priority, m.ContextWindow,
                 m.InputCostPerMillionTokens, m.OutputCostPerMillionTokens,
                 cooldowns.TryGetValue(m.Name, out DateTimeOffset until) ? until : null,
-                config.Connectors.TryGetValue(m.Connector, out ConnectorOptions? c) ? c.Type.ToString() : null)).ToArray(),
+                config.Connectors.TryGetValue(m.Connector, out ConnectorOptions? c) ? c.Type.ToString() : null)
+            {
+                CacheShare = cache?.Typical(m, route: null),
+                EffectiveInputCostPerMillionTokens = cache?.Typical(m, route: null) is { } share ? m.EstimateCost(1_000_000, 0, share) : null,
+            }).ToArray(),
             config.Connectors.Select(kv => new ConnectorStatus(
                 kv.Key, kv.Value.Type.ToString(), kv.Value.Type == ConnectorType.Cli ? kv.Value.Preset.ToString() : null,
                 kv.Value.Type is ConnectorType.Cli or ConnectorType.Copilot ? kv.Value.Executable : AddressDisplay.Show(kv.Value.BaseAddress),
@@ -918,7 +923,14 @@ public static partial class RouterDashboardEndpoints
     /// <summary>A catalog model and its health.</summary>
     public sealed record ModelStatus(
         string Name, string Connector, string? Model, int Tier, IReadOnlyList<string> Capabilities, bool IsLocal, bool Enabled, int Priority,
-        int ContextWindow, decimal InputCostPerMillionTokens, decimal OutputCostPerMillionTokens, DateTimeOffset? CoolingDownUntil, string? ConnectorType);
+        int ContextWindow, decimal InputCostPerMillionTokens, decimal OutputCostPerMillionTokens, DateTimeOffset? CoolingDownUntil, string? ConnectorType)
+    {
+        /// <summary>The share of its input the model read from and wrote to its prompt cache lately, when there were enough turns.</summary>
+        public PromptCacheShare? CacheShare { get; init; }
+
+        /// <summary>The input price per million tokens with <see cref="CacheShare"/> at the cache prices: what cost estimates use.</summary>
+        public decimal? EffectiveInputCostPerMillionTokens { get; init; }
+    }
 
     /// <summary>A connector.</summary>
     public sealed record ConnectorStatus(string Name, string Type, string? Preset, string? Target, string ToolCalling, bool HasApiKey, int ModelCount);

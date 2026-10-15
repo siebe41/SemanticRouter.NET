@@ -77,6 +77,8 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<RoutingFeedbackLog>();
         services.TryAddSingleton(sp => new ModelLatencyTracker(sp.GetRequiredService<RoutingActivityLog>(), sp.GetService<TimeProvider>()));
         services.TryAddSingleton<IModelLatency>(sp => sp.GetRequiredService<ModelLatencyTracker>());
+        services.TryAddSingleton(sp => new ModelCacheTracker(sp.GetRequiredService<RoutingActivityLog>(), sp.GetService<TimeProvider>()));
+        services.TryAddSingleton<IModelCacheShare>(sp => sp.GetRequiredService<ModelCacheTracker>());
         services.TryAddSingleton<ModelReliabilityTracker>();
         services.TryAddSingleton<IModelReliability>(sp => sp.GetRequiredService<ModelReliabilityTracker>());
         services.TryAddSingleton<IEvaluationSetStore>(sp =>

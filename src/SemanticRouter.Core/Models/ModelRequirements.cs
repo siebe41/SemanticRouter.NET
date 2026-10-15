@@ -20,10 +20,13 @@ public sealed record ModelRequirements
 
     /// <summary>The <see cref="SemanticRouterOptions.Profiles"/> entry the request was routed under, if any.</summary>
     public string? Profile { get; init; }
+
+    /// <summary>The route the prompt matched, if any. Cost estimates use how much each model reads from its prompt cache there (<see cref="IModelCacheShare"/>).</summary>
+    public string? Route { get; init; }
 }
 
 /// <summary>A model eligible to serve a request, in the order it should be tried.</summary>
 /// <param name="Model">The catalog entry.</param>
-/// <param name="EstimatedCost">Estimated marginal cost of the request in USD.</param>
+/// <param name="EstimatedCost">Estimated marginal cost of the request in USD, cached input at the cache prices when the model's cache share is known.</param>
 /// <param name="MeetsRequiredTier"><see langword="false"/> for below-tier fallbacks.</param>
 public sealed record ModelCandidate(ModelDefinition Model, decimal EstimatedCost, bool MeetsRequiredTier);
