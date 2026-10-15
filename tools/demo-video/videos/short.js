@@ -1,6 +1,6 @@
-// The vertical short (~45 s, 9:16 for Shorts, Reels and LinkedIn), recorded on the vertical stage in one take: Claude
-// Code full width, four turns routed (small local model, local coder, Claude, failover at the session limit), with the
-// decision under the window and captions that follow the voice word by word.
+// The vertical short (~45 s, 9:16 for Shorts, Reels and LinkedIn), recorded on the vertical stage in one take: a hook
+// and what the router is, then Claude Code full width with four turns routed (small local model, local coder, Claude,
+// failover at the session limit), the decision under the window and captions that follow the voice word by word.
 //
 //   NARRATION=narration/short.json python tts.py chatterbox out/voice-short <voice sample>
 //   NARRATION=narration/short.json python words.py out/voice-short
@@ -16,15 +16,44 @@ module.exports = async function short(k) {
   k.run('claude', `export ANTHROPIC_BASE_URL=${router} ANTHROPIC_AUTH_TOKEN=semantic-router CLAUDE_CODE_MAX_CONTEXT_TOKENS=200000; clear; claude --model semantic-router`);
   await k.waitFor('claude', /Claude Code v/);
   await k.stage('layout', 'vterm');
-  // The hook card is up before the first frame: it is the thumbnail, and the line starts at once.
-  await k.stage('title', 'Stop paying frontier prices<br>for small prompts.');
+
+  // The hook card is up before the first frame (it is the thumbnail): a small prompt, then the frontier model it
+  // would go to, struck out for the local model that answers it for free.
+  await k.stage('card', `
+    <div class="tagline" style="font-size: 68px">Why pay frontier prices<br>for small prompts?</div>
+    <div class="bubble fade"><span class="p">›</span> hi! what can you do?</div>
+    <div class="down fade">↓</div>
+    <div class="pick cloud fade"><b>Claude Opus</b><small>the most expensive model</small></div>
+    <div class="pick local fade"><b>a small local model</b><small>free · just as good for this</small></div>`);
   await sleep(1200);
 
   await k.record();
 
-  // The hook.
   let line = k.say('hook');
+  await k.cue('hook', 'ask'); await k.stage('reveal', 0);
+  await k.cue('hook', 'doesn'); await k.stage('reveal', 1); await k.stage('reveal', 2);
+  await k.cue('hook', 'so');
+  await k.stage('mark', '.pick.cloud', 'struck');
+  await k.stage('reveal', 3);
   await line;
+  await sleep(500);
+
+  // What it is: the name, then where prompts go, each as it is named.
+  line = k.say('intro');
+  await k.stage('card', `
+    <div class="brand">{logo}<div class="name">SemanticRouter<span>.NET</span></div></div>
+    <div class="tagline fade">Every prompt goes to the cheapest model that can answer it.</div>
+    <div class="row">
+      <div class="pill l fade"><b>Local models</b><small>LM Studio · Ollama · vLLM</small></div>
+      <div class="pill s fade"><b>Your subscriptions</b><small>Claude Code · Copilot · Codex</small></div>
+      <div class="pill a fade"><b>Paid APIs</b><small>OpenAI · Anthropic · Gemini</small></div>
+    </div>`);
+  await k.cue('intro', 'sends'); await k.stage('reveal', 0);
+  await k.cue('intro', 'local'); await k.stage('reveal', 1);
+  await k.cue('intro', 'subscription'); await k.stage('reveal', 2);
+  await k.cue('intro', 'paid'); await k.stage('reveal', 3);
+  await line;
+  await sleep(900);
   await k.stage('hideCard');
   await sleep(500);
 

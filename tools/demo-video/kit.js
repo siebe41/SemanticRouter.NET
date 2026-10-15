@@ -140,7 +140,8 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
   const size = vertical ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
   const wordsFile = path.join(voiceDir, 'words.json');
   if (vertical && !fs.existsSync(wordsFile)) throw new Error(`No ${wordsFile}: run words.py on the voice folder first`);
-  const phrases = vertical ? captionPhrases(JSON.parse(fs.readFileSync(wordsFile, 'utf8'))) : {};
+  const words = vertical ? JSON.parse(fs.readFileSync(wordsFile, 'utf8')) : {};
+  const phrases = captionPhrases(words);
   prepareHome();
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
@@ -216,6 +217,20 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       narration.push({ key, wall: Date.now() / 1000 });
       if (phrases[key]) k.stage('speak', phrases[key]);
       return sleep(durations[key] * 1000);
+    },
+    /**
+     * Waits until the line started last with say(key) reaches a word (the first one starting with `word`, after `after`
+     * if given), to time a beat to it. Needs the voice folder's words.json (words.py).
+     */
+    async cue(key, word, after) {
+      const list = words[key];
+      if (!list) throw new Error(`No word times for "${key}": run words.py on ${voiceDir}`);
+      const norm = (w) => w.toLowerCase().replace(/[^a-z0-9']/g, '');
+      const from = after ? list.findIndex(([w]) => norm(w).startsWith(after)) + 1 : 0;
+      const hit = list.slice(from).find(([w]) => norm(w).startsWith(word));
+      if (!hit) throw new Error(`No word "${word}" in "${key}"`);
+      const started = narration.findLast((n) => n.key === key).wall;
+      await sleep(Math.max(0, (started + hit[1]) * 1000 - Date.now()));
     },
     /** Waits until the line started last with say(key) has this many seconds left, to time a beat to its last words. */
     async secondsLeft(key, seconds) {

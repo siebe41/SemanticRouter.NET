@@ -117,6 +117,19 @@
   html.v #card .pill b { font-size: 32px; } html.v #card .pill small { font-size: 24px; }
   html.v #card code { font-size: 29px; padding: 22px 30px; }
   html.v #card .url { font-size: 34px; } html.v #card .muted { font-size: 28px; }
+  /* The short's hook: a small prompt, the model it would go to, and the one it should. */
+  #card .bubble { font-family: var(--font-mono); font-size: 38px; padding: 22px 34px; border-radius: 16px; border: 1px solid var(--border-strong); background: var(--bg); }
+  #card .bubble .p { color: var(--signal-ink); }
+  #card .down { font-size: 48px; line-height: 1; color: var(--text-faint); }
+  #card .pick { width: 640px; padding: 22px 28px; border-radius: 16px; border: 1px solid var(--border-strong); background: var(--bg-elevated); }
+  #card .pick b { display: block; font-size: 40px; transition: color 300ms ease; }
+  #card .pick small { display: block; margin-top: 6px; font-size: 26px; color: var(--text-muted); }
+  #card .pick.cloud { border-top: 4px solid var(--signal); } #card .pick.local { border-top: 4px solid var(--accent); }
+  #card .pick.local b { color: var(--accent-ink); }
+  #card .pick.struck { opacity: 0.55; transition: opacity 400ms ease; }
+  #card .pick.struck b { text-decoration: line-through 4px var(--danger); }
+  #card > * { transition: opacity 250ms ease; }
+  #card.swap > * { opacity: 0 !important; }
 </style>
 </head>
 <body>
@@ -267,6 +280,22 @@
       for (const el of $('card').querySelectorAll('.fade')) { await sleep(900); el.classList.add('in'); }
     },
     hideCard() { $('card').classList.add('hidden'); },
+    /**
+     * A card of the video's own (a "{logo}" in it becomes the logo), shown with its .fade parts hidden until reveal()
+     * brings them in one at a time; a card already up fades out first.
+     */
+    async card(html) {
+      const c = $('card');
+      if (!c.classList.contains('hidden') && c.children.length) { c.classList.add('swap'); await sleep(260); }
+      c.innerHTML = html.replaceAll('{logo}', logo);
+      c.classList.remove('hidden');
+      c.getBoundingClientRect();
+      c.classList.remove('swap');
+    },
+    /** Fades in the n-th hidden part of the card (from 0). */
+    reveal(n) { $('card').querySelectorAll('.fade')[n]?.classList.add('in'); },
+    /** Adds a class to a part of the card, e.g. to strike it out. */
+    mark(selector, cls) { $('card').querySelector(selector)?.classList.add(cls); },
 
     /** A full-screen chapter card: number and title. */
     async chapter(n, title, sub = '') {
