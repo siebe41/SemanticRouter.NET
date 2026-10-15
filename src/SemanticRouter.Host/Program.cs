@@ -59,7 +59,8 @@ static string Help() => $"""
                                         It asks before enabling each subscription CLI, since that CLI answers
                                         on whatever account it is signed in to (see "Using it at work" in
                                         docs/TERMS.md); without a terminal they are added disabled.
-      semantic-router doctor            Check every connector, model and the embeddings. Exit code 1 on failure.
+      semantic-router doctor            Check every connector, model and the embeddings, and list every host the
+                                        router will contact. Exit code 1 on failure.
       semantic-router models [name]     List the models each connector (or the one named) offers: loaded or not,
                                         context, size, which are in the catalog, and a suggested tier for the rest.
       semantic-router service <action> [options]

@@ -261,7 +261,7 @@ Uses your ChatGPT plan. See [TERMS.md](TERMS.md#openai-codex-cli).
 ]
 ```
 
-- **Command line.** The preset runs `codex exec --json --sandbox read-only --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules --color never -c features.shell_tool=false -c web_search="disabled" [-m …] -`, with the prompt on stdin.
+- **Command line.** The preset runs `codex exec --json --sandbox read-only --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules --color never -c features.shell_tool=false -c web_search="disabled" -c check_for_update_on_startup=false -c analytics.enabled=false -c otel.metrics_exporter="none" [-m …] -`, with the prompt on stdin. The last three keep a run from checking for updates or sending analytics and metrics to OpenAI (see [network.md](network.md)).
 - **Billing.** It removes `CODEX_API_KEY`, which would otherwise take precedence and bill the API instead of your plan.
 - **Limits.** "You've hit your usage limit" is treated as a quota error.
 - **Concurrency.** Keep `MaxConcurrency` at 1. OpenAI's guidance for ChatGPT-login automation is one machine or a serialized job stream per login.

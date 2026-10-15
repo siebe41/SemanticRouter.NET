@@ -248,4 +248,15 @@ public sealed class CliAdapterTests : IDisposable
             .And.Contain("HTTPS_PROXY", "http://proxy.example:3128");
         CliAdapter.For(CliPreset.Custom).EnvironmentFor(new ConnectorOptions()).Should().BeEmpty();
     }
+
+    [Fact]
+    public void Codex_runs_without_update_checks_or_analytics()
+    {
+        (List<string> args, _) = new CodexCliAdapter().Build(Request("gpt-6.1-sol", new ChatMessage("user", "hi")));
+
+        args.Should().ContainInOrder("-c", "check_for_update_on_startup=false")
+            .And.ContainInOrder("-c", "analytics.enabled=false")
+            .And.ContainInOrder("-c", "otel.metrics_exporter=\"none\"");
+        args.IndexOf("analytics.enabled=false").Should().BeLessThan(args.IndexOf("-"), "options come before the stdin marker");
+    }
 }

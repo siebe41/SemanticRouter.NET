@@ -5,8 +5,8 @@ namespace SemanticRouter.Host;
 
 /// <summary>
 /// <c>semantic-router doctor</c>: loads the configuration exactly as <c>semantic-router</c> would, then checks every
-/// connector, model and the embeddings against this machine (<see cref="RouterDoctor"/>) without calling a model.
-/// Exit code 1 when anything failed.
+/// connector, model and the embeddings against this machine (<see cref="RouterDoctor"/>) without calling a model, and
+/// lists every host the router will contact (<see cref="EgressList"/>). Exit code 1 when anything failed.
 /// </summary>
 internal static class DoctorCommand
 {
@@ -24,7 +24,9 @@ internal static class DoctorCommand
         {
             try
             {
-                checks = [.. HostChecks(app), .. await RouterDoctor.CheckAsync(app.Services).ConfigureAwait(false)];
+                // The egress list first: the embeddings check may download the ONNX model it reports.
+                IReadOnlyList<RouterCheck> egress = EgressList.For(app.Services, settings.ConfigurationDirectory);
+                checks = [.. HostChecks(app), .. egress, .. await RouterDoctor.CheckAsync(app.Services).ConfigureAwait(false)];
             }
             catch (InvalidOperationException ex)
             {
