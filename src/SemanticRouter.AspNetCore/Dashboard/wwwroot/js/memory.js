@@ -104,8 +104,8 @@ views.memory = () => {
   return `
     <div class="section-head"><h1>Memory</h1><span class="muted small" id="memory-summary">${memorySummaryText()}</span><span class="spacer"></span>
       <button class="btn small" data-action="memory-fit">Fit</button>
-      <button class="btn small" data-action="memory-refresh">Rescan</button>
-      ${admin ? '<button class="btn small" data-action="memory-reset" title="Forget which notes were sent where">Clear sharing</button>' : ''}</div>
+      ${admin ? `<button class="btn small" data-action="memory-refresh">Rescan</button>
+      <button class="btn small" data-action="memory-reset" title="Forget which notes were sent where">Clear sharing</button>` : ''}</div>
     ${m.mode && m.mode !== 'Dispatch' ? '<div class="card section small" style="border-color:var(--warn)">The gateway is in <b>Annotate</b> mode: your own endpoint calls the model, so the router can show which notes were in a request but not where they went.</div>' : ''}
     ${m.trackSharing === false ? '<div class="card section small" style="border-color:var(--warn)">Sharing is not tracked (<code>Memory:TrackSharing</code> is off): the map shows your notes, but requests are not checked for them.</div>' : ''}
     ${hasNotes ? `

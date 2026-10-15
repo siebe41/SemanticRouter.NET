@@ -310,7 +310,8 @@ public static partial class RouterDashboardEndpoints
         });
 
         api.MapPost("/memory/refresh", async (RouterRuntimeProvider provider, MemoryIndex memory, MemoryExposureLog exposure, CancellationToken cancellationToken) =>
-            Results.Json(BuildMemoryMap(provider.Current, await memory.RefreshAsync(cancellationToken).ConfigureAwait(false), exposure), ApiJson));
+            Results.Json(BuildMemoryMap(provider.Current, await memory.RefreshAsync(cancellationToken).ConfigureAwait(false), exposure), ApiJson))
+            .WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapPost("/memory/exposure/reset", (MemoryExposureLog exposure) =>
         {
@@ -366,7 +367,7 @@ public static partial class RouterDashboardEndpoints
                 new PromptRoutingRequest { Prompt = request.Prompt, Strategy = choice.Strategy, RequestedModel = choice.RequestedModel, Profile = profile },
                 cancellationToken).ConfigureAwait(false);
             return Results.Ok(PromptClassificationResponse.From(plan));
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance); // classifying embeds the prompt, which can cost an embedding call
 
         api.MapPost("/health/reset", (IModelHealth health) =>
         {
@@ -393,7 +394,7 @@ public static partial class RouterDashboardEndpoints
             {
                 return Results.Json(new EmbeddingTestResponse(false, 0, Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1), ex.Message), ApiJson);
             }
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapPost("/connectors/{name}/discover", async (string name, IServiceProvider services, CancellationToken cancellationToken) =>
         {
@@ -408,7 +409,7 @@ public static partial class RouterDashboardEndpoints
             }
 
             return Results.Json(DiscoverResponse.From(report), ApiJson);
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapPost("/connectors/{name}/check", async (string name, IServiceProvider services, RouterRuntimeProvider provider) =>
         {
@@ -422,7 +423,7 @@ public static partial class RouterDashboardEndpoints
             string target = EndpointHealth.TargetKey(provider.Current.Configuration, name);
             EndpointCheck result = await checks.RunAsync(name, target, () => RouterDoctor.CheckConnectorAsync(services, name)).ConfigureAwait(false);
             return Results.Json(result, ApiJson);
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance);
 
         EvaluationApi.Map(api, ApiJson, Actor);
         TuningApi.Map(api, ApiJson, Actor);

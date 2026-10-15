@@ -164,7 +164,7 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `POST api/session` | `{ "token": "..." }` → sets the session cookie. |
 | `DELETE api/session` | Signs out. |
 
-`PUT api/config`, `POST api/config/reset`, rollback, `POST api/health/reset`, `POST api/memory/exposure/reset`, changes to the evaluation set, adding utterances and `POST api/evaluate/compare` (which calls an endpoint you name) need the admin role; everything else is open to the read-only role.
+`PUT api/config`, `POST api/config/reset`, rollback, `POST api/health/reset`, `POST api/memory/exposure/reset`, changes to the evaluation set, adding utterances and every tuning action need the admin role. So does everything that spends embedding or API calls or scans the disk: `POST api/classify`, `POST api/evaluate` and `api/evaluate/compare`, `POST api/embeddings/test`, `POST api/connectors/{name}/check` and `/discover`, and `POST api/memory/refresh`. Everything else is open to the read-only role; the dashboard disables or hides those buttons for it.
 
 The same document works with `PUT` from scripts, e.g. to promote a tested configuration:
 
@@ -179,7 +179,7 @@ The admin API can change where prompts go, so the default is strict and opening 
 | Setup | Settings | What happens |
 |---|---|---|
 | **Loopback only** (default) | nothing | Requests from other machines get `403`. Loopback requests must carry a `Host` header naming this machine (`localhost`, `127.0.0.1`, `[::1]`, or a `PublicOrigins` entry), which stops a web page from reaching the dashboard through DNS rebinding. |
-| **Token** | `RequireLocalClient: false`, `AdminToken` (and optionally `ReadOnlyToken`) | Remote callers send `Authorization: Bearer <token>`, or sign in on the dashboard, which sets an `HttpOnly`, `SameSite=Strict` session cookie derived from the token (never the token itself; changing the token signs everyone out). The read-only token can view status, activity and the masked configuration and use the prompt tester; it cannot apply, save or reset. Loopback clients still need no token. |
+| **Token** | `RequireLocalClient: false`, `AdminToken` (and optionally `ReadOnlyToken`) | Remote callers send `Authorization: Bearer <token>`, or sign in on the dashboard, which sets an `HttpOnly`, `SameSite=Strict` session cookie derived from the token (never the token itself; changing the token signs everyone out). The read-only token can view status, activity and the masked configuration; it cannot apply, save or reset, nor classify, evaluate, test embeddings, check or discover connectors, or rescan memory, which spend embedding or API calls or read the disk. Loopback clients still need no token. |
 | **Reverse proxy that authenticates** | `RequireLocalClient: false`, `AllowUnauthenticatedRemoteClients: true` | Remote callers are trusted. Only for a proxy that authenticates every request; a warning is logged at start-up. |
 
 ```jsonc

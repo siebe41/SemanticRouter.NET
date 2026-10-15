@@ -303,7 +303,7 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
-    public async Task The_read_only_token_can_look_but_not_change()
+    public async Task The_read_only_token_can_look_but_not_change_or_spend()
     {
         HttpClient client = await StartAsync(WithTokens);
         string config = JsonNode.Parse(await (await client.SendAsync(Get("/router/api/config", ReadOnlyToken))).Content.ReadAsStringAsync())!["config"]!.ToJsonString();
@@ -317,8 +317,30 @@ public sealed class DashboardAccessTests : RouterHostTest
 
         (await client.SendAsync(put)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await client.SendAsync(reset)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await client.SendAsync(classify)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.SendAsync(classify)).StatusCode.Should().Be(HttpStatusCode.Forbidden, "classifying embeds the prompt");
         (await client.SendAsync(Get("/router/api/activity", ReadOnlyToken))).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData("/router/api/classify", """{"prompt":"hello"}""")]
+    [InlineData("/router/api/evaluate", """{"text":""}""")]
+    [InlineData("/router/api/evaluate/compare", """{"embeddings":{"Provider":"Hashing"}}""")]
+    [InlineData("/router/api/embeddings/test", """{"text":"hello"}""")]
+    [InlineData("/router/api/connectors/local/discover", "")]
+    [InlineData("/router/api/connectors/local/check", "")]
+    [InlineData("/router/api/memory/refresh", "")]
+    public async Task The_read_only_token_cannot_spend_embedding_or_api_calls_or_scan_the_disk(string path, string body)
+    {
+        HttpClient client = await StartAsync(WithTokens);
+        HttpRequestMessage Post(string token)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            return request;
+        }
+
+        (await client.SendAsync(Post(ReadOnlyToken))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.SendAsync(Post(AdminToken))).StatusCode.Should().NotBe(HttpStatusCode.Forbidden).And.NotBe(HttpStatusCode.Unauthorized);
     }
 
     [Fact]

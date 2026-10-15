@@ -9,14 +9,20 @@ namespace SemanticRouter.AspNetCore;
 /// <summary>What a dashboard caller may do.</summary>
 public enum RouterDashboardRole
 {
-    /// <summary>View status, activity and the (masked) configuration; classify prompts. No changes.</summary>
+    /// <summary>
+    /// View status, activity and the (masked) configuration. No changes, and nothing that spends embedding or API calls
+    /// or scans the disk: classifying, evaluating, testing embeddings, checking or discovering connectors, rescanning memory.
+    /// </summary>
     ReadOnly = 1,
 
     /// <summary>Everything, including applying, saving and resetting the configuration.</summary>
     Admin = 2,
 }
 
-/// <summary>Marks an admin API endpoint that changes the router (refused for <see cref="RouterDashboardRole.ReadOnly"/>).</summary>
+/// <summary>
+/// Marks an admin API endpoint that changes the router, or spends embedding or API calls or scans the disk (refused for
+/// <see cref="RouterDashboardRole.ReadOnly"/>).
+/// </summary>
 internal sealed class DashboardWriteMetadata
 {
     public static DashboardWriteMetadata Instance { get; } = new();

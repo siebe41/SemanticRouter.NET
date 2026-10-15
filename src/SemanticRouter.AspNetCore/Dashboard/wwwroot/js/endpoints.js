@@ -1,6 +1,6 @@
 /* Semantic Router dashboard: endpoints, where each connector sends requests and how it is doing (Overview card, top bar, Connectors page). */
 import { fmtMs } from './charts.js';
-import { h, num, state } from './core.js';
+import { h, num, readOnly, state } from './core.js';
 
 const STATES = {
   ok: ['ok', 'ok'],
@@ -62,7 +62,7 @@ function check(e) {
   const busy = state.checking.has(e.connector);
   const c = e.check;
   const last = c ? `<div class="small"><span class="badge ${CHECKS[c.status] || ''}" title="${h(c.messages.join('\n'))}">${h(c.status === 'Ok' ? 'passed' : c.status === 'Warning' ? 'warning' : 'failed')}</span> <span class="faint" title="${h(at(c.at))}">${h(ago(c.at))} · ${h(fmtMs(c.milliseconds))}</span></div>` : '';
-  return `<button class="btn small" data-action="endpoint-check" data-name="${h(e.connector)}" ${busy ? 'disabled' : ''} title="Ask it now, without calling a model: reachable and key accepted (HTTP), installed and signed in (CLI)">${busy ? 'Checking…' : 'Check'}</button>${last}`;
+  return `${readOnly() ? '' : `<button class="btn small" data-action="endpoint-check" data-name="${h(e.connector)}" ${busy ? 'disabled' : ''} title="Ask it now, without calling a model: reachable and key accepted (HTTP), installed and signed in (CLI)">${busy ? 'Checking…' : 'Check'}</button>`}${last}`;
 }
 
 /* Overview: every endpoint, its state and figures. */
