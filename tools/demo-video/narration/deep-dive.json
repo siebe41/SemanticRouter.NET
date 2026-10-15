@@ -13,7 +13,7 @@
     "callout": "And you can always take over. Start a message with at opus, at local, or at tier two, and the router does exactly that.",
     "privacy": "Some data should never leave your machine. Turn on secret detection, and once a conversation contains a credential, it stays local. Even if you've asked for Opus.",
     "failover": "When a model goes down, or runs out of quota, it cools down, and the next one picks up the work. The endpoints table shows what's cooling down, and for how long.",
-    "activity": "Every decision explains itself. The activity log shows the route, the tier, and every model a request tried.",
+    "activity": "Every decision explains itself. The activity log shows the route, the tier, and every model the request was sent to.",
     "evaluate": "And the evaluate page runs a set of labelled prompts through your configuration. You'll see how often the router gets it right, and exactly where it gets it wrong, before you change anything.",
     "end": "So that's how a prompt gets routed. Next time, we'll tune it for your own models. Semantic Router dot net is open source, and MIT licensed."
   }

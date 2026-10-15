@@ -109,7 +109,7 @@ if engine == "chatterbox":
     def speak(key, text):
         best = None
         for i in range(candidates):
-            seed = zlib.crc32(key.encode()) % 100_000 * 10 + i
+            seed = zlib.crc32(key.encode()) % 100_000 * 10 + i + 1000 * int(os.environ.get("TTS_SEED", "0"))
             parts = [trim(generate(c, seed)) for c in chunks(text)]
             audio = np.concatenate([np.concatenate([p, np.zeros(int(0.35 * rate), dtype=np.float32)]) for p in parts])[: -int(0.35 * rate)]
             s, info = score(audio, text)
