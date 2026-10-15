@@ -26,6 +26,12 @@ internal sealed record DesktopPreferences
     /// <summary>Whether an installed app looks for updates (at start and twice a day). Default on.</summary>
     public bool CheckForUpdates { get; init; } = true;
 
+    /// <summary>
+    /// Whether a downloaded update is applied when the app quits. Off: an update is only announced, and downloaded and
+    /// applied when the person chooses "Restart to update". Default on; the machine policy can turn it off for good.
+    /// </summary>
+    public bool ApplyUpdatesOnQuit { get; init; } = true;
+
     /// <summary>Where the dashboard window was when it was last hidden.</summary>
     public WindowPlacement? Window { get; init; }
 

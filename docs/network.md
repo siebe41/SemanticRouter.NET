@@ -12,7 +12,7 @@ What the router contacts, when, and how to turn it off. The router has no teleme
 | **The answer judge** | One of your connectors (`Middleware:Judge:Model`) | A sampled share of cheap answers, when `Judge:Enabled` is on (off by default) | Leave `Judge:Enabled` off |
 | **Webhooks** | Each `Notifications:Webhooks` URL | A notice appears or clears, and the weekly digest | Remove the webhook |
 | **Subscription CLIs** (`claude`, `codex`, `copilot`) and the Copilot SDK connector | Their vendor's API, from the vendor's own process | A request is routed to one of their models, or `doctor` runs | Disable the connector. The router starts Claude Code with `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and Copilot with `--no-auto-update`, so a run makes no update, telemetry or error-reporting requests. Codex is started with `-c check_for_update_on_startup=false -c analytics.enabled=false -c otel.metrics_exporter="none"` (and `--ignore-user-config`), so it checks for no update and sends OpenAI no analytics or metrics |
-| **Desktop app updates** | `api.github.com` and GitHub's release download hosts | At start and every 12 hours, when installed with the installer | Untick **Check for updates** in the tray menu |
+| **Desktop app updates** | `api.github.com` and GitHub's release download hosts | At start and every 12 hours, when installed with the installer | Untick **Check for updates** in the tray menu; for a whole machine, `Updates:Mode` `Off` or an internal feed in the [machine policy](enterprise.md) |
 | **`init`** | `localhost:1234` (LM Studio), `localhost:11434` (Ollama) | When you run `semantic-router init` | Nothing leaves this machine |
 
 Nothing else is contacted:
