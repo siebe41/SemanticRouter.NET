@@ -181,6 +181,19 @@ test('the prompt tester classifies and sends a prompt through the gateway', asyn
   await expect(page.locator('.tester')).toContainText('Hello from the stub backend.');
 });
 
+test('a status refresh does not interrupt typing in the prompt tester', async ({ page }) => {
+  await open(page, 'overview');
+  await page.locator('#tester-model').selectOption('auto:best');
+  await page.locator('#tester-prompt').click();
+  await page.keyboard.type('write a regex ');
+  // Wait for the next refresh to re-render the page: the field is then a new element.
+  await page.locator('#tester-prompt').evaluate((e) => { e.dataset.before = 'yes'; });
+  await page.waitForFunction(() => !document.getElementById('tester-prompt').dataset.before, null, { timeout: 15000 });
+  await page.keyboard.type('that matches email addresses');
+  await expect(page.locator('#tester-prompt')).toHaveValue('write a regex that matches email addresses');
+  await expect(page.locator('#tester-model')).toHaveValue('auto:best');
+});
+
 test('the endpoints card and the top bar show the host in use, its state and figures', async ({ page }) => {
   const stub = `127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`;
   await open(page, 'overview');
