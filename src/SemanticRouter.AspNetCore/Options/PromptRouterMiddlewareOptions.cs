@@ -84,8 +84,9 @@ public sealed class PromptRouterMiddlewareOptions
     /// <summary>
     /// Maps the model names clients send to routing aliases or catalog models, so tools keep their own model
     /// settings and the router still decides. Keys are case-insensitive globs (<c>*</c> matches anything), e.g.
-    /// <c>"*haiku*": "auto:cheapest"</c>, <c>"*opus*": "family:opus"</c> (the catalog's Opus model, else the most capable), <c>"gpt-*": "auto"</c>. Names that match no
-    /// pattern and no catalog model are routed as <c>auto</c>.
+    /// <c>"*haiku*": "auto:cheapest"</c>, <c>"claude-*": "auto"</c>, <c>"opus-pinned": "family:opus"</c> (the catalog's Opus
+    /// model, else the most capable). A key without <c>*</c> names one model exactly and is tried before the globs; among
+    /// the globs the first match wins. Names that match no pattern and no catalog model are routed as <c>auto</c>.
     /// </summary>
     public IDictionary<string, string> ModelAliases { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -146,7 +147,8 @@ public sealed class PromptRouterMiddlewareOptions
     /// <summary>
     /// The request header that carries a project label for <see cref="ProfileRules"/> and the activity log. Default
     /// <c>X-Router-Project</c>. Without it, a hash of the Anthropic <c>metadata.user_id</c> or OpenAI <c>user</c> field is
-    /// used (<c>user:</c> and 12 hex digits), never the id itself.
+    /// used (<c>user:</c> and 12 hex digits), never the id itself; a user id that is a JSON object (Claude Code's) gives no
+    /// project.
     /// </summary>
     public string ProjectHeader { get; set; } = "X-Router-Project";
 
@@ -310,6 +312,14 @@ public sealed class ConversationRoutingOptions
     /// OpenAI's; set 1 hour when your requests ask for 1-hour entries. Default 5 minutes.
     /// </summary>
     public TimeSpan CacheLifetime { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// A request header that carries the client's session id. When a request has it, the client, the session and the
+    /// first user message identify the conversation, instead of the client, the system prompt and the first user
+    /// message. Claude Code sends <c>x-claude-code-session-id</c> on every request. Empty turns it off. Default
+    /// <c>x-claude-code-session-id</c>.
+    /// </summary>
+    public string SessionHeader { get; set; } = "x-claude-code-session-id";
 }
 
 /// <summary>

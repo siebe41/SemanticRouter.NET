@@ -75,10 +75,10 @@ What it leaves alone:
 - **Requests for a specific catalog model** and **tool-result turns** (which stay on the model that issued the calls).
 - **A client's own cheap side tasks.** Claude Code sends titles, summaries and other housekeeping under a Haiku model name, which `ModelAliases` maps to `auto:cheapest`; those are not raised.
 
-A conversation is recognised by a hash of the client, the system prompt and the first user message, which chat clients resend on every turn. No prompt text is kept, the state is in memory (warm caches are also kept in the SQLite state, so they survive a restart), and the activity log shows only a short prefix of the hash. Clients that send only the newest message (relying on a server-side history) start a new conversation on each turn, so they are routed per message as before.
+A conversation is recognised by a hash of the client, the system prompt and the first user message, which chat clients resend on every turn. Only the system and developer messages before the first user message count as the system prompt: Claude Code adds system messages later in the conversation, on every turn and around tool calls, and those must not start a new conversation each time. A client that names its session in a header is recognised by the client, the session id and the first user message instead (`SessionHeader`, default `x-claude-code-session-id`, which Claude Code sends on every request), so a system prompt that changes during the session does not split it either. The first user message stays in that key because a session can hold more than one conversation (Claude Code's subagents open with their own task): each is a conversation of its own, and its first turn does not reset the main one. No prompt text is kept, the state is in memory (warm caches are also kept in the SQLite state, so they survive a restart), and the activity log shows only a short prefix of the hash. Clients that send only the newest message (relying on a server-side history) start a new conversation on each turn, so they are routed per message as before.
 
 ```jsonc
-"Middleware": { "Conversation": { "Enabled": true, "DecayTurns": 3, "IdleTimeout": "00:30:00", "ShortFollowUpLength": 60, "StickToModel": true, "CacheLifetime": "00:05:00" } }
+"Middleware": { "Conversation": { "Enabled": true, "DecayTurns": 3, "IdleTimeout": "00:30:00", "ShortFollowUpLength": 60, "StickToModel": true, "CacheLifetime": "00:05:00", "SessionHeader": "x-claude-code-session-id" } }
 ```
 
 ## Feedback

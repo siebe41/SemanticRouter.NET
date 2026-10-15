@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using SemanticRouter.AspNetCore;
@@ -251,6 +252,84 @@ public sealed class ConversationRoutingTests : RouterHostTest
         ConversationTracker.IsFollowUp("ok, go ahead", options).Should().BeTrue();
         ConversationTracker.IsFollowUp("```\nx\n```", options).Should().BeFalse("code is not a follow-up");
         ConversationTracker.IsFollowUp(new string('a', 61), options).Should().BeFalse();
+    }
+
+    [Fact]
+    public void System_messages_after_the_first_user_message_do_not_change_the_conversation()
+    {
+        ChatCompletionRequest Anthropic(string json) => ChatCompletionRequest.ParseAnthropic(JsonDocument.Parse(json).RootElement);
+
+        // Claude Code adds system messages after the user's: turn 1 is (user, system), turn 2 (user, system, assistant, user, system).
+        string? turn1 = ConversationTracker.Identify("laptop", Anthropic("""{"system":"S","max_tokens":10,"messages":[{"role":"user","content":"fix the bug"},{"role":"system","content":"reminder 1"}]}"""));
+        string? turn2 = ConversationTracker.Identify("laptop", Anthropic("""{"system":"S","max_tokens":10,"messages":[{"role":"user","content":"fix the bug"},{"role":"system","content":"reminder 1"},{"role":"assistant","content":"done"},{"role":"user","content":"thanks"},{"role":"system","content":"reminder 2"}]}"""));
+        string? otherSystem = ConversationTracker.Identify("laptop", Anthropic("""{"system":"T","max_tokens":10,"messages":[{"role":"user","content":"fix the bug"}]}"""));
+
+        turn1.Should().NotBeNull().And.Be(turn2);
+        otherSystem.Should().NotBe(turn1, "the system prompt before the first user message still counts");
+    }
+
+    [Fact]
+    public void A_client_session_id_identifies_the_conversation_with_the_client_and_the_opening_message()
+    {
+        ChatCompletionRequest Chat(string system, string user) => ChatCompletionRequest.Parse(JsonDocument.Parse(
+            JsonSerializer.Serialize(new { messages = new object[] { new { role = "system", content = system }, new { role = "user", content = user } } })).RootElement);
+
+        string? session = ConversationTracker.Identify("laptop", Chat("S", "fix the bug"), "session-1");
+
+        ConversationTracker.Identify("laptop", Chat("S, an hour later", "fix the bug"), "session-1").Should().Be(session, "the system prompt does not count within a session");
+        ConversationTracker.Identify("laptop", Chat("S", "fix the bug"), "session-2").Should().NotBe(session);
+        ConversationTracker.Identify("desktop", Chat("S", "fix the bug"), "session-1").Should().NotBe(session, "another client's session never collides");
+        ConversationTracker.Identify("laptop", Chat("S", "explore the repository"), "session-1").Should().NotBe(session, "a subagent opens with its own task");
+        ConversationTracker.Identify("laptop", Chat("S", "fix the bug")).Should().NotBe(session);
+        ConversationTracker.Identify("laptop", Chat("S", "fix the bug"), " ").Should().Be(ConversationTracker.Identify("laptop", Chat("S", "fix the bug")), "a blank header is no session");
+    }
+
+    [Fact]
+    public async Task Claude_codes_trailing_system_messages_keep_the_floor_and_the_callout()
+    {
+        HttpClient client = await StartDispatchAsync(o => o.ModelAliases["claude-*"] = "auto");
+        StringContent Turn(params (string Role, string Text)[] messages) => new(
+            JsonSerializer.Serialize(new { model = "claude-opus-5-5", max_tokens = 100, system = "You are Claude Code.", messages = messages.Select(m => new { role = m.Role, content = m.Text }) }),
+            Encoding.UTF8,
+            "application/json");
+
+        HttpResponseMessage first = await client.PostAsync("/v1/messages", Turn(("user", Task), ("system", "Tokens left: 180000")));
+        HttpResponseMessage followUp = await client.PostAsync("/v1/messages", Turn(
+            ("user", Task), ("system", "Tokens left: 180000"), ("assistant", "Done: 0"), ("user", "ok, go ahead"), ("system", "Tokens left: 150000")));
+        HttpResponseMessage callout = await client.PostAsync("/v1/messages", Turn(
+            ("user", Task), ("system", "Tokens left: 180000"), ("assistant", "Done: 0"), ("user", "ok, go ahead"), ("system", "Tokens left: 150000"),
+            ("assistant", "Done: 1"), ("user", "@local summarise what changed"), ("system", "Tokens left: 120000")));
+        HttpResponseMessage held = await client.PostAsync("/v1/messages", Turn(
+            ("user", Task), ("system", "Tokens left: 180000"), ("assistant", "Done: 0"), ("user", "ok, go ahead"), ("system", "Tokens left: 150000"),
+            ("assistant", "Done: 1"), ("user", "@local summarise what changed"), ("system", "Tokens left: 120000"),
+            ("assistant", "Done: 2"), ("user", "now list the files you touched in the payment module"), ("system", "Tokens left: 100000")));
+
+        Header(first, "Tier").Should().Be("4");
+        (Header(followUp, "Reason"), Header(followUp, "Tier")).Should().Be(("ConversationFloor", "4"));
+        Header(callout, "Model").Should().Be("local");
+        (Header(held, "Model"), Header(held, "Callout")).Should().Be(("local", "@local (earlier in the conversation)"));
+    }
+
+    [Fact]
+    public async Task Claude_codes_session_header_keeps_a_conversation_whose_system_prompt_changes()
+    {
+        HttpClient client = await StartDispatchAsync();
+        async Task<HttpResponseMessage> SendAsync(string session, string system, params string[] userTurns)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = Conversation("auto", userTurns) };
+            var body = JsonNode.Parse(await request.Content!.ReadAsStringAsync())!;
+            body["messages"]![0]!["content"] = system;
+            request.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+            request.Headers.Add("x-claude-code-session-id", session);
+            return await client.SendAsync(request);
+        }
+
+        await SendAsync("session-a", "Today is Monday.", Task);
+        HttpResponseMessage nextDay = await SendAsync("session-a", "Today is Tuesday.", Task, "ok, go ahead");
+        HttpResponseMessage otherSession = await SendAsync("session-b", "Today is Monday.", Task, "ok, go ahead");
+
+        (Header(nextDay, "Reason"), Header(nextDay, "Tier")).Should().Be(("ConversationFloor", "4"), "the session id, not the system prompt, keeps the conversation together");
+        (Header(otherSession, "Reason"), Header(otherSession, "Model")).Should().Be(("SemanticMatch", "local"), "another session that opened the same way is another conversation");
     }
 
     [Fact]

@@ -20,17 +20,55 @@ Claude Code reads `ANTHROPIC_BASE_URL` and sends the Messages API there, with it
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:5080
-export ANTHROPIC_AUTH_TOKEN=semantic-router   # any value: the router never reads or forwards it
-claude
+export ANTHROPIC_AUTH_TOKEN=semantic-router        # any value: the router never reads or forwards it
+export CLAUDE_CODE_MAX_CONTEXT_TOKENS=131072       # the smallest context window among your tool-capable models
+export CLAUDE_CODE_AUTO_MODE_SERVER=0
+claude --model semantic-router
 ```
 
-`ANTHROPIC_AUTH_TOKEN` matters: with it set, Claude Code sends that placeholder as its bearer token instead of your real session token, so your login never leaves the `claude` process. The router ignores the `Authorization` and `x-api-key` headers of every request and uses the credentials from its own configuration.
+- **`ANTHROPIC_AUTH_TOKEN`** matters: with it set, Claude Code sends that placeholder as its bearer token instead of your real session token, so your login never leaves the `claude` process. The router ignores the `Authorization` and `x-api-key` headers of every request and uses the credentials from its own configuration.
+- **`--model semantic-router`** is the router's own model name: it routes as `auto`, and Claude Code shows it instead of the name of a Claude model that may not be answering. Without it Claude Code sends its default model name, which the `init` template also routes as `auto`.
+- **`CLAUDE_CODE_MAX_CONTEXT_TOKENS`** tells Claude Code how much context it has, so it compacts the conversation before it outgrows a model. Every Claude Code turn carries tools, so use the smallest `ContextWindow` among the enabled models that declare `tools`. The router prints this line with your value at start-up, and `init` prints it after writing the configuration; when one of those models has no `ContextWindow`, they leave the variable out, and so should you. A small local model makes Claude Code compact often: leave it out of the agentic tiers if that is a problem.
+- **`CLAUDE_CODE_AUTO_MODE_SERVER=0`** keeps Claude Code's auto mode from relying on Anthropic's server-side classifier, and from showing a notice that it is missing. The router cannot provide those server-side safeguards.
+
+**Choosing from Claude Code's model picker.** With `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`, Claude Code asks the router's `GET /v1/models` for models and lists those whose id contains `claude` or `anthropic`. The router lists three of its own names for it, besides your catalog models with such a name (choosing one of those forces that model):
+
+| Model | Shown as | Routes as |
+|---|---|---|
+| `claude-semantic-router` | auto (SemanticRouter.NET) | `auto` |
+| `claude-semantic-router-cheapest` | auto:cheapest (SemanticRouter.NET) | `auto:cheapest` |
+| `claude-semantic-router-best` | auto:best (SemanticRouter.NET) | `auto:best` |
+
+Model aliases never remap these names, nor `semantic-router`.
+
+**Projects.** Claude Code's `metadata.user_id` is a JSON object (a device id, an account id and the session id), so the router does not take a project label from it. Send the `X-Router-Project` header for [profile rules](routing-profiles.md) and the Activity page, with Claude Code's `ANTHROPIC_CUSTOM_HEADERS` (one `Name: value` per line), for example from the project's `.envrc`:
+
+```bash
+export ANTHROPIC_CUSTOM_HEADERS="X-Router-Project: acme-payments"
+```
+
+**Conversations.** Claude Code sends `x-claude-code-session-id` on every request; the router uses it, with the client and the first user message, to recognise the conversation across turns ([conversation routing](routing-quality.md#conversations)).
+
+**A configuration from an earlier `init`** has `"*opus*": "family:opus"`. Now that Claude Code's default model is Opus, that sends every turn to Opus (`X-Prompt-Route-Reason: ModelOverride`): nothing is routed. The router does not rewrite your configuration. Change it on the dashboard under **Gateway → Model aliases** (**Add Claude Code defaults** sets these), or in `semantic-router.json`:
+
+```json
+"ModelAliases": {
+  "opus-pinned": "family:opus",
+  "*haiku*": "auto:cheapest",
+  "*sonnet*": "auto",
+  "*opus*": "auto",
+  "claude-*": "auto",
+  "gpt-*": "auto"
+}
+```
+
+A key without `*` is matched before the globs, so `opus-pinned` is not caught by `*opus*`.
 
 What happens to the different kinds of requests Claude Code sends:
 
 | Claude Code sends… | The router… |
 |---|---|
-| its model name (`claude-sonnet-…`, `/model opus`, `haiku` for side tasks) | maps it through `Middleware:ModelAliases` (sample: `*haiku*` → `auto:cheapest`, `*opus*` → `family:opus`, the catalog's Opus model or else the most capable, otherwise `auto`). Its default Sonnet name therefore means "router decides". Unknown names route as `auto`. |
+| its model name (its default `claude-opus-…`, `/model sonnet`, `haiku` for side tasks) | maps it through `Middleware:ModelAliases`. The `init` template routes `*haiku*` as `auto:cheapest` and every other Claude name as `auto`: Claude Code sends its default Opus name whether or not you chose Opus, so the name does not say you want Opus. Ask for Opus with `@opus` ([below](#telling-the-router-what-you-want)), or start Claude Code with `--model opus-pinned` (→ `family:opus`: the catalog's Opus model, or else the most capable) to keep the whole session on it. Unknown names route as `auto`. |
 | a follow-up such as "ok, go ahead" in the middle of a task | keeps the conversation's tier and model ([conversation routing](routing-quality.md#conversations)), so the task does not drop to a small model. |
 | a message starting with `@opus`, `@local`, `@best`… | routes as the tag asks, for that turn and the rest of the conversation ([below](#telling-the-router-what-you-want)). |
 | a turn **with tools** (every main-loop turn) | requires the `tools` capability. Candidates: HTTP models that declare `tools` (a local coder model, an API-key model) and CLI connectors with `ToolCalling: Prompted` (below). |
@@ -54,7 +92,7 @@ The wording these side requests are recognised by is a data file, not code: the 
 }
 ```
 
-`kind` is `Warmup` (matched against the whole message), `Resumed` (the start of a session's opening message, routed at `ResumedTier`), or `Title`, `Topic`, `Summary`, `CommandCheck` (anywhere in the latest user message or the system prompt). Patterns are .NET regular expressions, matched case-insensitively. The built-in ids are `warmup`, `claude-code/resumed`, `claude-code/title`, `claude-code/short-title`, `generic/title`, `claude-code/topic`, `claude-code/compaction`, `codex/compaction` and `claude-code/command-check`. An entry that cannot be used (a bad pattern, no id) is skipped and logged, and the rest of the file still applies. `Housekeeping:Patterns` is still there for a quick addition in the configuration itself.
+`kind` is `Warmup` (matched against the whole message), `Resumed` (the start of a session's opening message, routed at `ResumedTier`), or `Title`, `Topic`, `Summary`, `CommandCheck` (anywhere in the latest user message or the system prompt). Patterns are .NET regular expressions, matched case-insensitively. The built-in ids are `warmup`, `claude-code/resumed`, `claude-code/title`, `claude-code/session-title`, `claude-code/short-title`, `generic/title`, `claude-code/topic`, `claude-code/compaction`, `codex/compaction` and `claude-code/command-check`. An entry that cannot be used (a bad pattern, no id) is skipped and logged, and the rest of the file still applies. `Housekeeping:Patterns` is still there for a quick addition in the configuration itself.
 
 ### Where agentic turns can go
 
@@ -109,7 +147,7 @@ client = OpenAI(base_url="http://localhost:5080/v1", api_key="semantic-router")
 client.chat.completions.create(model="auto", messages=[{"role": "user", "content": "hello"}])
 ```
 
-Model names: `auto` (configured strategy), `auto:cheapest`, `auto:best`, `auto:fastest` (lowest recent time to first byte), `auto:balanced` (the cheapest of the nearly fastest), `auto:priority`, or a catalog model name to force it. `GET /v1/models` lists all of them, so model pickers in chat UIs work.
+Model names: `auto` (configured strategy), `auto:cheapest`, `auto:best`, `auto:fastest` (lowest recent time to first byte), `auto:balanced` (the cheapest of the nearly fastest), `auto:priority`, or a catalog model name to force it. `semantic-router` is another name for `auto`. `GET /v1/models` lists all of them, so model pickers in chat UIs work. Besides the OpenAI fields, each entry has a `display_name` and a `description`.
 
 ## OpenAI Codex CLI
 
