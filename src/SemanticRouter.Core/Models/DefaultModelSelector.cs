@@ -8,20 +8,24 @@ namespace SemanticRouter;
 /// request is local-only, and its context window fits the estimated input plus output. Eligible models that meet the
 /// required tier are ordered by the <see cref="SelectionStrategy"/>; when
 /// <see cref="ModelSelectionOptions.AllowBelowRequiredTier"/> is set, the remaining eligible models follow, most
-/// capable first, so a request degrades gracefully instead of failing.
+/// capable first, so a request degrades gracefully instead of failing. Cost is estimated with the share of input each
+/// model reads from and writes to its prompt cache on the request's route, when <see cref="IModelCacheShare"/> knows it.
 /// </remarks>
 public sealed class DefaultModelSelector : IModelSelector
 {
     private readonly ModelSelectionOptions _options;
     private readonly IModelLatency? _latency;
+    private readonly IModelCacheShare? _cache;
 
     /// <summary>Creates a selector.</summary>
     /// <param name="options">The selection settings.</param>
     /// <param name="latency">Recent time to first byte per model, for <see cref="SelectionStrategy.Fastest"/> and <see cref="SelectionStrategy.Balanced"/>.</param>
-    public DefaultModelSelector(ModelSelectionOptions? options = null, IModelLatency? latency = null)
+    /// <param name="cache">Recent prompt-cache shares per model and route, for cost estimates; without it, list prices.</param>
+    public DefaultModelSelector(ModelSelectionOptions? options = null, IModelLatency? latency = null, IModelCacheShare? cache = null)
     {
         _options = options ?? new ModelSelectionOptions();
         _latency = latency;
+        _cache = cache;
     }
 
     /// <inheritdoc />
@@ -49,7 +53,8 @@ public sealed class DefaultModelSelector : IModelSelector
             }
 
             bool meets = model.Tier >= requirements.RequiredTier;
-            var candidate = new ModelCandidate(model, model.EstimateCost(requirements.EstimatedInputTokens, outputTokens), meets);
+            decimal cost = model.EstimateCost(requirements.EstimatedInputTokens, outputTokens, _cache?.Typical(model, requirements.Route));
+            var candidate = new ModelCandidate(model, cost, meets);
             (meets ? meeting : below).Add(candidate);
         }
 

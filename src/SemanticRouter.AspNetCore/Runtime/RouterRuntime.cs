@@ -346,6 +346,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
         IModelLatency? latency = _services.GetService<IModelLatency>();
         (latency as ModelLatencyTracker)?.Configure(configuration.Selection);
+        IModelCacheShare? cache = _services.GetService<IModelCacheShare>();
+        (cache as ModelCacheTracker)?.Configure(configuration.Selection);
         _services.GetService<IStateRetention>()?.Apply(configuration.State.Retention);
 
         var warnings = new List<string>();
@@ -389,7 +391,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         IComplexityAnalyzer complexity = ResolveCustom<IComplexityAnalyzer>() ?? new HeuristicComplexityAnalyzer(configuration.Complexity);
         IRouteSelector routeSelector = ResolveCustom<IRouteSelector>() ?? new DefaultRouteSelector(configuration);
         IPromptClassifier classifier = ResolveCustom<IPromptClassifier>() ?? new SemanticPromptClassifier(embeddings, configuration, complexity, routeSelector);
-        IModelSelector modelSelector = ResolveCustom<IModelSelector>() ?? new DefaultModelSelector(configuration.Selection, latency);
+        IModelSelector modelSelector = ResolveCustom<IModelSelector>() ?? new DefaultModelSelector(configuration.Selection, latency, cache);
         IModelHealth health = _services.GetRequiredService<IModelHealth>();
         IPromptRouter router = ResolveCustom<IPromptRouter>() ?? new PromptRouter(classifier, configuration, modelSelector, health, reliability: _services.GetService<IModelReliability>(), latency: latency);
         IPromptExtractor extractor = ResolveCustom<IPromptExtractor>() ?? new JsonPromptExtractor(

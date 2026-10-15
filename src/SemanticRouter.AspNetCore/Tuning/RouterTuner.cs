@@ -55,6 +55,7 @@ internal sealed partial class RouterTuner : IDisposable
     private IReadOnlyList<TuningChange> _inForce = [];
     private IReadOnlyList<TuningChange> _models = [];
     private readonly ModelTrials? _trials;
+    private readonly IModelCacheShare? _cache;
 
     public RouterTuner(
         RouterRuntimeProvider provider,
@@ -64,7 +65,8 @@ internal sealed partial class RouterTuner : IDisposable
         ITuningStore store,
         ILogger<RouterTuner> logger,
         TimeProvider? time = null,
-        ModelTrials? trials = null)
+        ModelTrials? trials = null,
+        IModelCacheShare? cache = null)
     {
         _provider = provider;
         _labels = labels;
@@ -74,6 +76,7 @@ internal sealed partial class RouterTuner : IDisposable
         _logger = logger;
         _time = time ?? TimeProvider.System;
         _trials = trials;
+        _cache = cache;
         IReadOnlyList<TuningChange> changes = store.Changes();
         _lastId = changes.Count > 0 ? changes.Max(c => c.Id) : 0;
         Refresh(changes);

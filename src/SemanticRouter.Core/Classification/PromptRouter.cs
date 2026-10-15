@@ -286,6 +286,7 @@ public sealed class PromptRouter : IPromptRouter
             EstimatedInputTokens = request.EstimatedInputTokens ?? classification.Complexity.EstimatedTokens,
             Strategy = request.Strategy ?? profile?.Strategy,
             Profile = request.Profile,
+            Route = classification.RouteName,
         };
 
         // The profile and active hours decide which models exist for this request; health only orders and skips them.
