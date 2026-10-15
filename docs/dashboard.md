@@ -86,6 +86,8 @@ Its numbers are the Usage page's for the same window.
 | `Slack` | `{"text": …}`, which Slack incoming webhooks, Mattermost and Discord's `/slack` endpoint accept. |
 | `Ntfy` | The text as a plain body, with `Title`, `Tags`, `Priority` and (with a `DashboardUrl`) `Click` headers, for an [ntfy](https://ntfy.sh) topic URL. |
 
+Webhook messages leave out text that can come from prompts or replies: a learned utterance reads as "utterance for code", and a connector's latest error (which for a CLI connector can quote the model's reply) is dropped. They keep the counts, model, connector and route names, kinds and links. `Notifications:IncludeDetails: true` puts the text back, for a webhook you trust with prompts.
+
 `Notices` and `Digest` (both `true`) choose what a webhook gets. `DashboardUrl` turns the notice's page into a link people can open. A webhook URL usually carries a token, so it is treated as a secret: masked on the dashboard and moved to the secret file with `.UseSecretFile()`, like an API key, and it can be a `${secret:…}` or `${env:…}` reference. A delivery that fails is retried three times (after 2, 10 and 60 seconds) and then logged as a warning; it runs in the background and never holds up routing.
 
 Connector failures and usage-limit hits are kept in the state database when there is one (`UseSqliteState`, as the `semantic-router` tool and the desktop app use), so they add up across restarts. Without it they are counted in memory, and a restart starts the count again.

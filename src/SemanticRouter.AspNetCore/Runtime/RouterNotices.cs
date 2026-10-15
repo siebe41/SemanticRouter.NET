@@ -27,7 +27,16 @@ public enum NoticeKind
 /// <param name="Detail">What happened and what would help.</param>
 /// <param name="Link">The dashboard page to decide on, e.g. <c>#/learned</c>.</param>
 /// <param name="Since">Since when, as far as the router knows.</param>
-public sealed record RouterNotice(string Key, NoticeKind Kind, string Title, string Detail, string Link, DateTimeOffset Since);
+public sealed record RouterNotice(string Key, NoticeKind Kind, string Title, string Detail, string Link, DateTimeOffset Since)
+{
+    /// <summary>
+    /// <see cref="Detail"/> without text that can come from prompts or replies (a learned utterance, a connector's
+    /// error), for webhooks while <see cref="NotificationOptions.IncludeDetails"/> is off. <see langword="null"/>: none
+    /// was written, and webhooks leave the detail out.
+    /// </summary>
+    [JsonIgnore]
+    public string? PlainDetail { get; init; }
+}
 
 /// <summary>
 /// The router asks for attention only when a person needs to decide something: a subscription that keeps hitting its
@@ -77,11 +86,17 @@ internal sealed class RouterNotices(
                 "limit:" + connector,
                 NoticeKind.LimitReached,
                 $"{connector} keeps hitting its usage limit",
-                $"It hit its limit on {days} of the last 7 days{(detail is { Length: > 0 } ? $" (latest: {Clip(detail)})" : string.Empty)}. " +
-                "While it is out, its work goes to other models. A larger plan or a second account would keep it serving.",
+                LimitDetail(days, detail),
                 "#/models",
-                _time.GetUtcNow().AddDays(-7)));
+                _time.GetUtcNow().AddDays(-7))
+            {
+                PlainDetail = LimitDetail(days, null),
+            });
         }
+
+        static string LimitDetail(int days, string? latest) =>
+            $"It hit its limit on {days} of the last 7 days{(latest is { Length: > 0 } ? $" (latest: {Clip(latest)})" : string.Empty)}. " +
+            "While it is out, its work goes to other models. A larger plan or a second account would keep it serving.";
 
         UsageOptions usage = configuration.Usage;
         foreach (BudgetDefinition budget in usage.Budgets)
@@ -94,14 +109,12 @@ internal sealed class RouterNotices(
 
             BudgetStatus status = budgets.Status(usage).First(s => s.Name == budget.Name);
             string period = budget.Period.ToString().ToLowerInvariant();
-            notices.Add(new RouterNotice(
-                "budget:" + budget.Name,
-                NoticeKind.LimitReached,
-                $"Budget {budget.Name} keeps running out",
-                $"It was spent in {spent} of the last {BudgetPeriods} {period}s ({status.Covers}; now {status.Describe()}). " +
-                "Raise it, or let cheaper models take more of this work.",
-                "#/usage",
-                status.PeriodStart));
+            string detail = $"It was spent in {spent} of the last {BudgetPeriods} {period}s ({status.Covers}; now {status.Describe()}). " +
+                "Raise it, or let cheaper models take more of this work.";
+            notices.Add(new RouterNotice("budget:" + budget.Name, NoticeKind.LimitReached, $"Budget {budget.Name} keeps running out", detail, "#/usage", status.PeriodStart)
+            {
+                PlainDetail = detail,
+            });
         }
     }
 
@@ -134,15 +147,21 @@ internal sealed class RouterNotices(
             }
 
             string work = string.Join(", ", excluded.Select(r => r.Route is { } route ? "route " + route : "requests with tools"));
+
+            // The reliability detail is counts ("7 of 20 turns drew feedback"), no prompt or reply text.
+            string detail = $"It is left out of {excluded.Length} of the {judged.Length} kinds of work it does ({work}) until " +
+                $"{excluded.Max(r => r.ExcludedUntil)!.Value.ToString("d MMM HH:mm", CultureInfo.InvariantCulture)} UTC: {Clip(excluded[0].Detail ?? string.Empty)}. " +
+                "Check the model and its connector, or take it out of the catalog.";
             notices.Add(new RouterNotice(
                 "unreliable:" + model.Key,
                 NoticeKind.ModelUnreliable,
                 $"{model.Key} is unreliable for most of its work",
-                $"It is left out of {excluded.Length} of the {judged.Length} kinds of work it does ({work}) until " +
-                $"{excluded.Max(r => r.ExcludedUntil)!.Value.ToString("d MMM HH:mm", CultureInfo.InvariantCulture)} UTC: {Clip(excluded[0].Detail ?? string.Empty)}. " +
-                "Check the model and its connector, or take it out of the catalog.",
+                detail,
                 "#/models",
-                excluded.Min(r => r.ExcludedSince) ?? now));
+                excluded.Min(r => r.ExcludedSince) ?? now)
+            {
+                PlainDetail = detail,
+            });
         }
     }
 
@@ -160,12 +179,18 @@ internal sealed class RouterNotices(
                 "down:" + connector,
                 NoticeKind.ConnectorDown,
                 $"{connector} has been down for {Duration(now - since)}",
-                $"Every request to it has failed since {since.ToString("d MMM HH:mm", CultureInfo.InvariantCulture)} UTC" +
-                $"{(detail is { Length: > 0 } ? $" (latest: {Clip(detail)})" : string.Empty)}. Its models' work goes to the others. " +
-                "Start the server, check its address and key, or turn its models off.",
+                DownDetail(since, detail),
                 "#/connectors",
-                since));
+                since)
+            {
+                PlainDetail = DownDetail(since, null),
+            });
         }
+
+        static string DownDetail(DateTimeOffset since, string? latest) =>
+            $"Every request to it has failed since {since.ToString("d MMM HH:mm", CultureInfo.InvariantCulture)} UTC" +
+            $"{(latest is { Length: > 0 } ? $" (latest: {Clip(latest)})" : string.Empty)}. Its models' work goes to the others. " +
+            "Start the server, check its address and key, or turn its models off.";
     }
 
     private void Suggestions(RouterConfiguration configuration, List<RouterNotice> notices)
@@ -183,9 +208,15 @@ internal sealed class RouterNotices(
             "tuning:suggestions",
             NoticeKind.TuningSuggestion,
             waiting.Length == 1 ? "Automatic tuning has a suggestion" : $"Automatic tuning has {waiting.Length} suggestions",
-            $"{(waiting.Length == 1 ? "It" : "They")} wait for you because {why}: {Clip(string.Join("; ", waiting.Take(3).Select(c => c.Summary)))}. Apply or dismiss {(waiting.Length == 1 ? "it" : "them")}.",
+            Detail(c => c.Summary),
             "#/learned",
-            waiting.Min(c => c.Timestamp)));
+            waiting.Min(c => c.Timestamp))
+        {
+            PlainDetail = Detail(c => c.PlainSummary),
+        });
+
+        string Detail(Func<TuningChange, string> summary) =>
+            $"{(waiting.Length == 1 ? "It" : "They")} wait for you because {why}: {Clip(string.Join("; ", waiting.Take(3).Select(summary)))}. Apply or dismiss {(waiting.Length == 1 ? "it" : "them")}.";
     }
 
     private static string Duration(TimeSpan span) => span.TotalHours >= 48
