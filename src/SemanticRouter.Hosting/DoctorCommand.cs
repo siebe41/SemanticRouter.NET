@@ -15,12 +15,24 @@ internal static class DoctorCommand
         await output.WriteLineAsync($"Configuration: {settings.ConfigurationFile}{(File.Exists(settings.ConfigurationFile) ? string.Empty : " (not created yet; the built-in template applies)")}").ConfigureAwait(false);
 
         IReadOnlyList<RouterCheck> checks;
-        await using (WebApplication app = RouterHost.Build(settings, builder =>
+        WebApplication built;
+        try
         {
-            // Keep the report readable: the checks report problems themselves.
-            builder.Logging.SetMinimumLevel(LogLevel.Error);
-            configure?.Invoke(builder);
-        }))
+            built = RouterHost.Build(settings, builder =>
+            {
+                // Keep the report readable: the checks report problems themselves.
+                builder.Logging.SetMinimumLevel(LogLevel.Error);
+                configure?.Invoke(builder);
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A host setting the router cannot start with, e.g. a data-protection certificate it cannot load.
+            await output.WriteLineAsync($"[FAIL] configuration: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+
+        await using (WebApplication app = built)
         {
             try
             {
@@ -61,6 +73,11 @@ internal static class DoctorCommand
         yield return new RouterCheck("policy", RouterCheckStatus.Ok, policy.IsEmpty
             ? "no machine-wide policy is set."
             : $"set by your organization in {policy.Source}: {System.Text.Json.Nodes.JsonNode.Parse(policy.ToJson())!.ToJsonString()}");
+        foreach (RouterCheck check in app.Services.GetRequiredService<KeyRing>().Checks())
+        {
+            yield return check;
+        }
+
         string urls = app.Configuration[WebHostDefaults.ServerUrlsKey] ?? HostSettings.DefaultUrl;
         RouterDashboardOptions dashboard = app.Services.GetRequiredService<IOptions<RouterDashboardOptions>>().Value;
         bool remote = urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(u => !RouterHost.IsLoopback(u));
