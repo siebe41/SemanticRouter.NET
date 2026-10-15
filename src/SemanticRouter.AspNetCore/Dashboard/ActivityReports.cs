@@ -72,6 +72,7 @@ public static class ActivityReports
             "has_tools", "tool_continuation", "local_only", "estimated_input_tokens", "planned_model", "served_by", "connector", "attempt",
             "degraded", "outcome", "budget", "dropped", "classification_ms", "time_to_first_byte_ms", "total_ms", "input_tokens", "output_tokens",
             "cache_read_tokens", "cache_creation_tokens", "cost_usd", "trace_id", "detail", "prompted_tool_calls",
+            "attempt_time_to_first_byte_ms", "attempt_ms",
         ];
         builder.Append(string.Join(',', includePrompts ? [.. header, "prompt_preview"] : header)).Append("\r\n");
         foreach (RoutingActivityEntry e in entries)
@@ -82,7 +83,7 @@ public static class ActivityReports
                 e.Similarity, e.Complexity, e.HasTools, e.ToolContinuation, e.LocalOnly, e.EstimatedInputTokens, e.PlannedModel, e.ServedBy,
                 e.Connector, e.Attempt, e.Degraded, e.Outcome, e.Budget, e.Dropped, e.ClassificationMilliseconds, e.TimeToFirstByteMilliseconds,
                 e.TotalMilliseconds, e.InputTokens, e.OutputTokens, e.CacheReadTokens, e.CacheCreationTokens, e.CostUsd, e.TraceId, e.Detail,
-                e.PromptedToolCalls,
+                e.PromptedToolCalls, e.AttemptTimeToFirstByteMilliseconds, e.AttemptMilliseconds,
             ];
             builder.Append(string.Join(',', (includePrompts ? [.. row, e.PromptPreview] : row).Select(Cell))).Append("\r\n");
         }

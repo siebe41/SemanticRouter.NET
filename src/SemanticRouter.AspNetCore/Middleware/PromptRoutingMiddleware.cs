@@ -175,7 +175,7 @@ internal sealed partial class PromptRoutingMiddleware
             (prompt, chat, memory) = (strippedPrompt, strippedChat, strippedMemory);
         }
 
-        long started = Stopwatch.GetTimestamp();
+        long started = _time.GetTimestamp();
         DateTimeOffset routedAt = _time.GetUtcNow();
         ProfileSelection.ModelChoice modelChoice = ProfileSelection.ResolveModel(runtime, chat.Model);
         SelectionStrategy? strategy = modelChoice.Strategy;
@@ -463,7 +463,7 @@ internal sealed partial class PromptRoutingMiddleware
             }
         }
 
-        entry.TotalMilliseconds = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1);
+        entry.TotalMilliseconds = Math.Round(_time.GetElapsedTime(started).TotalMilliseconds, 1);
         routeSpan?.SetTag("semantic_router.outcome", entry.Outcome);
         routeSpan?.SetTag("semantic_router.served_by", entry.ServedBy);
         if (entry.Outcome == "failed")
