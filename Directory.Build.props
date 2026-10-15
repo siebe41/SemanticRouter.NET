@@ -7,6 +7,8 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <Deterministic>true</Deterministic>
+    <!-- In CI, paths in the binaries and symbols are normalized, so a build can be reproduced from the same commit. -->
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>
 
   <PropertyGroup Label="Package metadata">

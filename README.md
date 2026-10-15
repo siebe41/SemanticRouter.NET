@@ -1,6 +1,7 @@
 # SemanticRouter.NET
 
 [![CI](https://github.com/siebe41/SemanticRouter.NET/actions/workflows/ci.yml/badge.svg)](https://github.com/siebe41/SemanticRouter.NET/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/siebe41/SemanticRouter.NET/badge)](https://scorecard.dev/viewer/?uri=github.com/siebe41/SemanticRouter.NET)
 
 A lightweight **semantic prompt router** for .NET 10 and ASP.NET Core. It sends every prompt to the **cheapest model that is capable enough to answer it**, choosing across:
 
@@ -592,8 +593,11 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every pull r
 | Vulnerable packages | a direct or transitive NuGet package has a published advisory | `dotnet list package --vulnerable --include-transitive` |
 | Formatting | code differs from `dotnet format` under `.editorconfig` | `dotnet format` (fixes in place) |
 | Build, test, pack | any warning, test failure or packaging error | the commands above |
+| Container image | the image does not start, serves a remote client without a gateway key or an admin request without the token, or [Trivy](https://trivy.dev) finds a high or critical vulnerability that has a fix | `docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router .`, then `trivy image --ignore-unfixed --severity HIGH,CRITICAL semantic-router` |
 
-A leaked key must be revoked at the provider; removing it from the code does not remove it from history. For a confirmed false positive, add the fingerprint gitleaks prints to `.gitleaksignore`. Dependabot ([`.github/dependabot.yml`](.github/dependabot.yml)) proposes NuGet and GitHub Actions updates weekly; actions are pinned to commit SHAs.
+A leaked key must be revoked at the provider; removing it from the code does not remove it from history. For a confirmed false positive, add the fingerprint gitleaks prints to `.gitleaksignore`. Dependabot ([`.github/dependabot.yml`](.github/dependabot.yml)) proposes NuGet, GitHub Actions, container base image and npm updates weekly; actions are pinned to commit SHAs and base images to digests.
+
+[CodeQL](.github/workflows/codeql.yml) analyses the C# and JavaScript on every pull request and weekly, and [OpenSSF Scorecard](.github/workflows/scorecard.yml) rates the repository's supply-chain practices (the badge above). A release only publishes from a tag on a commit that is on `main`, after the tests pass, and its container image only when the Trivy scan is clean.
 
 ## Roadmap
 
