@@ -79,6 +79,43 @@ public sealed class HostTests : IDisposable
     }
 
     [Fact]
+    public void The_template_routes_claude_codes_default_opus_name_and_keeps_opus_as_a_choice()
+    {
+        IDictionary<string, string> aliases = RouterConfiguration.FromJson(RouterHost.Template()).Middleware.ModelAliases;
+
+        aliases["*opus*"].Should().Be("auto", "Claude Code sends its default Opus name whether or not you chose Opus");
+        aliases["*sonnet*"].Should().Be("auto");
+        aliases["claude-*"].Should().Be("auto");
+        aliases["*haiku*"].Should().Be("auto:cheapest");
+        aliases["opus-pinned"].Should().Be("family:opus");
+        aliases.Values.Should().ContainSingle(v => v.StartsWith("family:", StringComparison.Ordinal), "only the explicit name pins a family");
+    }
+
+    [Fact]
+    public void Claude_code_is_told_the_smallest_context_window_among_the_models_that_carry_tools()
+    {
+        static ModelDefinition Model(string name, int context, bool tools = true, bool enabled = true)
+        {
+            var model = new ModelDefinition { Name = name, ContextWindow = context, Enabled = enabled };
+            if (tools)
+            {
+                model.Capabilities.Add("tools");
+            }
+
+            return model;
+        }
+
+        RouterHost.ClaudeCodeContextTokens([Model("coder", 131_072), Model("opus", 200_000), Model("small", 8_192, tools: false), Model("off", 4_096, enabled: false)])
+            .Should().Be(131_072, "models without tools and disabled models never get a Claude Code turn");
+        RouterHost.ClaudeCodeContextTokens([Model("coder", 0), Model("opus", 200_000)]).Should().BeNull("an unknown context window is not guessed");
+        RouterHost.ClaudeCodeContextTokens([Model("small", 8_192, tools: false)]).Should().BeNull();
+
+        RouterHost.ClaudeCodeStart([Model("opus", 200_000)], windows: false).Should().Be("export CLAUDE_CODE_MAX_CONTEXT_TOKENS=200000; claude --model semantic-router");
+        RouterHost.ClaudeCodeStart([Model("opus", 200_000)], windows: true).Should().Be("$env:CLAUDE_CODE_MAX_CONTEXT_TOKENS=\"200000\"; claude --model semantic-router");
+        RouterHost.ClaudeCodeStart([], windows: false).Should().Be("claude --model semantic-router");
+    }
+
+    [Fact]
     public async Task The_sample_evaluation_set_runs_against_the_template()
     {
         RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
@@ -136,6 +173,7 @@ public sealed class HostTests : IDisposable
         written.Embeddings.Model.Should().Be("text-embedding-nomic-embed-text-v1.5");
         written.DefaultSimilarityThreshold.Should().BeApproximately(0.62f, 0.001f);
         output.ToString().Should().Contain("lmstudio: http://localhost:1234/").And.Contain("copilot").And.Contain("disabled");
+        output.ToString().Should().Contain("claude --model semantic-router").And.NotContain("CLAUDE_CODE_MAX_CONTEXT_TOKENS", "the local coder model's context window is unknown");
         EvaluationSet.Parse(File.ReadAllText(Path.Combine(_directory, "semantic-router.evaluation.jsonl"))).Should().NotBeEmpty("init writes the sample set next to the configuration");
         File.ReadAllText(Path.Combine(_directory, "semantic-router.json")).Should().NotContain("Effective", "computed properties are not settings");
     }

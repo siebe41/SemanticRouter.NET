@@ -93,11 +93,29 @@ public sealed class RoutingActivityEntry
     /// <summary>Failover notes, when models were skipped.</summary>
     public string? Detail { get; set; }
 
-    /// <summary>Total time from routing to the end of the response, in milliseconds.</summary>
+    /// <summary>Total time from routing to the end of the response, in milliseconds: what the client waited, failed attempts included.</summary>
     public double? TotalMilliseconds { get; set; }
 
-    /// <summary>Time from routing until the first byte of the reply was sent, in milliseconds.</summary>
+    /// <summary>Time from routing until the first byte of the reply was sent, in milliseconds, failed attempts included.</summary>
     public double? TimeToFirstByteMilliseconds { get; set; }
+
+    /// <summary>
+    /// Time from the start of the serving attempt until the first byte of the reply was sent, in milliseconds: the serving
+    /// model's own time to first byte, without the attempts that failed before it (Dispatch mode).
+    /// </summary>
+    public double? AttemptTimeToFirstByteMilliseconds { get; set; }
+
+    /// <summary>Time from the start of the serving attempt to the end of its response, in milliseconds (Dispatch mode).</summary>
+    public double? AttemptMilliseconds { get; set; }
+
+    /// <summary>
+    /// The serving model's own time to first byte and total time, for per-model and per-connector latency: the attempt's
+    /// figures, or the request's for an entry recorded before they were kept. Never one of each, so total − first stays
+    /// the time spent generating.
+    /// </summary>
+    internal (double? FirstByte, double? Total) ServingTimes() => AttemptMilliseconds is not null
+        ? (AttemptTimeToFirstByteMilliseconds, AttemptMilliseconds)
+        : (TimeToFirstByteMilliseconds, TotalMilliseconds);
 
     /// <summary>Input tokens the backend reported (excluding cached ones).</summary>
     public int? InputTokens { get; set; }

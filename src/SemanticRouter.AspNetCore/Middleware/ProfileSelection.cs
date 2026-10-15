@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 
@@ -104,10 +105,30 @@ internal static partial class ProfileSelection
 
     /// <summary>
     /// The project label for a client's own user id: <c>user:</c> and the first 12 hex digits of its SHA-256, stable
-    /// but never the id itself, which can name an account or a session.
+    /// but never the id itself, which can name an account or a session. A user id that is a JSON object gives no label:
+    /// Claude Code sends <c>{"device_id":…,"account_uuid":…,"session_id":…}</c>, which names the machine and changes
+    /// with every session, so it says nothing about the project.
     /// </summary>
     internal static string? UserProject(string? userId) =>
-        string.IsNullOrEmpty(userId) ? null : "user:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(userId)))[..12];
+        string.IsNullOrEmpty(userId) || IsJsonObject(userId) ? null : "user:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(userId)))[..12];
+
+    private static bool IsJsonObject(string text)
+    {
+        if (!text.TrimStart().StartsWith('{'))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            return document.RootElement.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>A scan that runs out of time counts as a match: when in doubt, stay local.</summary>
     private static bool Finds(Regex pattern, string text)

@@ -846,16 +846,16 @@ public static partial class RouterDashboardEndpoints
                 recent.Where(e => e.ServedBy is not null).GroupBy(e => e.ServedBy!).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase),
                 recent.GroupBy(e => e.Tier).OrderBy(g => g.Key).ToDictionary(g => g.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), g => g.Count()),
                 recent.GroupBy(e => e.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal),
-                recent.Where(e => e.Outcome == "served" && e.Connector is not null && e.TotalMilliseconds is not null)
+                recent.Where(e => e.Outcome == "served" && e.Connector is not null && e.ServingTimes().Total is not null)
                     .GroupBy(e => e.Connector!, StringComparer.OrdinalIgnoreCase)
                     .Select(g => new ConnectorLatency(
                         g.Key,
                         config.Connectors.TryGetValue(g.Key, out ConnectorOptions? kind) ? (kind.Type == ConnectorType.Cli ? $"Cli/{kind.Preset}" : kind.Type.ToString()) : null,
                         g.Count(),
                         g.Count(e => e.HasTools),
-                        Percentile(g.Select(e => e.TimeToFirstByteMilliseconds), 0.5),
-                        Percentile(g.Select(e => e.TimeToFirstByteMilliseconds), 0.95),
-                        Percentile(g.Select(e => e.TotalMilliseconds), 0.5)))
+                        Percentile(g.Select(e => e.ServingTimes().FirstByte), 0.5),
+                        Percentile(g.Select(e => e.ServingTimes().FirstByte), 0.95),
+                        Percentile(g.Select(e => e.ServingTimes().Total), 0.5)))
                     .OrderBy(l => l.Connector, StringComparer.OrdinalIgnoreCase)
                     .ToArray()),
             budgets.Status(config.Usage),
@@ -1063,7 +1063,7 @@ public static partial class RouterDashboardEndpoints
     /// <param name="Kind">Its type (<c>OpenAICompatible</c>, <c>Cli/ClaudeCode</c>, …).</param>
     /// <param name="Requests">Served requests.</param>
     /// <param name="WithTools">How many of them offered tools.</param>
-    /// <param name="FirstByteP50">Median time to the first byte of the reply, in milliseconds.</param>
+    /// <param name="FirstByteP50">Median time to the first byte of the reply, in milliseconds, from the start of the attempt that served it.</param>
     /// <param name="FirstByteP95">95th percentile time to the first byte.</param>
     /// <param name="TotalP50">Median time to the end of the reply.</param>
     public sealed record ConnectorLatency(string Connector, string? Kind, int Requests, int WithTools, double? FirstByteP50, double? FirstByteP95, double? TotalP50);

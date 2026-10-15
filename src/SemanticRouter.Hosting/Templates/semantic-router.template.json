@@ -135,10 +135,13 @@
   "Middleware": {
     "Mode": "Dispatch",
     "PathPrefixes": [ "/v1/chat/completions" ],
+    // Claude Code sends its default model name (an Opus name) whether or not you chose Opus, so every Claude name routes
+    // as auto. Ask for Opus with an "@opus" callout, or start Claude Code with --model opus-pinned for the whole session.
     "ModelAliases": {
+      "opus-pinned": "family:opus",
       "*haiku*": "auto:cheapest",
       "*sonnet*": "auto",
-      "*opus*": "family:opus",
+      "*opus*": "auto",
       "claude-*": "auto",
       "gpt-*": "auto"
     },

@@ -209,6 +209,7 @@ internal static class RouterHost
             .AppendLine(CultureInfo.InvariantCulture, $"  Configuration  {settings.ConfigurationFile}")
             .AppendLine(CultureInfo.InvariantCulture, $"  Dashboard      {local}/router")
             .AppendLine(CultureInfo.InvariantCulture, $"  Claude Code    {Set("ANTHROPIC_BASE_URL", local)}; {Set("ANTHROPIC_AUTH_TOKEN", "semantic-router")}")
+            .AppendLine(CultureInfo.InvariantCulture, $"                 {ClaudeCodeStart(app.Services.GetRequiredService<RouterRuntimeProvider>().Current.Router.Models, windows)}")
             .AppendLine(CultureInfo.InvariantCulture, $"  OpenAI clients {Set("OPENAI_BASE_URL", local + "/v1")}; model \"auto\"");
 
         if (urls.Any(u => !IsLoopback(u)))
@@ -222,6 +223,29 @@ internal static class RouterHost
         }
 
         await output.WriteLineAsync(banner.ToString()).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// How to start Claude Code against the router, for the banner and <c>init</c>: the router's own model name, and
+    /// <c>CLAUDE_CODE_MAX_CONTEXT_TOKENS</c> set to <see cref="ClaudeCodeContextTokens"/> when it is known.
+    /// </summary>
+    internal static string ClaudeCodeStart(IEnumerable<ModelDefinition> models, bool windows)
+    {
+        string start = $"claude --model {ModelAliases.Router}";
+        return ClaudeCodeContextTokens(models) is { } tokens
+            ? (windows ? $"$env:CLAUDE_CODE_MAX_CONTEXT_TOKENS=\"{tokens}\"" : $"export CLAUDE_CODE_MAX_CONTEXT_TOKENS={tokens}") + "; " + start
+            : start;
+    }
+
+    /// <summary>
+    /// The smallest context window among the enabled models that can carry tools (every Claude Code turn has them), so
+    /// Claude Code compacts the conversation before it outgrows one of them. <see langword="null"/> when there is no
+    /// such model, or when one of them does not declare its context window.
+    /// </summary>
+    internal static int? ClaudeCodeContextTokens(IEnumerable<ModelDefinition> models)
+    {
+        ModelDefinition[] agentic = models.Where(m => m.Enabled && m.HasCapabilities(["tools"])).ToArray();
+        return agentic.Length == 0 || agentic.Any(m => m.ContextWindow <= 0) ? null : agentic.Min(m => m.ContextWindow);
     }
 
     /// <summary>What clients on other machines need to use the gateway, for the banner and <c>doctor</c>.</summary>

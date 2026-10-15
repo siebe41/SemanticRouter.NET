@@ -298,6 +298,74 @@ test('every built-in theme meets WCAG AA contrast', async ({ request }) => {
   }
 });
 
+/** Sends a prompt through the gateway, so the Live feed and the Activity table have a row for it. */
+async function route(request, prompt, headers = {}) {
+  const res = await request.post('/v1/chat/completions', { headers, data: { model: 'auto', messages: [{ role: 'user', content: prompt }] } });
+  expect(res.ok(), await res.text()).toBeTruthy();
+}
+
+/** How far the page scrolls sideways: 0 when everything fits the window. */
+const sideways = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+
+// A pasted build URL (not a credential, so it is not masked) and the kind of JSON user id Claude Code sends.
+const LONG_TOKEN = 'https://example.com/builds/' + 'a1b2c3d4e5f6'.repeat(8);
+const LONG_PROJECT = JSON.stringify({ device_id: 'f'.repeat(64), account_uuid: '12345678-1234-1234-1234-123456789abc' });
+
+// At 1680 px a short decision used to fit on one line and a long one wrapped its reason under the header: now every row
+// has the same lines at every width.
+for (const width of [1360, 1680]) {
+  test(`every decision on Live has the same lines, with the latency on the reason line (${width} px)`, async ({ page, request }) => {
+    await route(request, 'hello there, how are you?');
+    await route(request, 'please design a scalable distributed architecture for an event sourcing system with CQRS, snapshots and replay across regions');
+    await page.setViewportSize({ width, height: 900 });
+    await open(page, 'live');
+    const rows = page.locator('#live-feed .feed-row');
+    await expect(rows.nth(1)).toBeVisible();
+    for (const row of await rows.all()) {
+      const box = async (sel) => (await row.locator(sel).first().boundingBox());
+      const [t, tier, why, ms, prompt, self] = [await box('.t'), await box('.tier'), await box('.why'), await box('.ms'), await box('.prompt'), await row.boundingBox()];
+      expect(Math.abs((tier.y + tier.height / 2) - (t.y + t.height / 2)), 'the tier is on the header line').toBeLessThan(6);
+      expect(why.y, 'the reason is below the header line').toBeGreaterThanOrEqual(t.y + t.height - 1);
+      expect(Math.abs(ms.y - why.y), 'the latency is on the reason line').toBeLessThan(4);
+      expect(self.x + self.width - (ms.x + ms.width), 'the latency is right-aligned').toBeLessThan(12);
+      expect(prompt.y, 'the prompt is below the reason line').toBeGreaterThanOrEqual(why.y + why.height - 1);
+    }
+  });
+}
+
+for (const width of [1000, 1100, 1200]) {
+  test(`Live fits a ${width} px window without scrolling sideways`, async ({ page, request }) => {
+    await route(request, 'summarize this text: ' + 'the ledger replays events twice and the customer account number is wrong on every invoice '.repeat(3));
+    await page.setViewportSize({ width, height: 900 });
+    await open(page, 'live');
+    await expect(page.locator('#live-feed .feed-row').first()).toBeVisible();
+    await expect(page.locator('#live-graph svg')).toBeVisible();
+    expect(await sideways(page), 'horizontal overflow').toBeLessThanOrEqual(0);
+    const card = await page.locator('#live-graph').boundingBox();
+    const graph = await page.locator('#live-graph svg').boundingBox();
+    expect(graph.x + graph.width, 'the graph fits its panel').toBeLessThanOrEqual(card.x + card.width + 1);
+  });
+}
+
+test('a long unbroken token in a prompt or project keeps the Activity table on screen', async ({ page, request }) => {
+  await route(request, 'hello there ' + LONG_TOKEN, { 'X-Router-Project': LONG_PROJECT });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const view of ['activity', 'overview']) {
+    await open(page, view);
+    const row = page.locator('#view table.activity-table tr', { hasText: 'example.com/builds' }).first();
+    await expect(row).toBeVisible();
+    expect(await sideways(page), `horizontal overflow on ${view}`).toBeLessThanOrEqual(0);
+    const wrap = row.locator('xpath=ancestor::div[contains(@class, "table-wrap")]');
+    expect(await wrap.evaluate((el) => el.scrollWidth - el.clientWidth), `the ${view} table scrolls sideways`).toBeLessThanOrEqual(0);
+    const box = await wrap.boundingBox();
+    const served = await row.locator('td.served').boundingBox();
+    const ms = await row.locator('td.num').boundingBox();
+    expect(served.width, 'Served by has room').toBeGreaterThanOrEqual(100);
+    expect(ms.x + ms.width, 'the ms column is inside the table').toBeLessThanOrEqual(box.x + box.width + 1);
+    await expect(row.locator('td.served')).toContainText(/local-small|cloud-large/);
+  }
+});
+
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 

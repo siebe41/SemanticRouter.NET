@@ -6,5 +6,10 @@ internal sealed class ManualTimeProvider : TimeProvider
 
     public override DateTimeOffset GetUtcNow() => _now;
 
+    /// <summary>Elapsed times measured with this provider move only when it is advanced.</summary>
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    public override long GetTimestamp() => _now.UtcTicks;
+
     public void Advance(TimeSpan by) => _now += by;
 }

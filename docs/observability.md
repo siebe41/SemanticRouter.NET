@@ -98,7 +98,8 @@ Failed attempts are marked with error status. HTTP backends receive `traceparent
 | `semantic_router.classification.cache_hits` | {decision} | `reason` (decisions reused from the classification cache, with no embedding call) |
 | `semantic_router.attempts` | {attempt} | `model`, `outcome` |
 | `semantic_router.request.duration` | s | `model`, `connector`, `outcome` (`served`, `failed`) |
-| `semantic_router.time_to_first_byte` | s | `model`, `connector` |
+| `semantic_router.time_to_first_byte` | s | `model`, `connector` (the serving one; the time counts from routing, so it includes attempts that failed before it) |
+| `semantic_router.attempt.time_to_first_byte` | s | `model`, `connector` (from the start of the serving attempt only) |
 | `semantic_router.tokens` | {token} | `model`, `connector`, `type` (`input`, `output`, `cache_read`, `cache_write`) |
 | `semantic_router.cost` | USD | `model`, `connector` |
 | `semantic_router.cooldowns` | {cooldown} | `model`, `kind` |
@@ -124,6 +125,7 @@ Without OpenTelemetry: `dotnet-counters monitor -n semantic-router --counters Se
 - **Dropped features.** When the serving backend could not carry part of the request (a hosted tool, a reasoning request, `logprobs`, …), the response has `X-Prompt-Route-Dropped`, the activity entry has `dropped`, and the attempt span has `semantic_router.dropped`. The list is in [providers.md](providers.md#what-survives-translation).
 - **Connector notes.** What a connector wants on the record about the attempt it served, such as `tool call repaired` or `malformed tool call: …` for prompted tool calling, goes to the activity field `notes` and the attempt span tag `semantic_router.notes`.
 - **Prompted tool calls.** When a CLI connector read tool calls out of the model's text (`ToolCalling: Prompted`), the activity entry has `promptedToolCalls` (how many), the export has the column `prompted_tool_calls`, the attempt span has `semantic_router.prompted_tool_calls`, and the dashboard's Activity page can show only those requests (`prompted calls`). Native tool calls are not counted.
+- **Timings after a failover.** When a model fails and the next one answers, the activity entry's `timeToFirstByteMilliseconds` and `totalMilliseconds` are what the client waited, failed attempts included, and so is `semantic_router.time_to_first_byte`. The serving model's own times, from when it was asked, are `attemptTimeToFirstByteMilliseconds` and `attemptMilliseconds` (export columns `attempt_time_to_first_byte_ms` and `attempt_ms`) and `semantic_router.attempt.time_to_first_byte`. Per-model and per-connector figures use the serving model's own times: the typical time to first byte that `Fastest` and `Balanced` rank by, and the dashboard's Endpoints and latency figures, so a model that rescues a request is not charged for the one that failed first. Without a failover the two agree.
 - **Request ids.** Every routed response carries `X-Prompt-Route-Id`, the id of its activity entry. The entry also stores the W3C `traceId`, so a request a user reports can be found in the dashboard, the export and the tracing backend.
 - **Log scope.** Log lines written while a request is routed carry the scope `RouteRequestId`. Turn on scopes in your logging provider (e.g. `"Console": { "IncludeScopes": true }`).
 - **Export.** `GET {dashboard}/api/activity/export?format=csv|jsonl&since=…&until=…` downloads activity (default: the last 7 days), with tokens, cost, timings and trace ids. Prompt previews are left out unless you add `prompts=true`.

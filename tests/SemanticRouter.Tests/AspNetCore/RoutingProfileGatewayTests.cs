@@ -134,7 +134,7 @@ public sealed class RoutingProfileGatewayTests : RouterHostTest
     [Fact]
     public async Task Without_a_project_header_the_project_is_a_hash_of_the_user_id_never_the_id()
     {
-        const string userId = """{"device_id":"d-123","account_uuid":"acct-456","session_id":"s-789"}""";
+        const string userId = "user_d123_account_acct-456_session_s-789";
         string label = ProfileSelection.UserProject(userId)!;
         label.Should().MatchRegex("^user:[0-9a-f]{12}$").And.Be(ProfileSelection.UserProject(userId), "it is stable");
         ProfileSelection.UserProject("someone else").Should().NotBe(label);
@@ -151,6 +151,39 @@ public sealed class RoutingProfileGatewayTests : RouterHostTest
         IReadOnlyList<RoutingActivityEntry> recent = Services.GetRequiredService<RoutingActivityLog>().Recent(2);
         recent.Select(e => e.Project).Should().BeEquivalentTo([label, "acme-payments"]);
         recent.Should().NotContain(e => e.Project!.Contains("acct-456"));
+    }
+
+    [Fact]
+    public async Task A_user_id_that_is_a_json_object_gives_no_project()
+    {
+        // Claude Code's metadata.user_id: a device id and the session, which change per machine and per session.
+        string userId = $$"""{"device_id":"{{new string('a', 64)}}","account_uuid":"","session_id":"5f0c7d1e-6c1b-4c71-9a4f-1e2d3c4b5a69"}""";
+        ProfileSelection.UserProject(userId).Should().BeNull();
+        ProfileSelection.UserProject("  {\"project\":\"acme-payments\"}").Should().BeNull("no label is taken from inside the object either");
+        ProfileSelection.UserProject("{not json").Should().MatchRegex("^user:[0-9a-f]{12}$", "only a JSON object is skipped");
+        ProfileSelection.UserProject("[1,2]").Should().MatchRegex("^user:[0-9a-f]{12}$");
+
+        HttpClient client = await StartProfilesAsync(o => o.ProfileRules.Add(new ProfileRule { Profile = "private", Projects = { "user:*" } }));
+        string body = $$"""{"model":"claude-opus-5-5","max_tokens":64,"metadata":{"user_id":{{JsonSerializer.Serialize(userId)}}},"messages":[{"role":"user","content":"fix the build"}]}""";
+        async Task<HttpResponseMessage> SendAsync(string? project)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/messages") { Content = Json(body) };
+            if (project is not null)
+            {
+                request.Headers.Add("X-Router-Project", project);
+            }
+
+            return await client.SendAsync(request);
+        }
+
+        HttpResponseMessage response = await SendAsync(null);
+        HttpResponseMessage named = await SendAsync("acme-payments");
+
+        named.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Headers.Contains("X-Prompt-Route-Profile").Should().BeFalse("no project, so the user:* rule does not match");
+        IReadOnlyList<RoutingActivityEntry> recent = Services.GetRequiredService<RoutingActivityLog>().Recent(2);
+        recent.Select(e => e.Project).Should().BeEquivalentTo([null, "acme-payments"], "the header still names the project");
     }
 
     [Fact]

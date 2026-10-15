@@ -215,8 +215,10 @@ public sealed class PromptedCliGatewayTests : RouterHostTest
         message.GetProperty("tool_calls")[0].GetProperty("function").GetProperty("name").GetString().Should().Be("Read");
         LastActivity().Notes.Should().Be("prompted tool calls: Read");
         LastActivity().PromptedToolCalls.Should().Be(1);
-        ActivityReports.ToCsv([LastActivity()], includePrompts: false).Split("\r\n")[0].Should().EndWith(",detail,prompted_tool_calls");
-        ActivityReports.ToCsv([LastActivity()], includePrompts: false).Split("\r\n")[1].Should().EndWith(",1");
+        string[] csv = ActivityReports.ToCsv([LastActivity()], includePrompts: false).Split("\r\n");
+        int column = Array.IndexOf(csv[0].Split(','), "prompted_tool_calls");
+        column.Should().BePositive();
+        csv[1].Split(',')[column].Should().Be("1");
     }
 
     [Fact]

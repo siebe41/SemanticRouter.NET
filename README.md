@@ -151,7 +151,7 @@ Eligible models that meet the required tier are ordered by the strategy:
 | `Fastest` | typical time to first byte ↑, then cost ↑ | waiting matters more than cost |
 | `Balanced` | the models within `BalancedLatencyFactor` of the fastest by cost ↑, then the rest by cost ↑ | cheap, but not much slower than the quickest |
 
-A model's typical time to first byte is the median over its served turns in the last `LatencyWindow` (a day), once it has `LatencySamples` (5) of them. A model without enough turns counts as the median of the others; with no data at all, `Fastest` and `Balanced` order by cost. They pick the model and record why: the Activity page shows it, and Dispatch sends it as `X-Prompt-Route-Selection`, e.g. `fastest: quick (300 ms to first byte) over cheaper cloud (1,500 ms to first byte)`.
+A model's typical time to first byte is the median over its served turns in the last `LatencyWindow` (a day), each timed from when that model was asked (not counting a model that failed before it), once it has `LatencySamples` (5) of them. A model without enough turns counts as the median of the others; with no data at all, `Fastest` and `Balanced` order by cost. They pick the model and record why: the Activity page shows it, and Dispatch sends it as `X-Prompt-Route-Selection`, e.g. `fastest: quick (300 ms to first byte) over cheaper cloud (1,500 ms to first byte)`.
 
 **Estimated cost counts the prompt cache.** A model that reads most of a long conversation from its prompt cache at a tenth of the input price can cost less than one with a lower list price and no cache. So the estimate splits the request's input by the share each model read from and wrote to its cache on recent served turns (`CacheShareWindow`, a day): that part at `CacheReadCostPerMillionTokens` and `CacheWriteCostPerMillionTokens`, the rest at the input price. The share is learned per route once a model has `CacheShareSamples` (5) turns with reported usage there, otherwise over all its turns; with fewer, the list prices apply, as they do for a model without cache prices. Every strategy's cost ordering uses this estimate, and so do the [per-route model trials](docs/routing-quality.md#cheaper-models-per-route). The Models page shows the effective input price next to the list price.
 
@@ -275,14 +275,14 @@ The router is a drop-in base URL. Claude Code speaks the Anthropic Messages API,
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:5080
 export ANTHROPIC_AUTH_TOKEN=semantic-router   # any value; the router never reads or forwards it
-claude
+claude --model semantic-router
 ```
 
-Nothing about your workflow changes. Claude Code keeps its system prompt, its tools and its model names; the router decides per turn:
+`--model semantic-router` makes Claude Code show that the router picks the model. The router's start-up banner also prints `CLAUDE_CODE_MAX_CONTEXT_TOKENS` for your models ([docs/clients.md](docs/clients.md#claude-code)). Nothing else about your workflow changes. Claude Code keeps its system prompt, its tools and its model names; the router decides per turn:
 
 | Claude Code sends… | The router… |
 |---|---|
-| `claude-sonnet-…`, `/model opus`, `haiku` for side tasks | maps the name through `Middleware:ModelAliases` (`*haiku*` → `auto:cheapest`, `*opus*` → `auto:best`, …); unknown names route as `auto`, catalog names force that model |
+| its default `claude-opus-…`, `/model sonnet`, `haiku` for side tasks | maps the name through `Middleware:ModelAliases`: the `init` template routes every Claude name as `auto`, and `*haiku*` as `auto:cheapest`. Claude Code sends its default Opus name whether or not you chose Opus, so ask for Opus with `@opus` or `--model opus-pinned`. Unknown names route as `auto`, catalog names force that model |
 | a turn with tools (every main-loop turn) | requires `tools`: HTTP models declaring it (a local coder model, an API-key model) or a CLI connector with `ToolCalling: Prompted` |
 | tool results (the loop continuing) | pins the request to the model that issued the tool calls (`ConversationAffinity`) |
 | `<system-reminder>` and other injected context blocks, `count_tokens` calls | ignores the former when classifying; answers the latter from its own estimator |
@@ -468,7 +468,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:PathPrefixes[]` | `[]` (all JSON POSTs) | Paths carrying OpenAI chat-completions bodies. Required in Dispatch mode. |
 | `Middleware:AnthropicPathPrefixes[]` | `/v1/messages` | Paths carrying Anthropic Messages bodies (Claude Code). Errors on them use the Anthropic format. |
 | `Middleware:ResponsesPathPrefixes[]` | `/v1/responses` | Paths carrying OpenAI Responses bodies (Codex CLI). Only the path itself is routed; `/v1/responses/{id}` is not. |
-| `Middleware:ModelAliases` | `{}` | Glob → alias/model map for client model names: `"*haiku*": "auto:cheapest"`, `"*opus*": "family:opus"` (the catalog's Opus model, else the most capable). Catalog names and `auto:*` are never remapped; unmatched names route as `auto`. |
+| `Middleware:ModelAliases` | `{}` | Glob → alias/model map for client model names: `"*haiku*": "auto:cheapest"`, `"claude-*": "auto"`, `"opus-pinned": "family:opus"` (the catalog's Opus model, else the most capable). A key without `*` matches exactly and is tried before the globs. Catalog names, `auto:*` and the router's own names (`semantic-router`, `claude-semantic-router…`) are never remapped; unmatched names route as `auto`. |
 | `Middleware:Feedback:Enabled` | `true` | Record signs that a decision was not good enough (retried, corrected, overridden with a callout, failing tool calls, empty reply, graded low by the judge) with the decision. See [docs/routing-quality.md](docs/routing-quality.md#feedback). |
 | `Middleware:Feedback:CorrectionSimilarity` / `CorrectionMargin` | `0.72` / `0.12` | Recognise corrections no phrase covers (other wording, other languages) by comparing short follow-ups with example corrections using the routing embedding model. `0` turns it off. See [docs/routing-quality.md](docs/routing-quality.md#corrections-in-other-words). |
 | `Tuning:Mode` | `Apply` | Automatic tuning of thresholds, utterances and cheaper models per route: `Apply` (shown under Router learned, each change undoable), `Suggest` or `Off`. See [docs/routing-quality.md](docs/routing-quality.md#automatic-tuning). |
@@ -492,6 +492,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:Conversation:Enabled` | `true` | Route by the conversation: keep the tier recent turns needed and stay on the model that answered. See [docs/routing-quality.md](docs/routing-quality.md#conversations). |
 | `Middleware:Conversation:DecayTurns` / `IdleTimeout` / `ShortFollowUpLength` / `StickToModel` | `3` / `00:30:00` / `60` / `true` | Simpler turns before the floor drops a tier; how long an idle conversation is remembered; the length (characters) below which a message is a follow-up that keeps the full floor; whether to prefer the previous model, or the one with the conversation's warm prompt cache when moving would cost more. |
 | `Middleware:Conversation:CacheLifetime` | `00:05:00` | How long a model's prompt cache counts as warm after a turn that used it. Set `01:00:00` when your requests ask for 1-hour cache entries. See [routing-quality.md](docs/routing-quality.md#conversations). |
+| `Middleware:Conversation:SessionHeader` | `x-claude-code-session-id` | A header with the client's session id. When a request has it, the session and the first user message identify the conversation, whatever the system prompt does. Empty turns it off. See [routing-quality.md](docs/routing-quality.md#conversations). |
 | `Middleware:RetryEscalation:Enabled` / `Window` | `false` / `00:02:00` | A prompt repeated by the same client within the window goes one tier up. See [docs/routing-quality.md](docs/routing-quality.md#retry-escalation). |
 | `Middleware:StripSystemReminders` | `true` | Ignore the context blocks clients inject into user messages when classifying: `<system-reminder>`, `<system_reminder>`, `<current_datetime>`, `<copilot_tauri_workspace>` and `Middleware:InjectedTags`. |
 | `Middleware:InjectedTags` | `[]` | More tag names (e.g. `environment_details`) whose blocks are ignored when classifying. |
@@ -512,7 +513,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `State:Retention` | store defaults | `ActivityDays` (30), `ActivityEntries` (10,000), `UsageDays` (400), `ConfigurationVersions` (200), `AuditDays` (365, the [audit log](docs/dashboard.md#audit-log)). |
 | `Middleware:RequireGatewayKeyForLocalClients` | `false` | Require the key from loopback clients too (a local reverse proxy). |
 | `Middleware:RateLimits` | `{}` | Per gateway client (and `*` for the rest): `{ RequestsPerMinute, TokensPerMinute }` over a sliding minute. A client over its limit gets `429` with `Retry-After` in its protocol, recorded in Activity. See [docs/dashboard.md](docs/dashboard.md#rate-limits). |
-| `Middleware:ProfileHeader` / `ProjectHeader` | `X-Router-Profile` / `X-Router-Project` | Headers that name the routing profile and the project. Without the project header, the project is a hash of the client's user id (`user:` and 12 hex digits), never the id itself. |
+| `Middleware:ProfileHeader` / `ProjectHeader` | `X-Router-Profile` / `X-Router-Project` | Headers that name the routing profile and the project. Without the project header, the project is a hash of the client's user id (`user:` and 12 hex digits), never the id itself; a user id that is a JSON object (Claude Code's) gives no project. |
 | `Middleware:ClientProfiles` | `{}` | Gateway client → profile it always runs under. |
 | `Middleware:ProfileRules[]` | `[]` | `{ Profile, Clients[], Projects[], ToolsInclude[], ToolsExclude[] }`; the first match picks the profile. |
 | `Middleware:VirtualModels` | `{}` | Model names clients can pick: `{ "private": { "Profile": "private", "Strategy": null, "Description": "…" } }`. |

@@ -173,15 +173,20 @@ export function liveFeed() {
     const sent = e.sentTo || [];
     const toCloud = sent.some((n) => !isLocalModel(n));
     const notes = (e.memory || []);
+    // A fixed shape whatever the names' lengths: who → which model / why and how long / the prompt / the notes it carried.
     return `<div class="feed-row ${e.outcome === 'failed' ? 'failed' : ''} ${pending ? 'pending' : ''}">
-      <span class="t">${h(when(e.timestamp))}</span>
-      <span class="who">${h(clientLabel(e))}</span>
-      <span class="arrow">→</span>
-      ${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.outcome === 'rate-limited' ? '<span class="badge warn">rate limited</span>' : `<span class="model ${local ? 'local' : 'cloud'}">${h(model || '—')}</span>`}
-      <span class="tier">T${e.tier}</span>
-      <span class="why">${h(e.reason)}${e.route ? ' · ' + h(e.route) + (e.similarity != null ? ' ' + num(e.similarity, 2) : '') : ''}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.attempt > 1 ? ' · try ' + e.attempt : ''}${e.degraded ? ' · degraded' : ''}</span>
-      <span class="ms">${pending ? '…' : num(e.totalMilliseconds, 0) + ' ms'}</span>
-      <div class="prompt">${e.promptPreview ? h(e.promptPreview) : '<span class="faint">prompt not stored</span>'}</div>
+      <div class="feed-head">
+        <span class="t">${h(when(e.timestamp))}</span>
+        <span class="who">${h(clientLabel(e))}</span>
+        <span class="arrow">→</span>
+        ${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.outcome === 'rate-limited' ? '<span class="badge warn">rate limited</span>' : `<span class="model ${local ? 'local' : 'cloud'}">${h(model || '—')}</span>`}
+        <span class="tier">T${e.tier}</span>
+      </div>
+      <div class="feed-why">
+        <span class="why">${h(e.reason)}${e.route ? ' · ' + h(e.route) + (e.similarity != null ? ' ' + num(e.similarity, 2) : '') : ''}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.attempt > 1 ? ' · try ' + e.attempt : ''}${e.degraded ? ' · degraded' : ''}</span>
+        <span class="ms">${pending ? '…' : num(e.totalMilliseconds, 0) + ' ms'}</span>
+      </div>
+      ${e.promptPreview ? `<div class="prompt" title="${h(e.promptPreview)}">${h(e.promptPreview)}</div>` : '<div class="prompt"><span class="faint">prompt not stored</span></div>'}
       ${notes.length ? `<div class="mem">${notes.slice(0, 6).map((r) => `<a href="#/memory" data-action="memory-open" data-id="${h(r.id)}" class="note-chip ${r.kind === 'Content' ? (toCloud ? 'cloud' : 'local') : 'ref'}" title="${h(r.source)} · ${r.kind === 'Content' ? r.lines + ' of ' + r.totalLines + ' lines' : 'mentioned'}">${h(r.title)}</a>`).join('')}${notes.length > 6 ? ` <span class="faint">+${notes.length - 6}</span>` : ''}</div>` : ''}
     </div>`;
   }).join('');

@@ -331,7 +331,7 @@ views.gateway = () => {
     </div></div>
     ${rateLimitsCard(m)}
     ${storedPromptsCard(state.config.State || {})}
-    <div class="card section"><div class="card-head"><h2>Model aliases</h2><span class="muted small">Map the names clients send to routing aliases or catalog models. Globs, first match wins.</span><span class="spacer"></span><button class="btn small" data-action="alias-add">Add alias</button><button class="btn ghost small" data-action="alias-claude">Add Claude Code defaults</button></div>
+    <div class="card section"><div class="card-head"><h2>Model aliases</h2><span class="muted small">Map the names clients send to routing aliases or catalog models. A name without <code>*</code> is matched exactly, before the globs; among the globs the first match wins. Claude Code sends its default Opus name whether or not you chose Opus, so route Claude names as <code>auto</code>.</span><span class="spacer"></span><button class="btn small" data-action="alias-add">Add alias</button><button class="btn ghost small" data-action="alias-claude">Add Claude Code defaults</button></div>
       <table><tr><th>Client model (glob)</th><th>Routes as</th><th></th></tr>
         ${aliases.map(([k, v], i) => `<tr><td><input type="text" data-action-input="alias-key" data-index="${i}" value="${h(k)}"></td><td><input type="text" data-action-input="alias-value" data-index="${i}" value="${h(v)}" list="alias-targets"></td><td><button class="btn ghost small" data-action="alias-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="3" class="muted small">No aliases. Unknown names route as <code>auto</code>.</td></tr>'}
       </table>
@@ -374,6 +374,9 @@ views.clients = () => {
   const origin = location.origin;
   const s = state.status;
   const anth = (s.gateway.anthropicPathPrefixes[0] || '/v1/messages');
+  // Claude Code compacts before the conversation outgrows the smallest model that can carry its tools, when every such model declares its context window.
+  const agentic = (state.config.Models || []).filter((m) => m.Enabled !== false && (m.Capabilities || []).some((c) => String(c).toLowerCase() === 'tools'));
+  const context = agentic.length && agentic.every((m) => m.ContextWindow > 0) ? Math.min(...agentic.map((m) => m.ContextWindow)) : null;
   const snippet = (title, code, note) => `<div class="card section"><div class="card-head"><h2>${title}</h2></div>${note ? `<p class="muted small">${note}</p>` : ''}<div class="snippet"><pre><code>${h(code)}</code><button class="btn small copy" data-action="copy">Copy</button></pre></div></div>`;
   return `
     <div class="section-head"><h1>Connect clients</h1><span class="muted">Point your tools at <code>${h(origin)}</code>; keep their workflow, let the router pick the model.</span></div>
@@ -381,11 +384,13 @@ views.clients = () => {
     ${snippet('Claude Code', `# Anthropic Messages API on ${origin}${anth}
 export ANTHROPIC_BASE_URL=${origin}
 export ANTHROPIC_AUTH_TOKEN=semantic-router   # any value: the router ignores it and never forwards it
-claude
+${context ? `export CLAUDE_CODE_MAX_CONTEXT_TOKENS=${context}   # the smallest context window among your tool-capable models
+` : ''}export CLAUDE_CODE_AUTO_MODE_SERVER=0
+claude --model semantic-router
 
 # One-off:
-ANTHROPIC_BASE_URL=${origin} ANTHROPIC_AUTH_TOKEN=semantic-router claude -p "explain this repo"`,
-      `Claude Code keeps its own model names (<code>/model opus</code>, <code>haiku</code> for side tasks); the <a href="#/gateway">model aliases</a> decide what they mean here. Tool-bearing turns go to models whose connector can carry tools: HTTP models declaring <code>tools</code>, or a CLI connector with <b>prompted</b> tool calling. ${(s.connectors.some((c) => c.type === 'Cli' && c.toolCalling === 'Prompted')) ? '' : 'None of your CLI connectors has prompted tool calling on, so agentic turns will only use HTTP models.'}`)}
+ANTHROPIC_BASE_URL=${origin} ANTHROPIC_AUTH_TOKEN=semantic-router claude --model semantic-router -p "explain this repo"`,
+      `<code>semantic-router</code> is the router's own model name: Claude Code shows that the router picks the model. Other names Claude Code sends (its default Opus name, <code>haiku</code> for side tasks) go through the <a href="#/gateway">model aliases</a>; <code>@opus</code> at the start of a message asks for Opus. Tool-bearing turns go to models whose connector can carry tools: HTTP models declaring <code>tools</code>, or a CLI connector with <b>prompted</b> tool calling. ${(s.connectors.some((c) => c.type === 'Cli' && c.toolCalling === 'Prompted')) ? '' : 'None of your CLI connectors has prompted tool calling on, so agentic turns will only use HTTP models.'}`)}
     ${snippet('OpenAI SDKs and most tools', `# Base URL ${origin}/v1 · any API key · model "auto"
 export OPENAI_BASE_URL=${origin}/v1
 export OPENAI_API_KEY=semantic-router

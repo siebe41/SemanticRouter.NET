@@ -152,10 +152,12 @@ internal static class EndpointHealth
             string model = entry.SentTo[i];
             if (i == answered)
             {
-                double? rate = entry.OutputTokens is > 0 && entry.TotalMilliseconds is { } total && entry.TimeToFirstByteMilliseconds is { } first && total - first >= 50
+                // The serving attempt's own times: the failed attempts before it belong to their endpoints, not this one.
+                (double? firstByte, double? totalTime) = entry.ServingTimes();
+                double? rate = entry.OutputTokens is > 0 && totalTime is { } total && firstByte is { } first && total - first >= 50
                     ? Math.Round(entry.OutputTokens.Value / ((total - first) / 1000), 1)
                     : null;
-                yield return new Attempt(model, entry.Timestamp, true, entry.TimeToFirstByteMilliseconds, entry.TotalMilliseconds, rate, null);
+                yield return new Attempt(model, entry.Timestamp, true, firstByte, totalTime, rate, null);
             }
             else
             {
@@ -306,7 +308,7 @@ internal sealed class EndpointChecks(TimeProvider? time = null)
 /// <param name="LastError">Why that one failed (redacted).</param>
 /// <param name="FailingSince">Since when every request to it has failed, when they all have.</param>
 /// <param name="LimitDays">Days in the last 7 on which it hit a usage limit.</param>
-/// <param name="FirstByteP50">Median time to the first byte of a reply, in milliseconds.</param>
+/// <param name="FirstByteP50">Median time to the first byte of a reply, in milliseconds, from the start of the attempt that served it.</param>
 /// <param name="FirstByteP95">95th percentile time to the first byte.</param>
 /// <param name="TotalP50">Median time to the end of a reply.</param>
 /// <param name="TotalP95">95th percentile time to the end of a reply.</param>

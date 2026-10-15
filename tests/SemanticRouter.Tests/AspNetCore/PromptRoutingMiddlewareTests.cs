@@ -311,7 +311,42 @@ public sealed class AnnotateModeTests : RouterHostTest
 
         json.RootElement.GetProperty("object").GetString().Should().Be("list");
         json.RootElement.GetProperty("data").EnumerateArray().Select(m => m.GetProperty("id").GetString())
-            .Should().Equal("auto", "auto:cheapest", "auto:best", "auto:priority", "auto:fastest", "auto:balanced", "local", "cloud");
+            .Should().Equal(
+                "auto", "auto:cheapest", "auto:best", "auto:priority", "auto:fastest", "auto:balanced",
+                "semantic-router", "claude-semantic-router", "claude-semantic-router-cheapest", "claude-semantic-router-best",
+                "local", "cloud");
+    }
+
+    [Fact]
+    public async Task Models_endpoint_offers_claude_code_the_routers_own_names_with_display_names()
+    {
+        HttpClient client = await StartAsync();
+
+        // What Claude Code's gateway model discovery asks for, and keeps: ids containing "claude" or "anthropic".
+        using JsonDocument json = JsonDocument.Parse(await client.GetStringAsync("/v1/models?limit=1000"));
+        JsonElement[] data = [.. json.RootElement.GetProperty("data").EnumerateArray()];
+        var discovered = data.Where(m => m.GetProperty("id").GetString()!.Contains("claude", StringComparison.Ordinal))
+            .Select(m => (m.GetProperty("id").GetString(), m.GetProperty("display_name").GetString(), m.GetProperty("description").GetString()))
+            .ToArray();
+
+        discovered.Should().Equal(
+            ("claude-semantic-router", "auto (SemanticRouter.NET)", "The router picks a model for each turn"),
+            ("claude-semantic-router-cheapest", "auto:cheapest (SemanticRouter.NET)", "The router picks the cheapest model that can handle each turn"),
+            ("claude-semantic-router-best", "auto:best (SemanticRouter.NET)", "The router picks the most capable model for each turn"));
+        data.Should().OnlyContain(m => m.GetProperty("object").GetString() == "model" && m.GetProperty("display_name").GetString()!.Length > 0, "the OpenAI shape stays, with a display name everywhere");
+        data.Single(m => m.GetProperty("id").GetString() == "cloud").GetProperty("display_name").GetString().Should().Be("cloud");
+    }
+
+    [Theory]
+    [InlineData("semantic-router", null)]
+    [InlineData("claude-semantic-router", null)]
+    [InlineData("Claude-Semantic-Router-Cheapest", SelectionStrategy.CheapestCapable)]
+    [InlineData("claude-semantic-router-best", SelectionStrategy.MostCapable)]
+    public void The_routers_own_names_route_like_auto_and_its_strategies(string name, SelectionStrategy? strategy)
+    {
+        ModelAliases.Resolve(name).Should().Be((strategy, (string?)null));
+        ModelAliases.IsRouterName(name).Should().BeTrue();
+        ModelAliases.IsRouterName("claude-opus-5-5").Should().BeFalse();
     }
 
     [Fact]
