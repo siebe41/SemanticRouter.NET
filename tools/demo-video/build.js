@@ -33,7 +33,7 @@ const spoken = (text) => text.replace(/Semantic Router dot net/g, 'SemanticRoute
   .replace(/in-it/g, 'init').replace(/L M Studio/g, 'LM Studio').replace(/C L I/g, 'CLI');
 const cues = [];
 for (const n of timeline) {
-  const sentences = spoken(lines[n.key]).match(/[^.!?:]+[.!?:]?/g).map((s) => s.trim()).filter(Boolean);
+  const sentences = spoken(lines[n.key]).match(/.+?(?:[.!?:](?=\s|$)|$)/g).map((s) => s.trim()).filter(Boolean);
   const total = sentences.reduce((sum, s) => sum + s.length, 0);
   let at = n.start;
   for (const s of sentences) {
