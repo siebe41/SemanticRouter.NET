@@ -7,6 +7,6 @@
     "update-screenshots": "playwright test --update-snapshots"
   },
   "devDependencies": {
-    "@playwright/test": "1.56.1"
+    "@playwright/test": "1.64.0"
   }
 }
