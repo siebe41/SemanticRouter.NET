@@ -103,7 +103,7 @@ if engine == "chatterbox":
         if reference is not None:
             e = model.ve.embeds_from_wavs([a16], sample_rate=16000)[0]
             similarity = float(np.dot(reference, e) / np.linalg.norm(reference) / np.linalg.norm(e))
-        total = (0 if ok else 100) + 3 * len(missing) + 2 * bursts + 4 * creak - 20 * similarity
+        total = (0 if ok else 100) + 3 * len(missing) + 2 * bursts + 15 * creak - 20 * similarity
         return total, dict(ok=ok, missing=missing, doubled=doubled, bursts=bursts, creak=round(creak, 2), similarity=round(similarity, 3))
 
     def speak(key, text):
