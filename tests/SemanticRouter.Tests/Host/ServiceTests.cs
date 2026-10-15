@@ -19,8 +19,20 @@ public sealed class ServiceTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        Directory.Delete(_directory, recursive: true);
+        // Windows can hold a closed database file for a moment longer (the last connection, a virus scanner): try again.
+        for (int attempt = 1; ; attempt++)
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try
+            {
+                Directory.Delete(_directory, recursive: true);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < 50)
+            {
+                Thread.Sleep(100);
+            }
+        }
     }
 
     private string ConfigurationDirectory => Path.Combine(_directory, "config dir");
