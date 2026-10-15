@@ -230,7 +230,7 @@ internal sealed partial class PromptRoutingMiddleware
         string retryClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
         string? conversationKey = (conversation.Enabled || options.Callouts.Enabled || feedback) && _conversations is not null
             && modelChoice.Strategy != SelectionStrategy.CheapestCapable && !housekeeping
-            ? ConversationTracker.Identify(retryClient, chat)
+            ? ConversationTracker.Identify(retryClient, chat, SessionId(context.Request, conversation))
             : null;
 
         if (conversationKey is not null && firstTurn)
@@ -631,9 +631,14 @@ internal sealed partial class PromptRoutingMiddleware
         }
     }
 
+    /// <summary>The client's session id from <see cref="ConversationRoutingOptions.SessionHeader"/>, when it sends one.</summary>
+    private static string? SessionId(HttpRequest request, ConversationRoutingOptions conversation) =>
+        conversation.SessionHeader is { Length: > 0 } header && request.Headers[header].FirstOrDefault() is { Length: > 0 } session ? session : null;
+
     /// <summary>
-    /// Applies the configured model alias globs (first match wins) to the client's model name. Routing aliases and
-    /// catalog model names are returned as they are, so an explicit choice always beats a pattern.
+    /// Applies the configured model aliases to the client's model name: a key without <c>*</c> that names it exactly,
+    /// else the first glob that matches. Routing aliases (<c>auto…</c>, <c>semantic-router</c> and its Claude-style
+    /// names) and catalog model names are returned as they are, so an explicit choice always beats a pattern.
     /// </summary>
     internal static string? MapModel(RouterRuntime runtime, string? model)
     {
@@ -644,9 +649,18 @@ internal sealed partial class PromptRoutingMiddleware
 
         string trimmed = model.Trim();
         if (trimmed.StartsWith(ModelAliases.Auto, StringComparison.OrdinalIgnoreCase)
+            || ModelAliases.IsRouterName(trimmed)
             || runtime.Router.Models.Any(m => string.Equals(m.Name, trimmed, StringComparison.OrdinalIgnoreCase)))
         {
             return model;
+        }
+
+        foreach ((string pattern, string target) in runtime.ModelAliases)
+        {
+            if (!pattern.Contains('*', StringComparison.Ordinal) && string.Equals(pattern, trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                return target;
+            }
         }
 
         foreach ((string pattern, string target) in runtime.ModelAliases)

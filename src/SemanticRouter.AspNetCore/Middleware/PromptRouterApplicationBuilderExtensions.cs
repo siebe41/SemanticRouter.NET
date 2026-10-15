@@ -83,7 +83,10 @@ public static class PromptRouterApplicationBuilderExtensions
 
     /// <summary>
     /// Maps an OpenAI-compatible <c>GET /v1/models</c> listing the routing aliases (<c>auto</c>, <c>auto:cheapest</c>,
-    /// <c>auto:best</c>, <c>auto:fastest</c>, <c>auto:balanced</c>, <c>auto:priority</c>) and every enabled catalog model, so chat clients can offer them.
+    /// <c>auto:best</c>, <c>auto:fastest</c>, <c>auto:balanced</c>, <c>auto:priority</c>), the router's own names
+    /// (<c>semantic-router</c>, and <c>claude-semantic-router</c> with <c>-cheapest</c> and <c>-best</c> for Claude
+    /// Code's gateway model discovery) and every enabled catalog model, so chat clients can offer them. Entries carry
+    /// <c>display_name</c> and <c>description</c> besides the OpenAI fields.
     /// </summary>
     public static RouteHandlerBuilder MapRouterModels(
         this IEndpointRouteBuilder endpoints,
@@ -100,10 +103,11 @@ public static class PromptRouterApplicationBuilderExtensions
                         .Select(v => (v.Key, v.Value.Description ?? $"Routes{(v.Value.Profile is { } p ? $" under profile '{p}'" : string.Empty)}{(v.Value.Strategy is { } s ? $" with {s}" : string.Empty)}."))
                         .Concat(configuration.Profiles.Select(p => ($"{ModelAliases.Auto}@{p.Key}", p.Value.Description ?? $"Routes automatically under profile '{p.Key}'.")));
                 var data = ModelAliases.All.Concat(virtualModels)
-                    .Select(a => new RouterModelInfo(a.Id, "model", "semantic-router", null, null, a.Description, null))
+                    .Select(a => new RouterModelInfo(a.Id, "model", "semantic-router", null, null, a.Description, null, a.Id))
+                    .Concat(ModelAliases.RouterNames.Select(n => new RouterModelInfo(n.Id, "model", "semantic-router", null, null, n.Description, null, n.DisplayName)))
                     .Concat(router.Models.Where(m => m.Enabled).Select(m => new RouterModelInfo(
                         m.Name, "model", m.Connector, m.Tier, m.IsLocal, m.Description,
-                        cooldowns.TryGetValue(m.Name, out DateTimeOffset until) ? until : null)))
+                        cooldowns.TryGetValue(m.Name, out DateTimeOffset until) ? until : null, m.Name)))
                     .ToArray();
                 return Results.Ok(new RouterModelList("list", data));
             })
@@ -123,7 +127,7 @@ public sealed record TokenCountResponse([property: System.Text.Json.Serializatio
 /// <param name="Profile">Optional routing profile to route under.</param>
 public sealed record ClassifyPromptRequest(string Prompt, string? Model = null, string? Profile = null);
 
-/// <summary>An entry in <c>GET /v1/models</c>.</summary>
+/// <summary>An entry in <c>GET /v1/models</c>: the OpenAI fields, plus the name and description a model picker shows.</summary>
 public sealed record RouterModelInfo(
     string Id,
     [property: System.Text.Json.Serialization.JsonPropertyName("object")] string ObjectType,
@@ -131,7 +135,8 @@ public sealed record RouterModelInfo(
     int? Tier,
     bool? Local,
     string? Description,
-    DateTimeOffset? CoolingDownUntil);
+    DateTimeOffset? CoolingDownUntil,
+    [property: System.Text.Json.Serialization.JsonPropertyName("display_name")] string? DisplayName = null);
 
 /// <summary>The <c>GET /v1/models</c> response.</summary>
 public sealed record RouterModelList(

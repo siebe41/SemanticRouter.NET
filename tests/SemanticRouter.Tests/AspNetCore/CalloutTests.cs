@@ -133,6 +133,35 @@ public sealed class CalloutTests : RouterHostTest
     }
 
     [Fact]
+    public async Task With_the_init_templates_aliases_claude_codes_default_opus_name_is_routed_and_opus_is_a_choice()
+    {
+        HttpClient client = await StartDispatchAsync(o =>
+        {
+            // The globs first: an exact name is matched before them wherever it stands (a dashboard edit appends it).
+            o.ModelAliases.Clear();
+            foreach ((string pattern, string target) in RouterConfiguration.FromJson(SemanticRouter.Host.RouterHost.Template()).Middleware.ModelAliases
+                .OrderBy(a => !a.Key.Contains('*', StringComparison.Ordinal)))
+            {
+                o.ModelAliases[pattern] = target;
+            }
+        });
+
+        HttpResponseMessage byDefault = await client.PostAsync("/v1/chat/completions", Chat("claude-opus-5-5", "hello there"));
+        HttpResponseMessage callout = await client.PostAsync("/v1/chat/completions", Chat("claude-opus-5-5", "@opus why does this deadlock?"));
+        HttpResponseMessage pinned = await client.PostAsync("/v1/chat/completions", Chat("opus-pinned", "hello there"));
+        HttpResponseMessage router = await client.PostAsync("/v1/chat/completions", Chat("semantic-router", "hello there"));
+        HttpResponseMessage cheapest = await client.PostAsync("/v1/chat/completions", Chat("claude-semantic-router-cheapest", "hello there"));
+        HttpResponseMessage best = await client.PostAsync("/v1/chat/completions", Chat("claude-semantic-router-best", "hello there"));
+
+        (Header(byDefault, "Model"), Header(byDefault, "Reason")).Should().Be(("local", "SemanticMatch"), "Claude Code sends its default Opus name whether or not you chose Opus");
+        (Header(callout, "Model"), Header(callout, "Reason")).Should().Be(("claude-opus", "ExplicitCallout"));
+        (Header(pinned, "Model"), Header(pinned, "Reason")).Should().Be(("claude-opus", "ModelOverride"), "the exact key beats the *opus* glob");
+        Header(router, "Model").Should().Be("local");
+        Header(cheapest, "Model").Should().Be("local");
+        Header(best, "Model").Should().Be("cloud", "claude-* does not remap the router's own names: this is auto:best");
+    }
+
+    [Fact]
     public async Task Only_a_leading_known_tag_counts_and_unknown_tags_are_left_alone()
     {
         HttpClient client = await StartDispatchAsync();

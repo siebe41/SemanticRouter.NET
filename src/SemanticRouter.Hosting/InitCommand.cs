@@ -124,6 +124,7 @@ internal static class InitCommand
         }
 
         await output.WriteLineAsync("Next: `semantic-router doctor` checks every connector; `semantic-router` starts the router and the dashboard.").ConfigureAwait(false);
+        await output.WriteLineAsync($"Then, with ANTHROPIC_BASE_URL pointing at the router: {RouterHost.ClaudeCodeStart(document.Models, probes.Windows)}").ConfigureAwait(false);
         return 0;
     }
 

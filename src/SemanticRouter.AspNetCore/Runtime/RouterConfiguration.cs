@@ -248,9 +248,9 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         foreach ((string name, VirtualModel model) in Middleware.VirtualModels)
         {
             if (name.StartsWith(ModelAliases.Auto, StringComparison.OrdinalIgnoreCase) || name.Contains('@', StringComparison.Ordinal)
-                || Models.Any(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)))
+                || ModelAliases.IsRouterName(name) || Models.Any(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)))
             {
-                errors.Add($"Virtual model '{name}' must not start with 'auto', contain '@' or reuse a catalog model's name.");
+                errors.Add($"Virtual model '{name}' must not start with 'auto', contain '@', reuse a catalog model's name or one of the router's own names ({string.Join(", ", ModelAliases.RouterNames.Select(n => n.Id))}).");
             }
 
             if (model.Profile is { Length: > 0 } profile && !Profiles.ContainsKey(profile))
