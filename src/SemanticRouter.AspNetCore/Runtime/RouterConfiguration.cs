@@ -713,6 +713,16 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         return changed;
     }
 
+    /// <summary>
+    /// The memory sources that would read a folder or file <paramref name="current"/> does not: a source whose path no
+    /// source of the same type has now. Renaming, reordering and removing sources is not a change.
+    /// </summary>
+    internal IReadOnlyList<string> MemoryPathChanges(RouterConfiguration current) =>
+        [.. Memory.Sources
+            .Where(s => !string.IsNullOrEmpty(s.Path)
+                && !current.Memory.Sources.Any(c => c.Type == s.Type && string.Equals(c.Path, s.Path, StringComparison.Ordinal)))
+            .Select(s => s.Name)];
+
     private static bool SameProcess(ConnectorOptions a, ConnectorOptions b) =>
         a.Type == b.Type && a.Preset == b.Preset
         && string.Equals(a.Executable, b.Executable, StringComparison.Ordinal)

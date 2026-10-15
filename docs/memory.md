@@ -11,7 +11,7 @@ That answers the question a router like this raises: when Claude Code reads your
 
 ## Set it up
 
-Add sources under `SemanticRouter:Memory` (or with **Add folder**, **Add Claude Code** and **Add MCP graph** on the Memory page, then **Apply & save**):
+Add sources under `SemanticRouter:Memory` in the configuration file. The Memory page's **Add Claude Code** adds Claude Code's memory in its default place; a path you type there (with **Add folder** or **Add MCP graph**, or a changed one) is refused over the dashboard unless `Dashboard:AllowProcessSettings` is on (see [Privacy](#privacy)):
 
 ```jsonc
 "SemanticRouter": {
@@ -67,7 +67,7 @@ Limits worth knowing:
 ## Privacy
 
 - Note text never leaves the router. The dashboard and its API get titles, paths, folders, tags, aliases, links and sizes; activity entries get the titles and ids of the notes a request carried.
-- Scanning reads files on the machine the router runs on, with the router's permissions. Only an admin (the loopback user, or the admin token) can change which folders are read; the read-only token can see the map, which includes note titles and paths.
+- Scanning reads files on the machine the router runs on, with the router's permissions. Which folders and files are read is changed in the configuration file: the admin API refuses a source with a new path unless `Dashboard:AllowProcessSettings` is on, since loopback clients are admin without a token. Only an admin can rescan; the read-only token can see the map, which includes note titles and paths.
 - Fingerprints are 64-bit hashes held in memory, used only for matching.
 
 ## Configuration
@@ -88,6 +88,6 @@ All under the dashboard prefix, see [dashboard.md](dashboard.md#admin-api).
 | Method and path | Purpose |
 |---|---|
 | `GET api/memory` | `{ loadedAt, sources[], nodes[], links[[from, to]], exposure{ noteId: { localContent, localReference, cloudContent, cloudReference, firstShared, lastShared, models{} } } }`. Scans first if nothing has been scanned yet. |
-| `POST api/memory/refresh` | Rescan every source now and return the map. |
+| `POST api/memory/refresh` | Rescan every source now and return the map (admin). |
 | `POST api/memory/exposure/reset` | Forget the sharing counts (admin). |
 | `GET api/events` | Server-sent events: an `activity` event when a request is routed and again when it finishes, with its `memory` notes and `sentTo` models. |

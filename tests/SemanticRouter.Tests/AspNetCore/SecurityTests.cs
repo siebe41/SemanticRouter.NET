@@ -515,6 +515,43 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Which_files_memory_sources_read_cannot_be_changed_over_the_admin_api_unless_allowed()
+    {
+        HttpClient client = await StartAsync(remote: false);
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        RouterConfiguration fromFile = provider.Current.Configuration.Clone();
+        fromFile.Memory.Sources.Add(new MemorySourceOptions { Name = "vault", Path = "/srv/notes" });
+        provider.Apply(fromFile, persist: false, "configuration file");
+
+        async Task<HttpResponseMessage> SendWithAsync(HttpClient http, string sources, string path = "/router/api/config?persist=false")
+        {
+            JsonNode config = JsonNode.Parse(await http.GetStringAsync("/router/api/config"))!["config"]!;
+            config["Memory"]!["Sources"] = JsonNode.Parse(sources);
+            var content = new StringContent(config.ToJsonString(), Encoding.UTF8, "application/json");
+            return path.Contains("validate", StringComparison.Ordinal) ? await http.PostAsync(path, content) : await http.PutAsync(path, content);
+        }
+
+        HttpResponseMessage added = await SendWithAsync(client, """[{"Name":"vault","Path":"/srv/notes"},{"Name":"keys","Path":"/home/me/.ssh"}]""");
+        HttpResponseMessage moved = await SendWithAsync(client, """[{"Name":"vault","Path":"/etc"}]""");
+        HttpResponseMessage retyped = await SendWithAsync(client, """[{"Name":"vault","Type":"KnowledgeGraph","Path":"/srv/notes"}]""");
+        HttpResponseMessage validated = await SendWithAsync(client, """[{"Name":"root","Path":"/"}]""", "/router/api/config/validate");
+
+        added.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await added.Content.ReadAsStringAsync()).Should().Contain("Memory:Sources:keys:Path").And.Contain("AllowProcessSettings").And.NotContain("Memory:Sources:vault");
+        moved.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await moved.Content.ReadAsStringAsync()).Should().Contain("Memory:Sources:vault:Path");
+        retyped.StatusCode.Should().Be(HttpStatusCode.BadRequest, "another type reads the same path differently");
+        (await validated.Content.ReadAsStringAsync()).Should().Contain("Memory:Sources:root:Path", "validation says so before applying");
+        (await SendWithAsync(client, """[{"Name":"notes","Path":"/srv/notes","Enabled":false}]""")).StatusCode
+            .Should().Be(HttpStatusCode.OK, "renaming or turning off a source reads nothing new");
+        (await SendWithAsync(client, """[{"Name":"claude","Type":"ClaudeCode"}]""")).StatusCode.Should().Be(HttpStatusCode.OK, "a source in its default place can be added");
+        await DisposeAsync();
+
+        HttpClient allowed = await StartAsync(o => o.AllowProcessSettings = true, remote: false);
+        (await SendWithAsync(allowed, """[{"Name":"vault","Path":"/srv/other"}]""")).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task No_other_site_may_frame_the_dashboard()
     {
         HttpClient client = await StartAsync(remote: false);

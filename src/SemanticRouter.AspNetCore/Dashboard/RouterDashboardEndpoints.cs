@@ -57,10 +57,11 @@ public sealed class RouterDashboardOptions
     public bool RequireTokenForLocalClients { get; set; }
 
     /// <summary>
-    /// Let the admin API change what a CLI or Copilot connector runs: its program, arguments, environment variables and
-    /// home directory, beyond a preset started from PATH. Off by default, because loopback clients are admin without a
-    /// token, and with this any program on the machine (or any user, on a shared one) could run whatever it liked as
-    /// you. Those settings are then changed in the configuration file. Default <see langword="false"/>.
+    /// Let the admin API change what a CLI or Copilot connector runs (its program, arguments, environment variables and
+    /// home directory, beyond a preset started from PATH) and which folders and files memory sources read. Off by
+    /// default, because loopback clients are admin without a token, and with this any program on the machine (or any
+    /// user, on a shared one) could run whatever it liked as you, or have the router read any file you can. Those
+    /// settings are then changed in the configuration file. Default <see langword="false"/>.
     /// </summary>
     public bool AllowProcessSettings { get; set; }
 
@@ -521,13 +522,26 @@ public static partial class RouterDashboardEndpoints
             : $"{role} from {context.Connection.RemoteIpAddress}";
     }
 
-    /// <summary>Errors for CLI and Copilot connectors whose program, arguments or environment the request would change.</summary>
-    private static IEnumerable<string> ProcessSettingErrors(RouterConfiguration candidate, RouterRuntimeProvider provider, RouterDashboardOptions options) =>
-        options.AllowProcessSettings ? [] : candidate.ProcessSettingChanges(provider.Current.Configuration).Select(name =>
-            $"Connectors:{name}: what a CLI runs (its program, arguments, environment variables and home directory) is changed in the " +
-            $"configuration file{(provider.Store is { } store ? $" ({store.Location})" : string.Empty)}, not over the admin API, which " +
-            "any program on this machine can reach. Presets started from PATH can be added here. To allow it, set " +
-            "SemanticRouter:Dashboard:AllowProcessSettings.");
+    /// <summary>
+    /// Errors for CLI and Copilot connectors whose program, arguments or environment the request would change, and for
+    /// memory sources it would point at another folder or file.
+    /// </summary>
+    private static IEnumerable<string> ProcessSettingErrors(RouterConfiguration candidate, RouterRuntimeProvider provider, RouterDashboardOptions options)
+    {
+        if (options.AllowProcessSettings)
+        {
+            return [];
+        }
+
+        string file = $"configuration file{(provider.Store is { } store ? $" ({store.Location})" : string.Empty)}";
+        return candidate.ProcessSettingChanges(provider.Current.Configuration).Select(name =>
+                $"Connectors:{name}: what a CLI runs (its program, arguments, environment variables and home directory) is changed in the " +
+                $"{file}, not over the admin API, which any program on this machine can reach. Presets started from PATH can be added here. " +
+                "To allow it, set SemanticRouter:Dashboard:AllowProcessSettings.")
+            .Concat(candidate.MemoryPathChanges(provider.Current.Configuration).Select(name =>
+                $"Memory:Sources:{name}:Path: which folders and files the router reads is changed in the {file}, not over the admin API, " +
+                "which any program on this machine can reach. To allow it, set SemanticRouter:Dashboard:AllowProcessSettings."));
+    }
 
     private static RouterDashboardOptions CopyOf(RouterDashboardOptions? source)
     {
