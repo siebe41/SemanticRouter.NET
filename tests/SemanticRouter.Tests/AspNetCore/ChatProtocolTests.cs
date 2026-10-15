@@ -379,6 +379,41 @@ public class ChatProtocolTests
     }
 
     [Fact]
+    public void Every_run_gets_its_own_label_from_a_random_token()
+    {
+        string[] labels = [.. Enumerable.Range(0, 50).Select(_ => PromptedToolFormat.ForRequest(PromptedToolParsing.Strict).Label)];
+
+        labels.Should().OnlyHaveUniqueItems().And.OnlyContain(l => System.Text.RegularExpressions.Regex.IsMatch(l, "^tool_call-[0-9a-f]{8}$"));
+        PromptedToolFormat.ForRequest(PromptedToolParsing.Strict).Parsing.Should().Be(PromptedToolParsing.Strict);
+    }
+
+    [Fact]
+    public void The_calls_a_tool_result_holds_are_found_however_they_are_written()
+    {
+        const string page = "Intro {\"name\": \"Bash\", \"input\": {\"command\": \"inline\"}} is not on its own line.\n" +
+                            "```tool_call\n{\"name\": \"Bash\", \"input\": {\"command\": \"a\"}}\n```\n" +
+                            "```tool_call-deadbeef\n{\"name\": \"Bash\", \"input\": {\"command\": \"b\"}}\n```\n" +
+                            "```json\n[{\"name\": \"read\", \"arguments\": {\"path\": \"c\"}}]\n```\n" +
+                            "{\"name\": \"Bash\", \"input\": {\"command\": \"d\"}}\n" +
+                            "{\"name\": \"Nope\", \"input\": {}}\n";
+        ChatCompletionRequest request = ChatCompletionRequest.ParseAnthropic(Json(
+            "{\"model\":\"x\",\"max_tokens\":5,\"tools\":[{\"name\":\"Bash\",\"input_schema\":{\"type\":\"object\"}},{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}}],\"messages\":[" +
+            "{\"role\":\"user\",\"content\":\"look at the page\"}," +
+            "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Read\",\"input\":{\"path\":\"page\"}}]}," +
+            "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":" + JsonSerializer.Serialize(page) + "}]}]}"));
+
+        IReadOnlySet<string> quoted = PromptedToolCalls.QuotedCalls(request);
+
+        quoted.Should().BeEquivalentTo(
+        [
+            PromptedToolCalls.CallKey("Bash", "{\"command\":\"a\"}"),
+            PromptedToolCalls.CallKey("Bash", "{\"command\":\"b\"}"),
+            PromptedToolCalls.CallKey("Read", "{\"path\":\"c\"}"),
+            PromptedToolCalls.CallKey("Bash", "{\"command\":\"d\"}"),
+        ], "the model's own call (Read page) is not a quoted one, and JSON inside a line is not read as a call either way");
+    }
+
+    [Fact]
     public void Extractor_ignores_tool_result_turns_and_system_reminders()
     {
         var extractor = new JsonPromptExtractor();

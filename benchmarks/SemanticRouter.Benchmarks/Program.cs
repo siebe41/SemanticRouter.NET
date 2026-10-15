@@ -3,6 +3,7 @@
 //   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks
 //   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks -- --remote http://localhost:11434 nomic-embed-text
 //   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks -- latency http://localhost:5000 <model> …   (see LatencyBenchmark.cs)
+//   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks -- tool-calls http://localhost:5000 <model> …   (see ToolCallBenchmark.cs)
 //
 // Each provider classifies every prompt of the set (the classification cache is off, so every prompt is embedded)
 // for several rounds after a warm-up, and is calibrated on the set to find the range of thresholds that route it best.
@@ -17,6 +18,11 @@ using SemanticRouter.Embeddings.Onnx;
 if (args is ["latency", ..])
 {
     return await SemanticRouter.Benchmarks.LatencyBenchmark.RunAsync(args);
+}
+
+if (args is ["tool-calls", ..])
+{
+    return await SemanticRouter.Benchmarks.ToolCallBenchmark.RunAsync(args);
 }
 
 string root = FindRepository();

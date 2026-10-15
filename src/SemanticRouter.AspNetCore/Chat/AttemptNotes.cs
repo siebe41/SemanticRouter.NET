@@ -12,6 +12,18 @@ internal sealed class AttemptNotes
 
     public IReadOnlyList<string> Notes => _notes;
 
+    /// <summary>How many tool calls the attempt read out of the model's text (prompted tool calling), if any.</summary>
+    public int? PromptedToolCalls { get; private set; }
+
+    /// <summary>Records that the attempt being served returned <paramref name="count"/> tool calls read out of the model's text.</summary>
+    public static void ReportPromptedToolCalls(HttpContext context, int count)
+    {
+        if (context.Features.Get<AttemptNotes>() is { } notes)
+        {
+            notes.PromptedToolCalls = count;
+        }
+    }
+
     /// <summary>Records <paramref name="note"/> on the attempt being served, if the dispatcher is tracking one.</summary>
     public static void Report(HttpContext context, string note)
     {

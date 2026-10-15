@@ -135,6 +135,12 @@ public sealed class RoutingActivityEntry
     /// <summary>What the serving connector put on the record, e.g. <c>tool call repaired</c>, if anything.</summary>
     public string? Notes { get; set; }
 
+    /// <summary>
+    /// How many of the reply's tool calls were read out of the model's text (prompted tool calling, a CLI connector),
+    /// rather than returned by a native tool API; null when there were none.
+    /// </summary>
+    public int? PromptedToolCalls { get; set; }
+
     /// <summary>The W3C trace id of the request, for finding it in a tracing backend.</summary>
     public string? TraceId { get; set; }
 

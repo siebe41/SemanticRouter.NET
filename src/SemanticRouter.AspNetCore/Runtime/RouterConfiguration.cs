@@ -192,6 +192,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             {
                 errors.Add($"Connector '{name}' CacheTtl must be 5m or 1h.");
             }
+
+            if (!Enum.IsDefined(connector.PromptedToolParsing))
+            {
+                errors.Add($"Connector '{name}' PromptedToolParsing must be Lenient or Strict.");
+            }
         }
 
         foreach (ModelDefinition model in Models.Where(m => m.Enabled && !string.IsNullOrWhiteSpace(m.Connector)))
