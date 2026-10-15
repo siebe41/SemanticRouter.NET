@@ -127,6 +127,7 @@ public class SemanticRouterOptions
     public ModelSelectionOptions Selection { get; set; } = new();
 
     /// <summary>The effective tier ladder: <see cref="Tiers"/>, or <see cref="DefaultTiers"/> when none are configured.</summary>
+    [JsonIgnore]
     public IReadOnlyList<TierDefinition> EffectiveTiers =>
         Tiers is { Count: > 0 } ? Tiers.OrderBy(t => t.Level).ToArray() : DefaultTiers;
 

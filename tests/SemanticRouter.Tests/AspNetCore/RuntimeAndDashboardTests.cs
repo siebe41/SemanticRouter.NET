@@ -263,6 +263,70 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
     }
 
     [Fact]
+    public void A_saved_document_holds_settings_only_and_no_computed_values()
+    {
+        RouterConfiguration document = RouterConfiguration.FromJson(SemanticRouter.Host.RouterHost.Template());
+        document.Selection.TimeZone = "Europe/Amsterdam";
+
+        string json = document.ToJson();
+
+        json.Should().NotContain("Effective", "EffectiveTiers, EffectiveTimeZone and the like are derived from other settings")
+            .And.NotContain("BaseUtcOffset", "the time zone is written as its id, not as this machine's time zone object");
+        JsonNode.Parse(json)!["Selection"]!["TimeZone"]!.GetValue<string>().Should().Be("Europe/Amsterdam");
+        RouterConfiguration.FromJson(json).ToJson().Should().Be(json);
+
+        // A file saved before still loads; its stale copies are dropped on the next save.
+        RouterConfiguration earlier = RouterConfiguration.FromJson(
+            """{ "EffectiveTiers": [ { "Level": 9, "Name": "Stale" } ], "Selection": { "TimeZone": "UTC", "EffectiveTimeZone": { "Id": "Europe/Paris" } } }""");
+        earlier.EffectiveTiers.Should().NotContain(t => t.Name == "Stale");
+        earlier.ToJson().Should().NotContain("Effective");
+    }
+
+    [Fact]
+    public void Every_written_property_of_the_configuration_can_be_read_back()
+    {
+        // A property without a setter is written but never read: only collections, which reading fills, may be one.
+        var json = new JsonSerializerOptions { TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver() };
+        var seen = new HashSet<Type>();
+        var pending = new Queue<Type>([typeof(RouterConfiguration)]);
+        var computed = new List<string>();
+        while (pending.TryDequeue(out Type? type))
+        {
+            if (!seen.Add(type) || type.Namespace?.StartsWith("SemanticRouter", StringComparison.Ordinal) != true && !type.IsGenericType)
+            {
+                continue;
+            }
+
+            System.Text.Json.Serialization.Metadata.JsonTypeInfo info = json.GetTypeInfo(type);
+            if (info.ElementType is { } element)
+            {
+                pending.Enqueue(element);
+                continue;
+            }
+
+            if (info.Kind != System.Text.Json.Serialization.Metadata.JsonTypeInfoKind.Object)
+            {
+                continue;
+            }
+
+            foreach (System.Text.Json.Serialization.Metadata.JsonPropertyInfo property in info.Properties.Where(p => p.Get is not null))
+            {
+                pending.Enqueue(property.PropertyType);
+                bool fillable = property.PropertyType.IsGenericType
+                    && property.PropertyType.GetGenericTypeDefinition() is var definition
+                    && (definition == typeof(IList<>) || definition == typeof(ICollection<>) || definition == typeof(IDictionary<,>));
+                if (property.Set is null && !fillable)
+                {
+                    computed.Add($"{type.Name}.{property.Name}");
+                }
+            }
+        }
+
+        seen.Should().Contain([typeof(ModelSelectionOptions), typeof(ConnectorOptions), typeof(PromptRouterMiddlewareOptions)]);
+        computed.Should().BeEmpty("a computed property needs [JsonIgnore], or every saved configuration carries a stale copy of it");
+    }
+
+    [Fact]
     public async Task Hot_reload_disposes_the_previous_runtime_and_builds_connectors_fresh()
     {
         await StartDispatchAsync();
