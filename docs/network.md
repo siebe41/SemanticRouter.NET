@@ -47,6 +47,21 @@ On Linux, .NET also reads `SSL_CERT_FILE` (a bundle) and `SSL_CERT_DIR`, but the
 
 **The CLIs** are separate programs: `CaBundle` does not reach them. They inherit the router's environment (minus the variables the preset removes), so the same proxy variables reach them, and so do their own certificate settings: `NODE_EXTRA_CA_CERTS` for Claude Code and the Copilot CLI (Node.js programs; it adds to their built-in roots) and `CODEX_CA_CERTIFICATE` for Codex. Set them in the router's environment, or per connector in `EnvironmentVariables`, e.g. `"EnvironmentVariables": { "NODE_EXTRA_CA_CERTS": "/etc/semantic-router/corporate-root.pem" }`.
 
+## Offline mode
+
+For an air-gapped or locked-down network, `SemanticRouter:Network:Offline` makes sure nothing leaves except the model traffic you allow:
+
+```json
+{ "SemanticRouter": { "Network": { "Offline": true, "AllowedHosts": ["llm-gateway.corp.example"] } } }
+```
+
+- **Connectors, the embeddings endpoint and webhooks** reach only this machine (loopback) and `AllowedHosts` (host names, `*.domain` or IP addresses, each with an optional `:port`). Models on any other connector are turned off at start-up and listed with the warnings on the dashboard; turning one back on, on the dashboard or through the admin API, is refused. Remote embeddings fall back to the in-process hashing provider; a webhook elsewhere is not used.
+- **CLI and Copilot connectors are off.** They always reach their vendor over the internet, whatever the router does.
+- **The ONNX embedding model is never downloaded.** If it is not on disk, classification fails with a message naming the file, where to put it and its SHA-256: download it on another machine (`semantic-router doctor` prints the URLs' host and the folder) or set `Embeddings:ModelPath` to a folder with `model.onnx` and `vocab.txt`.
+- `semantic-router doctor` shows what is still contacted, and what is never contacted and why.
+
+It is a host setting, like `CaBundle`: `appsettings.json` in the configuration directory, the environment (`SemanticRouter__Network__Offline=true`) or the command line. An administrator can force it for the whole machine with `"Offline": true` in the [machine-wide policy](enterprise.md); then the policy's `AllowedEndpoints` are the hosts it allows, the user's `AllowedHosts` cannot add more, and the desktop app does not update. The user's own `Network:Offline` does not change the desktop app's updates: untick **Check for updates** in its tray menu.
+
 ## Allowing it through a firewall
 
 For an egress allowlist, list:

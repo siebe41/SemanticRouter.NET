@@ -67,6 +67,26 @@ public sealed class OnnxEmbeddingTests : IDisposable
     }
 
     [Fact]
+    public async Task Offline_the_model_is_never_downloaded_but_one_placed_by_hand_is_used()
+    {
+        StubHttpMessageHandler http = Serving("model-bytes", "vocab-bytes");
+        OnnxModelInfo info = Fake("model-bytes", "vocab-bytes");
+        string refused = MachinePolicy.Effective(null, new NetworkOptions { Offline = true }).Refuses(info.ModelUrl)!;
+
+        Func<Task> act = () => OnnxModelDownloader.EnsureAsync(info, _directory, new HttpClient(http), refused);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage($"model.onnx is not on this machine and cannot be downloaded (huggingface.co is not reachable in offline mode (Network:Offline))*place it at {Path.Combine(_directory, "fake", "model.onnx")}*");
+        http.Requests.Should().BeEmpty();
+
+        Directory.CreateDirectory(Path.Combine(_directory, "fake"));
+        await File.WriteAllTextAsync(Path.Combine(_directory, "fake", "model.onnx"), "model-bytes");
+        await File.WriteAllTextAsync(Path.Combine(_directory, "fake", "vocab.txt"), "vocab-bytes");
+        (await OnnxModelDownloader.EnsureAsync(info, _directory, new HttpClient(http), refused)).ModelFile.Should().EndWith("model.onnx");
+        http.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Known_models_are_pinned()
     {
         OnnxEmbeddingModels.Known.Should().OnlyContain(m => m.Revision.Length == 40 && m.ModelSha256.Length == 64 && m.VocabSha256.Length == 64);

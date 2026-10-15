@@ -29,7 +29,8 @@ internal sealed class DesktopUpdater(UpdateManager? manager, ServicePlatform? pl
         UpdatePolicy policy;
         try
         {
-            policy = MachinePolicyLoader.Load().Updates;
+            MachinePolicy machine = MachinePolicyLoader.Load();
+            policy = machine.Offline ? new UpdatePolicy { Mode = UpdateMode.Off } : machine.Updates;
         }
         catch (InvalidDataException ex)
         {
