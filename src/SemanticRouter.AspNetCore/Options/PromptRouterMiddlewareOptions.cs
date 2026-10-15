@@ -234,6 +234,14 @@ public sealed class PromptRouterMiddlewareOptions
     /// spending it in minutes, or crowding out the others.
     /// </summary>
     public IDictionary<string, RateLimitOptions> RateLimits { get; } = new Dictionary<string, RateLimitOptions>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Requests per minute for each client on another machine (by gateway client, or by address without a key) that no
+    /// <see cref="RateLimits"/> entry covers. Default 120, so a remote client stuck in a loop cannot spend the
+    /// connectors' keys at full speed even before limits are configured. 0 turns it off. Clients on this machine are not
+    /// limited by it.
+    /// </summary>
+    public int RemoteRequestsPerMinute { get; set; } = 120;
 }
 
 /// <summary>One client's rate limit (<see cref="PromptRouterMiddlewareOptions.RateLimits"/>), over a sliding minute.</summary>

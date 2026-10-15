@@ -155,7 +155,13 @@ Gateway keys, dashboard tokens and prompts cross the network in clear text over 
 
   `Path` and `KeyPath` also take PEM files. See [Configure endpoints for Kestrel](https://learn.microsoft.com/aspnet/core/fundamentals/servers/kestrel/endpoints).
 
-- **A reverse proxy** (Caddy, nginx, Traefik) that terminates TLS and forwards to the router on `localhost`. Requests then arrive from loopback, so turn on `RequireGatewayKeyForLocalClients` (and `RequireTokenForLocalClients` for the dashboard), or the proxy's clients are treated as local. Add the proxy's public address to `Dashboard:PublicOrigins`. With Caddy:
+- **A reverse proxy** (Caddy, nginx, Traefik) that terminates TLS and forwards to the router. Name the proxy in `appsettings.json`, so the router takes the client's address and scheme from its `X-Forwarded-For` and `X-Forwarded-Proto` headers:
+
+  ```json
+  { "SemanticRouter": { "ForwardedHeaders": { "KnownProxies": [ "127.0.0.1" ], "KnownNetworks": [ "10.0.0.0/8" ] } } }
+  ```
+
+  Only these proxies are believed; the headers from anyone else are ignored. Without this, every request arrives from the proxy, so clients share one rate limit, and a proxy on this machine makes them all look local: then turn on `RequireGatewayKeyForLocalClients` (and `RequireTokenForLocalClients` for the dashboard). Add the proxy's public address to `Dashboard:PublicOrigins`. With Caddy:
 
   ```
   router.example.com {

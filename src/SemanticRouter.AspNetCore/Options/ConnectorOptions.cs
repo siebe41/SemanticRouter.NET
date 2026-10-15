@@ -202,11 +202,19 @@ public sealed class ConnectorOptions
     public int MaxConcurrency { get; set; } = 2;
 
     /// <summary>
-    /// CLI only: when this many requests are already waiting for a free process, the next one goes to another model
-    /// instead of queueing (a long queue on a subscription CLI is slower than a different model). <see langword="null"/>:
-    /// always wait.
+    /// CLI and Copilot: when this many requests are already waiting for a free process, the next one goes to another
+    /// model instead of queueing (a long queue on a subscription CLI is slower than a different model, and an unbounded
+    /// one lets a burst of requests hold the router's memory and connections). <see langword="null"/>:
+    /// <see cref="DefaultMaxQueue"/>; 0: never wait.
     /// </summary>
     public int? MaxQueue { get; set; }
+
+    /// <summary>The queue length used when <see cref="MaxQueue"/> is not set.</summary>
+    public const int DefaultMaxQueue = 16;
+
+    /// <summary><see cref="MaxQueue"/>, or <see cref="DefaultMaxQueue"/> when it is not set.</summary>
+    [JsonIgnore]
+    public int EffectiveMaxQueue => MaxQueue ?? DefaultMaxQueue;
 
     /// <summary>
     /// Copilot only: the Copilot runtime's home directory (<c>COPILOT_HOME</c>): where its own sign-in lives when it is not

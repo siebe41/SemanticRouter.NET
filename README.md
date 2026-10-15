@@ -440,7 +440,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `QuotaErrorPatterns[]` | CLI | preset patterns | Extra output fragments that mean "quota exhausted". |
 | `EnvironmentVariables`, `RemoveEnvironmentVariables[]` | CLI | preset defaults | The presets remove API-key variables that would switch billing away from your subscription. |
 | `MaxConcurrency` | CLI, Copilot | `2` | Simultaneous processes (Copilot: simultaneous turns). |
-| `MaxQueue` | CLI, Copilot | `null` (always wait) | When this many requests are already waiting for a process, the next goes to another model. |
+| `MaxQueue` | CLI, Copilot | `16` | When this many requests are already waiting for a process, the next goes to another model. `0`: never wait. |
 | `MaxArgumentLength` | CLI | `24000` | With `PromptInput: Argument`, longer prompts are sent on stdin. Longer Claude Code system prompts are moved into the conversation. |
 | `Executable`, `HomeDirectory` | Copilot | `copilot`, `~/.copilot` | The Copilot CLI the SDK runs as its runtime, and its `COPILOT_HOME`. |
 | `AllowRemoteClients` | CLI, Copilot | `false` | See [TERMS.md](docs/TERMS.md) before changing this. |
@@ -491,6 +491,8 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Usage:Budgets[]` | `[]` | `{ Name, Model or Connector or Profile, Period (Day/Week/Month), MaxTokens, MaxCostUsd }`. A spent budget's models are not tried until the period ends; a spent profile budget stops that profile's paid models only. |
 | `Middleware:GatewayKeys` | `{}` | Client keys by name (`"laptop": "${env:ROUTER_KEY_LAPTOP}"`). Remote clients must send one as `Authorization: Bearer` or `x-api-key`, and are refused while none is set; the name is recorded in Activity. Never forwarded. |
 | `Middleware:AllowUnauthenticatedRemoteClients` | `false` | Serve remote clients without a key while `GatewayKeys` is empty. Only behind a proxy that authenticates callers. |
+| `Middleware:RemoteRequestsPerMinute` | `120` | Requests per minute for each client on another machine that no `RateLimits` entry covers. `0` turns it off. |
+| `ForwardedHeaders:KnownProxies`, `KnownNetworks` | none | Reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed (host setting, read at start-up). See [host.md](docs/host.md#serving-over-https). |
 | `State:StorePrompts` | `Redacted` | How much of each prompt the activity log keeps: `Redacted` (160 characters, credentials masked), `On`, or `Off`. See [host.md](docs/host.md#what-the-router-stores). |
 | `State:Retention` | store defaults | `ActivityDays` (30), `ActivityEntries` (10,000), `UsageDays` (400), `ConfigurationVersions` (200). |
 | `Middleware:RequireGatewayKeyForLocalClients` | `false` | Require the key from loopback clients too (a local reverse proxy). |

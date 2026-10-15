@@ -724,7 +724,7 @@ public static partial class RouterDashboardEndpoints
                 config.Middleware.EffectiveResponsesPathPrefixes.ToArray(),
                 config.Middleware.ModelAliases.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
                 config.Selection.Strategy.ToString(),
-                rateLimits.Status(config.Middleware.RateLimits)),
+                rateLimits.Status(config.Middleware)),
             new ActivitySummary(
                 recent.Count,
                 recent.Count(e => e.Outcome == "served"),

@@ -312,4 +312,28 @@ public sealed class HostTests : IDisposable
         RouterHost.LocalAddress("http://+:8080").Should().Be("http://localhost:8080");
         RouterHost.LocalAddress("http://127.0.0.1:5080/").Should().Be("http://127.0.0.1:5080");
     }
+
+    [Fact]
+    public void Forwarded_headers_are_trusted_only_from_the_configured_proxies()
+    {
+        WebApplicationBuilder none = WebApplication.CreateBuilder();
+        RouterHost.ConfigureForwardedHeaders(none).Should().BeFalse("without proxies nothing is forwarded");
+
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.Configuration["SemanticRouter:ForwardedHeaders:KnownProxies:0"] = "10.1.2.3";
+        builder.Configuration["SemanticRouter:ForwardedHeaders:KnownNetworks:0"] = "172.16.0.0/12";
+
+        RouterHost.ConfigureForwardedHeaders(builder).Should().BeTrue();
+
+        using ServiceProvider services = builder.Services.BuildServiceProvider();
+        var options = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>>().Value;
+        options.ForwardedHeaders.Should().Be(Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto,
+            "X-Forwarded-Host would get past the Host check against DNS rebinding");
+        options.KnownProxies.Should().Equal(IPAddress.Parse("10.1.2.3"));
+        options.KnownIPNetworks.Should().Equal(System.Net.IPNetwork.Parse("172.16.0.0/12"));
+
+        WebApplicationBuilder broken = WebApplication.CreateBuilder();
+        broken.Configuration["SemanticRouter:ForwardedHeaders:KnownNetworks:0"] = "everyone";
+        FluentActions.Invoking(() => RouterHost.ConfigureForwardedHeaders(broken)).Should().Throw<InvalidOperationException>().WithMessage("*KnownNetworks*everyone*");
+    }
 }

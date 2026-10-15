@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration.Json;
 using SemanticRouter.AspNetCore;
 
@@ -77,15 +78,65 @@ internal static class RouterHost
             .AddCopilotConnector()
             .UseSqliteState(Path.Combine(settings.ConfigurationDirectory, HostSettings.StateFileName));
 
+        bool behindProxy = ConfigureForwardedHeaders(builder);
         configure?.Invoke(builder);
 
         WebApplication app = builder.Build();
+        if (behindProxy)
+        {
+            app.UseForwardedHeaders();
+        }
+
         app.UsePromptRouter();
         app.MapRouterModels();
         app.MapAnthropicTokenCount();
         app.MapPromptClassification();
         app.MapRouterDashboard("/router");
         return app;
+    }
+
+    /// <summary>The configuration section that names the reverse proxies whose forwarded headers are trusted.</summary>
+    public const string ForwardedHeadersSection = "SemanticRouter:ForwardedHeaders";
+
+    /// <summary>
+    /// Behind a reverse proxy every request arrives from the proxy, so per-client rate limits, the activity log and the
+    /// local-client checks would all see one address. With <c>SemanticRouter:ForwardedHeaders:KnownProxies</c> (addresses)
+    /// or <c>KnownNetworks</c> (CIDR ranges) set, <c>X-Forwarded-For</c> and <c>X-Forwarded-Proto</c> from those proxies,
+    /// and only those, give the real client address and scheme. <c>X-Forwarded-Host</c> is not taken: the Host header
+    /// check against DNS rebinding keeps seeing what the browser sent. Returns whether any proxy is configured.
+    /// </summary>
+    internal static bool ConfigureForwardedHeaders(WebApplicationBuilder builder)
+    {
+        IConfigurationSection section = builder.Configuration.GetSection(ForwardedHeadersSection);
+        string[] proxies = section.GetSection("KnownProxies").Get<string[]>() ?? [];
+        string[] networks = section.GetSection("KnownNetworks").Get<string[]>() ?? [];
+        if (proxies.Length == 0 && networks.Length == 0)
+        {
+            return false;
+        }
+
+        IPAddress[] proxyAddresses = [.. proxies.Select(p => IPAddress.TryParse(p.Trim(), out IPAddress? address)
+            ? address
+            : throw new InvalidOperationException($"{ForwardedHeadersSection}:KnownProxies: '{p}' is not an IP address."))];
+        System.Net.IPNetwork[] proxyNetworks = [.. networks.Select(n => System.Net.IPNetwork.TryParse(n.Trim(), out System.Net.IPNetwork network)
+            ? network
+            : throw new InvalidOperationException($"{ForwardedHeadersSection}:KnownNetworks: '{n}' is not a CIDR range such as 10.0.0.0/8."))];
+        builder.Services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+            options.KnownProxies.Clear();
+            options.KnownIPNetworks.Clear();
+            foreach (IPAddress address in proxyAddresses)
+            {
+                options.KnownProxies.Add(address);
+            }
+
+            foreach (System.Net.IPNetwork network in proxyNetworks)
+            {
+                options.KnownIPNetworks.Add(network);
+            }
+        });
+        return true;
     }
 
     /// <summary>The exit code when the listen address is taken; a service manager does not restart on it.</summary>

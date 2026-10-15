@@ -326,6 +326,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             errors.Add("Middleware:Feedback:CorrectionSimilarity and CorrectionMargin must be from 0 to 1.");
         }
 
+        if (Middleware.RemoteRequestsPerMinute < 0)
+        {
+            errors.Add("Middleware:RemoteRequestsPerMinute must not be negative (0 turns it off).");
+        }
+
         foreach ((string client, RateLimitOptions limit) in Middleware.RateLimits)
         {
             if (string.IsNullOrWhiteSpace(client))

@@ -184,10 +184,11 @@ internal sealed partial class PromptRoutingMiddleware
         // A client over its rate limit is turned away before anything is spent on it. A client without a gateway key is
         // counted by its address.
         string rateClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
-        (string Name, RateLimitOptions Limit)? rateLimit = _rateLimiter is null ? null : ClientRateLimiter.LimitFor(options.RateLimits, client);
+        bool remoteClient = !DashboardAccess.IsLocal(context);
+        (string Name, RateLimitOptions Limit)? rateLimit = _rateLimiter is null ? null : ClientRateLimiter.LimitFor(options, client, remoteClient);
         if (rateLimit is { } limit)
         {
-            RateLimitDecision admission = _rateLimiter!.TryAdmit(rateClient, limit.Limit, chat.EstimatedInputTokens);
+            RateLimitDecision admission = _rateLimiter!.TryAdmit(rateClient, limit.Limit, chat.EstimatedInputTokens, remoteClient);
             if (!admission.Admitted)
             {
                 await RejectRateLimitedAsync(context, protocol, client, rateClient, chat, prompt, profile.Profile, admission).ConfigureAwait(false);

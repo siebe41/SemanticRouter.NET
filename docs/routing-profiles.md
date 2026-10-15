@@ -113,7 +113,7 @@ A model with `ActiveHours` is only tried inside that daily window. The window ca
 "Connectors": { "claude-code": { "Type": "Cli", "Preset": "ClaudeCode", "MaxConcurrency": 2, "MaxQueue": 4 } }
 ```
 
-`MaxConcurrency` limits how many CLI processes run at once; later requests wait. With `MaxQueue`, once that many requests are already waiting, the next request goes to the next model in its plan instead of joining the queue. The skip does not put the model into cooldown.
+`MaxConcurrency` limits how many CLI processes run at once; later requests wait. Once `MaxQueue` requests (16 unless set) are already waiting, the next request goes to the next model in its plan instead of joining the queue. The skip does not put the model into cooldown.
 
 ## Seeing it
 

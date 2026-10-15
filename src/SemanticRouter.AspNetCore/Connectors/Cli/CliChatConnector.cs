@@ -91,7 +91,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
 
         int waiting = Interlocked.Increment(ref _waiting);
-        if (_options.MaxQueue is { } maxQueue && _gate.CurrentCount == 0 && waiting > maxQueue)
+        if (_options.EffectiveMaxQueue is var maxQueue && _gate.CurrentCount == 0 && waiting > maxQueue)
         {
             Interlocked.Decrement(ref _waiting);
             return ConnectorResult.Skipped($"{waiting - 1} request(s) are already waiting for this CLI (MaxQueue {maxQueue})");
