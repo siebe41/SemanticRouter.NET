@@ -75,14 +75,15 @@ function serveStage() {
  * Starts everything a video needs and returns the kit.
  *   out, voiceDir  where frames go, and the narration made by tts.py for this video
  *   shells         [[id, cols, rows], …] for the terminals on the stage (ids match stage.html: router, claude)
+ *   loaded         the stand-in LM Studio's models in memory at the start (default: all of them)
  */
-async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], ['claude', 88, 34]] }) {
+async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], ['claude', 88, 34]], loaded }) {
   const durations = JSON.parse(fs.readFileSync(path.join(voiceDir, 'durations.json'), 'utf8'));
   prepareHome();
   fs.rmSync(out, { recursive: true, force: true });
   fs.mkdirSync(out, { recursive: true });
 
-  const stub = createStub({ project });
+  const stub = createStub({ project, loaded });
   await new Promise((r) => stub.listen(1234, '127.0.0.1', r));
   const stageServer = await serveStage();
 
@@ -131,6 +132,11 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       if (!(key in durations)) throw new Error(`No narration line "${key}" in ${voiceDir}`);
       narration.push({ key, wall: Date.now() / 1000 });
       return sleep(durations[key] * 1000);
+    },
+    /** Waits until the line started last with say(key) has this many seconds left, to time a beat to its last words. */
+    async secondsLeft(key, seconds) {
+      const started = narration.findLast((n) => n.key === key).wall;
+      await sleep(Math.max(0, (started + durations[key] - seconds) * 1000 - Date.now()));
     },
 
     screen: (id) => page.evaluate((i) => window.stage.screen(i), id),
@@ -236,7 +242,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
         await sleep(100);
       }
     },
-    /** Scrolls the dashboard; a highlight would stay where it was on screen while the page moves, so it goes first. */
+    /** Scrolls the dashboard to another part of the page; the current highlight belongs to the part it leaves. */
     async dashScroll(selector, block = 'center') {
       await k.unhighlight();
       await k.frame().locator(selector).first().evaluate((e, b) => e.scrollIntoView({ behavior: 'smooth', block: b }), block);
@@ -244,31 +250,51 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       await k.settle();
     },
     /**
-     * Outlines a dashboard element on the stage, and keeps following it: the dashboard re-renders as status arrives,
-     * and the element can move under a box drawn once.
+     * Outlines a dashboard element. The box is drawn inside the dashboard page and redrawn every frame, so it moves
+     * with the element as the page scrolls or re-renders, never a frame behind. Sizes are in stage pixels.
      */
     async highlight(selector, pad = 8) {
       if (tracker) await k.unhighlight();
-      // Bring it into view first, and measure only once the page has stopped scrolling.
+      // Bring it into view first: the box follows a scroll, but a still page reads better.
       const target = k.frame().locator(selector).first();
       const visible = await target.evaluate((e) => { const b = e.getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; });
       if (!visible) {
-        await k.unhighlight();
         await target.evaluate((e) => e.scrollIntoView({ behavior: 'smooth', block: 'center' }));
         await sleep(300);
       }
       await k.settle();
-      const measure = async () => {
-        const r = await target.evaluate((e) => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: Math.min(b.width, innerWidth - b.left - 8), h: b.height }; });
-        const f = await page.evaluate(() => { const i = document.getElementById('dash'); const b = i.getBoundingClientRect(); return { x: b.left, y: b.top, s: b.width / i.offsetWidth }; });
-        await k.stage('highlight', f.x + r.x * f.s - pad, f.y + r.y * f.s - pad, r.w * f.s + 2 * pad, r.h * f.s + 2 * pad);
-      };
-      await measure();
-      tracker = setInterval(() => measure().catch(() => {}), 100);
+      const scale = await page.evaluate(() => { const i = document.getElementById('dash'); return i.getBoundingClientRect().width / i.offsetWidth; });
+      await target.evaluate((e, { pad, s }) => {
+        const box = document.createElement('div');
+        Object.assign(box.style, {
+          position: 'fixed', zIndex: 2147483647, pointerEvents: 'none', opacity: '0', transition: 'opacity 250ms ease',
+          border: `${3 / s}px solid #d08c34`, borderRadius: `${10 / s}px`,
+          boxShadow: `0 0 0 9999px rgba(5, 8, 10, 0.45), 0 0 ${24 / s}px rgba(208, 140, 52, 0.55)`,
+        });
+        document.documentElement.appendChild(box);
+        const hl = window.demoHighlight = { el: e, box };
+        const p = pad / s;
+        const draw = () => {
+          if (window.demoHighlight !== hl) return;
+          const b = hl.el.getBoundingClientRect();
+          Object.assign(box.style, { left: `${b.left - p}px`, top: `${b.top - p}px`, width: `${Math.min(b.width, innerWidth - b.left - 8) + 2 * p}px`, height: `${b.height + 2 * p}px` });
+          requestAnimationFrame(draw);
+        };
+        draw();
+        requestAnimationFrame(() => { box.style.opacity = '1'; });
+      }, { pad, s: scale });
+      // A re-render can replace the element: point the box at whatever the selector finds now.
+      tracker = setInterval(() => target.evaluate((e) => { if (window.demoHighlight) window.demoHighlight.el = e; }).catch(() => {}), 200);
     },
     async unhighlight() {
-      if (tracker) { clearInterval(tracker); tracker = null; }
-      await k.stage('unhighlight');
+      if (!tracker) return;
+      clearInterval(tracker);
+      tracker = null;
+      await k.frame()?.evaluate(() => {
+        const hl = window.demoHighlight;
+        window.demoHighlight = null;
+        if (hl) { hl.box.style.opacity = '0'; setTimeout(() => hl.box.remove(), 300); }
+      }).catch(() => {});
       await sleep(250);
     },
 

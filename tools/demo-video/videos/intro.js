@@ -96,3 +96,7 @@ module.exports = async function intro(k) {
   await line;
   await sleep(1800);
 };
+
+// Only the small model is in memory at the start, so it answers the simple question; the coder loads for the first
+// coding task (with both loaded, the router would send everything local to the more capable coder).
+module.exports.loaded = ['qwen/qwen3-8b'];

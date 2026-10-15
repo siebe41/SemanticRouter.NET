@@ -107,10 +107,10 @@ module.exports = async function deepDive(k) {
 
   await k.go('overview');
   line = k.say('strategy');
-  await k.stage('caption', 'A strategy ranks the models that qualify', 'cheapest capable (default) · auto:best · auto:fastest · auto:priority');
+  await k.stage('caption', 'A strategy ranks the models that qualify', 'cheapest capable (default): local, loaded first → subscriptions, lowest tier first → paid');
   await classify(REGEX);
   await k.highlight('.tester >> text=Models, in order >> xpath=..');
-  await sleep(4200);
+  await k.secondsLeft('strategy', 5.5); // "Switch to auto best, …"
   await k.stage('sub', '<span class="cloud">auto:best</span> · the most capable model first');
   await classify(REGEX, 'auto:best');
   await k.highlight('.tester >> text=Models, in order >> xpath=..');

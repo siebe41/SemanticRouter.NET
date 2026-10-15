@@ -87,9 +87,6 @@
   #card .diagram .qn { position: absolute; top: -22px; left: 20px; width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: #0a1114; font-weight: 700; font-size: 22px; display: flex; align-items: center; justify-content: center; }
   #card .diagram .ans { margin-top: 14px; font-family: var(--font-mono); font-size: 19px; color: var(--accent-ink); }
   #card .diagram .arrow { font-size: 44px; color: var(--text-faint); }
-  #highlight { position: absolute; z-index: 5; border: 3px solid var(--signal); border-radius: 10px; box-shadow: 0 0 0 9999px rgba(5, 8, 10, 0.45), 0 0 24px rgba(208, 140, 52, 0.55);
-    opacity: 0; pointer-events: none; transition: opacity 250ms ease, left 100ms linear, top 100ms linear, width 100ms linear, height 100ms linear; }
-  #highlight.on { opacity: 1; }
 </style>
 </head>
 <body>
@@ -97,7 +94,6 @@
   <div class="win term off" id="w-claude"><div class="bar"><i></i><i></i><i></i><span>~/billing — claude</span></div><div class="body"><div class="scaler"><div id="t-claude"></div></div></div></div>
   <div class="win off" id="w-dash"><div class="bar"><i></i><i></i><i></i><div class="url">localhost:5080/router/#/live</div></div><div class="body"><div class="scaler"><iframe id="dash" src="about:blank"></iframe></div></div></div>
   <div id="caption" class="hidden"><div class="headline"></div><div class="sub"></div></div>
-  <div id="highlight"></div>
   <div id="card"></div>
 
 <script src="/node_modules/@xterm/xterm/lib/xterm.js"></script>
@@ -223,14 +219,6 @@
       $('card').classList.remove('hidden');
       for (const el of $('card').querySelectorAll('.fade')) { await sleep(800); el.classList.add('in'); }
     },
-
-    /** An outline around part of the stage (kit.highlight maps dashboard elements onto it). */
-    highlight(x, y, w, h) {
-      const b = $('highlight');
-      Object.assign(b.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' });
-      b.classList.add('on');
-    },
-    unhighlight() { $('highlight').classList.remove('on'); },
   };
   stage.layout('blank');
 </script>

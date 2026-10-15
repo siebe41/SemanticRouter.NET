@@ -76,13 +76,24 @@ if engine == "chatterbox":
         return a16, f0, voiced, loud
 
     def trim(audio):
-        """Cuts what comes before the first voiced sound and after the last (breaths, clicks), with short fades."""
-        _, _, voiced, _ = voicing(audio)
+        """Cuts the breaths and clicks before the speech and after it, with short fades. Speech runs from the first
+        voiced sound to the last, widened to the unvoiced consonants that touch it (the s of "tools", the t of "it"),
+        which voicing alone would clip."""
+        _, _, voiced, loud = voicing(audio)
         idx = np.where(voiced)[0]
         if not len(idx):
             return audio
-        start = max(0, int((idx[0] * 0.01 - 0.08) * rate))
-        end = min(len(audio), int((idx[-1] * 0.01 + 0.25) * rate))
+        quiet = 0.1 * np.median(loud[idx])
+
+        def extend(i, step):  # through sound louder than quiet, across gaps up to 80 ms (the hold before a t or k)
+            gap = 0
+            while 0 <= i + step < len(loud) and gap < 8:
+                i += step
+                gap = 0 if loud[i] > quiet else gap + 1
+            return i - step * gap
+
+        start = max(0, int((extend(idx[0], -1) * 0.01 - 0.05) * rate))
+        end = min(len(audio), int((extend(idx[-1], 1) * 0.01 + 0.2) * rate))
         audio = audio[start:end].copy()
         fade = int(0.02 * rate)
         audio[:fade] *= np.linspace(0, 1, fade)

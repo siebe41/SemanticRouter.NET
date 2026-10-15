@@ -15,11 +15,19 @@ function lastUserText(request) {
 }
 
 // project: the demo project's directory, for the absolute paths Claude Code's tools need.
-function createStub({ project = process.cwd() } = {}) {
+// loaded: the models in memory at the start (default both). Like LM Studio with just-in-time loading, a request
+// loads its model, and LM Studio's own API (/api/v0/models) reports which are loaded; the router prefers those.
+function createStub({ project = process.cwd(), loaded = models } = {}) {
+  const inMemory = new Set(loaded);
   return http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', async () => {
+      if (req.method === 'GET' && req.url === '/api/v0/models') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ object: 'list', data: models.map((id) => ({ id, object: 'model', type: 'llm', publisher: 'qwen', quantization: 'Q4_K_M', state: inMemory.has(id) ? 'loaded' : 'not-loaded', max_context_length: 40960, ...(inMemory.has(id) ? { loaded_context_length: 32768 } : {}), capabilities: ['tool_use'] })) }));
+        return;
+      }
       if (req.method === 'GET' && req.url.endsWith('/models')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ object: 'list', data: models.map((id) => ({ id, object: 'model', owned_by: 'organization_owner' })) }));
@@ -28,6 +36,7 @@ function createStub({ project = process.cwd() } = {}) {
 
       let request = {};
       try { request = JSON.parse(body || '{}'); } catch { /* not JSON */ }
+      if (models.includes(request.model)) inMemory.add(request.model);
       if (process.env.DEMO_STUB_LOG) require('fs').appendFileSync(process.env.DEMO_STUB_LOG, `----- ${request.model} roles=${(request.messages || []).map((m) => m.role + (m.tool_calls ? '(calls)' : '')).join(',')}\n${lastUserText(request)}\n`);
       // A tool round trip: call a tool the client offers, then answer from its result.
       const messages = request.messages || [];
