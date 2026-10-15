@@ -13,9 +13,9 @@ namespace SemanticRouter.Desktop;
 /// </summary>
 /// <remarks>
 /// <list type="bullet">
-/// <item>Windows: every <c>.exe</c> and <c>.dll</c> in the package must have a valid Authenticode signature
-/// (<c>WinVerifyTrust</c>), and the main executable and the app's own assemblies (<c>SemanticRouter.*</c>) must be
-/// signed by the publisher.</item>
+/// <item>Windows: every executable image in the package (whatever its extension) must have a valid Authenticode
+/// signature (<c>WinVerifyTrust</c>); the main executable and the app's own assemblies (<c>SemanticRouter.*</c>) must be
+/// signed by the publisher, and the rest by the publisher or Microsoft.</item>
 /// <item>macOS: the app bundle must pass <c>codesign --verify --deep --strict</c> with a Developer ID signature, and its
 /// team ID must be the publisher.</item>
 /// <item>Linux: the packages carry no signature, so every update is refused.</item>
@@ -30,6 +30,9 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
         MacOS,
         Linux,
     }
+
+    /// <summary>The subject of Microsoft's code-signing certificates, which sign the .NET runtime and ONNX Runtime.</summary>
+    internal const string Microsoft = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US";
 
     /// <summary>Where the app's files are in a Velopack package.</summary>
     private const string AppFolder = "lib/app/";
@@ -92,8 +95,9 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
 
     private string? RefusesWindows(ZipArchive zip, string id, string mainExe, string folder)
     {
-        ZipArchiveEntry[] code = [.. zip.Entries.Where(e => e.FullName.StartsWith(AppFolder, StringComparison.Ordinal)
-            && (e.FullName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || e.FullName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)))];
+        // Every Windows executable image, whatever its name: a library renamed to .bin is loaded just the same once
+        // SemanticRouter.deps.json names it, and that file carries no signature of its own.
+        ZipArchiveEntry[] code = [.. zip.Entries.Where(e => e.FullName.StartsWith(AppFolder, StringComparison.Ordinal) && !e.FullName.EndsWith('/') && IsExecutableImage(e))];
         if (!code.Any(e => e.FullName == AppFolder + mainExe))
         {
             return $"its package has no {mainExe}";
@@ -110,16 +114,25 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
                 return $"{relative} {problem}";
             }
 
-            // The app's own code must be the publisher's; the rest (the runtime, libraries, Velopack's updater) may be
-            // signed by whoever made it.
+            // The app's own code must be the publisher's. The rest is the publisher's too (vpk signs every unsigned
+            // file with the release's certificate) or Microsoft's (the .NET runtime, ONNX Runtime): a valid signature
+            // from anyone else is not enough, or a cheap code-signing certificate would let a tampered package through.
             bool own = relative == mainExe || Path.GetFileName(relative).StartsWith(id + ".", StringComparison.OrdinalIgnoreCase);
-            if (own && !Matches(signature))
+            if (!Matches(signature) && (own || signature.Signer is not { } signer || !SignedBy(signer, Microsoft)))
             {
-                return $"{relative} is signed by {Describe(signature)}, not by {publisher}";
+                return $"{relative} is signed by {Describe(signature)}, not by {publisher}{(own ? string.Empty : " or Microsoft")}";
             }
         }
 
         return null;
+    }
+
+    /// <summary>Whether <paramref name="entry"/> is a Windows executable image (<c>MZ</c>): a program or a library.</summary>
+    private static bool IsExecutableImage(ZipArchiveEntry entry)
+    {
+        using Stream stream = entry.Open();
+        Span<byte> header = stackalloc byte[2];
+        return stream.ReadAtLeast(header, 2, throwOnEndOfStream: false) == 2 && header[0] == (byte)'M' && header[1] == (byte)'Z';
     }
 
     private string? RefusesMacOS(ZipArchive zip, string id, string mainExe, string folder)

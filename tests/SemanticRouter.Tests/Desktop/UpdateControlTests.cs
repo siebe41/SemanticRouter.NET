@@ -218,16 +218,33 @@ public sealed class UpdateControlTests : IDisposable
     }
 
     [Fact]
-    public void On_Windows_the_apps_own_code_must_be_the_publishers_and_the_rest_validly_signed()
+    public void On_Windows_the_apps_own_code_must_be_the_publishers_and_the_rest_the_publishers_or_microsofts()
     {
-        using X509Certificate2 microsoft = Certificate("CN=Microsoft Corporation, O=Microsoft Corporation, C=US");
+        using X509Certificate2 microsoft = Certificate(UpdatePublisher.Microsoft);
         string package = WindowsPackage();
         UpdatePublisher Check(Func<string, CodeSignature> read) => new("Contoso Ltd", UpdatePublisher.Platform.Windows, new FakeSignatures(read));
         CodeSignature Ours(string file) => Path.GetFileName(file).StartsWith("SemanticRouter", StringComparison.Ordinal) ? new CodeSignature(null, Contoso) : new CodeSignature(null, microsoft);
 
         Check(Ours).Refuses(package).Should().BeNull("the app is Contoso's; the runtime and the updater are signed by their makers");
         Check(f => Path.GetFileName(f) == "SemanticRouter.Core.dll" ? new CodeSignature(null, microsoft) : Ours(f)).Refuses(package)
-            .Should().Be("SemanticRouter.Core.dll is signed by CN=Microsoft Corporation, O=Microsoft Corporation, C=US, not by Contoso Ltd");
+            .Should().Be($"SemanticRouter.Core.dll is signed by {microsoft.Subject}, not by Contoso Ltd");
+        Check(f => Path.GetFileName(f) == "Squirrel.exe" ? new CodeSignature(null, Contoso) : Ours(f)).Refuses(package)
+            .Should().BeNull("vpk signs the updater with the release's certificate");
+
+        // A valid signature from anyone else is not enough: a cheap certificate would let a tampered library through.
+        using X509Certificate2 mallory = Certificate("CN=Mallory, O=Mallory, C=US");
+        Check(f => Path.GetFileName(f) == "onnxruntime.dll" ? new CodeSignature(null, mallory) : Ours(f)).Refuses(package)
+            .Should().Be($"onnxruntime.dll is signed by {mallory.Subject}, not by Contoso Ltd or Microsoft");
+        using X509Certificate2 lookalike = Certificate("CN=Microsoft Corporation, O=Mallory, C=US");
+        Check(f => Path.GetFileName(f) == "onnxruntime.dll" ? new CodeSignature(null, lookalike) : Ours(f)).Refuses(package)
+            .Should().StartWith("onnxruntime.dll is signed by");
+
+        // Any executable image is checked, whatever its name (SemanticRouter.deps.json can name a library .bin); other files are not.
+        string renamed = Package("renamed.nupkg", "SemanticRouter.exe", ["lib/app/SemanticRouter.exe", "lib/app/native.bin", "lib/app/readme.txt"]);
+        var read = new List<string>();
+        Check(f => { read.Add(Path.GetFileName(f)); return Path.GetFileName(f) == "native.bin" ? new CodeSignature(null, mallory) : Ours(f); })
+            .Refuses(renamed).Should().Be($"native.bin is signed by {mallory.Subject}, not by Contoso Ltd or Microsoft");
+        read.Should().NotContain("readme.txt");
         Check(f => Path.GetFileName(f) == "onnxruntime.dll" ? new CodeSignature("is not signed") : Ours(f)).Refuses(package)
             .Should().Be("onnxruntime.dll is not signed");
         Check(f => Path.GetFileName(f) == "Squirrel.exe" ? new CodeSignature("was changed after it was signed") : Ours(f)).Refuses(package)
@@ -295,6 +312,7 @@ public sealed class UpdateControlTests : IDisposable
         CodeSignature microsoft = signatures.Read(signed);
         microsoft.Problem.Should().BeNull();
         microsoft.Signer!.GetNameInfo(X509NameType.SimpleName, false).Should().Be("Microsoft Corporation");
+        UpdatePublisher.SignedBy(microsoft.Signer, UpdatePublisher.Microsoft).Should().BeTrue("the runtime's files are signed with the subject the check accepts");
         signatures.Read(typeof(UpdateControlTests).Assembly.Location).Problem.Should().Be("is not signed");
 
         string changed = Path.Combine(_directory, "changed.dll");
@@ -371,8 +389,9 @@ public sealed class UpdateControlTests : IDisposable
         Nuspec(zip, mainExe);
         foreach (string file in files)
         {
+            // Programs and libraries start as Windows executable images do; the rest is text.
             using StreamWriter writer = new(zip.CreateEntry(file).Open());
-            writer.Write("not really " + file);
+            writer.Write((file.EndsWith(".exe", StringComparison.Ordinal) || file.EndsWith(".dll", StringComparison.Ordinal) || file.EndsWith(".bin", StringComparison.Ordinal) ? "MZ" : string.Empty) + "not really " + file);
         }
 
         return path;
