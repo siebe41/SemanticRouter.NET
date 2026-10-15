@@ -232,9 +232,9 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       }
       throw new Error(`Timed out waiting for ${pattern} in the ${id} terminal:\n${await k.screen(id)}`);
     },
-    /** Types like a person: about 18 characters a second, then Enter. */
-    async type(id, text, enter = true) {
-      for (const ch of text) { shells[id].write(ch); await sleep(35 + Math.random() * 45); }
+    /** Types like a person: about 18 characters a second (pace 2 is twice that), then Enter. */
+    async type(id, text, enter = true, pace = 1) {
+      for (const ch of text) { shells[id].write(ch); await sleep((35 + Math.random() * 45) / pace); }
       if (enter) { await sleep(280); shells[id].write('\r'); }
     },
     /** Runs a command at once, for setup the camera doesn't need to watch. */

@@ -16,13 +16,14 @@ module.exports = async function short(k) {
   k.run('claude', `export ANTHROPIC_BASE_URL=${router} ANTHROPIC_AUTH_TOKEN=semantic-router CLAUDE_CODE_MAX_CONTEXT_TOKENS=200000; clear; claude --model semantic-router`);
   await k.waitFor('claude', /Claude Code v/);
   await k.stage('layout', 'vterm');
+  // The hook card is up before the first frame: it is the thumbnail, and the line starts at once.
+  await k.stage('title', 'Stop paying frontier prices<br>for small prompts.');
   await sleep(1200);
 
   await k.record();
 
   // The hook.
   let line = k.say('hook');
-  await k.stage('title', 'Stop paying frontier prices<br>for small prompts.');
   await line;
   await k.stage('hideCard');
   await sleep(500);
@@ -33,21 +34,26 @@ module.exports = async function short(k) {
     const failed = (e.sentTo || []).filter((m) => m !== e.servedBy).map((m) => `<span class="fail">${m}</span> `).join('');
     return `<b>${failed}<span class="${k.isLocal(e.servedBy) ? 'local' : 'cloud'}">→ ${e.servedBy}</span></b><small>tier ${e.tier} · ${note}</small>`;
   };
-  const turn = async (key, headline, prompt, done, note, hold = 900) => {
+  // Each prompt is typed while the last decision is still up, and sent as its line starts, so the voice never waits
+  // for the typing and the decision lands while it is being talked about.
+  const turn = async (key, headline, prompt, done, note, typeFirst = true) => {
+    if (typeFirst) await k.type('claude', prompt, false, 1.6);
     line = k.say(key);
-    await k.stage('caption', headline, '');
-    const e = await k.ask(prompt, done);
-    await k.stage('sub', chip(e, note));
-    await Promise.all([line, sleep(2200)]);
-    await sleep(hold);
+    const caption = k.stage('caption', headline, '');
+    if (typeFirst) k.shells.claude.write('\r'); else await k.type('claude', prompt, true, 1.6);
+    await k.waitFor('claude', done);
+    await caption;
+    await k.stage('sub', chip(await k.decision(prompt), note));
+    await Promise.all([line, sleep(1000)]);
   };
-  await turn('hello', 'A simple question', 'hi! what can you do?', /What would you like to work on/, 'local · free · stays on this machine', 300);
-  await turn('code', 'A quick coding task', 'write a unit test for the InvoiceTotal function', /Assert\.Equal/, 'the local coder · free', 300);
+  await turn('hello', 'A simple question', 'hi! what can you do?', /What would you like to work on/, 'local · free · stays on this machine', false);
+  await turn('code', 'A quick coding task', 'write a unit test for the InvoiceTotal function', /Assert\.Equal/, 'the local coder · free');
   await turn('hard', 'A hard debugging question', 'the invoice job deadlocks under load, find the root cause', /three-file change/, 'your Claude subscription');
 
   // Claude's session limit runs out mid-conversation.
   fs.writeFileSync(k.limitFile, '');
-  await turn('limit', 'Claude hits its session limit', 'why does the cache serve stale data after a deploy?', /Startup\.cs/, 'Claude cools down until it resets', 1000);
+  await turn('limit', 'Claude hits its session limit', 'why does the cache serve stale data after a deploy?', /Startup\.cs/, 'Claude cools down until it resets');
+  await sleep(1200);
 
   // End.
   await k.stage('hideCaption');
