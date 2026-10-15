@@ -3,8 +3,9 @@ using System.Diagnostics;
 namespace SemanticRouter;
 
 /// <summary>
-/// The default <see cref="IPromptClassifier"/>: complexity heuristics, then embedding similarity
-/// against the route index, then an <see cref="IRouteSelector"/> policy that decides the required model tier.
+/// The default <see cref="IPromptClassifier"/>: complexity heuristics, then embedding similarity of the prompt's prose
+/// (<see cref="SemanticRouterOptions.EmbedProseOnly"/>) against the route index, then an <see cref="IRouteSelector"/>
+/// policy that decides the required model tier.
 /// </summary>
 /// <remarks>
 /// The route index is built lazily on first use (or by <see cref="WarmUpAsync"/>) and cached for the
@@ -99,8 +100,8 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
         if (_routes.Length > 0)
         {
             SemanticRouteIndex index = await GetIndexAsync(cancellationToken).ConfigureAwait(false);
-            ReadOnlyMemory<float> embedding =
-                await _embeddingProvider.GenerateEmbeddingAsync(prompt, cancellationToken).ConfigureAwait(false);
+            ReadOnlyMemory<float> embedding = await _embeddingProvider.GenerateEmbeddingAsync(
+                _options.EmbedProseOnly ? PromptProse.Extract(prompt) : prompt, cancellationToken).ConfigureAwait(false);
             ranked = index.Score(embedding.Span);
         }
 

@@ -188,7 +188,8 @@ public sealed class RoutingEvaluator
         {
             SemanticRouteIndex index = await SemanticRouteIndex.BuildAsync(_routes, _embeddings, _options.ScoringStrategy, cancellationToken).ConfigureAwait(false);
             IReadOnlyList<ReadOnlyMemory<float>> vectors =
-                await _embeddings.GenerateEmbeddingsAsync(cases.Select(c => c.Prompt).ToArray(), cancellationToken).ConfigureAwait(false);
+                await _embeddings.GenerateEmbeddingsAsync(
+                    cases.Select(c => _options.EmbedProseOnly ? PromptProse.Extract(c.Prompt) : c.Prompt).ToArray(), cancellationToken).ConfigureAwait(false);
             if (vectors.Count != cases.Count)
             {
                 throw new InvalidOperationException($"Embedding provider returned {vectors.Count} vectors for {cases.Count} prompts.");

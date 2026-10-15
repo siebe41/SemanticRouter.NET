@@ -30,7 +30,7 @@ A JSON array of the same objects works too, as does `{"cases": [...]}`. Use the 
 - **Route accuracy**, for cases that name a route.
 - **Misrouted prompts**, each with the reason (`NoMatchFallback`, `AmbiguousMatchEscalation`, …) and the best route scores behind the decision. **Add to route…** adds the prompt as an utterance and runs the set again.
 
-The evaluator decides exactly as the router does, with `DefaultRouteSelector`, the complexity rules and the short-circuit. A custom `IRouteSelector` or `IPromptClassifier` is not used here.
+The evaluator decides exactly as the router does, with `DefaultRouteSelector`, the complexity rules and the short-circuit, and embeds the same text: the prose of each prompt, without pasted code (`EmbedProseOnly`). A custom `IRouteSelector` or `IPromptClassifier` is not used here.
 
 ## Calibrating thresholds
 

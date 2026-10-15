@@ -99,7 +99,7 @@ The classifier, router, connectors and extractor are rebuilt as one unit when co
 
 ### Step 1: requirements from the prompt
 
-**Semantic matching.** Each route is an intent cluster: example utterances plus the `Tier` (and optionally `RequiredCapabilities` and `LocalOnly`) that intent needs. Utterances are embedded once, in a batch, and stored L2-normalized in one contiguous matrix. Scoring a prompt costs one embedding call and a sweep of SIMD dot products (`MaxSimilarity` nearest neighbour, or `Centroid`).
+**Semantic matching.** Each route is an intent cluster: example utterances plus the `Tier` (and optionally `RequiredCapabilities` and `LocalOnly`) that intent needs. Utterances are embedded once, in a batch, and stored L2-normalized in one contiguous matrix. Scoring a prompt costs one embedding call and a sweep of SIMD dot products (`MaxSimilarity` nearest neighbour, or `Centroid`). Only the prompt's prose is embedded: fenced code blocks, and unfenced runs of eight or more lines that look like pasted code or logs, are left out, so a long function under "write a unit test for this function" does not hide the instruction. A prompt that is only code is embedded whole, and the complexity heuristics below still read the code.
 
 **Complexity heuristics.** A single pass extracts four signals in [0, 1]:
 
@@ -382,6 +382,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `ComplexityShortCircuitThreshold` | `0.9` | Skip embedding for obviously hard prompts. Set above 1 to disable. |
 | `AmbiguityMargin` | `0.02` | Near-tied routes contribute their tier. `0` disables. |
 | `ScoringStrategy` | `MaxSimilarity` | `MaxSimilarity` or `Centroid`. |
+| `EmbedProseOnly` | `true` | Embed a prompt without its fenced code blocks and long pasted code or logs (eight or more lines that look like code). `false` embeds the whole prompt. |
 | `ClassificationCache:Enabled` / `MaxEntries` / `MaxAge` | `true` / `2048` / `00:10:00` | Reuse a recent decision for the same prompt (whitespace-normalised) instead of embedding it again. In memory, per configuration version. |
 | `Profiles:{name}` | `{}` | Routing profiles: `AllowedModels[]`, `DeniedModels[]` (globs), `AllowedConnectors[]`, `DeniedConnectors[]`, `MinTier`, `MaxTier`, `Strategy`, `LocalOnly`, `Description`. See [docs/routing-profiles.md](docs/routing-profiles.md). |
 | `Complexity:*` | | `TokenSaturation`, `{Length,Code,Structure,Reasoning}Weight`, `ReasoningKeywords`, … |

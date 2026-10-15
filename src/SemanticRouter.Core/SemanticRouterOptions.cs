@@ -111,6 +111,14 @@ public class SemanticRouterOptions
     /// <summary>How utterance similarities are aggregated per route. Default <see cref="RouteScoringStrategy.MaxSimilarity"/>.</summary>
     public RouteScoringStrategy ScoringStrategy { get; set; } = RouteScoringStrategy.MaxSimilarity;
 
+    /// <summary>
+    /// Compare only the prose of a prompt with the utterances: fenced code blocks, and unfenced runs of eight or more
+    /// lines that look like pasted code or logs, are left out of the embedding (complexity still counts them). A prompt
+    /// that is only code is embedded whole. Without this, "write a unit test for this function" with a long function
+    /// pasted under it embeds mostly as the function and matches no route. Default <see langword="true"/>.
+    /// </summary>
+    public bool EmbedProseOnly { get; set; } = true;
+
     /// <summary>How many of the best route scores to include in <see cref="PromptClassificationResult.TopScores"/>. Default 3.</summary>
     public int MaxReportedScores { get; set; } = 3;
 
