@@ -100,8 +100,11 @@ function glide(locator, block) {
  *   out, voiceDir  where frames go, and the narration made by tts.py for this video
  *   shells         [[id, cols, rows], …] for the terminals on the stage (ids match stage.html: router, claude)
  *   loaded         the stand-in LM Studio's models in memory at the start (default: all of them)
+ *   paidApi        model ids for a stand-in paid OpenAI-compatible API at http://paid-api.example:4000 (the name
+ *                  needs an /etc/hosts entry, which this adds when it can: an address that is not this machine's,
+ *                  so the router treats it as a cloud API, and a reserved domain, so nobody mistakes it for one)
  */
-async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], ['claude', 88, 34]], loaded }) {
+async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], ['claude', 88, 34]], loaded, paidApi }) {
   const durations = JSON.parse(fs.readFileSync(path.join(voiceDir, 'durations.json'), 'utf8'));
   prepareHome();
   fs.rmSync(out, { recursive: true, force: true });
@@ -109,6 +112,17 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
 
   const stub = createStub({ project, loaded });
   await new Promise((r) => stub.listen(1234, '127.0.0.1', r));
+  let paid = null;
+  if (paidApi) {
+    const hosts = fs.readFileSync('/etc/hosts', 'utf8');
+    if (!/\spaid-api\.example\b/.test(hosts)) {
+      try { fs.appendFileSync('/etc/hosts', '\n127.0.0.1 paid-api.example\n'); } catch {
+        throw new Error('Add "127.0.0.1 paid-api.example" to /etc/hosts: the paid API stand-in is served under that name.');
+      }
+    }
+    paid = createStub({ project, models: paidApi, localApi: false });
+    await new Promise((r) => paid.listen(4000, '127.0.0.1', r));
+  }
   const stageServer = await serveStage();
 
   const browser = await chromium.launch();
@@ -147,8 +161,18 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
   let background = null;
   let tracker = null;
 
+  // The dashboard is drawn scaled in the stage's window: sizes meant in stage pixels are divided by this.
+  const dashScale = () => page.evaluate(() => { const i = document.getElementById('dash'); return i.getBoundingClientRect().width / i.offsetWidth; });
+  const press = () => k.pointer && k.frame().evaluate(() => new Promise((done) => {
+    const c = document.getElementById('demo-pointer');
+    if (!c) { done(); return; }
+    c.style.transform = 'scale(0.82)';
+    setTimeout(() => { c.style.transform = ''; setTimeout(done, 120); }, 130);
+  }));
+  const glideTo = (y) => k.frame().evaluate((top) => window.scrollTo({ top, behavior: 'instant' }), y);
+
   const k = {
-    home, project, router, limitFile, env, sleep, page, shells,
+    home, project, router, limitFile, env, sleep, page, shells, lmstudio: stub, paidApi: paid, paidApiUrl: 'http://paid-api.example:4000/v1',
     stage: (fn, ...args) => page.evaluate(([f, a]) => window.stage[f](...a), [fn, args]),
 
     /** Starts a narration line; resolves when it has been spoken. */
@@ -251,14 +275,69 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
     /** Types into a dashboard field; long text goes faster, so it doesn't outlast its narration. */
     async dashType(selector, text) {
       const field = k.frame().locator(selector).first();
+      await k.point(field);
       await field.fill('');
       await field.pressSequentially(text, { delay: text.length > 80 ? 8 : 28 });
       // Keystrokes that land while the dashboard re-renders are lost if it drops the focus: fail the take, not the viewer.
       const typed = await field.inputValue();
       if (typed !== text) throw new Error(`Typed "${text}" but the field holds "${typed}"`);
+      // Settings fields take their value on change (when you leave them).
+      await field.evaluate((e) => e.dispatchEvent(new Event('change', { bubbles: true })));
     },
-    dashClick: (selector) => k.frame().locator(selector).first().click(),
-    dashSelect: (selector, value) => k.frame().locator(selector).first().selectOption(value),
+    async dashCheck(selector, on = true) {
+      const target = k.frame().locator(selector).first();
+      await k.point(target);
+      await press();
+      await target.setChecked(on);
+    },
+    /** Clicks a dashboard element, the pointer going there first. */
+    async dashClick(selector) {
+      const target = k.frame().locator(selector).first();
+      await k.point(target);
+      await press();
+      await target.click();
+    },
+    async dashSelect(selector, value) {
+      const target = k.frame().locator(selector).first();
+      await k.point(target);
+      await target.selectOption(value);
+    },
+    /** Opens a dashboard page from the sidebar, as a person would. */
+    async nav(view) {
+      await k.unhighlight();
+      await k.dashClick(`#nav a[href="#/${view}"]`);
+      await k.stage('url', `${router}/router/#/${view}`);
+      await glideTo(0);
+      await sleep(700);
+    },
+    /** Whether clicks and typing in the dashboard show a mouse pointer moving there (the how-to turns it on). */
+    pointer: false,
+    /** Moves the pointer onto an element (a locator in the dashboard), scrolling it into view first if need be. */
+    async point(target) {
+      if (!k.pointer) return;
+      const visible = await target.evaluate((e) => { const b = e.getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; });
+      if (!visible) { await glide(target, 'center'); await k.settle(); }
+      const scale = await dashScale();
+      await target.evaluate((e, s) => new Promise((done) => {
+        let c = document.getElementById('demo-pointer');
+        if (!c) {
+          c = document.createElement('div');
+          c.id = 'demo-pointer';
+          c.innerHTML = '<svg viewBox="0 0 16 24" width="100%" height="100%"><path d="M1 1 L1 19 L5.5 14.5 L8.5 22 L11.5 20.8 L8.6 13.5 L14.5 13.5 Z" fill="#fff" stroke="#111" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+          Object.assign(c.style, {
+            position: 'fixed', zIndex: 2147483647, pointerEvents: 'none', width: `${20 / s}px`, height: `${30 / s}px`,
+            left: `${innerWidth * 0.6}px`, top: `${innerHeight * 0.55}px`, filter: 'drop-shadow(0 1px 2px rgba(0,0,0,.5))',
+            transition: 'left 650ms cubic-bezier(.4,0,.2,1), top 650ms cubic-bezier(.4,0,.2,1), transform 120ms ease',
+          });
+          document.documentElement.appendChild(c);
+          c.getBoundingClientRect();
+        }
+        const b = e.getBoundingClientRect();
+        c.style.left = `${b.left + Math.min(b.width / 2, 48)}px`;
+        c.style.top = `${b.top + b.height / 2}px`;
+        setTimeout(done, 700);
+      }), scale);
+    },
     /** Waits until the dashboard has stopped scrolling (smooth scrolls take a variable time). */
     async settle() {
       let last = null; let still = 0;
@@ -286,7 +365,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       const visible = await target.evaluate((e) => { const b = e.getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; });
       if (!visible) await glide(target, 'center');
       await k.settle();
-      const scale = await page.evaluate(() => { const i = document.getElementById('dash'); return i.getBoundingClientRect().width / i.offsetWidth; });
+      const scale = await dashScale();
       await target.evaluate((e, { pad, s }) => {
         const box = document.createElement('div');
         Object.assign(box.style, {
@@ -345,7 +424,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       timers.forEach(clearInterval);
       if (background) background.kill();
       await browser.close();
-      stub.close(); stageServer.close();
+      stub.close(); stageServer.close(); paid?.close();
       fs.rmSync(limitFile, { force: true });
 
       // Each frame lasts until the next one; the narration goes on the same clock (frame time ≈ arrival time - lag).

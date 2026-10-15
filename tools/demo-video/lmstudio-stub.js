@@ -1,10 +1,11 @@
-// A stand-in for LM Studio's OpenAI-compatible server, for the demo video: lists two models and streams the reply
-// from replies.js for the latest user message, quickly, the way a local model on a good GPU would.
+// A stand-in for LM Studio's OpenAI-compatible server, for the demo videos: lists two models and streams the reply
+// from replies.js for the latest user message, quickly, the way a local model on a good GPU would. With other models
+// and localApi off, it stands in for a paid OpenAI-compatible API instead.
 //   node lmstudio-stub.js [port]     (default 1234, LM Studio's own port)
 const http = require('http');
 const { replyFor, words, toolCallFor, afterTool } = require('./replies');
 
-const models = ['qwen/qwen3-8b', 'qwen/qwen3-coder-30b'];
+const lmStudioModels = ['qwen/qwen3-8b', 'qwen/qwen3-coder-30b'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function lastUserText(request) {
@@ -15,17 +16,19 @@ function lastUserText(request) {
 }
 
 // project: the demo project's directory, for the absolute paths Claude Code's tools need.
-// loaded: the models in memory at the start (default both). Like LM Studio with just-in-time loading, a request
-// loads its model, and LM Studio's own API (/api/v0/models) reports which are loaded; the router prefers those.
-function createStub({ project = process.cwd(), loaded = models } = {}) {
+// models: the model ids it lists. loaded: those in memory at the start (default all). Like LM Studio with
+// just-in-time loading, a request loads its model, and LM Studio's own API (/api/v0/models, unless localApi is off)
+// reports which are loaded; the router prefers those. addModel(id) lists another, as if just downloaded.
+function createStub({ project = process.cwd(), models: listed = lmStudioModels, loaded = listed, localApi = true } = {}) {
+  const models = [...listed];
   const inMemory = new Set(loaded);
-  return http.createServer((req, res) => {
+  const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', async () => {
-      if (req.method === 'GET' && req.url === '/api/v0/models') {
+      if (localApi && req.method === 'GET' && req.url === '/api/v0/models') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ object: 'list', data: models.map((id) => ({ id, object: 'model', type: 'llm', publisher: 'qwen', quantization: 'Q4_K_M', state: inMemory.has(id) ? 'loaded' : 'not-loaded', max_context_length: 40960, ...(inMemory.has(id) ? { loaded_context_length: 32768 } : {}), capabilities: ['tool_use'] })) }));
+        res.end(JSON.stringify({ object: 'list', data: models.map((id) => ({ id, object: 'model', type: /gemma-3|-vl/.test(id) ? 'vlm' : 'llm', publisher: id.split('/')[0], quantization: 'Q4_K_M', state: inMemory.has(id) ? 'loaded' : 'not-loaded', max_context_length: 40960, ...(inMemory.has(id) ? { loaded_context_length: 32768 } : {}), capabilities: ['tool_use'] })) }));
         return;
       }
       if (req.method === 'GET' && req.url.endsWith('/models')) {
@@ -33,6 +36,7 @@ function createStub({ project = process.cwd(), loaded = models } = {}) {
         res.end(JSON.stringify({ object: 'list', data: models.map((id) => ({ id, object: 'model', owned_by: 'organization_owner' })) }));
         return;
       }
+      if (req.method === 'GET') { res.writeHead(404); res.end(); return; }
 
       let request = {};
       try { request = JSON.parse(body || '{}'); } catch { /* not JSON */ }
@@ -83,6 +87,8 @@ function createStub({ project = process.cwd(), loaded = models } = {}) {
       res.end('data: [DONE]\n\n');
     });
   });
+  server.addModel = (id) => { if (!models.includes(id)) models.push(id); };
+  return server;
 }
 
 module.exports = { createStub };

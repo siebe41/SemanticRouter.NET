@@ -11,7 +11,7 @@ const [video = 'intro', out = 'out/frames', voice = 'out/voice'] = process.argv.
 const scenes = require(`./videos/${video}`);
 
 (async () => {
-  const k = await kit.start({ out: path.resolve(out), voiceDir: path.resolve(voice), shells: scenes.shells, loaded: scenes.loaded });
+  const k = await kit.start({ out: path.resolve(out), voiceDir: path.resolve(voice), shells: scenes.shells, loaded: scenes.loaded, paidApi: scenes.paidApi });
   try {
     await scenes(k);
   } finally {

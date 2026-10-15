@@ -7,7 +7,7 @@ they can be re-recorded whenever the product changes.
 |---|---|---|---|---|
 | 1 | **Intro** ([record.js](record.js)) | ~1:45 | anyone | What is it, how fast is setup, what does it do for me? |
 | 2 | **Deep dive: how a prompt gets routed** ([videos/deep-dive.js](videos/deep-dive.js), recorded) | ~3 min | developers deciding whether to trust it | Why did *this* prompt go to *that* model, and what happens when things go wrong? |
-| 3 | **How-to: the settings** | ~6 min | new users after `init` | How do I make it fit my models, my budget and my privacy rules? |
+| 3 | **How-to: the settings** ([videos/settings.js](videos/settings.js), recorded) | ~3:30 | new users after `init` | How do I make it fit my models, my budget and my privacy rules? |
 
 Later candidates, each 1–2 minutes: per-client setup clips (Codex CLI, GitHub Copilot, Open WebUI, the OpenAI SDK);
 the memory map and privacy; a vertical cut of the intro for social media.
@@ -60,7 +60,12 @@ Kit work needed: a diagram card (chapter 1), zoomed callouts on dashboard region
 an outline box), a curl pane (a third terminal), clicking through dashboard pages from `record.js`
 (`page.frameLocator('#dash')`), and replies in `replies.js` for the new prompts.
 
-## 3. How-to: the settings (~6 min)
+## 3. How-to: the settings (recorded, ~3:30)
+
+Recorded as [videos/settings.js](videos/settings.js), tighter than this outline: where settings live, Discover for a
+model LM Studio just downloaded, a paid API (connector, key, Discover, prices), Evaluate's "Add to route…" fixing a
+misroute, a local-only profile picked by project, a budget, and `doctor`. Left out for a later clip: embeddings,
+gateway keys and rate limits, active hours. The outline it was built from:
 
 Setup: a fresh `init` configuration, then each change made on the dashboard and applied live. Ends with `semantic-router
 doctor`. Each section opens with the question a user has.

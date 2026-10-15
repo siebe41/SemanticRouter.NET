@@ -6,6 +6,7 @@ Records narrated videos of SemanticRouter.NET from scripts, so they can be re-re
 |---|---|---|---|
 | **Intro**: install, `init`, start, Claude Code routed turn by turn, failover, the dashboard | [videos/intro.js](videos/intro.js) | [narration/intro.json](narration/intro.json) | ~1:50 |
 | **Deep dive**: how a prompt gets routed (routes, the prompt tester, complexity, tiers, strategies, a tool round trip, callouts, secret detection, failover, Activity, Evaluate) | [videos/deep-dive.js](videos/deep-dive.js) | [narration/deep-dive.json](narration/deep-dive.json) | ~3:05 |
+| **How-to: the settings**: where they live, a model LM Studio just downloaded, a paid API and its prices, fixing a misroute with Evaluate, a local-only profile, a budget, `doctor` | [videos/settings.js](videos/settings.js) | [narration/settings.json](narration/settings.json) | ~3:30 |
 
 [kit.js](kit.js) holds what they share (the demo user, the stand-in models, the shells, the stage, the dashboard
 helpers, the narration clock), [stage.html](stage.html) is what the camera sees, and [PLAN.md](PLAN.md) lists the
@@ -82,6 +83,11 @@ the Claude Code binary if `claude` on your `PATH` is not it.
 
 For the deep dive, use `deep-dive` and `narration/deep-dive.json` in the same commands. It installs and starts the
 router off camera (with secret detection turned on through the admin API), so it starts on the title card.
+
+For the settings how-to, use `settings` and `narration/settings.json`. It clicks and types on the dashboard with a
+pointer on screen, and adds a stand-in paid API, served as `paid-api.example:4000` (a reserved domain, so it is never
+mistaken for a real provider, and not this machine's name, so the router treats it as a cloud API). That name needs
+`127.0.0.1 paid-api.example` in `/etc/hosts`; the kit adds the line when it may write the file.
 
 To change the story, edit the lines in the video's narration file (then run `tts.py` again; every beat waits for its
 line, and `TTS_ONLY=hello,code` redoes just those lines), the prompts and captions in its script under `videos/`,

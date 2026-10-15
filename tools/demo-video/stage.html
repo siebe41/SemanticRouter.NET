@@ -119,6 +119,8 @@
     split:   { router: [190, 50, 1540, 860, 'off'], claude: [24, 24, 1010, 892], dash: [1058, 24, 838, 892, 1180] },
     // The dashboard on its own, with Claude Code waiting off to the left.
     dash:    { router: [190, 50, 1540, 860, 'off'], claude: [-1010, 24, 1010, 892, 'off'], dash: [24, 24, 1872, 892, 1440] },
+    // The same, drawn larger (the page is laid out 1200 px wide), for forms people should be able to read.
+    zoom:    { router: [190, 50, 1540, 860, 'off'], claude: [-1010, 24, 1010, 892, 'off'], dash: [24, 24, 1872, 892, 1200] },
   };
 
   function place(win, spec) {
@@ -161,6 +163,8 @@
       place($('w-router'), l.router); place($('w-claude'), l.claude); place($('w-dash'), l.dash);
     },
     dash(url) { $('dash').src = url; $('w-dash').querySelector('.url').textContent = url.replace(/^https?:\/\//, ''); },
+    /** The address bar only, for navigation inside the dashboard. */
+    url(url) { $('w-dash').querySelector('.url').textContent = url.replace(/^https?:\/\//, ''); },
     async caption(headline, sub) {
       const c = $('caption');
       c.querySelector('.headline').textContent = headline;

@@ -1,0 +1,14 @@
+{
+  "lines": {
+    "title": "This one's the how-to. After init, you'll want the router to fit your models, your budget and your rules. All of it is on the dashboard, and every change applies live.",
+    "where": "Everything lives in one file, and this page shows it. Every other page edits the same file. A change starts as a draft. Apply swaps it in, with no restart, and apply and save writes it to the file too.",
+    "discover": "Say you just downloaded a new model in LM Studio. On the models page, discover asks LM Studio what it has. It suggests a tier for each model, and what it can do. Gemma reads images, so it gets vision. Add it, then apply and save.",
+    "connector": "Want a paid API as well? Add a connector. Any OpenAI compatible endpoint works, like OpenRouter, Groq, or a server of your own. The key you type is encrypted into the secret store. It never goes in the config file.",
+    "prices": "Apply, then discover its models, and add the one you want. Give it its price per million tokens. That's how cheapest capable knows what it costs: local models still go first, then your subscription, and the paid model only when nothing cheaper can do the job.",
+    "evaluate": "When prompts land on the wrong tier, don't guess. The evaluate page runs a labelled set through your configuration, and lists every miss. This one needed deep reasoning, but nothing matched it. Add it to the right route, and the set runs again. One more right, and nothing else broke.",
+    "profiles": "Profiles are policies. This one is local only, so nothing it covers ever leaves your machine. A rule picks it for the billing project. And the compare tool shows what each profile would do with a prompt, before you rely on it.",
+    "budget": "The usage page shows what you spent, and what your subscription use would have cost at API prices. To cap the paid API, add a budget. Here, two dollars a day. Once it's spent, the router skips that connector until tomorrow.",
+    "doctor": "And when something seems off, run doctor. It checks the configuration, the embeddings, and every connector, without calling a model.",
+    "end": "That's the tour. Everything you saw is also in the docs. Semantic Router dot net is open source, and MIT licensed."
+  }
+}
