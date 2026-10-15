@@ -53,6 +53,7 @@ export const state = {
   label: null,         // the Activity "label this prompt" form
   profileTester: { prompt: '', results: null, busy: false },
   checking: new Set(), // connectors whose endpoint check is running
+  audit: { entries: null, loading: false, limit: 200, error: null }, // GET api/audit (Audit log)
   lineups: [],         // Discover models: one { connector, busy, error, server, loading, loadingNote, note, lineup } per connector asked
 };
 export const lineupFor = (connector) => state.lineups.find((l) => l.connector === connector);

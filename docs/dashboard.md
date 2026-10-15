@@ -37,6 +37,7 @@ builder.Services
 | **Gateway** | Mode (Dispatch or Annotate), OpenAI and Anthropic path prefixes, model aliases, tool-turn pinning, system-reminder stripping, body limit, response headers, fail-open, message selection. |
 | **Connect clients** | Ready-to-paste snippets for Claude Code, OpenAI SDKs, Codex CLI and curl, filled in with the router's address. |
 | **JSON** | The whole document as text (the same shape as the `SemanticRouter` section of `appsettings.json`): edit, download, compare with the application baseline, reset. **History** lists every applied version (when, what applied it, who), diffs any of them against the draft and rolls back to it. |
+| **Audit log** | Admin only. Every change made through the dashboard or admin API, sign-ins and sign-outs: when, who (the user your proxy signed in, `admin token`, `read-only token` or `this machine`), from which address, what, the request and its status. **Download JSON Lines** exports it. See [Audit log](#audit-log). |
 
 ![The Live page](images/live.png)
 
@@ -160,11 +161,12 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `POST api/embeddings/test` | Embed a sentence with the applied provider. |
 | `POST api/connectors/{name}/check` | Checks the connector now without calling a model, as `semantic-router doctor` does for it: `status` (`Ok`, `Warning`, `Failed`), `milliseconds`, `messages`, `at`. The result is kept for the Endpoints card until the connector points somewhere else. A check of a connector that is already being checked joins it. |
 | `POST api/connectors/{name}/discover` | What the connector offers: `models` (ids it serves), `server` (`LM Studio`, `Ollama`), `loading` (`OnDemand`, `LoadedOnly`, `Unknown`) with `loadingNote`, and `lineup`: per model its `kind`, `listed`, `loaded`, `contextLength`, `parametersBillions`, `capabilities`, `inCatalog`, `recommended`, `reason` and a `suggestion` in the configuration document's shape. HTTP connectors are asked (`/v1/models`, plus LM Studio's and Ollama's own APIs on local addresses), the Copilot SDK lists your account's models, and CLI presets return the names they accept. A `401` is reported as "requires authentication", naming the key to set. |
-| `GET api/session` | `{ role, tokenRequired, tokensConfigured }` for the caller. |
+| `GET api/session` | `{ role, tokenRequired, tokensConfigured, identity }` for the caller; `identity` is who it acts as (see [Audit log](#audit-log)). |
 | `POST api/session` | `{ "token": "..." }` → sets the session cookie, good for `SessionLifetime`. After five wrong tokens from one address in 15 minutes, `429` with `Retry-After` until the first is 15 minutes old. |
 | `DELETE api/session` | Signs out. |
+| `GET api/audit?since=&until=&limit=200&format=jsonl` | The [audit log](#audit-log), newest first: `id`, `timestamp`, `actor`, `client`, `method`, `path`, `route`, `status`, `summary`. `since` is inclusive, `until` exclusive; `limit` up to 10,000. `format=jsonl` downloads JSON Lines. Admin role only. |
 
-`PUT api/config`, `POST api/config/reset`, rollback, `POST api/health/reset`, `POST api/memory/exposure/reset`, changes to the evaluation set, adding utterances and every tuning action need the admin role. So does everything that spends embedding or API calls or scans the disk: `POST api/classify`, `POST api/evaluate` and `api/evaluate/compare`, `POST api/embeddings/test`, `POST api/connectors/{name}/check` and `/discover`, and `POST api/memory/refresh`. Everything else is open to the read-only role; the dashboard disables or hides those buttons for it.
+`PUT api/config`, `POST api/config/reset`, rollback, `POST api/health/reset`, `POST api/memory/exposure/reset`, changes to the evaluation set, adding utterances and every tuning action need the admin role. So does everything that spends embedding or API calls or scans the disk: `POST api/classify`, `POST api/evaluate` and `api/evaluate/compare`, `POST api/embeddings/test`, `POST api/connectors/{name}/check` and `/discover`, and `POST api/memory/refresh`. Everything else is open to the read-only role, except `GET api/audit`; the dashboard disables or hides those buttons for it.
 
 The same document works with `PUT` from scripts, e.g. to promote a tested configuration:
 
@@ -180,7 +182,8 @@ The admin API can change where prompts go, so the default is strict and opening 
 |---|---|---|
 | **Loopback only** (default) | nothing | Requests from other machines get `403`. Loopback requests must carry a `Host` header naming this machine (`localhost`, `127.0.0.1`, `[::1]`, or a `PublicOrigins` entry), which stops a web page from reaching the dashboard through DNS rebinding. |
 | **Token** | `RequireLocalClient: false`, `AdminToken` (and optionally `ReadOnlyToken`) | Remote callers send `Authorization: Bearer <token>`, or sign in on the dashboard, which sets an `HttpOnly`, `SameSite=Strict` session cookie: the time it was issued, signed with the token (never the token itself). It lapses after `SessionLifetime` (12 hours), and changing the token signs everyone out. Five wrong tokens from one address within 15 minutes, at sign-in or as a bearer token, make that address wait (`429` with `Retry-After`) until the first is 15 minutes old; a right token does not count. The read-only token can view status, activity and the masked configuration; it cannot apply, save or reset, nor classify, evaluate, test embeddings, check or discover connectors, or rescan memory, which spend embedding or API calls or read the disk. Loopback clients still need no token. |
-| **Reverse proxy that authenticates** | `RequireLocalClient: false`, `AllowUnauthenticatedRemoteClients: true` | Remote callers are trusted. Only for a proxy that authenticates every request; a warning is logged at start-up. |
+| **Reverse proxy that signs people in** | `RequireLocalClient: false`, `ForwardedHeaders:KnownProxies`, `TrustedIdentityHeader`, `TrustedIdentityRoles` | The proxy (oauth2-proxy, Cloudflare Access, an IdP-aware gateway) names the user in a header; each user gets the role you map them to, and is named in the history and the [audit log](#audit-log). See [Signed-in users from a reverse proxy](#signed-in-users-from-a-reverse-proxy). |
+| **Reverse proxy that authenticates** | `RequireLocalClient: false`, `AllowUnauthenticatedRemoteClients: true` | Remote callers are trusted. Only for a proxy that authenticates every request; a warning is logged at start-up. Everyone is admin and recorded as `unauthenticated remote client`; prefer the row above. |
 
 ```jsonc
 "SemanticRouter": {
@@ -202,6 +205,52 @@ Whatever the setup:
 - **What a CLI runs is changed in the configuration file, not over the API.** Loopback clients are admin without a token, so the admin API refuses changes to a CLI or Copilot connector's `Executable`, `Arguments`, `EnvironmentVariables` and `HomeDirectory`; otherwise any program on the machine could make the router run anything it liked. Adding a preset started from `PATH` (Claude Code, Codex, Copilot) still works from the dashboard. The same goes for which files the router reads: a [memory source](memory.md) with a path no source of its type has now (a new folder, or a source pointed elsewhere) is refused; renaming, turning off or removing a source, and adding one in its default place (Claude Code's `~/.claude`), still work. `AllowProcessSettings: true` lifts both.
 - **A reverse proxy on this machine makes every request look local.** Name it in `SemanticRouter:ForwardedHeaders:KnownProxies` so the real client address is seen (see [host.md](host.md#serving-over-https)), or set `RequireTokenForLocalClients: true`.
 - **Subscription CLI connectors stay loopback-only** (`AllowRemoteClients: false`) whatever the dashboard allows: a remote client's request falls through to an API-key or local model. Serving other people from your personal subscription is what [TERMS.md](TERMS.md) rules out.
+- **Admin is as powerful as the router's own account.** The admin role chooses where prompts and keys go and, with `AllowProcessSettings`, what programs run. Give it to the people you would let log in as the router's user.
+
+### Signed-in users from a reverse proxy
+
+Put the router behind a proxy that signs people in with your identity provider, and let the proxy say who each request is from:
+
+```jsonc
+"SemanticRouter": {
+  "ForwardedHeaders": { "KnownProxies": [ "10.0.0.5" ] },  // the proxy's address as the router sees it
+  "Dashboard": {
+    "RequireLocalClient": false,
+    "PublicOrigins": [ "https://router.corp.example" ],  // where people browse to
+    "TrustedIdentityHeader": "X-Forwarded-User",      // oauth2-proxy; X-Auth-Request-Email, Cf-Access-Authenticated-User-Email, …
+    "TrustedGroupsHeader": "X-Forwarded-Groups",      // optional: comma-separated groups
+    "TrustedIdentityRoles": {
+      "alice@corp.example": "Admin",
+      "router-admins": "Admin",                      // a group
+      "*": "ReadOnly"                                // everyone else the proxy signed in
+    }
+  }
+}
+```
+
+- **The header is believed only from a known proxy.** A request that does not come straight from an address in `SemanticRouter:ForwardedHeaders:KnownProxies` or `KnownNetworks` is treated as if it had no such header, whatever it sends: it needs a token like any other caller. The `semantic-router` host does this for you, and `semantic-router doctor` warns when the header is set but no proxy is named; in your own app, call `app.UseRouterForwardedHeaders()` (in place of `UseForwardedHeaders()`) after configuring `ForwardedHeadersOptions`, whose defaults trust loopback.
+- **A proxy on this machine trusts this machine.** With `KnownProxies: [ "127.0.0.1" ]`, any program on the machine can connect from that address and name any user, as it can already use the dashboard as `this machine` by default. Run the proxy on another host when local programs must not act as others. The request must also carry a `Host` naming this machine or a `PublicOrigins` entry (add the address people browse to), so a web page cannot use DNS rebinding to send the header itself.
+- **The proxy must replace the header, not add to it.** Configure it to drop any copy the client sent. A header that appears twice, lists several names (a comma) or is longer than 256 characters is refused with `403`.
+- **Roles.** The user's own entry in `TrustedIdentityRoles` wins, then the highest role among the groups in `TrustedGroupsHeader`, then `*`. Names are compared ignoring case. A user with no role gets `403` naming the setting; there are two roles, `Admin` and `ReadOnly`, as for tokens.
+- **The proxy decides.** On a request that names a user, tokens and session cookies are not consulted, and there is nothing to sign out of on the dashboard. The machine policy's `Dashboard: ReadOnly` still makes everyone read-only.
+- Tokens and loopback access keep working for requests without the header (scripts on the proxy's network with `Authorization: Bearer`, the machine itself).
+
+### Audit log
+
+Every request that changes something through the dashboard or admin API (each `PUT`, `POST` and `DELETE`, and every endpoint that spends embedding or API calls), sign-ins and sign-outs, wrong tokens, and exports of activity and of the evaluation set are recorded once answered:
+
+| Field | |
+|---|---|
+| `timestamp` | When it was answered. |
+| `actor` | The user your proxy signed in, `admin token`, `read-only token`, `this machine` (loopback without a token), `unauthenticated remote client` (`AllowUnauthenticatedRemoteClients`), or `anonymous` for a wrong token. The same name goes into the configuration history and onto learned changes someone undid, applied or dismissed. |
+| `client` | The caller's address (the real one behind a known proxy); empty for in-process calls. |
+| `method`, `path`, `route` | The request without its query string, and the endpoint's route template. Ids in the path (a version, a learned change, a connector name) are kept. |
+| `status` | The status code answered: refusals of a signed-in caller (a read-only user trying a change, `403`) are recorded too. |
+| `summary` | What was done, e.g. `applied the configuration: version 14, saved`, `deleted activity: 230 entries, everything`, `undid a learned change: change 7`, `sign-in failed: wrong token`. |
+
+Never recorded: request bodies, tokens, keys, prompt text or utterances. Requests refused before anyone signed in (no credentials) are not recorded, so a stranger cannot fill the log; wrong tokens are, and they are throttled per address. Reading `GET api/audit` is not recorded.
+
+With the state database (`UseSqliteState`, which the `semantic-router` host uses) the log is the `audit` table: rows are only inserted, never changed, and only those older than `State:Retention:AuditDays` (365 days by default) are deleted, as new ones are written. Purging activity does not touch it, and the machine policy's `MaxRetentionDays` does not cap it, since it holds no prompt text. Changing `AuditDays` is itself recorded. Without the database the latest 5,000 entries are kept in memory; your own store can replace it by registering an `IAuditLog`. Each entry is also logged at Information level under the `SemanticRouter.Audit` category, so it reaches whatever collects the router's logs (OpenTelemetry, a file, the console).
 
 ### Gateway keys
 

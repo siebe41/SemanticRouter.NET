@@ -85,7 +85,8 @@ internal static class RouterHost
         WebApplication app = builder.Build();
         if (behindProxy)
         {
-            app.UseForwardedHeaders();
+            // Also notes which requests came straight from a known proxy: only those may name the dashboard user.
+            app.UseRouterForwardedHeaders();
         }
 
         app.UsePromptRouter();

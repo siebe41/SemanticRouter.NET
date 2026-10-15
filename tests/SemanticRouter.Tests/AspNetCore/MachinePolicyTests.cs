@@ -213,6 +213,14 @@ public sealed class MachinePolicyTests : RouterHostTest
         {
             (await reset.Content.ReadAsStringAsync()).Should().ContainEquivalentOf("your organization's policy");
         }
+
+        // Reading the audit log changes nothing, so a read-only policy leaves it to those who would otherwise be admin.
+        HttpResponseMessage audit = await client.GetAsync("/router/api/audit");
+        audit.StatusCode.Should().Be(read);
+        if (read == HttpStatusCode.OK)
+        {
+            (await ReadAsync(audit))["entries"]!.AsArray().Single()!["status"]!.GetValue<int>().Should().Be((int)write);
+        }
     }
 
     [Fact]

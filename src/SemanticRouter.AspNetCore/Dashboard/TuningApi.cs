@@ -40,33 +40,38 @@ internal static class TuningApi
             {
                 return Results.Problem($"Tuning could not run: {ex.Message}", statusCode: StatusCodes.Status502BadGateway);
             }
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("ran automatic tuning");
 
         api.MapPost("/tuning/changes/{id:long}/undo", (HttpContext context, RouterTuner tuner, long id) =>
-            Act(() => tuner.Undo(id, actor(context)), json)).WithMetadata(DashboardWriteMetadata.Instance);
+            Act(context, () => tuner.Undo(id, actor(context)), json)).WithMetadata(DashboardWriteMetadata.Instance).Audited("undid a learned change");
 
         api.MapPost("/tuning/changes/{id:long}/apply", (HttpContext context, RouterTuner tuner, long id) =>
-            Act(() => tuner.ApplySuggestion(id, actor(context)), json)).WithMetadata(DashboardWriteMetadata.Instance);
+            Act(context, () => tuner.ApplySuggestion(id, actor(context)), json)).WithMetadata(DashboardWriteMetadata.Instance).Audited("applied a suggested change");
 
         api.MapPost("/tuning/changes/{id:long}/dismiss", (HttpContext context, RouterTuner tuner, long id) =>
-            Act(() => tuner.Dismiss(id, actor(context)), json)).WithMetadata(DashboardWriteMetadata.Instance);
+            Act(context, () => tuner.Dismiss(id, actor(context)), json)).WithMetadata(DashboardWriteMetadata.Instance).Audited("dismissed a suggested change");
 
         api.MapPost("/tuning/undo-all", (HttpContext context, RouterTuner tuner) =>
         {
             (int undone, IReadOnlyList<string> skipped) = tuner.UndoAll(actor(context));
+            DashboardAudit.Detail(context, $"{undone} undone");
             return Results.Json(new UndoAllResponse(undone, skipped), json);
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("undid every learned change");
 
-        api.MapPost("/tuning/pause", (RouterTuner tuner) => Results.Json(tuner.SetPaused(true), json)).WithMetadata(DashboardWriteMetadata.Instance);
+        api.MapPost("/tuning/pause", (RouterTuner tuner) => Results.Json(tuner.SetPaused(true), json))
+            .WithMetadata(DashboardWriteMetadata.Instance).Audited("paused automatic tuning");
 
-        api.MapPost("/tuning/resume", (RouterTuner tuner) => Results.Json(tuner.SetPaused(false), json)).WithMetadata(DashboardWriteMetadata.Instance);
+        api.MapPost("/tuning/resume", (RouterTuner tuner) => Results.Json(tuner.SetPaused(false), json))
+            .WithMetadata(DashboardWriteMetadata.Instance).Audited("resumed automatic tuning");
     }
 
-    private static IResult Act(Func<TuningChange> action, JsonSerializerOptions json)
+    private static IResult Act(HttpContext context, Func<TuningChange> action, JsonSerializerOptions json)
     {
         try
         {
-            return Results.Json(ChangeDto.From(action(), null), json);
+            TuningChange change = action();
+            DashboardAudit.Detail(context, $"change {change.Id}");
+            return Results.Json(ChangeDto.From(change, null), json);
         }
         catch (TuningConflictException ex)
         {

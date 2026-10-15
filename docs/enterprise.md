@@ -30,7 +30,7 @@ Every setting is optional.
 | `LocalHosts` | `["gpu.corp.example"]` | When set, the only hosts a model or the embeddings endpoint may be marked local on (`IsLocal`); this machine always counts. A model elsewhere, or served by a CLI or Copilot, is treated as not local, so local-only requests (local-only routes and profiles, conversations that contained a credential) never go there. Use it so a corporate gateway that forwards to a cloud provider cannot be marked local. `[]`: only this machine. |
 | `RequireLocalOnly` | `true` | Only local models may be used (after `LocalHosts`), and only embeddings that keep prompts local; remote embeddings fall back to the in-process hashing provider. |
 | `StorePrompts` | `"Off"` | The most prompt text the activity log may keep: `Off` or `Redacted` caps `State:StorePrompts`. |
-| `MaxRetentionDays` | `7` | The most days activity (with its prompt previews) and feedback are kept; caps `State:Retention:ActivityDays`. |
+| `MaxRetentionDays` | `7` | The most days activity (with its prompt previews) and feedback are kept; caps `State:Retention:ActivityDays`. The audit log, which holds no prompt text, keeps its own `State:Retention:AuditDays`. |
 | `Dashboard` | `"ReadOnly"` | `ReadOnly`: everyone gets the read-only role, so the router can be watched but not changed from the dashboard or admin API (the dashboard shows it read-only). `Off`: the dashboard and its API answer `403`. |
 | `Updates:Mode` / `Updates:Feed` | `"Off"`, or `"Feed"` and `"https://updates.corp.example/semantic-router"` | Desktop app updates. `Off`: never checked; the menu item is hidden. `Feed`: only from this feed (a URL or a folder of Velopack packages, e.g. your internal mirror of the GitHub releases); it wins over `SEMANTICROUTER_UPDATE_SOURCE`. The user's **Check for updates** switch still applies within it. A feed over plain HTTP (other than to this machine) is always refused. |
 | `Features:Memory` | `false` | No memory sources are read. |
@@ -40,6 +40,10 @@ Every setting is optional.
 | `Features:Webhooks` | `false` | No webhooks are used for the digest and notices. |
 
 The policy can only restrict: a `Features` switch set to `true` does not turn on what the configuration leaves off.
+
+## Who changed what
+
+On a shared router (the container, a router on a dev VM), put it behind a proxy that signs people in with your identity provider and set `Dashboard:TrustedIdentityHeader` and `TrustedIdentityRoles`: each person then gets `Admin` or `ReadOnly` from their user or group, and is named in the configuration history and the audit log. The audit log records every change made through the dashboard or admin API, sign-ins and sign-outs (who, from which address, what, the outcome; never prompt text or tokens). It is kept for `State:Retention:AuditDays` (365 days), which `MaxRetentionDays` does not cap, and each entry is also logged under `SemanticRouter.Audit` for your SIEM. With `Dashboard: ReadOnly`, those who would otherwise be admin can still read it. See [dashboard.md](dashboard.md#signed-in-users-from-a-reverse-proxy) and [Audit log](dashboard.md#audit-log).
 
 ## Samples
 

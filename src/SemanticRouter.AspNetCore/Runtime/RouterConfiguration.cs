@@ -309,7 +309,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         }
 
         StateRetentionOptions retention = State.Retention;
-        if (retention.ActivityDays is < 1 || retention.ActivityEntries is < 1 || retention.UsageDays is < 1 || retention.ConfigurationVersions is < 1)
+        if (retention.ActivityDays is < 1 || retention.ActivityEntries is < 1 || retention.UsageDays is < 1 || retention.ConfigurationVersions is < 1 || retention.AuditDays is < 1)
         {
             errors.Add("State:Retention values must be at least 1 (leave one out for the default).");
         }

@@ -120,7 +120,8 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | `semantic-router.db`, table `activity` | One entry per request: time, client name, project label (the `X-Router-Project` header, or else a hash of the client's user id, never the id), models, tiers, tokens, cost, notes, and a **prompt preview** (see below) | 30 days or 10,000 entries (`State:Retention:ActivityDays`, `ActivityEntries`) | **Gateway → Stored prompts → Delete all activity**, or `DELETE /router/api/activity?since=…&until=…` |
 | `semantic-router.db`, table `feedback` | Retries, corrections, labels and grades per request: tiers and short notes, no prompt text | As activity | With the activity it belongs to ageing out |
 | `semantic-router.db`, table `usage` | Tokens and cost per request, by model, connector, route, client and profile; no prompt text | 400 days (`State:Retention:UsageDays`) | Delete the file |
-| `semantic-router.db`, table `config_history` | Every applied configuration, with secrets masked | 200 versions (`State:Retention:ConfigurationVersions`) | Delete the file |
+| `semantic-router.db`, table `config_history` | Every applied configuration, with secrets masked, and who applied it | 200 versions (`State:Retention:ConfigurationVersions`) | Delete the file |
+| `semantic-router.db`, table `audit` | The [audit log](dashboard.md#audit-log): each change made through the dashboard or admin API, sign-in and sign-out, with when, who, the client's address, the request path and status, and a short summary; no request bodies, tokens or prompt text | 365 days (`State:Retention:AuditDays`); never changed, and not deleted by an activity purge or capped by the machine policy's `MaxRetentionDays` | Delete the file |
 | `semantic-router.db`, tables `cooldowns`, `affinity`, `warm_caches`, `tuning_changes` | Model cooldowns, which model issued each tool call (ids only), the size of each conversation's prompt cache per model (conversation hashes only), learned routing changes (which can include short utterances learned from prompt previews) | Until they expire, 24 hours, until they expire, until undone | Undo on **Router learned**, or delete the file |
 | `semantic-router.evaluation.jsonl` | Prompts you labelled, in full | Until you remove them | Edit or delete the file (the **Evaluate** page) |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted | Until removed from the configuration | Remove the key on the dashboard |
@@ -174,7 +175,7 @@ Gateway keys, dashboard tokens and prompts cross the network in clear text over 
   { "SemanticRouter": { "ForwardedHeaders": { "KnownProxies": [ "127.0.0.1" ], "KnownNetworks": [ "10.0.0.0/8" ] } } }
   ```
 
-  Only these proxies are believed; the headers from anyone else are ignored. Without this, every request arrives from the proxy, so clients share one rate limit, and a proxy on this machine makes them all look local: then turn on `RequireGatewayKeyForLocalClients` (and `RequireTokenForLocalClients` for the dashboard). Add the proxy's public address to `Dashboard:PublicOrigins`. With Caddy:
+  Only these proxies are believed; the headers from anyone else are ignored. Without this, every request arrives from the proxy, so clients share one rate limit, and a proxy on this machine makes them all look local: then turn on `RequireGatewayKeyForLocalClients` (and `RequireTokenForLocalClients` for the dashboard). Add the proxy's public address to `Dashboard:PublicOrigins`. A proxy that signs people in can also name them to the dashboard (`Dashboard:TrustedIdentityHeader`, believed only from these proxies); see [Signed-in users from a reverse proxy](dashboard.md#signed-in-users-from-a-reverse-proxy). With Caddy:
 
   ```
   router.example.com {

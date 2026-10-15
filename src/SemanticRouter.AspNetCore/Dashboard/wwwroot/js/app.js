@@ -6,6 +6,7 @@ import './usage.js';
 import './evaluate.js';
 import './profiles.js';
 import './learned.js';
+import './audit.js';
 import { actions } from './actions.js';
 import { $, api, h, isDirty, readInput, setPath, showSignIn, state, toast } from './core.js';
 import { connectStream } from './live.js';
@@ -93,6 +94,7 @@ document.addEventListener('change', (ev) => {
     render();
   } else if (el.id === 'activity-filter') { state.activityFilter = el.value; render(); }
   else if (el.id === 'auto-refresh') { state.autoRefresh = el.checked; }
+  else if (el.id === 'audit-limit') { state.audit.limit = +el.value; state.audit.entries = null; render(); }
   else if (el.id === 'tester-model') { state.tester.model = el.value; }
   else if (el.id === 'memory-filter') { state.memoryUi.filter = el.value; if (graph) graph.redraw(); }
   else if (el.id === 'memory-color') { state.memoryUi.colorBy = el.value; render(); }
