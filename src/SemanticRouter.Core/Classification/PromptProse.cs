@@ -4,7 +4,8 @@ namespace SemanticRouter;
 /// The text of a prompt that is compared with route utterances: the prompt without the code and logs pasted into it.
 /// Utterances are short instructions ("write a unit test for this function"). A prompt that carries that instruction
 /// with a 40-line function embeds mostly as the function and scores below every route, so it falls back to the
-/// fallback tier. Complexity is still measured on the whole prompt, code included.
+/// fallback tier. Complexity is still measured on the whole prompt, code included, and local-only routes are still
+/// checked against it.
 /// </summary>
 /// <remarks>
 /// Removed:

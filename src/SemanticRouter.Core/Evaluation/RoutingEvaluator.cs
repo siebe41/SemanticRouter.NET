@@ -89,10 +89,12 @@ public sealed record EvaluationReport
 /// <summary>An evaluation set embedded once, ready to be scored under many thresholds without new embedding calls.</summary>
 public sealed class PreparedEvaluation
 {
-    internal PreparedEvaluation(IReadOnlyList<EvaluationCase> cases, RouteScore[][] ranked, ComplexityAnalysis[] complexity, TimeSpan elapsed)
+    internal PreparedEvaluation(
+        IReadOnlyList<EvaluationCase> cases, RouteScore[][] ranked, RouteScore[]?[] wholeRanked, ComplexityAnalysis[] complexity, TimeSpan elapsed)
     {
         Cases = cases;
         Ranked = ranked;
+        WholeRanked = wholeRanked;
         Complexity = complexity;
         EmbeddingTime = elapsed;
     }
@@ -104,6 +106,9 @@ public sealed class PreparedEvaluation
     public TimeSpan EmbeddingTime { get; }
 
     internal RouteScore[][] Ranked { get; }
+
+    /// <summary>The whole prompt's scores, where only its prose was ranked and a route is local-only; otherwise <see langword="null"/>.</summary>
+    internal RouteScore[]?[] WholeRanked { get; }
 
     internal ComplexityAnalysis[] Complexity { get; }
 }
@@ -184,20 +189,30 @@ public sealed class RoutingEvaluator
         long started = Stopwatch.GetTimestamp();
         var complexity = cases.Select(c => _complexity.Analyze(c.Prompt)).ToArray();
         var ranked = new RouteScore[cases.Count][];
+        var wholeRanked = new RouteScore[]?[cases.Count];
         if (_routes.Length > 0 && cases.Count > 0)
         {
             SemanticRouteIndex index = await SemanticRouteIndex.BuildAsync(_routes, _embeddings, _options.ScoringStrategy, cancellationToken).ConfigureAwait(false);
+
+            // As the classifier does: the prose of each prompt, and the whole prompt too where that left something out
+            // and a route is local-only.
+            string[] texts = cases.Select(c => _options.EmbedProseOnly ? PromptProse.Extract(c.Prompt) : c.Prompt).ToArray();
+            int[] whole = _hasLocalOnlyRoutes ? Enumerable.Range(0, cases.Count).Where(i => !ReferenceEquals(texts[i], cases[i].Prompt)).ToArray() : [];
             IReadOnlyList<ReadOnlyMemory<float>> vectors =
-                await _embeddings.GenerateEmbeddingsAsync(
-                    cases.Select(c => _options.EmbedProseOnly ? PromptProse.Extract(c.Prompt) : c.Prompt).ToArray(), cancellationToken).ConfigureAwait(false);
-            if (vectors.Count != cases.Count)
+                await _embeddings.GenerateEmbeddingsAsync([.. texts, .. whole.Select(i => cases[i].Prompt)], cancellationToken).ConfigureAwait(false);
+            if (vectors.Count != texts.Length + whole.Length)
             {
-                throw new InvalidOperationException($"Embedding provider returned {vectors.Count} vectors for {cases.Count} prompts.");
+                throw new InvalidOperationException($"Embedding provider returned {vectors.Count} vectors for {texts.Length + whole.Length} texts.");
             }
 
             for (int i = 0; i < cases.Count; i++)
             {
                 ranked[i] = index.Score(vectors[i].Span);
+            }
+
+            for (int j = 0; j < whole.Length; j++)
+            {
+                wholeRanked[whole[j]] = index.Score(vectors[texts.Length + j].Span);
             }
         }
         else
@@ -205,7 +220,7 @@ public sealed class RoutingEvaluator
             ranked.AsSpan().Fill([]);
         }
 
-        return new PreparedEvaluation(cases, ranked, complexity, Stopwatch.GetElapsedTime(started));
+        return new PreparedEvaluation(cases, ranked, wholeRanked, complexity, Stopwatch.GetElapsedTime(started));
     }
 
     /// <summary>Embeds and evaluates a set with the configured thresholds.</summary>
@@ -361,7 +376,8 @@ public sealed class RoutingEvaluator
         }
 
         RouteDecision decision = selector.SelectRoute(ranked, complexity);
+        bool localOnly = decision.LocalOnly || (prepared.WholeRanked[index] is { } whole && selector.SelectRoute(whole, complexity).LocalOnly);
         return new EvaluationResult(
-            item, decision.RequiredTier, decision.Reason, decision.Route?.Name, decision.Similarity, complexity.Score, decision.LocalOnly, top);
+            item, decision.RequiredTier, decision.Reason, decision.Route?.Name, decision.Similarity, complexity.Score, localOnly, top);
     }
 }

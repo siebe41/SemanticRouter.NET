@@ -237,6 +237,38 @@ public sealed class OnnxEmbeddingTests : IDisposable
         pasted.RouteName.Should().Be("simple-code", "a long unfenced paste is left out too");
     }
 
+    /// <summary>A records table pasted under an instruction is left out of the embedding, but still keeps the prompt local.</summary>
+    [Fact]
+    public async Task With_MiniLM_pasted_customer_records_still_match_the_local_only_route()
+    {
+        RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
+        template.DefaultSimilarityThreshold = OnnxEmbeddingModels.Find(null)!.SuggestedThreshold;
+        template.Routes.Add(new RouteDefinition
+        {
+            // As in samples/RoutingApiSample.
+            Name = "internal-records",
+            Tier = 1,
+            LocalOnly = true,
+            SimilarityThreshold = 0.35f,
+            Utterances =
+            {
+                "look up the customer record for account number", "show the employee salary history", "what is the patient's medical history",
+                "find the social security number for this customer", "list the invoices for customer id",
+            },
+        });
+        using OnnxEmbeddingProviderFactory factory = RealFactory();
+        var classifier = new SemanticPromptClassifier(factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx }), template);
+        string records = string.Join('\n', Enumerable.Range(1, 12).Select(i =>
+            $"{1000 + i}, customer {i}, account number {4400 + i}-0021, social security number {i:000}-45-6789"));
+        PromptProse.Extract($"summarize these:\n{records}").Should().Be("summarize these:", "the records are a pasted block");
+
+        PromptClassificationResult prose = await classifier.ClassifyAsync("summarize these:");
+        PromptClassificationResult pasted = await classifier.ClassifyAsync($"summarize these:\n{records}");
+
+        prose.LocalOnly.Should().BeFalse("the instruction alone says nothing private");
+        pasted.LocalOnly.Should().BeTrue("the records match internal-records, so the prompt stays on local models");
+    }
+
     /// <summary>
     /// The shipped evaluation set (chat and agentic-client turns) against the template routes, with each ONNX model at
     /// the threshold <c>init</c> sets for it: CI fails if routing out of the box regresses below 90%.

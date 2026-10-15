@@ -97,22 +97,36 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
         }
 
         RouteScore[] ranked = [];
+        RouteScore[]? wholeRanked = null;
         if (_routes.Length > 0)
         {
             SemanticRouteIndex index = await GetIndexAsync(cancellationToken).ConfigureAwait(false);
-            ReadOnlyMemory<float> embedding = await _embeddingProvider.GenerateEmbeddingAsync(
-                _options.EmbedProseOnly ? PromptProse.Extract(prompt) : prompt, cancellationToken).ConfigureAwait(false);
-            ranked = index.Score(embedding.Span);
+            string text = _options.EmbedProseOnly ? PromptProse.Extract(prompt) : prompt;
+            if (_hasLocalOnlyRoutes && !ReferenceEquals(text, prompt))
+            {
+                // Pasted data is where private content is: local-only routes are still checked against the whole
+                // prompt, so leaving it out of the embedding never loses a local-only match.
+                IReadOnlyList<ReadOnlyMemory<float>> both =
+                    await _embeddingProvider.GenerateEmbeddingsAsync([text, prompt], cancellationToken).ConfigureAwait(false);
+                ranked = index.Score(both[0].Span);
+                wholeRanked = index.Score(both[1].Span);
+            }
+            else
+            {
+                ReadOnlyMemory<float> embedding = await _embeddingProvider.GenerateEmbeddingAsync(text, cancellationToken).ConfigureAwait(false);
+                ranked = index.Score(embedding.Span);
+            }
         }
 
         RouteDecision decision = _routeSelector.SelectRoute(ranked, complexity);
+        bool localOnly = decision.LocalOnly || (wholeRanked is not null && _routeSelector.SelectRoute(wholeRanked, complexity).LocalOnly);
 
         var result = new PromptClassificationResult
         {
             RequiredTier = decision.RequiredTier,
             Reason = decision.Reason,
             RequiredCapabilities = decision.RequiredCapabilities,
-            LocalOnly = decision.LocalOnly,
+            LocalOnly = localOnly,
             RouteName = decision.Route?.Name,
             Similarity = decision.Similarity,
             Complexity = complexity,
