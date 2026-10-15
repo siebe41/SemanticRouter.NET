@@ -502,6 +502,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:AllowUnauthenticatedRemoteClients` | `false` | Serve remote clients without a key while `GatewayKeys` is empty. Only behind a proxy that authenticates callers. |
 | `Middleware:RemoteRequestsPerMinute` | `120` | Requests per minute for each client on another machine that no `RateLimits` entry covers. `0` turns it off. |
 | `ForwardedHeaders:KnownProxies`, `KnownNetworks` | none | Reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed (host setting, read at start-up). See [host.md](docs/host.md#serving-over-https). |
+| `Network:Offline` / `AllowedHosts` | `false` / `[]` | Offline mode: the router reaches only this machine and these hosts; CLI and Copilot connectors are off and the ONNX model is never downloaded (host setting). See [network.md](docs/network.md#offline-mode). |
 | `Network:CaBundle` | none | A PEM file of CA certificates trusted for the router's own HTTPS connections (connectors, embeddings, webhooks, the ONNX download) in addition to the system store, for a proxy that inspects TLS (host setting, read at start-up). See [network.md](docs/network.md#proxies-and-certificates). |
 | `State:StorePrompts` | `Redacted` | How much of each prompt the activity log keeps: `Redacted` (160 characters, credentials masked), `On`, or `Off`. See [host.md](docs/host.md#what-the-router-stores). |
 | `State:Retention` | store defaults | `ActivityDays` (30), `ActivityEntries` (10,000), `UsageDays` (400), `ConfigurationVersions` (200). |

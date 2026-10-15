@@ -15,8 +15,18 @@ public static class OnnxModelDownloader
     /// <returns>The paths of <c>model.onnx</c> and <c>vocab.txt</c>.</returns>
     /// <exception cref="InvalidOperationException">A download did not match its checksum.</exception>
     /// <exception cref="HttpRequestException">A download failed.</exception>
+    public static Task<(string ModelFile, string VocabFile)> EnsureAsync(
+        OnnxModelInfo model, string modelsDirectory, HttpClient http, CancellationToken cancellationToken = default) =>
+        EnsureAsync(model, modelsDirectory, http, downloadRefused: null, cancellationToken);
+
+    /// <summary>
+    /// As <see cref="EnsureAsync(OnnxModelInfo, string, HttpClient, CancellationToken)"/>, but when
+    /// <paramref name="downloadRefused"/> says why it may not be downloaded (offline mode, the machine policy), a missing
+    /// or corrupt file is an error saying where to place it instead.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">A download did not match its checksum, or was refused.</exception>
     public static async Task<(string ModelFile, string VocabFile)> EnsureAsync(
-        OnnxModelInfo model, string modelsDirectory, HttpClient http, CancellationToken cancellationToken = default)
+        OnnxModelInfo model, string modelsDirectory, HttpClient http, string? downloadRefused, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentException.ThrowIfNullOrWhiteSpace(modelsDirectory);
@@ -30,8 +40,8 @@ public static class OnnxModelDownloader
         try
         {
             Directory.CreateDirectory(directory);
-            await EnsureFileAsync(modelFile, model.ModelUrl, model.ModelSha256, http, cancellationToken).ConfigureAwait(false);
-            await EnsureFileAsync(vocabFile, model.VocabUrl, model.VocabSha256, http, cancellationToken).ConfigureAwait(false);
+            await EnsureFileAsync(modelFile, model.ModelUrl, model.ModelSha256, http, downloadRefused, cancellationToken).ConfigureAwait(false);
+            await EnsureFileAsync(vocabFile, model.VocabUrl, model.VocabSha256, http, downloadRefused, cancellationToken).ConfigureAwait(false);
             return (modelFile, vocabFile);
         }
         finally
@@ -40,11 +50,18 @@ public static class OnnxModelDownloader
         }
     }
 
-    private static async Task EnsureFileAsync(string path, Uri url, string sha256, HttpClient http, CancellationToken cancellationToken)
+    private static async Task EnsureFileAsync(string path, Uri url, string sha256, HttpClient http, string? refused, CancellationToken cancellationToken)
     {
         if (File.Exists(path) && string.Equals(await HashAsync(path, cancellationToken).ConfigureAwait(false), sha256, StringComparison.OrdinalIgnoreCase))
         {
             return;
+        }
+
+        if (refused is not null)
+        {
+            throw new InvalidOperationException(
+                $"{Path.GetFileName(path)} is not on this machine and cannot be downloaded ({refused}). Download {url} elsewhere and " +
+                $"place it at {path} (SHA-256 {sha256}), or set Embeddings:ModelPath to a folder holding model.onnx and vocab.txt.");
         }
 
         string temp = path + "." + Guid.NewGuid().ToString("N")[..8] + ".download";

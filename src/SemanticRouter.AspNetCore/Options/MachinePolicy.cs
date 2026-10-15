@@ -72,6 +72,22 @@ public sealed class MachinePolicy
     /// <summary>Desktop app updates.</summary>
     public UpdatePolicy Updates { get; set; } = new();
 
+    /// <summary>
+    /// Offline mode: the router reaches only this machine and the hosts in <see cref="AllowedEndpoints"/>; CLI and
+    /// Copilot connectors, which always reach their vendor, are off, the ONNX model is never downloaded and the desktop
+    /// app does not update. The user's own <c>Network:Offline</c> does the same, but cannot be turned off here.
+    /// </summary>
+    public bool Offline { get; set; }
+
+    /// <summary>For the user's offline mode (<c>Network:AllowedHosts</c>): hosts it may reach besides this machine.</summary>
+    [JsonIgnore]
+    public IReadOnlyList<string> OfflineHosts { get; private set; } = [];
+
+    /// <summary>Where offline mode comes from, for messages: <c>Network:Offline</c> or the machine policy.</summary>
+    private string OfflineSetting => _offlineByPolicy ? "your organization's policy" : "Network:Offline";
+
+    private bool _offlineByPolicy = true;
+
     /// <summary>Features that can be switched off.</summary>
     public FeaturePolicy Features { get; set; } = new();
 
@@ -84,7 +100,30 @@ public sealed class MachinePolicy
     public bool IsEmpty =>
         DisabledConnectorTypes.Count == 0 && DisabledPresets.Count == 0 && AllowedEndpoints.Count == 0 && LocalHosts is null
         && !RequireLocalOnly && StorePrompts is null && MaxRetentionDays is null && Dashboard == DashboardPolicy.Default
-        && Updates.IsDefault && Features.IsDefault;
+        && Updates.IsDefault && Features.IsDefault && !Offline;
+
+    /// <summary>
+    /// The rules in force: <paramref name="policy"/>, plus the user's own offline mode from <paramref name="network"/>
+    /// (<c>Network:Offline</c> and <c>Network:AllowedHosts</c>). The user's list of hosts does not widen an offline mode
+    /// the machine policy sets.
+    /// </summary>
+    public static MachinePolicy Effective(MachinePolicy? policy, NetworkOptions? network)
+    {
+        policy ??= None;
+        if (network is not { Offline: true } || policy.Offline)
+        {
+            return policy;
+        }
+
+        MachinePolicy effective = FromJson(policy.ToJson(), policy.Source);
+        effective.Offline = true;
+        effective._offlineByPolicy = false;
+        effective.OfflineHosts = [.. network.AllowedHosts];
+        return effective;
+    }
+
+    /// <summary>Whether <paramref name="pattern"/> is a host name, <c>*.domain</c> or IP address, with an optional port.</summary>
+    public static bool IsHostPattern(string pattern) => HostPattern.TryParse(pattern, out _);
 
     /// <summary>Reads a policy document. Unknown settings are an error, so a misspelt one cannot silently do nothing.</summary>
     /// <exception cref="InvalidDataException">The document is not a valid policy.</exception>
@@ -153,16 +192,29 @@ public sealed class MachinePolicy
             return $"the {connector.Preset} CLI is turned off by your organization's policy";
         }
 
-        return connector.Type is ConnectorType.Cli or ConnectorType.Copilot || connector.BaseAddress is not { } address || AllowsEndpoint(address)
-            ? null
-            : $"{address.Authority} is not an allowed endpoint in your organization's policy";
+        if (Offline && connector.Type is ConnectorType.Cli or ConnectorType.Copilot)
+        {
+            return $"{connector.Type} connectors reach their vendor, so they are off in offline mode ({OfflineSetting})";
+        }
+
+        return connector.Type is ConnectorType.Cli or ConnectorType.Copilot || connector.BaseAddress is not { } address ? null : Refuses(address);
     }
 
-    /// <summary>Whether <see cref="AllowedEndpoints"/> lets the router send requests to <paramref name="address"/>.</summary>
-    public bool AllowsEndpoint(Uri address)
+    /// <summary>Whether the router may send requests to <paramref name="address"/> (<see cref="AllowedEndpoints"/>, <see cref="Offline"/>).</summary>
+    public bool AllowsEndpoint(Uri address) => Refuses(address) is null;
+
+    /// <summary>Why the router may not send requests to <paramref name="address"/>, or <see langword="null"/> when it may.</summary>
+    public string? Refuses(Uri address)
     {
         ArgumentNullException.ThrowIfNull(address);
-        return AllowedEndpoints.Count == 0 || Matches(address, AllowedEndpoints);
+        if (AllowedEndpoints.Count > 0 && !Matches(address, AllowedEndpoints))
+        {
+            return $"{address.Authority} is not an allowed endpoint in your organization's policy";
+        }
+
+        return Offline && !Matches(address, [.. AllowedEndpoints, .. OfflineHosts])
+            ? $"{address.Authority} is not reachable in offline mode ({OfflineSetting})"
+            : null;
     }
 
     /// <summary>Whether <see cref="LocalHosts"/> lets a model at <paramref name="address"/> be local (<see langword="null"/>: a CLI or Copilot).</summary>
@@ -227,7 +279,12 @@ public sealed class MachinePolicy
                 changes.Add($"The embeddings endpoint {endpoint.Authority} does not count as local in your organization's policy.");
             }
 
-            if (!AllowsEndpoint(endpoint) || (RequireLocalOnly && !embeddings.KeepsPromptsLocal))
+            if (Refuses(endpoint) is { } refused)
+            {
+                embeddings.Provider = EmbeddingProviderKind.Hashing;
+                changes.Add($"The embeddings endpoint is not used ({refused}): routing uses the in-process hashing embeddings.");
+            }
+            else if (RequireLocalOnly && !embeddings.KeepsPromptsLocal)
             {
                 embeddings.Provider = EmbeddingProviderKind.Hashing;
                 changes.Add($"The embeddings endpoint {endpoint.Authority} is not allowed by your organization's policy: routing uses the in-process hashing embeddings.");
@@ -273,9 +330,9 @@ public sealed class MachinePolicy
             {
                 yield return (name, "webhooks are turned off by your organization's policy");
             }
-            else if (Uri.TryCreate(hook.Url, UriKind.Absolute, out Uri? url) && !AllowsEndpoint(url))
+            else if (Uri.TryCreate(hook.Url, UriKind.Absolute, out Uri? url) && Refuses(url) is { } refused)
             {
-                yield return (name, $"{url.Authority} is not an allowed endpoint in your organization's policy");
+                yield return (name, refused);
             }
         }
     }
