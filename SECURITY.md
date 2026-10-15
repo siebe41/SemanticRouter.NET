@@ -36,13 +36,14 @@ The router sits between your clients and models you pay for, holds the keys for 
 - **The audit log.** A change through the dashboard or admin API that is not recorded, a record naming the wrong actor, or a request body, token or prompt text that ends up in it.
 - **Gateway keys.** `Middleware:GatewayKeys`: a remote request served without a valid key, a key that is logged or forwarded to a backend, or a timing difference that reveals a key.
 - **CLI connector process spawning.** Subscription CLI connectors start `claude`, `copilot` or `codex` as child processes with an argument list, a scrubbed environment and an empty working directory in a parent only the user can write to, and refuse `.cmd` shims. Prompt text that becomes extra arguments or shell commands, an API key or other variable leaking into the child, or a remote client reaching a CLI connector while `AllowRemoteClients` is off.
+- **Prompted tool calls.** With `ToolCalling: Prompted` a CLI connector reads tool calls out of the model's text, and the client runs them. Text in a tool result that becomes a call by being repeated (word for word or reformatted), a tool result that can pose as a turn of the transcript, a run's fence token that reaches the client or can be predicted, or, with `PromptedToolParsing: Strict`, a call accepted without the run's label, after which the reply goes on, or to a tool the request does not have. See [docs/providers.md](docs/providers.md#forged-tool-calls) for what each mode accepts.
 - **The LocalOnly guarantee.** A route, routing profile or `LocalOnlyWhen` signal marked local-only must only be served by models marked `IsLocal`, including on failover. A local-only prompt that reaches a non-local model is a security issue.
 - **Stored prompts.** The activity log and the SQLite state database (`semantic-router.db`) hold prompt previews, with credentials masked unless `State:StorePrompts` is `On`; the evaluation set export leaves local-only prompts out unless asked. A way to read these without dashboard access, prompt text stored with `StorePrompts: Off`, or purged activity that can still be read from the database files is in scope.
 
 Out of scope:
 
 - Vulnerabilities in the vendor CLIs, model servers or cloud APIs themselves; report those to the vendor.
-- What a model says, or a prompt injection that only changes a model's answer.
+- What a model says, or a prompt injection that only changes a model's answer. This includes a model that an injected instruction talks into making a tool call of its own: the client's permission settings decide whether it runs.
 - Setups the documentation describes as trusted, such as `AllowUnauthenticatedRemoteClients: true` without an authenticating proxy, or keys written in plain text to `appsettings.json`.
 - Questions about whether using a subscription CLI through the router fits a vendor's terms. These are not security issues; see [docs/TERMS.md](docs/TERMS.md) and open a normal issue if something there is wrong or out of date.
 

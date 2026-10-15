@@ -200,7 +200,11 @@ public sealed class ConnectorOptions
     /// </summary>
     public bool RepairToolCalls { get; set; } = true;
 
-    /// <summary>CLI, prompted tool calling: how strictly the reply is read for tool calls. Default <see cref="PromptedToolParsing.Lenient"/>.</summary>
+    /// <summary>
+    /// CLI, prompted tool calling: how strictly the reply is read for tool calls. Default <see cref="PromptedToolParsing.Lenient"/>,
+    /// until <see cref="PromptedToolParsing.Strict"/> has been measured on smaller models (see <c>docs/providers.md</c>).
+    /// The run's random fence label, defused tool results and refusing calls copied from a tool result apply in both.
+    /// </summary>
     public PromptedToolParsing PromptedToolParsing { get; set; } = PromptedToolParsing.Lenient;
 
     /// <summary>

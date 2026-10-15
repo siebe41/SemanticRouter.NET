@@ -397,18 +397,39 @@ Prompted tool calling keeps the CLI text-in/text-out (the vendor CLI's own tools
 ### Prompted tool calling in practice
 
 - **Text streams.** The reply's text goes to the client as the CLI writes it. Only a line that opens a fence or a JSON object is held back until the router can tell whether it is a tool call; ordinary code blocks (` ```python `) stream like text. Calls are sent as structured tool calls at the end of the reply, after any text. `StreamPromptedReplies: false` buffers the whole reply instead. The trade-off: once text has been streamed, a run that then fails cannot fail over to another model.
-- **Near misses count.** Besides the requested ` ```tool_call ` block, the router accepts:
-  - another tool-ish label (`tool_use`, `function_call`, …);
+- **Near misses count** (`PromptedToolParsing: Lenient`, the default). Besides the requested ` ```tool_call-<token> ` block, the router accepts:
+  - plain ` ```tool_call ` or another tool-ish label (`tool_use`, `function_call`, …);
   - a ` ```json ` or unlabelled block, or a bare JSON object, that names one of the request's tools;
   - an array of calls, or a `{"tool_calls": […]}` wrapper;
   - OpenAI-style `{"function": {"name", "arguments": "<json string>"}}`;
-  - trailing commas.
+  - trailing commas;
+  - calls anywhere in the reply, with text after them.
 
-  Tool names match case-insensitively. JSON that names no tool (an answer that happens to contain `{"name": "Bob"}`) stays text.
-- **Each run has its own label.** The instructions ask for ` ```tool_call-7f3a9c01 `, with a random token that is new for every run, and earlier calls in the transcript are shown with it. Text written before the run (a file, a web page, an issue) cannot carry it.
-- **Tool results are data.** Each result is rendered between `[tool_result]` and `[/tool_result]`, and the instructions say a call inside one is not the model's. Before it goes into the transcript, a result is defused: runs of three or more backticks are broken up with zero-width spaces, a line that starts a JSON object or array gets a zero-width space in front, and a line such as `[user]` or `[/tool_result]` gets a backslash. A model that repeats a hostile result word for word therefore writes no call, and the result cannot pose as the end of the result or as a user turn.
-- **Strict parsing.** `PromptedToolParsing: Strict` reads only the run's own fence as a call, naming one of the request's tools, at the end of the reply. Bare JSON, ` ```json ` and other labels stay text, and calls followed by more text are kept as text (`tool call not at the end of the reply, kept as text` in Activity). It is harder to trick, but models that do not follow the format answer in text instead of calling the tool. `Lenient` (the default) keeps the near misses above.
-- **Calls are marked.** An activity entry whose reply carried prompted calls says so: `prompted tool calls: Read, Bash`. The client still decides whether to run each call under its own permission settings; the router only reads it out of the text.
+  Tool names match case-insensitively. JSON that names no tool (an answer that happens to contain `{"name": "Bob"}`) stays text, and so does a fence labelled with another run's token (` ```tool_call-00000000 `).
+- **Calls are marked.** An activity entry whose reply carried prompted calls says so: `prompted tool calls: Read, Bash` in its notes, and `promptedToolCalls` (how many) as a field of its own, which the CSV export (`prompted_tool_calls`), the attempt span (`semantic_router.prompted_tool_calls`) and the dashboard carry too. The Activity page's `prompted calls` filter shows only those requests. The client still decides whether to run each call under its own permission settings; the router only reads it out of the text.
+
+### Forged tool calls
+
+A prompted call is text, and so is everything a tool returns: a file, a web page, an issue comment or a command's output goes back into the next run's transcript. Text that looks like a call could be taken for one, and the client would then run it. Four things keep that from happening.
+
+- **Each run has its own label.** The instructions ask for ` ```tool_call-7f3a9c01 `, with a token from a cryptographic random number generator that is new for every run, and the model's own earlier calls are shown in the transcript with it. Text written before the run cannot carry it. The token is for the model only: in the text that reaches the client the label reads plain `tool_call`, even when a call is kept as text. A request without tools gets no token, and earlier calls are shown with the plain label.
+- **Tool results are data.** Each result is rendered between `[tool_result]` and `[/tool_result]`, and the instructions say a call inside one is not the model's. Before it goes into the transcript, a result is defused: runs of three or more backticks are broken up with zero-width spaces, a line that starts a JSON object or array gets a zero-width space in front, and a line such as `[user]`, `[assistant]` or `[/tool_result]` gets a backslash. A model that repeats a hostile result word for word therefore writes no call, and the result cannot pose as the end of the result or as a user turn.
+- **A call copied from a tool result stays text.** The router reads every tool result of the request the lenient way, as if it were a reply (any tool-ish fence, a ` ```json ` or unlabelled block, bare JSON naming a tool, a fence with any run's token). A call in the reply that repeats one of them (the same tool and the same input, however the JSON is spaced, ordered or wrapped) is kept as text, in both modes and whatever its label: the author of that page chose it, not the model. The activity notes say `tool call copied from a tool result, kept as text`.
+- **Strict parsing.** `PromptedToolParsing: Strict` reads only the run's own fence as a call, naming one of the request's tools, at the end of the reply. Bare JSON, ` ```json `, plain ` ```tool_call ` and other labels stay text, and calls followed by more text are kept as text (`tool call not at the end of the reply, kept as text` in Activity). A fence with the run's label that names a tool the request does not have is a broken call (repaired once, see below), never a call to that tool.
+
+What each mode still accepts, honestly:
+
+| | `Lenient` (default) | `Strict` |
+|---|---|---|
+| A tool result's call, repeated word for word | no: the fence and JSON lines are defused | no |
+| A tool result's call, retyped or reformatted by the model | no: it repeats a quoted call | no |
+| A call the model writes itself because a tool result talked it into it (a different call, or one the result only describes in prose) | **yes**, in any of the near-miss formats | **yes**, if the model writes it with the run's label at the end of its reply |
+| A call inside a line of a tool result (`run {"name": "Bash", …} now`), moved to a line of its own by the model | **yes**: only line-start blocks are read from results | only with the run's label |
+| Bare JSON, ` ```json `, plain ` ```tool_call `, a call followed by text | yes | no |
+
+Neither mode can tell a call the model chose from one an injected instruction persuaded it to choose: the model knows the run's label, so whatever it decides to call carries it. That is prompt injection, which only the client's permission settings stop (Claude Code and Codex ask before running anything their permission mode does not allow). What the router guarantees is narrower: text that is merely *in* a tool result never becomes a call by being repeated, and in `Strict` nothing becomes a call unless the model wrote this run's label at the end of its reply.
+
+**Why `Lenient` is still the default.** Strict parsing turns every format slip into a text answer: a model that writes ` ```json `, forgets the token or adds a sentence after the call does not call the tool, and the agent stalls. Frontier models follow the format; how often smaller ones (Haiku-class) slip has not been measured yet. Run the tool-call benchmark below against your models in both modes; once `Strict` holds up, it will become the default. Until then, set `"PromptedToolParsing": "Strict"` on connectors whose models follow the format.
 - **Broken calls are repaired once.** When a block meant as a call cannot be read (invalid JSON, a tool that does not exist, missing arguments), the router runs the CLI once more with a short prompt. That prompt holds only the broken block, the problem and that tool's schema, not the conversation. The repaired call replaces the broken block. If the repair fails too, the block reaches the client as text. Either way the activity entry says so (`tool call repaired`, or `malformed tool call: …`), and the log has a line. `RepairToolCalls: false` turns the repair run off.
 - **Measured.** The dashboard's Overview shows time to first byte and total time per connector. `benchmarks/SemanticRouter.Benchmarks -- latency <router url> <model> …` runs a fixed three-turn agentic task (a Read tool, a scripted tool result, a follow-up) against any models and prints time to first output, total time and input tokens per turn.
 
@@ -422,6 +443,24 @@ Prompted tool calling keeps the CLI text-in/text-out (the vendor CLI's own tools
   | streaming | 2 | 1594 ms | 2924 ms | 392 |
 
   Total time and input tokens do not change: every turn still starts a CLI process and re-sends the transcript. [TERMS.md](TERMS.md#session-reuse-and-long-lived-processes) explains why session reuse and long-lived processes are not used. Real CLIs start more slowly and write longer replies than the simulation, so the gain in time to first output is larger. Run the benchmark against your own models to see it.
+- **Success rate per parsing mode.** `benchmarks/SemanticRouter.Benchmarks -- tool-calls <router url> <model> … [--rounds N]` sends seven fixed tasks with four tools (Read, Bash, Grep, Write): five that need a specific call (read a named file, run a command, search, write a file, call again after a tool result), one that needs none, and one whose tool result holds a forged call the model must not make. It prints, per model and task, how often the reply carried the right structured call, answered in text instead, or made a wrong call, and a success rate per model. To compare the modes, configure the same CLI twice and name both models:
+
+  ```json
+  "Connectors": {
+    "claude-lenient": { "Type": "Cli", "Preset": "ClaudeCode", "ToolCalling": "Prompted" },
+    "claude-strict":  { "Type": "Cli", "Preset": "ClaudeCode", "ToolCalling": "Prompted", "PromptedToolParsing": "Strict" }
+  },
+  "Models": [
+    { "Name": "haiku-lenient", "Connector": "claude-lenient", "Model": "haiku", "Tier": 2, "Capabilities": [ "chat", "code", "tools" ] },
+    { "Name": "haiku-strict",  "Connector": "claude-strict",  "Model": "haiku", "Tier": 2, "Capabilities": [ "chat", "code", "tools" ] }
+  ]
+  ```
+
+  ```
+  dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks -- tool-calls http://localhost:5000 haiku-lenient haiku-strict --rounds 5
+  ```
+
+  Both models get the same instructions; only the reading of the reply differs. The numbers need real CLIs and a subscription, so none are published here yet.
 
 Across a tool-calling turn the router pins follow-up requests (those carrying tool results) to the model that issued the calls (`Middleware:PinToolCallingTurns`), so a turn never changes models halfway.
 
