@@ -32,10 +32,11 @@ internal static class EvaluationApi
             }
 
             store.Save(cases);
+            DashboardAudit.Detail(context, $"{cases.Count} prompts");
             return Results.Json(new EvaluationSetResponse(store.Location, cases.Count, cases.Select(CaseDto.From).ToArray()), json);
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("replaced the evaluation set");
 
-        api.MapPost("/evaluation/cases", (CaseDto label, IEvaluationSetStore store) =>
+        api.MapPost("/evaluation/cases", (HttpContext context, CaseDto label, IEvaluationSetStore store) =>
         {
             if (string.IsNullOrWhiteSpace(label.Prompt) || label.Tier < 0)
             {
@@ -46,15 +47,17 @@ internal static class EvaluationApi
             EvaluationCase added = label.ToCase();
             var cases = store.Load().Where(c => !string.Equals(c.Prompt, added.Prompt, StringComparison.Ordinal)).Append(added).ToArray();
             store.Save(cases);
+            DashboardAudit.Detail(context, $"tier {label.Tier}");
             return Results.Json(new EvaluationSetResponse(store.Location, cases.Length, cases.Select(CaseDto.From).ToArray()), json);
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("labelled a prompt for the evaluation set");
 
-        api.MapGet("/evaluation/set/export", (IEvaluationSetStore store, bool? localOnly) =>
+        api.MapGet("/evaluation/set/export", (HttpContext context, IEvaluationSetStore store, bool? localOnly) =>
         {
+            DashboardAudit.Detail(context, localOnly == true ? "with local-only prompts" : "without local-only prompts");
             // Prompts labelled local-only stay on this machine unless the export asks for them.
             IEnumerable<EvaluationCase> cases = store.Load().Where(c => localOnly == true || !c.LocalOnly);
             return Results.File(Encoding.UTF8.GetBytes(EvaluationSet.ToJsonLines(cases)), "application/jsonl", "semantic-router.evaluation.jsonl");
-        });
+        }).Audited("exported the evaluation set");
 
         api.MapPost("/evaluate", async (HttpContext context, RouterRuntimeProvider provider, IEvaluationSetStore store, bool? calibrate) =>
         {
@@ -80,7 +83,7 @@ internal static class EvaluationApi
             EvaluationReport report = evaluator.Evaluate(prepared);
             CalibrationReport? calibration = calibrate == true ? evaluator.Calibrate(prepared) : null;
             return Results.Json(EvaluationResponse.From(report, calibration, prepared.EmbeddingTime, runtime.Configuration.Embeddings), json);
-        }).WithMetadata(DashboardWriteMetadata.Instance); // embeds every prompt in the set
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("ran the evaluation"); // embeds every prompt in the set
 
         api.MapPost("/evaluate/compare", async (HttpContext context, RouterRuntimeProvider provider, IEvaluationSetStore store) =>
         {
@@ -150,7 +153,7 @@ internal static class EvaluationApi
             CompareSide current = await RunAsync("current", runtime.EmbeddingProvider, runtime.Configuration.Embeddings).ConfigureAwait(false);
             CompareSide compared = await RunAsync("candidate", other, candidate.Masked().Embeddings).ConfigureAwait(false);
             return Results.Json(new CompareResponse(current, compared, warnings), json);
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("compared embedding models");
 
         api.MapGet("/routes/health", async (HttpContext context, RouterRuntimeProvider provider) =>
         {
@@ -201,9 +204,10 @@ internal static class EvaluationApi
             }
 
             RouterRuntime applied = provider.Apply(next, persist: true, "dashboard", actor(context), $"added an utterance to '{route.Name}'");
+            DashboardAudit.Detail(context, $"route {route.Name}, version {applied.Version}");
             PromptClassificationResult classification = await applied.Classifier.ClassifyAsync(utterance, context.RequestAborted).ConfigureAwait(false);
             return Results.Json(new AddUtteranceResponse(applied.Version, route.Name, route.Utterances.Count, classification.RequiredTier, classification.RouteName, classification.Reason, classification.Similarity), json);
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("added an utterance to a route");
     }
 
     /// <summary>The set to use: the request body (cases, <c>{"text": …}</c> or raw JSON Lines), else the stored set.</summary>

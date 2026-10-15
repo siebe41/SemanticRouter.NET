@@ -29,6 +29,9 @@ public sealed class SqliteStateOptions
     /// <summary>Most configuration versions kept. Default 200.</summary>
     public int HistoryMaxEntries { get; set; } = 200;
 
+    /// <summary>Oldest audit log entries kept. Default 365 days.</summary>
+    public TimeSpan AuditRetention { get; set; } = TimeSpan.FromDays(365);
+
     /// <summary>How long a write waits for another writer (another router instance) before giving up. Default 5 s.</summary>
     public TimeSpan BusyTimeout { get; set; } = TimeSpan.FromSeconds(5);
 }
@@ -38,7 +41,7 @@ public static class SqliteStateBuilderExtensions
 {
     /// <summary>
     /// Keeps model cooldowns, tool-call affinity, conversations' warm prompt caches, the activity log, feedback, usage,
-    /// learned changes, connector incidents and the configuration history in one SQLite file, so they survive restarts. Several router instances on one machine may share the file (cooldowns and affinity
+    /// learned changes, connector incidents, the configuration history and the audit log in one SQLite file, so they survive restarts. Several router instances on one machine may share the file (cooldowns and affinity
     /// are then shared); a database that cannot be opened or written falls back to memory with a warning.
     /// </summary>
     public static SemanticRouterBuilder UseSqliteState(this SemanticRouterBuilder builder, string path, Action<SqliteStateOptions>? configure = null)
@@ -62,6 +65,7 @@ public static class SqliteStateBuilderExtensions
         services.Replace(ServiceDescriptor.Singleton<ITuningStore, SqliteTuningStore>());
         services.Replace(ServiceDescriptor.Singleton<IUsageLedger, SqliteUsageLedger>());
         services.Replace(ServiceDescriptor.Singleton<IStateValueStore, SqliteStateValues>());
+        services.Replace(ServiceDescriptor.Singleton<IAuditLog, SqliteAuditLog>());
         return builder;
     }
 }
@@ -129,6 +133,9 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
 
     /// <summary>Most configuration versions kept: <c>State:Retention:ConfigurationVersions</c>, or <see cref="SqliteStateOptions.HistoryMaxEntries"/>.</summary>
     public int HistoryMaxEntries => _retention.ConfigurationVersions ?? Options.HistoryMaxEntries;
+
+    /// <summary>Oldest audit log entries kept: <c>State:Retention:AuditDays</c>, or <see cref="SqliteStateOptions.AuditRetention"/>.</summary>
+    public TimeSpan AuditRetention => _retention.AuditDays is int days ? TimeSpan.FromDays(days) : Options.AuditRetention;
 
     /// <summary>Takes the retention of the configuration just applied; records past it go at the next prune.</summary>
     public void Apply(StateRetentionOptions retention) => _retention = retention ?? new StateRetentionOptions();
@@ -252,6 +259,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
             CREATE TABLE IF NOT EXISTS config_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp_ticks INTEGER NOT NULL,
                 source TEXT NOT NULL, actor TEXT, note TEXT, document TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp_ticks INTEGER NOT NULL, actor TEXT NOT NULL, client TEXT,
+                method TEXT NOT NULL, path TEXT NOT NULL, route TEXT, status INTEGER NOT NULL, summary TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS audit_timestamp ON audit (timestamp_ticks);
             INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', $version);
             """, ("$version", SchemaVersion.ToString(CultureInfo.InvariantCulture))))
         {
@@ -917,4 +928,61 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
 
             return records;
         });
+}
+
+/// <summary>
+/// The audit log on disk. Rows are only ever inserted; the only delete is of rows older than <c>State:Retention:AuditDays</c>
+/// (365 days by default), as each new one is written. A database that fails keeps entries in memory for this run.
+/// </summary>
+internal sealed class SqliteAuditLog(SqliteRouterDatabase database) : IAuditLog
+{
+    private readonly InMemoryAuditLog _fallback = new();
+
+    public AuditEntry Append(AuditEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        long id = database.Run<long>("recording the audit log", -1, connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "INSERT INTO audit (timestamp_ticks, actor, client, method, path, route, status, summary) " +
+                "VALUES ($ts, $actor, $client, $method, $path, $route, $status, $summary);" +
+                "DELETE FROM audit WHERE timestamp_ticks < $oldest;" +
+                "SELECT last_insert_rowid();",
+                ("$ts", entry.Timestamp.UtcTicks), ("$actor", entry.Actor), ("$client", entry.Client), ("$method", entry.Method),
+                ("$path", entry.Path), ("$route", entry.Route), ("$status", entry.Status), ("$summary", entry.Summary),
+                ("$oldest", (database.Time.GetUtcNow() - database.AuditRetention).UtcTicks));
+            return (long)command.ExecuteScalar()!;
+        });
+
+        return id >= 0 ? entry with { Id = id } : _fallback.Append(entry);
+    }
+
+    public IReadOnlyList<AuditEntry> Query(DateTimeOffset? since, DateTimeOffset? until, int limit)
+    {
+        if (!database.Available)
+        {
+            return _fallback.Query(since, until, limit);
+        }
+
+        return database.Run<IReadOnlyList<AuditEntry>>("reading the audit log", _fallback.Query(since, until, limit), connection =>
+        {
+            var entries = new List<AuditEntry>();
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "SELECT id, timestamp_ticks, actor, client, method, path, route, status, summary FROM audit " +
+                "WHERE timestamp_ticks >= $since AND timestamp_ticks < $until ORDER BY id DESC LIMIT $limit;",
+                ("$since", since?.UtcTicks ?? 0L), ("$until", until?.UtcTicks ?? long.MaxValue), ("$limit", Math.Max(0, limit)));
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                entries.Add(new AuditEntry(
+                    reader.GetInt64(0), new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero), reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4), reader.GetString(5),
+                    reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetInt32(7), reader.GetString(8)));
+            }
+
+            return entries;
+        });
+    }
 }

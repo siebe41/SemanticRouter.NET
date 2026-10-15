@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Host;
 using SemanticRouter.Tests.Support;
@@ -346,6 +347,41 @@ public sealed class HostTests : IDisposable
 
         exit.Should().Be(1, output.ToString());
         output.ToString().Should().Contain("[FAIL] network: SemanticRouter:Network:CaBundle: " + Path.Combine(_directory, "missing.pem") + " could not be read");
+    }
+
+    [Fact]
+    public async Task Doctor_warns_when_the_identity_header_has_no_proxy_to_come_from()
+    {
+        new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(RouterConfiguration.FromJson(RouterHost.Template()));
+        var alone = new StringWriter();
+        var behind = new StringWriter();
+
+        await DoctorCommand.RunAsync(Settings("doctor", "--SemanticRouter:Dashboard:TrustedIdentityHeader=X-Forwarded-User"), alone);
+        await DoctorCommand.RunAsync(
+            Settings("doctor", "--SemanticRouter:Dashboard:TrustedIdentityHeader=X-Forwarded-User", "--SemanticRouter:ForwardedHeaders:KnownProxies:0=10.0.0.5",
+                "--SemanticRouter:Dashboard:TrustedIdentityRoles:*=ReadOnly"),
+            behind);
+
+        alone.ToString().Should().Contain("[WARN] identity: Dashboard:TrustedIdentityHeader is X-Forwarded-User, but SemanticRouter:ForwardedHeaders names no proxy");
+        behind.ToString().Should().Contain("[ OK ] identity: the dashboard takes the user from X-Forwarded-User on requests from the known proxies; TrustedIdentityRoles names 1.");
+    }
+
+    [Theory]
+    [InlineData("127.0.0.1", "alice@corp.example")]
+    [InlineData("10.9.9.9", "this machine")]
+    public async Task The_host_believes_the_identity_header_only_from_a_known_proxy(string proxy, string identity)
+    {
+        HostSettings settings = Settings(
+            "--urls", "http://127.0.0.1:0", "--SemanticRouter:Embeddings:Provider=Hashing", $"--SemanticRouter:ForwardedHeaders:KnownProxies:0={proxy}",
+            "--SemanticRouter:Dashboard:TrustedIdentityHeader=X-Forwarded-User", "--SemanticRouter:Dashboard:TrustedIdentityRoles:alice@corp.example=Admin");
+        await using RunningRouter? router = await RouterHost.StartAsync(settings, TextWriter.Null, b => b.Logging.ClearProviders());
+        using var client = new HttpClient { BaseAddress = new Uri(router!.App.Urls.First()) };
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/router/api/session");
+        request.Headers.Add("X-Forwarded-User", "alice@corp.example");
+
+        System.Text.Json.Nodes.JsonNode session = System.Text.Json.Nodes.JsonNode.Parse(await (await client.SendAsync(request)).Content.ReadAsStringAsync())!;
+
+        session["identity"]!.GetValue<string>().Should().Be(identity);
     }
 
     [Fact]

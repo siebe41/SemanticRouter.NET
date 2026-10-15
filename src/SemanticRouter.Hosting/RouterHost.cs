@@ -90,7 +90,8 @@ internal static class RouterHost
         keyRing.LogAtStart(app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("SemanticRouter.Host.KeyRing"), replacedKey);
         if (behindProxy)
         {
-            app.UseForwardedHeaders();
+            // Also notes which requests came straight from a known proxy: only those may name the dashboard user.
+            app.UseRouterForwardedHeaders();
         }
 
         app.UsePromptRouter();

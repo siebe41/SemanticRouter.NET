@@ -1,6 +1,7 @@
 /* Semantic Router dashboard: Actions behind data-action buttons, and applying configuration. */
 import { lineDiff } from './config.js';
 import { $, api, connectorNames, h, isDirty, lineupFor, setPath, state, tiers, toast } from './core.js';
+import { loadAudit } from './audit.js';
 import { loadTuning } from './learned.js';
 import { loadReliability } from './reliability.js';
 import { graph, loadMemory, updateMemorySide } from './memory.js';
@@ -76,6 +77,7 @@ export const actions = {
   'usage-set'(el) { state.usage[el.dataset.key] = el.dataset.value; state.usage.data = null; render(); },
   'budget-add'() { state.config.Usage = state.config.Usage || {}; (state.config.Usage.Budgets = state.config.Usage.Budgets || []).push({ Name: 'budget-' + (state.config.Usage.Budgets.length + 1), Model: null, Connector: null, Period: 'Day', MaxTokens: null, MaxCostUsd: 5 }); render(); },
   'budget-remove'(el) { state.config.Usage.Budgets.splice(+el.dataset.index, 1); render(); },
+  async 'audit-load'() { state.audit.entries = null; await loadAudit(); },
   async 'history-load'() { state.history.versions = (await api('GET', '/config/history?limit=100')).versions; render(); },
   async 'history-diff'(el) {
     const v = await api('GET', '/config/history/' + el.dataset.id);

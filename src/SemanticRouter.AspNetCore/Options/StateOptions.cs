@@ -28,7 +28,7 @@ public sealed class StateOptions
 
 /// <summary>
 /// How long the state database (<c>UseSqliteState</c>) keeps records. Unset values keep the store's own defaults:
-/// activity and feedback 30 days and 10,000 entries, usage 400 days, 200 configuration versions.
+/// activity and feedback 30 days and 10,000 entries, usage 400 days, 200 configuration versions, audit log 365 days.
 /// </summary>
 public sealed class StateRetentionOptions
 {
@@ -43,6 +43,12 @@ public sealed class StateRetentionOptions
 
     /// <summary>Most configuration versions kept for history and rollback.</summary>
     public int? ConfigurationVersions { get; set; }
+
+    /// <summary>
+    /// Days of the audit log (who changed what through the dashboard and admin API, sign-ins) kept. Not capped by the
+    /// machine policy's <c>MaxRetentionDays</c>, which is about prompt text: the audit log holds none.
+    /// </summary>
+    public int? AuditDays { get; set; }
 }
 
 /// <summary>Takes the retention settings of each applied configuration (implemented by durable state stores).</summary>

@@ -66,7 +66,8 @@ export function renderChrome() {
   $('#save-bar').classList.toggle('hidden', !isDirty() || readOnly());
   $$('#nav a').forEach((a) => { const on = a.dataset.view === state.view; a.classList.toggle('active', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   const notes = [];
-  if (readOnly()) notes.push('Signed in with the <b>read-only</b> token: you can look, but not change settings or run what spends embedding or API calls (classify, evaluate, check, discover).');
+  const who = state.session.identity;
+  if (readOnly()) notes.push(`${who && !/ token$|^this machine$/.test(who) ? `Signed in as <b>${h(who)}</b> with the <b>read-only</b> role` : 'Signed in with the <b>read-only</b> token'}: you can look, but not change settings or run what spends embedding or API calls (classify, evaluate, check, discover).`);
   if (state.meta.warning) notes.push(h(state.meta.warning));
   ((s && s.warnings) || []).forEach((w) => notes.push(h(w)));
   ((s && s.budgets) || []).filter((b) => b.exceeded || b.warning).forEach((b) => notes.push(`Budget <b>${h(b.name)}</b> (${h(b.covers)}) is ${b.exceeded ? 'spent' : 'at ' + b.percent + '%'}. <a href="#/usage">Usage</a>`));
@@ -146,6 +147,7 @@ export function route() {
   const hash = location.hash.replace(/^#\/?/, '') || 'overview';
   state.view = views[hash] ? hash : 'overview';
   if (state.view === 'models') state.reliability = null; // fresh figures each visit
+  if (state.view === 'audit') state.audit.entries = null;
   render();
   window.scrollTo(0, 0);
 }

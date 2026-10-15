@@ -80,6 +80,17 @@ internal static class DoctorCommand
 
         string urls = app.Configuration[WebHostDefaults.ServerUrlsKey] ?? HostSettings.DefaultUrl;
         RouterDashboardOptions dashboard = app.Services.GetRequiredService<IOptions<RouterDashboardOptions>>().Value;
+        if (!string.IsNullOrWhiteSpace(dashboard.TrustedIdentityHeader))
+        {
+            IConfigurationSection forwarded = app.Configuration.GetSection(RouterHost.ForwardedHeadersSection);
+            bool proxies = forwarded.GetSection("KnownProxies").GetChildren().Any() || forwarded.GetSection("KnownNetworks").GetChildren().Any();
+            yield return proxies
+                ? new RouterCheck("identity", RouterCheckStatus.Ok,
+                    $"the dashboard takes the user from {dashboard.TrustedIdentityHeader} on requests from the known proxies; TrustedIdentityRoles names {dashboard.TrustedIdentityRoles.Count}.")
+                : new RouterCheck("identity", RouterCheckStatus.Warning,
+                    $"Dashboard:TrustedIdentityHeader is {dashboard.TrustedIdentityHeader}, but {RouterHost.ForwardedHeadersSection} names no proxy, so the header is never believed.");
+        }
+
         bool remote = urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(u => !RouterHost.IsLoopback(u));
         if (!remote)
         {

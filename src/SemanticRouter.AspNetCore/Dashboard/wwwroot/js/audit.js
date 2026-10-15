@@ -1,0 +1,51 @@
+/* Semantic Router dashboard: Audit log page: who changed what through the dashboard and admin API, and sign-ins (admin only). */
+import { API, api, h, readOnly, state, toast, views } from './core.js';
+import { render } from './shell.js';
+
+/* GET api/audit into state.audit.entries. */
+export async function loadAudit() {
+  if (state.audit.loading) return;
+  state.audit.loading = true;
+  try {
+    state.audit.entries = (await api('GET', `/audit?limit=${state.audit.limit}`)).entries;
+    state.audit.error = null;
+  } catch (e) {
+    state.audit.entries = [];
+    state.audit.error = e.status === 403 ? 'Only the admin role can read the audit log.' : e.message;
+    if (e.status !== 403) toast(e.message, 'danger');
+  }
+  state.audit.loading = false;
+  if (state.view === 'audit') render();
+}
+
+const stamp = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
+const outcome = (status) => `<span class="badge ${status >= 500 ? 'danger' : status >= 400 ? 'warn' : 'ok'}">${status}</span>`;
+
+views.audit = () => {
+  const a = state.audit;
+  const head = `<div class="section-head"><h1>Audit log</h1><span class="muted">Every change made through the dashboard or the admin API, sign-ins and sign-outs: when, who, from where, and the outcome. Request bodies, tokens and prompt text are never recorded.</span></div>`;
+  if (readOnly()) return head + '<div class="card muted">Only the admin role can read the audit log.</div>';
+  if (!a.entries) { loadAudit(); return head + '<div class="muted">Loading…</div>'; }
+  const who = state.session.identity ? `You are signed in as <b>${h(state.session.identity)}</b>.` : '';
+  return head + `
+    <div class="card section">
+      <div class="card-head"><h2>Recent actions</h2><span class="muted small">${who}</span><span class="spacer"></span>
+        <label class="small">Show <select id="audit-limit" style="width:auto">${[100, 200, 1000].map((n) => `<option value="${n}" ${a.limit === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <button class="btn ghost small" data-action="audit-load">Refresh</button>
+        <a class="btn ghost small" href="${API}/audit?format=jsonl&amp;limit=10000" download>Download JSON Lines</a>
+      </div>
+      ${a.error ? `<p class="small" style="color:var(--danger)">${h(a.error)}</p>` : ''}
+      <div class="table-wrap"><table aria-label="Audit log">
+        <thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">From</th><th scope="col">What</th><th scope="col">Request</th><th scope="col">Result</th></tr></thead>
+        <tbody>${a.entries.map((e) => `<tr>
+          <td class="small">${h(stamp(e.timestamp))}</td>
+          <td><b>${h(e.actor)}</b></td>
+          <td class="small mono">${h(e.client || 'this machine')}</td>
+          <td>${h(e.summary)}</td>
+          <td class="small mono">${h(e.method)} ${h(e.path)}</td>
+          <td>${outcome(e.status)}</td>
+        </tr>`).join('') || '<tr><td colspan="6" class="muted small">Nothing recorded yet.</td></tr>'}</tbody>
+      </table></div>
+      <p class="small faint">Kept in the state database for <span class="mono">State:Retention:AuditDays</span> (365 days by default), or in memory without one. Also written to the log under <span class="mono">SemanticRouter.Audit</span>.</p>
+    </div>`;
+};

@@ -68,6 +68,7 @@ public static class SemanticRouterServiceCollectionExtensions
             sp.GetService<ICooldownStore>()));
         services.TryAddSingleton<IRouterConfigurationHistory>(_ => new InMemoryRouterConfigurationHistory());
         services.TryAddSingleton<IUsageLedger, InMemoryUsageLedger>();
+        services.TryAddSingleton<IAuditLog>(_ => new InMemoryAuditLog());
         services.TryAddSingleton(sp => new BudgetGate(
             sp.GetRequiredService<IUsageLedger>(), sp.GetService<TimeProvider>() ?? TimeProvider.System,
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BudgetGate>>()));

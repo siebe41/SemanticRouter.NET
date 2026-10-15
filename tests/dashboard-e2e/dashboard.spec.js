@@ -7,7 +7,7 @@ const { test: base, expect } = require('@playwright/test');
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'semantic-router.json'), 'utf8')
   .replace(/__STUB__/g, `http://127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`));
 
-const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'json'];
+const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'json', 'audit'];
 const THEMES = ['machine-dark', 'machine-light', 'terminal'];
 
 // Every test fails if the page throws or logs an error (a Content-Security-Policy violation is one), or asks any host
@@ -71,6 +71,15 @@ test('every page renders, has a heading and labels every control', async ({ page
     if (found.length) unlabelled[view] = found;
   }
   expect(unlabelled, 'controls without an accessible name, by page').toEqual({});
+});
+
+test('the audit log lists changes with who made them and from where', async ({ page }) => {
+  // beforeEach applied the fixture through the admin API from this machine.
+  await open(page, 'audit');
+  const table = page.locator('#view table[aria-label="Audit log"]');
+  await expect(table.locator('tbody tr').first()).toContainText('this machine');
+  await expect(table).toContainText('applied the configuration');
+  await expect(table).toContainText('PUT /router/api/config');
 });
 
 test('the page has landmarks, a skip link and marks the current page', async ({ page }) => {
