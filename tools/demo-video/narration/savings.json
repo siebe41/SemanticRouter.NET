@@ -1,7 +1,7 @@
 {
   "lines": {
     "title": "What does routing actually save you? Here's a day's worth of requests through the router, from quick questions to hard debugging.",
-    "local": "Most of it never left the machine. The simple questions, the small coding tasks and the tool calls all went to local models, and they cost nothing.",
+    "local": "Nearly half of it never left the machine. The quick questions and small coding tasks the routes recognise went to local models, and they cost nothing.",
     "subscription": "The hard ones went to your Claude subscription. You don't pay per request there, but that use is still worth something. At API prices, this is what it would have cost.",
     "paid": "When the session limit hit, a few requests went to the paid API instead. That's the only money actually spent today.",
     "saved": "Compared with sending everything to a frontier model through its API, this is what routing saved. And the overview keeps a running total for the week.",

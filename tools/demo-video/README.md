@@ -7,6 +7,8 @@ Records narrated videos of SemanticRouter.NET from scripts, so they can be re-re
 | **Intro**: install, `init`, start, Claude Code routed turn by turn, failover, the dashboard | [videos/intro.js](videos/intro.js) | [narration/intro.json](narration/intro.json) | ~1:50 |
 | **Deep dive**: how a prompt gets routed (routes, the prompt tester, complexity, tiers, strategies, a tool round trip, callouts, secret detection, failover, Activity, Evaluate) | [videos/deep-dive.js](videos/deep-dive.js) | [narration/deep-dive.json](narration/deep-dive.json) | ~3:05 |
 | **How-to: the settings**: where they live, a model LM Studio just downloaded, a paid API and its prices, fixing a misroute with Evaluate, a local-only profile, a budget, `doctor` | [videos/settings.js](videos/settings.js) | [narration/settings.json](narration/settings.json) | ~2:10 |
+| **What it saves you**: a day of traffic (local, a Claude subscription, a paid API after the session limit), then Usage and the weekly digest; every figure is the router's own | [videos/savings.js](videos/savings.js) | [narration/savings.json](narration/savings.json) | ~0:45 |
+| **Privacy**: the Memory map of a notes vault, a note read by a local model and then sent to Opus, a credential keeping a conversation local, Activity as the record | [videos/privacy.js](videos/privacy.js) (vault: [notes.js](notes.js)) | [narration/privacy.json](narration/privacy.json) | ~1:00 |
 
 A vertical cut for Shorts, Reels and LinkedIn (1080×1920, ~50 s) is made from the intro, not recorded:
 `node vertical.js intro out/semantic-router-demo.mp4 out/semantic-router-short.mp4` ([vertical.js](vertical.js) lists

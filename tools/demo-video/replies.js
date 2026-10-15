@@ -2,6 +2,8 @@
 // Used by lmstudio-stub.js and fake-claude/claude, so a reply looks the same whichever model the router picks.
 const replies = [
   [/^(write|generate|suggest)\b.{0,40}\btitle\b/i, 'Billing repo help'],
+  [/risks we missed|review (that|the) plan/i,
+    "Two gaps. The replay isn't idempotent yet, so a retried night creates duplicates during the freeze too: key invoices by ledger event id first. And nothing covers rollback: if cutover fails after the freeze, the legacy ledger has missed two hours of writes. Plan a replay back, or keep dual-writing until you're sure."],
   [/what can you (do|help)/i,
     "Hi! I can read and change the code in this repo, write tests, explain what something does, and dig into bugs. What would you like to work on?"],
   [/unit test/i,
@@ -30,8 +32,13 @@ const fallback = 'Sure. Here you go.';
 // tool result comes back.
 const toolCalls = [
   [/what does this (project|repo) do|read the readme/i, { name: 'Read', input: (project) => ({ file_path: `${project}/README.md` }) }],
+  [/billing migration note/i, { name: 'Read', input: (project) => ({ file_path: `${require('path').dirname(project)}/notes/Billing migration.md` }) }],
 ];
-const afterTool = "It's the billing service: it builds invoices from ledger events, applies tax per line, and converts currencies through the FX client. The README lists two open risks, duplicate invoices on replay and reused account numbers, both tracked under the billing migration.";
+const afterReadme = "It's the billing service: it builds invoices from ledger events, applies tax per line, and converts currencies through the FX client. The README lists two open risks, duplicate invoices on replay and reused account numbers, both tracked under the billing migration.";
+const afterNote = 'The migration is on track: ledger events replay nightly into the new store, and cutover is the weekend of November 14 with a two-hour write freeze. Three risks are open: duplicate invoices on replay, reused account numbers, and one-cent tax rounding differences.';
+
+/** What a model says once the tool result it asked for comes back. */
+const afterTool = (result) => (/Billing migration/.test(result || '') ? afterNote : afterReadme);
 
 /** The prompt without the <system-reminder> blocks clients add, and only its last 400 characters (the latest turn). */
 function latest(prompt) {

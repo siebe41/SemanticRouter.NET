@@ -64,7 +64,8 @@ function createStub({ project = process.cwd(), models: listed = lmStudioModels, 
         res.end('data: [DONE]\n\n');
         return;
       }
-      const reply = toolResultBack ? afterTool : replyFor(lastUserText(request));
+      const toolResult = [...messages].reverse().find((m) => m.role === 'tool');
+      const reply = toolResultBack ? afterTool(typeof toolResult?.content === 'string' ? toolResult.content : JSON.stringify(toolResult?.content)) : replyFor(lastUserText(request));
       const usage = { prompt_tokens: Math.round(body.length / 4), completion_tokens: words(reply).length, total_tokens: 0 };
       usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
       await sleep(150 + Math.random() * 150);
