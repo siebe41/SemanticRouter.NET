@@ -383,12 +383,31 @@ public sealed class DurableStateHostTests : RouterHostTest
         var text = new StringBuilder();
         foreach (string file in Directory.GetFiles(_directory, "state.db*"))
         {
-            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            using var reader = new StreamReader(stream, Encoding.Latin1);
-            text.Append(reader.ReadToEnd());
+            text.Append(ReadWhileOpen(file));
         }
 
         return text.ToString();
+    }
+
+    /// <summary>
+    /// Reads a file the router may be writing. On macOS the shared lock .NET takes when opening a file conflicts with
+    /// the lock SQLite holds while it writes, so a read that lands during a write is tried again.
+    /// </summary>
+    private static string ReadWhileOpen(string file)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream, Encoding.Latin1);
+                return reader.ReadToEnd();
+            }
+            catch (IOException) when (attempt < 50 && File.Exists(file))
+            {
+                Thread.Sleep(20);
+            }
+        }
     }
 
     /// <summary>Waits until <paramref name="count"/> entries are in the store: an entry is stored once its request finishes, which can be just after the client has the reply.</summary>
