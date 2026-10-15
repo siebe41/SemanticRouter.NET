@@ -175,6 +175,7 @@ public sealed class HostTests : IDisposable
         output.ToString().Should().Contain("lmstudio: http://localhost:1234/").And.Contain("copilot").And.Contain("disabled");
         output.ToString().Should().Contain("claude --model semantic-router").And.NotContain("CLAUDE_CODE_MAX_CONTEXT_TOKENS", "the local coder model's context window is unknown");
         EvaluationSet.Parse(File.ReadAllText(Path.Combine(_directory, "semantic-router.evaluation.jsonl"))).Should().NotBeEmpty("init writes the sample set next to the configuration");
+        File.ReadAllText(Path.Combine(_directory, "semantic-router.json")).Should().NotContain("Effective", "computed properties are not settings");
     }
 
     [Theory]

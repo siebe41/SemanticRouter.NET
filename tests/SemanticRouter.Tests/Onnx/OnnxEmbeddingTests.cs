@@ -206,6 +206,69 @@ public sealed class OnnxEmbeddingTests : IDisposable
         first.ToArray().Should().Equal(second.ToArray());
     }
 
+    /// <summary>Prompts the template once misrouted with the default model at the threshold <c>init</c> sets for it.</summary>
+    [Fact]
+    public async Task With_MiniLM_a_question_about_the_assistant_and_an_instruction_above_pasted_code_reach_their_routes()
+    {
+        RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
+        template.DefaultSimilarityThreshold = OnnxEmbeddingModels.Find(null)!.SuggestedThreshold;
+        using OnnxEmbeddingProviderFactory factory = RealFactory();
+        var classifier = new SemanticPromptClassifier(factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx }), template);
+        string function = string.Join('\n',
+            "def parse_duration(text):",
+            "    units = {\"d\": 86400, \"h\": 3600, \"m\": 60, \"s\": 1}",
+            "    total, number = 0, \"\"",
+            "    for ch in text.strip().lower():",
+            "        if ch.isdigit():",
+            "            number += ch",
+            "        elif ch in units:",
+            "            total += int(number) * units[ch]",
+            "            number = \"\"",
+            "        else:",
+            "            raise ValueError(f\"unexpected character {ch!r}\")",
+            "    return total");
+
+        PromptClassificationResult greeting = await classifier.ClassifyAsync("hey! what can you help me with in this repo?");
+        PromptClassificationResult fenced = await classifier.ClassifyAsync($"write a unit test for this function\n\n```python\n{function}\n```");
+        PromptClassificationResult pasted = await classifier.ClassifyAsync($"write a unit test for this function\n\n{function}");
+
+        greeting.Should().Match<PromptClassificationResult>(r => r.RouteName == "smalltalk" && r.RequiredTier == 1, "it asks what the assistant can do (#127)");
+        fenced.Should().Match<PromptClassificationResult>(r => r.RouteName == "simple-code" && r.RequiredTier == 2, "the code no longer drowns the instruction (#131)");
+        pasted.RouteName.Should().Be("simple-code", "a long unfenced paste is left out too");
+    }
+
+    /// <summary>A records table pasted under an instruction is left out of the embedding, but still keeps the prompt local.</summary>
+    [Fact]
+    public async Task With_MiniLM_pasted_customer_records_still_match_the_local_only_route()
+    {
+        RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
+        template.DefaultSimilarityThreshold = OnnxEmbeddingModels.Find(null)!.SuggestedThreshold;
+        template.Routes.Add(new RouteDefinition
+        {
+            // As in samples/RoutingApiSample.
+            Name = "internal-records",
+            Tier = 1,
+            LocalOnly = true,
+            SimilarityThreshold = 0.35f,
+            Utterances =
+            {
+                "look up the customer record for account number", "show the employee salary history", "what is the patient's medical history",
+                "find the social security number for this customer", "list the invoices for customer id",
+            },
+        });
+        using OnnxEmbeddingProviderFactory factory = RealFactory();
+        var classifier = new SemanticPromptClassifier(factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx }), template);
+        string records = string.Join('\n', Enumerable.Range(1, 12).Select(i =>
+            $"{1000 + i}, customer {i}, account number {4400 + i}-0021, social security number {i:000}-45-6789"));
+        PromptProse.Extract($"summarize these:\n{records}").Should().Be("summarize these:", "the records are a pasted block");
+
+        PromptClassificationResult prose = await classifier.ClassifyAsync("summarize these:");
+        PromptClassificationResult pasted = await classifier.ClassifyAsync($"summarize these:\n{records}");
+
+        prose.LocalOnly.Should().BeFalse("the instruction alone says nothing private");
+        pasted.LocalOnly.Should().BeTrue("the records match internal-records, so the prompt stays on local models");
+    }
+
     /// <summary>
     /// The shipped evaluation set (chat and agentic-client turns) against the template routes, with each ONNX model at
     /// the threshold <c>init</c> sets for it: CI fails if routing out of the box regresses below 90%.

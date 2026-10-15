@@ -124,7 +124,7 @@ public sealed class HeuristicComplexityAnalyzer : IComplexityAnalyzer
         };
     }
 
-    private static bool IsStructuralItem(ReadOnlySpan<char> line)
+    internal static bool IsStructuralItem(ReadOnlySpan<char> line)
     {
         // Bullets: "- x", "* x", "+ x". Headings: "# x", "## x".
         if (line.Length >= 2 && line[1] == ' ' && line[0] is '-' or '*' or '+')
@@ -156,7 +156,7 @@ public sealed class HeuristicComplexityAnalyzer : IComplexityAnalyzer
                && line[digits + 1] == ' ';
     }
 
-    private static bool LooksLikeCode(ReadOnlySpan<char> line)
+    internal static bool LooksLikeCode(ReadOnlySpan<char> line)
     {
         char last = line[^1];
         if (last is ';' or '{' or '}')

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SemanticRouter;
 
 /// <summary>Model selection and failover settings. Bound from <c>SemanticRouter:Selection</c>.</summary>
@@ -52,6 +54,7 @@ public sealed class ModelSelectionOptions
     public string? TimeZone { get; set; }
 
     /// <summary>The <see cref="TimeZone"/>, or this machine's when unset or unknown.</summary>
+    [JsonIgnore]
     public TimeZoneInfo EffectiveTimeZone =>
         TimeZone is { Length: > 0 } id && TimeZoneInfo.TryFindSystemTimeZoneById(id, out TimeZoneInfo? zone) ? zone : TimeZoneInfo.Local;
 
