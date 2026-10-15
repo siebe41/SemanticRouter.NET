@@ -306,7 +306,8 @@ internal sealed class CopilotCliAdapter : CliAdapter
 /// <summary>
 /// OpenAI Codex CLI non-interactive mode (https://learn.chatgpt.com/docs/non-interactive-mode):
 /// <c>codex exec --json --sandbox read-only --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules
-/// --color never -c features.shell_tool=false -c web_search="disabled" -</c>, prompt on standard input. The final
+/// --color never -c features.shell_tool=false -c web_search="disabled" -c check_for_update_on_startup=false
+/// -c analytics.enabled=false -c otel.metrics_exporter="none" -</c>, prompt on standard input. The final
 /// <c>agent_message</c> item is the reply.
 /// </summary>
 internal sealed class CodexCliAdapter : CliAdapter
@@ -329,6 +330,10 @@ internal sealed class CodexCliAdapter : CliAdapter
             "exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral",
             "--ignore-user-config", "--ignore-rules", "--color", "never",
             "-c", "features.shell_tool=false", "-c", "web_search=\"disabled\"",
+
+            // A run answers one prompt: no update check, and no analytics or metrics sent to OpenAI beyond the model API
+            // (config keys in codex-rs/config/src/config_toml.rs and types.rs).
+            "-c", "check_for_update_on_startup=false", "-c", "analytics.enabled=false", "-c", "otel.metrics_exporter=\"none\"",
         };
 
         if (!string.IsNullOrEmpty(request.Model))

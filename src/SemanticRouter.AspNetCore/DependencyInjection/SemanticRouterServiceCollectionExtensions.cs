@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -16,7 +17,7 @@ public static class SemanticRouterServiceCollectionExtensions
     /// <summary>
     /// Registers prompt routing, binding <see cref="SemanticRouterOptions"/> (routes, models, selection) from
     /// <paramref name="configuration"/> (typically <c>builder.Configuration.GetSection("SemanticRouter")</c>) along with
-    /// the <c>Connectors</c>, <c>Embeddings</c>, <c>Middleware</c>, <c>Usage</c>, <c>Memory</c>, <c>Tuning</c>, <c>Notifications</c> and <c>Dashboard</c> child sections.
+    /// the <c>Connectors</c>, <c>Embeddings</c>, <c>Middleware</c>, <c>Usage</c>, <c>Memory</c>, <c>Tuning</c>, <c>Notifications</c>, <c>Dashboard</c> and <c>Network</c> child sections.
     /// </summary>
     public static SemanticRouterBuilder AddSemanticPromptRouting(this IServiceCollection services, IConfiguration configuration)
     {
@@ -33,6 +34,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.AddOptions<NotificationOptions>().Bind(configuration.GetSection("Notifications"));
         services.AddOptions<StateOptions>().Bind(configuration.GetSection("State"));
         services.AddOptions<Microsoft.AspNetCore.Builder.RouterDashboardOptions>().Bind(configuration.GetSection("Dashboard"));
+        services.AddOptions<NetworkOptions>().Bind(configuration.GetSection("Network"));
 
         return AddCore(services);
     }
@@ -122,6 +124,25 @@ public static class SemanticRouterServiceCollectionExtensions
         // redacted, so the factory's messages for these clients are left out.
         services.AddLogging(logging => logging.AddFilter("System.Net.Http.HttpClient.SemanticRouter", LogLevel.Warning));
 
+        // Network:CaBundle: extra roots for the router's own HTTPS clients. A bundle that cannot be loaded fails start-up.
+        services.AddOptions<NetworkOptions>().ValidateOnStart();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<NetworkOptions>, NetworkOptionsValidator>());
+        services.TryAddSingleton(sp =>
+        {
+            NetworkOptions network;
+            try
+            {
+                network = sp.GetRequiredService<IOptions<NetworkOptions>>().Value;
+            }
+            catch (OptionsValidationException ex)
+            {
+                // Before start-up validation (doctor, or a client created first): the same failure as a configuration error.
+                throw new InvalidOperationException(ex.Message, ex);
+            }
+
+            return OutboundTrust.From(network, sp.GetService<IHostEnvironment>()?.ContentRootPath);
+        });
+
         // Connector clients time out per request (time to response headers), so streamed replies are never cut off.
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IConfigureOptions<HttpClientFactoryOptions>, ConnectorHttpClientOptions>());
         services.AddHttpClient(EmbeddingsClientName)
@@ -141,10 +162,20 @@ public static class SemanticRouterServiceCollectionExtensions
         return Path.Combine(Path.GetDirectoryName(full)!, Path.GetFileNameWithoutExtension(full) + ".evaluation.jsonl");
     }
 
-    private sealed class ConnectorHttpClientOptions : IConfigureNamedOptions<HttpClientFactoryOptions>
+    /// <summary>The prefix of every client the router creates (connectors, embeddings, webhooks, ONNX model downloads).</summary>
+    internal const string RouterClientPrefix = "SemanticRouter.";
+
+    private sealed class ConnectorHttpClientOptions(IServiceProvider services) : IConfigureNamedOptions<HttpClientFactoryOptions>
     {
         public void Configure(string? name, HttpClientFactoryOptions options)
         {
+            // The router's own clients also trust Network:CaBundle; the host's other clients are left alone.
+            if (name?.StartsWith(RouterClientPrefix, StringComparison.Ordinal) == true
+                && services.GetRequiredService<OutboundTrust>() is { Roots: not null } trust)
+            {
+                options.HttpMessageHandlerBuilderActions.Add(builder => trust.Apply(builder.PrimaryHandler));
+            }
+
             bool connector = name?.StartsWith(OpenAICompatibleConnector.HttpClientNamePrefix, StringComparison.Ordinal) == true;
             if (connector)
             {

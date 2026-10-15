@@ -190,6 +190,76 @@ public sealed class HostTests : IDisposable
     }
 
     [Fact]
+    public async Task Doctor_lists_every_host_the_router_will_contact_without_webhook_tokens()
+    {
+        var document = RouterConfiguration.FromJson(RouterHost.Template());
+        document.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
+        document.Connectors["openai"] = new ConnectorOptions { BaseAddress = new Uri("https://api.example.com:8443/v1"), ApiKey = "sk-doctor-test" };
+        document.Connectors["codex"] = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.Codex, Executable = FakeCli };
+        document.Connectors["copilot"] = new ConnectorOptions { Type = ConnectorType.Copilot };
+        document.Models.Add(new ModelDefinition { Name = "small", Connector = "lmstudio", Model = "qwen3-8b", IsLocal = true });
+        document.Models.Add(new ModelDefinition { Name = "cloud", Connector = "openai", Model = "gpt-x", Tier = 3 });
+        document.Models.Add(new ModelDefinition { Name = "codex", Connector = "codex", Tier = 4 });
+        document.Embeddings = new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx };
+        document.Notifications.Webhooks["ops"] = new WebhookOptions { Url = "https://hooks.example.com/services/T000/B000/hook-secret?token=abc" };
+        new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(document);
+        string bundle = Path.Combine(_directory, "corporate-root.pem");
+        using (var key = System.Security.Cryptography.ECDsa.Create())
+        {
+            var request = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=Test Root", key, System.Security.Cryptography.HashAlgorithmName.SHA256);
+            using var root = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+            await File.WriteAllTextAsync(bundle, root.ExportCertificatePem());
+        }
+
+        void Stub(WebApplicationBuilder builder)
+        {
+            builder.Services.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "lmstudio")
+                .ConfigurePrimaryHttpMessageHandler(() => StubHttpMessageHandler.Json("""{"data":[{"id":"qwen3-8b"}]}"""));
+            builder.Services.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "openai")
+                .ConfigurePrimaryHttpMessageHandler(() => StubHttpMessageHandler.Json("""{"data":[{"id":"gpt-x"}]}"""));
+
+            // The embeddings check would download the ONNX model; nothing may leave the test.
+            builder.Services.AddHttpClient(SemanticRouter.Embeddings.Onnx.OnnxEmbeddingOptions.HttpClientName)
+                .ConfigurePrimaryHttpMessageHandler(() => StubHttpMessageHandler.Json("{}", HttpStatusCode.NotFound));
+        }
+
+        var first = new StringWriter();
+        await DoctorCommand.RunAsync(Settings("doctor", $"--SemanticRouter:Network:CaBundle={bundle}"), first, Stub);
+
+        string models = Path.Combine(_directory, "models", "all-MiniLM-L6-v2");
+        Directory.CreateDirectory(models);
+        await File.WriteAllTextAsync(Path.Combine(models, "model.onnx"), "placeholder");
+        await File.WriteAllTextAsync(Path.Combine(models, "vocab.txt"), "placeholder");
+        var second = new StringWriter();
+        await DoctorCommand.RunAsync(Settings("doctor"), second, Stub);
+
+        string report = first.ToString();
+        report.Should().Contain("[ OK ] egress: connector lmstudio: localhost:1234 (this machine).");
+        report.Should().Contain("[ OK ] egress: connector openai: api.example.com:8443.");
+        report.Should().Contain($"[ OK ] egress: connector codex: CLI: {FakeCli}, which contacts OpenAI.");
+        report.Should().Contain("[ OK ] egress: connector copilot: CLI: copilot (the Copilot SDK's runtime), which contacts GitHub (no enabled model uses it yet).");
+        report.Should().Contain("[ OK ] egress: embeddings: huggingface.co, once, to download ONNX model all-MiniLM-L6-v2 into " + models);
+        report.Should().Contain("[ OK ] egress: webhook ops: hooks.example.com.");
+        report.Should().Contain("[ OK ] egress: desktop app updates: api.github.com, github.com and objects.githubusercontent.com (only the installed desktop app");
+        report.Should().Contain($"[ OK ] network: HTTPS also trusts the 1 certificate(s) in {bundle}");
+        report.Should().NotContain("hook-secret").And.NotContain("token=abc").And.NotContain("/services/").And.NotContain("sk-doctor-test");
+        second.ToString().Should().Contain($"[ OK ] egress: embeddings: ONNX model all-MiniLM-L6-v2 is in {models}; nothing is downloaded.")
+            .And.NotContain("network: HTTPS also trusts");
+    }
+
+    [Fact]
+    public async Task Doctor_names_a_ca_bundle_it_cannot_load()
+    {
+        new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(RouterConfiguration.FromJson(RouterHost.Template()));
+        var output = new StringWriter();
+
+        int exit = await DoctorCommand.RunAsync(Settings("doctor", "--SemanticRouter:Network:CaBundle=missing.pem"), output);
+
+        exit.Should().Be(1, output.ToString());
+        output.ToString().Should().Contain("[FAIL] network: SemanticRouter:Network:CaBundle: " + Path.Combine(_directory, "missing.pem") + " could not be read");
+    }
+
+    [Fact]
     public async Task Init_adds_every_chat_model_a_local_server_offers_and_says_how_it_loads_them()
     {
         var handler = LocalServers.LmStudio(justInTime: true);

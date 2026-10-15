@@ -53,7 +53,8 @@ static string Help() => $"""
       semantic-router [run] [options]   Start the router and the dashboard (default http://localhost:5080).
       semantic-router init [--force]    Write a starting configuration with the models found on this machine
                                         (LM Studio, Ollama, and the claude / codex / copilot CLIs on PATH).
-      semantic-router doctor            Check every connector, model and the embeddings. Exit code 1 on failure.
+      semantic-router doctor            Check every connector, model and the embeddings, and list every host the
+                                        router will contact. Exit code 1 on failure.
       semantic-router models [name]     List the models each connector (or the one named) offers: loaded or not,
                                         context, size, which are in the catalog, and a suggested tier for the rest.
       semantic-router service <action> [options]
