@@ -442,7 +442,12 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         return errors;
     }
 
-    /// <summary>Fills secrets that <paramref name="document"/> leaves empty from <paramref name="defaults"/> (same connector name).</summary>
+    /// <summary>
+    /// Fills secrets that <paramref name="document"/> leaves empty from <paramref name="defaults"/> (same connector name),
+    /// and adds the gateway keys <paramref name="defaults"/> has and the document does not name: a key given in
+    /// <c>appsettings.json</c> or an environment variable (<c>SemanticRouter__Middleware__GatewayKeys__laptop</c>, the
+    /// container's <c>ROUTER_GATEWAY_KEY</c>) always applies, as a dashboard token does.
+    /// </summary>
     public static void InheritSecrets(RouterConfiguration document, RouterConfiguration defaults)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -484,7 +489,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
 
         foreach ((string client, string key) in defaults.Middleware.GatewayKeys)
         {
-            if (document.Middleware.GatewayKeys.TryGetValue(client, out string? current) && (string.IsNullOrEmpty(current) || current == MaskedSecret))
+            if (!document.Middleware.GatewayKeys.TryGetValue(client, out string? current) || string.IsNullOrEmpty(current) || current == MaskedSecret)
             {
                 document.Middleware.GatewayKeys[client] = key;
             }

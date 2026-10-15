@@ -176,6 +176,7 @@ ROUTER_ADMIN_TOKEN=$(openssl rand -hex 24) ROUTER_GATEWAY_KEY=$(openssl rand -he
 - The compose example publishes the port on `127.0.0.1` only.
 - Requests that come in through the port mapping arrive from the container network, so the router treats them as remote. The dashboard asks for `ROUTER_ADMIN_TOKEN` and the gateway for `ROUTER_GATEWAY_KEY` (clients send it as `ANTHROPIC_AUTH_TOKEN` or `OPENAI_API_KEY`); without them, everyone is refused.
 - With `docker run`, publish the port as `-p 127.0.0.1:5080:8080`. Plain `-p 5080:8080` opens it to every network the machine is on.
+- The image is Ubuntu chiseled: no shell or package manager, so `docker exec … sh` does not work. Use `docker cp` to read or replace files on the volume, and `docker logs` for the log. Base images are pinned by digest and scanned before each release.
 - Keep API keys in the environment and refer to them from the configuration: `"ApiKey": "${env:OPENAI_API_KEY}"`.
 - A model server on the host machine is `http://host.docker.internal:1234` (LM Studio) or `:11434` (Ollama).
 

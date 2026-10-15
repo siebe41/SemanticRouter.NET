@@ -7,15 +7,21 @@
 #
 # Clients send ROUTER_GATEWAY_KEY as their API key (ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY). Publish the port beyond
 # 127.0.0.1 only on a network you trust, and see docs/host.md for HTTPS.
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+#
+# Base images are pinned by digest (Dependabot updates them); the runtime is Ubuntu chiseled: no shell or package
+# manager, only what .NET needs. The -extra variant keeps ICU and time zone data, for budgets in a local time zone.
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:0d99ebf1ccad15037b5c98c9fe8979d6b8dbac23812feae2277a0b277b5c5ffa AS build
 WORKDIR /src
 COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props .editorconfig ./
 COPY src/ src/
 RUN dotnet publish src/SemanticRouter.Host/SemanticRouter.Host.csproj -c Release -o /app /p:UseAppHost=false
+# The runtime image has no shell to create the data directory, so it is made here and copied over.
+RUN mkdir -p /data
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra@sha256:3ed6558056b54d5c9dfefb7ff473728e022ff2bf1d976cbf8ee07b05ec594374
 WORKDIR /app
 COPY --from=build /app .
+COPY --from=build --chown=$APP_UID:$APP_UID /data /data
 
 # Configuration, the encrypted secrets file and the data-protection keys that decrypt it live on one volume.
 # Port-mapped requests arrive from the container network, so the router treats them as remote: the dashboard needs a
@@ -27,7 +33,6 @@ ENV SEMANTIC_ROUTER_HOME=/data \
     SemanticRouter__Dashboard__RequireLocalClient=false \
     SemanticRouter__Dashboard__AdminToken=\${env:ROUTER_ADMIN_TOKEN} \
     SemanticRouter__Middleware__GatewayKeys__default=\${env:ROUTER_GATEWAY_KEY}
-RUN mkdir -p /data && chown "$APP_UID" /data
 VOLUME /data
 EXPOSE 8080
 USER $APP_UID
