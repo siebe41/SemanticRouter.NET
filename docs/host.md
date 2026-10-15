@@ -29,7 +29,7 @@ SemanticRouter 0.2.0 is listening on http://localhost:5080
 | Command | What it does |
 |---|---|
 | `semantic-router` (or `run`) | Starts the router and the dashboard. Creates the configuration file from the built-in template on first run. |
-| `semantic-router init [--force] [--no-detect]` | Writes a starting configuration. It probes LM Studio (`localhost:1234`) and Ollama (`localhost:11434`) for chat and embedding models and looks for `claude`, `codex` and `copilot` on `PATH`. It refuses to overwrite an existing file without `--force`. |
+| `semantic-router init [--force] [--no-detect] [--yes \| --no-cli]` | Writes a starting configuration. It probes LM Studio (`localhost:1234`) and Ollama (`localhost:11434`) for chat and embedding models and looks for `claude`, `codex` and `copilot` on `PATH`, asking before it enables a subscription CLI (see [What `init` adds](#what-init-adds)). `--yes` enables them without asking; `--no-cli` adds no subscription CLI connector. It refuses to overwrite an existing file without `--force`. |
 | `semantic-router doctor` | Loads the configuration exactly as `run` would and checks it without calling a model. It flags unresolved `${env:…}` references, tests the embeddings, and checks each HTTP connector (reachable, credentials accepted, configured model ids offered) and each CLI connector (installed, starts and, for Claude Code, signed in). Every failure names the setting to change. Exit code 1 when anything failed. |
 | `semantic-router models [connector]` | Asks every connector (or the one named) which models it offers, and prints them with their load state, context length and size, the catalog model that already uses each, and a suggested name, tier (and where it came from: the family table, the size or the name) and capabilities for the rest (see [Model lineups](providers.md#model-lineups-several-models-per-provider)). A `model-families.json` in the configuration directory adds or changes families. LM Studio and Ollama also say whether they load models on demand. Changes nothing; add models on the dashboard. |
 | `semantic-router service install\|uninstall\|start\|stop\|restart\|status` | Runs the router in the background whenever you sign in. See [Run it in the background](#run-it-in-the-background). |
@@ -85,6 +85,17 @@ While it runs, the router records its process id and addresses in `semantic-rout
 | `copilot` on PATH | `copilot-cli` and a tier-4 `copilot` model, **disabled**: it spends your plan's premium requests, so you turn it on. |
 
 On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not used, because the router never starts a CLI through `cmd.exe`. Everything else (API-key providers, tiers, routes) is edited on the dashboard.
+
+**Subscription CLIs are enabled only on a yes.** A CLI connector answers with whatever account that CLI is signed in to, which on a work machine may be a personal plan under consumer terms (see [Using it at work](TERMS.md#using-it-at-work)). So `init` lists the `claude` and `codex` it found and asks about each one (`[y/N]`, no by default):
+
+| How `init` runs | `claude-cli` and `codex-cli` |
+|---|---|
+| At a terminal | Asked about one by one. Yes: added enabled, as in the table above. No: added with every model disabled, so you can turn them on later on the dashboard's **Models** page. |
+| Without a terminal (input or output redirected: a script, CI, an installer) | Added with every model disabled, with a note saying how to enable them. |
+| `--yes` | Added enabled without asking. |
+| `--no-cli` | Not added. Neither is `copilot-cli`. |
+
+`copilot-cli` is never asked about: it is always added disabled, as above.
 
 ## Where things live
 

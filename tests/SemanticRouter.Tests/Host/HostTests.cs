@@ -40,6 +40,9 @@ public sealed class HostTests : IDisposable
         HostSettings.Parse(["--help"], _ => null).Command.Should().Be("help");
         HostSettings.Parse(["models", "lmstudio", "--config-dir=/tmp/x"], _ => null).Should().Match<HostSettings>(s => s.Command == "models" && s.Connector == "lmstudio");
         HostSettings.Parse(["models"], _ => null).Connector.Should().BeNull();
+        HostSettings.Parse(["init", "--yes"], _ => null).Should().Match<HostSettings>(s => s.Yes && !s.NoCli);
+        HostSettings.Parse(["init", "-y", "--no-cli"], _ => null).Should().Match<HostSettings>(s => s.Yes && s.NoCli);
+        HostSettings.Parse(["init"], _ => null).Should().Match<HostSettings>(s => !s.Yes && !s.NoCli);
     }
 
     [Fact]
@@ -108,7 +111,7 @@ public sealed class HostTests : IDisposable
             : throw new HttpRequestException("Connection refused"));
         var output = new StringWriter();
 
-        int exit = await InitCommand.RunAsync(Settings("init"), new InitProbes(new HttpClient(handler), bin, Windows: false), output);
+        int exit = await InitCommand.RunAsync(Settings("init", "--yes"), new InitProbes(new HttpClient(handler), bin, Windows: false), output);
 
         exit.Should().Be(0, output.ToString());
         RouterConfiguration written = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
@@ -133,6 +136,68 @@ public sealed class HostTests : IDisposable
         written.DefaultSimilarityThreshold.Should().BeApproximately(0.62f, 0.001f);
         output.ToString().Should().Contain("lmstudio: http://localhost:1234/").And.Contain("copilot").And.Contain("disabled");
         EvaluationSet.Parse(File.ReadAllText(Path.Combine(_directory, "semantic-router.evaluation.jsonl"))).Should().NotBeEmpty("init writes the sample set next to the configuration");
+    }
+
+    [Theory]
+    [InlineData("interactive yes", new[] { "init" }, "y\nyes\n", true, true)]
+    [InlineData("interactive no", new[] { "init" }, "n\n\n", false, true)]
+    [InlineData("interactive, input ends", new[] { "init" }, "", false, true)]
+    [InlineData("no terminal", new[] { "init" }, null, false, true)]
+    [InlineData("--yes", new[] { "init", "--yes" }, null, true, true)]
+    [InlineData("--no-cli", new[] { "init", "--no-cli" }, "y\ny\n", false, false)]
+    [InlineData("--no-cli wins over --yes", new[] { "init", "--yes", "--no-cli" }, null, false, false)]
+    public async Task Init_enables_a_subscription_cli_only_on_an_explicit_yes(string scenario, string[] args, string? answers, bool enabled, bool added)
+    {
+        string bin = Directory.CreateDirectory(Path.Combine(_directory, "bin")).FullName;
+        foreach (string cli in new[] { "claude", "codex", "copilot" })
+        {
+            File.WriteAllText(Path.Combine(bin, cli), string.Empty);
+        }
+
+        var handler = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("Connection refused"));
+        var output = new StringWriter();
+
+        int exit = await InitCommand.RunAsync(
+            Settings(args), new InitProbes(new HttpClient(handler), bin, Windows: false), output, answers is null ? null : new StringReader(answers));
+
+        exit.Should().Be(0, output.ToString());
+        RouterConfiguration written = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+        written.GetDocumentValidationErrors().Should().BeEmpty();
+        string[] subscription = ["claude-cli", "codex-cli", "copilot-cli"];
+        if (!added)
+        {
+            written.Connectors.Keys.Should().NotContain(subscription, scenario);
+            written.Models.Should().BeEmpty(scenario);
+            output.ToString().Should().NotContain("Enable claude", "--no-cli asks nothing");
+            return;
+        }
+
+        written.Connectors.Keys.Should().Contain(subscription, scenario);
+        written.Connectors["claude-cli"].ToolCalling.Should().Be(CliToolCalling.Prompted);
+        written.Models.Where(m => m.Connector == "claude-cli" && m.Tier < 5).Should().OnlyContain(m => m.Enabled == enabled, scenario);
+        written.Models.Single(m => m.Connector == "codex-cli").Enabled.Should().Be(enabled, scenario);
+        written.Models.Where(m => m.Connector == "copilot-cli").Should().OnlyContain(m => !m.Enabled, "Copilot is never enabled by init");
+        written.Models.Single(m => m.Connector == "claude-cli" && m.Tier == 5).Enabled.Should().BeFalse("init never enables Claude's top tier");
+
+        string report = output.ToString();
+        if (answers is null)
+        {
+            report.Should().NotContain("Enable claude", "without a terminal init asks nothing");
+            if (!enabled)
+            {
+                report.Should().Contain("claude, codex: init asks before enabling").And.Contain("whatever account").And.Contain("docs/TERMS.md").And.Contain("--force --yes");
+            }
+        }
+        else
+        {
+            report.Should().Contain("whatever account that CLI is signed in to").And.Contain("docs/TERMS.md")
+                .And.Contain("Enable claude on the account it is signed in to? [y/N]").And.NotContain("Enable copilot");
+        }
+
+        if (!enabled)
+        {
+            report.Should().Contain("all disabled").And.Contain(answers is null ? "no terminal to ask on" : "you did not say yes").And.Contain("No model is enabled");
+        }
     }
 
     [Fact]

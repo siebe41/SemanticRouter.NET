@@ -130,11 +130,20 @@ What the router does instead: it streams text as it arrives (most of the waiting
 
 OpenAI, Anthropic, Gemini, Azure OpenAI, OpenRouter and similar APIs are used with your own API keys under each provider's normal API terms. These are the right choice for anything shared: team gateways, internal tools, products. `AllowRemoteClients` does not apply to them.
 
+## Using it at work
+
+A subscription CLI connector sends prompts through **whatever account that CLI is signed in to**. The router never sees which account that is (rule 2). The Copilot SDK connector works the same way, with whatever sign-in the Copilot runtime finds (its stored login, `gh auth`, or a token in its environment). On a work machine, that can mean your company's code and prompts go through a personal Claude Pro/Max, ChatGPT Plus or Copilot Individual plan. Personal plans are covered by consumer terms, whose data retention, training settings and data-processing terms differ from the agreement your company has with the vendor.
+
+- **Check your company's AI policy first.** Many companies allow only approved tools and accounts for work code.
+- **Use the account your company provides.** Sign each CLI in to your company's plan (for example Claude for Work, ChatGPT Enterprise or Copilot Business), or use an API-key connector under the company's agreement. A company seat keeps its own terms: the router does not change who the vendor is serving or under which agreement.
+- **Keep the CLI connectors off where they are not allowed.** `semantic-router init` asks before enabling each subscription CLI it finds, and adds them disabled when it cannot ask (no terminal, a script, CI). `semantic-router init --no-cli` adds none at all. A connector that is already set up is turned off by disabling its models on the dashboard's **Models** page. A machine-wide policy that lets an administrator turn off connector types is planned; see [#100](https://github.com/siebe41/SemanticRouter.NET/issues/100).
+
 ## Your checklist
 
 - [ ] The router listens on `localhost`. CLI connectors keep `AllowRemoteClients: false`.
 - [ ] Only you use the subscription-backed models. Anyone else goes through API-key models.
 - [ ] You signed in to each CLI yourself, through the vendor's own login flow.
+- [ ] On a work machine, each CLI is signed in to an account your company's AI policy allows (see [Using it at work](#using-it-at-work)).
 - [ ] You are not feeding unattended bulk jobs through a subscription.
 - [ ] You re-read the vendor terms linked above when you upgrade a CLI or change how you use the router.
 
