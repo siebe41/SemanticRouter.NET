@@ -18,7 +18,14 @@ public enum ChatProtocol
 }
 
 /// <summary>One part of a chat message.</summary>
-public abstract record ContentBlock;
+public abstract record ContentBlock
+{
+    /// <summary>
+    /// The Anthropic <c>cache_control</c> marker the client put on this block, as JSON (e.g.
+    /// <c>{"type":"ephemeral"}</c>). Written again when the request is rebuilt for an Anthropic backend.
+    /// </summary>
+    public string? CacheControl { get; init; }
+}
 
 /// <summary>Plain text.</summary>
 /// <param name="Text">The text.</param>
@@ -98,6 +105,9 @@ public sealed record ToolDefinition(
 
     /// <summary>The name the client knows the tool by.</summary>
     public string OriginalName => ClientName ?? Name;
+
+    /// <summary>The Anthropic <c>cache_control</c> marker the client put on this tool, as JSON.</summary>
+    public string? CacheControl { get; init; }
 }
 
 /// <summary>A request for the model to reason before answering.</summary>

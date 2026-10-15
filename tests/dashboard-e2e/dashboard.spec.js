@@ -164,6 +164,18 @@ test('renaming a connector renames it in the models that use it', async ({ page,
   expect(config.Models.find((m) => m.Name === 'local-small').Connector).toBe('lmstudio');
 });
 
+test('an Anthropic connector\'s prompt caching settings are saved', async ({ page, request }) => {
+  await open(page, 'connectors');
+  await page.locator('.item-head', { hasText: 'local' }).first().click();
+  await page.locator('.item.open select[data-bind="Connectors.local.Type"]').selectOption('Anthropic');
+  await page.locator('.item.open select[data-bind="Connectors.local.PromptCaching"]').selectOption('Off');
+  await page.locator('.item.open select[data-bind="Connectors.local.CacheTtl"]').selectOption('1h');
+  await page.locator('#save-bar [data-action="apply"]').click();
+  await expect(page.locator('#toast')).toContainText('Applied');
+  const config = (await (await request.get('/router/api/config')).json()).config;
+  expect(config.Connectors.local).toMatchObject({ Type: 'Anthropic', PromptCaching: 'Off', CacheTtl: '1h' });
+});
+
 test('validation lists problems and discard restores the configuration', async ({ page }) => {
   await open(page, 'routes');
   await page.locator('.item-head', { hasText: 'architecture' }).click();

@@ -45,6 +45,13 @@ internal sealed class DroppedFeatures
         // Web search, file search, … run inside the provider: Codex declares web_search on every turn, so a backend of
         // another kind answers without it rather than not at all.
         dropped.AddRange(request.HostedTools);
+
+        // Only the Messages API takes cache markers; the OpenAI APIs cache by prefix on their own.
+        if (request.HasCacheMarkers && target != ChatProtocol.Anthropic)
+        {
+            dropped.Add("cache_control");
+        }
+
         dropped.AddRange(request.ProtocolOnlyFeatures);
         if (request.Reasoning is not null)
         {
@@ -62,6 +69,11 @@ internal sealed class DroppedFeatures
     public static List<string> ForCli(ChatCompletionRequest request)
     {
         var dropped = new List<string>(request.HostedTools);
+        if (request.HasCacheMarkers)
+        {
+            dropped.Add("cache_control");
+        }
+
         dropped.AddRange(request.ProtocolOnlyFeatures);
         if (request.Reasoning is not null)
         {

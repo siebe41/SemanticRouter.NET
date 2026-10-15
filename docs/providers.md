@@ -314,7 +314,7 @@ Set `ApiKey`. The router sends `store: false` on translated requests.
 
 ## Anthropic API
 
-The `Anthropic` connector speaks the Messages API (`POST /v1/messages`) with your API key, billed per token and separate from any Claude subscription. Requests from Anthropic-protocol clients (Claude Code, the Anthropic SDKs) pass through untouched, prompt caching and all; OpenAI-protocol requests are translated, including tools and streaming.
+The `Anthropic` connector speaks the Messages API (`POST /v1/messages`) with your API key, billed per token and separate from any Claude subscription. Requests from Anthropic-protocol clients (Claude Code, the Anthropic SDKs) pass through untouched, prompt caching and all; OpenAI-protocol requests are translated, including tools, streaming and [cache markers](#prompt-caching-on-translated-requests).
 
 ```jsonc
 "Connectors": { "anthropic": { "Type": "Anthropic", "BaseAddress": "https://api.anthropic.com" } },
@@ -327,6 +327,17 @@ The `Anthropic` connector speaks the Messages API (`POST /v1/messages`) with you
 ```
 
 Set `ApiKey`, then **Discover models** lists the models your key can use with their list prices and context windows. `AnthropicVersion` (default `2023-06-01`) is sent as `anthropic-version`; add client headers you want relayed, such as `anthropic-beta`, to `ForwardHeaders`. The client's own `Authorization`/`x-api-key` headers are never forwarded. (Anthropic's OpenAI-compatible endpoint still works through an `OpenAICompatible` connector if you prefer it.)
+
+### Prompt caching on translated requests
+
+Anthropic only caches what a request marks with `cache_control`. Claude Code marks its own requests, which pass through untouched. Requests the router translates (from OpenAI clients, Aider, Codex) carry no markers of their own, so the router adds them (`PromptCaching: Auto`, the default):
+
+- **One breakpoint at the end of the system prompt.** Tools and system come first in Anthropic's prompt and stay the same every turn, so this caches both. Without a system prompt it goes on the last tool. The system text itself is not changed; it is sent as one text block so it can carry the marker.
+- **Automatic caching for the conversation** (a top-level `cache_control`). Anthropic puts that breakpoint on the last block and moves it forward as the conversation grows, so each turn reads the previous turns from the cache.
+- **Only above the model's cacheable minimum:** 4,096 estimated tokens on Opus 4.5 and 4.6 and Haiku 4.5, 512 on other models. A shorter prompt gets no markers.
+- **`CacheTtl`:** `5m` (default) or `1h`, on both markers. Writing a one-hour entry costs twice the input price instead of 1.25 times, so it only pays off when turns are often more than five minutes apart.
+
+The first turn above the minimum pays the cache-write price on its prompt; later turns read it. The activity entry and the Usage page show the reads and writes ([observability.md](observability.md)). A request from an Anthropic client that the router rebuilds keeps that client's own markers, and the router adds none. Set `PromptCaching: Off` for an Anthropic-compatible server that rejects `cache_control`.
 
 ## Google Gemini API
 
@@ -429,9 +440,11 @@ When a backend speaks the client's protocol, the body passes through untouched (
 | `parallel_tool_calls: false` | ✓ | `disable_parallel_tool_use` | ✓ | dropped |
 | Stop reasons (length, refusal, tool use) | ✓ | ✓ (`refusal`, `pause_turn`) | ✓ (`incomplete`) | end of turn, or tool use with prompted tools |
 | Hosted tools (`web_search`, …) | dropped | dropped | ✓ | dropped |
-| `prompt_cache_key` | ✓ | not needed (caches by prefix) | ✓ | not needed |
+| Prompt caching | automatic | markers added above the model's minimum ([`PromptCaching`](#prompt-caching-on-translated-requests)) | automatic | n/a |
+| `cache_control` markers from an Anthropic client | dropped (the backend caches on its own) | ✓ | dropped (the backend caches on its own) | dropped |
+| `prompt_cache_key` | ✓ | not needed (the router adds cache markers) | ✓ | not needed |
 | Cached-token counts in the reply | `prompt_tokens_details.cached_tokens` | `cache_read_input_tokens`, `cache_creation_input_tokens` (also on a streamed `message_delta`) | `input_tokens_details.cached_tokens` | read from the CLI's usage (claude, codex) |
-| Protocol-only features (`cache_control`, documents, `logprobs`, `n` > 1, audio, `previous_response_id`, reasoning items) | dropped | dropped | dropped | dropped |
+| Protocol-only features (documents, `logprobs`, `n` > 1, audio, `previous_response_id`, reasoning items) | dropped | dropped | dropped | dropped |
 
 Notes:
 
