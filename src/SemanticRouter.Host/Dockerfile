@@ -14,7 +14,10 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:0d99ebf1ccad15037b5c98c9fe8979d6b8
 WORKDIR /src
 COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props .editorconfig ./
 COPY src/ src/
+COPY deploy/third-party-notices.cs deploy/
 RUN dotnet publish src/SemanticRouter.Host/SemanticRouter.Host.csproj -c Release -o /app /p:UseAppHost=false
+# The licences and notices of the NuGet packages the image ships, from the packages restore just fetched (no network).
+RUN dotnet run --file deploy/third-party-notices.cs -- /app/THIRD-PARTY-NOTICES.txt /app
 # The runtime image has no shell to create the data directory, so it is made here and copied over.
 RUN mkdir -p /data
 

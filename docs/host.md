@@ -202,4 +202,4 @@ ROUTER_ADMIN_TOKEN=$(openssl rand -hex 24) ROUTER_GATEWAY_KEY=$(openssl rand -he
 
 **Subscription CLI connectors do not work in a container.** The image has no vendor CLIs, and the CLIs' logins on your machine must not be copied or mounted into one: the router never handles vendor credentials ([TERMS.md](TERMS.md), rule 2). Run the dotnet tool on the machine itself for those.
 
-Images are published as `ghcr.io/siebe41/semantic-router:<version>` when a version tag is pushed. To build one yourself: `docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router .`
+Images are published as `ghcr.io/siebe41/semantic-router:<version>` when a version tag is pushed, signed with keyless cosign and with provenance and SBOM attestations: [releases.md](releases.md#check-the-container-image) shows how to verify one. To build one yourself: `docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router .`

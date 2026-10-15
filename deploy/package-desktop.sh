@@ -7,6 +7,8 @@
 # win-*   SemanticRouter-<version>-<rid>.zip with SemanticRouter.exe
 # linux-* SemanticRouter-<version>-<rid>.tar.gz with SemanticRouter and semantic-router.png
 # osx-*   SemanticRouter-<version>-<rid>.zip with SemanticRouter.app (unsigned: see docs/desktop.md)
+#
+# Each has THIRD-PARTY-NOTICES.txt next to the executable (publish-desktop.sh).
 set -euo pipefail
 
 rid="$1"
