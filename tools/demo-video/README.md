@@ -8,6 +8,10 @@ Records narrated videos of SemanticRouter.NET from scripts, so they can be re-re
 | **Deep dive**: how a prompt gets routed (routes, the prompt tester, complexity, tiers, strategies, a tool round trip, callouts, secret detection, failover, Activity, Evaluate) | [videos/deep-dive.js](videos/deep-dive.js) | [narration/deep-dive.json](narration/deep-dive.json) | ~3:05 |
 | **How-to: the settings**: where they live, a model LM Studio just downloaded, a paid API and its prices, fixing a misroute with Evaluate, a local-only profile, a budget, `doctor` | [videos/settings.js](videos/settings.js) | [narration/settings.json](narration/settings.json) | ~2:10 |
 
+A vertical cut for Shorts, Reels and LinkedIn (1080×1920, ~50 s) is made from the intro, not recorded:
+`node vertical.js intro out/semantic-router-demo.mp4 out/semantic-router-short.mp4` ([vertical.js](vertical.js) lists
+the segments, cut between narration lines, with a headline above and large subtitles below).
+
 [kit.js](kit.js) holds what they share (the demo user, the stand-in models, the shells, the stage, the dashboard
 helpers, the narration clock), [stage.html](stage.html) is what the camera sees, and [PLAN.md](PLAN.md) lists the
 videos still to make.
