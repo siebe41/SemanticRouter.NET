@@ -423,10 +423,12 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem($"Unknown routing profile '{profile}'.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            RoutingPlan plan = await runtime.Router.RouteAsync(
+            // As the gateway routes a first turn: a leading callout ("@opus …") applies and is not classified.
+            (RoutingPlan plan, string? callout) = await Callouts.RouteAsync(
+                runtime, runtime.Router,
                 new PromptRoutingRequest { Prompt = request.Prompt, Strategy = choice.Strategy, RequestedModel = choice.RequestedModel, Profile = profile },
                 cancellationToken).ConfigureAwait(false);
-            return Results.Ok(PromptClassificationResponse.From(plan));
+            return Results.Ok(PromptClassificationResponse.From(plan) with { Callout = callout });
         }).WithMetadata(DashboardWriteMetadata.Instance).Audited("classified a prompt"); // classifying embeds the prompt, which can cost an embedding call
 
         api.MapPost("/health/reset", (IModelHealth health) =>

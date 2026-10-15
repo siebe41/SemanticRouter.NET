@@ -166,7 +166,7 @@ internal sealed partial class PromptRoutingMiddleware
 
         // An inline callout ("@opus …") routes as the person asked. The tag is taken out of every user message before
         // the request goes on, so the model never sees it; the body is only rewritten when there is one.
-        Callout? callout = options.Callouts.Enabled && Callouts.LeadingTag(prompt) is { } tag ? Callouts.Resolve(tag, runtime) : null;
+        Callout? callout = Callouts.Find(prompt, runtime);
         if (options.Callouts.Enabled && Callouts.Strip(bodyBytes, protocol, runtime) is { } stripped
             && TryParse(context, runtime, protocol, stripped, out string strippedPrompt, out ChatCompletionRequest strippedChat, out IReadOnlyList<MemoryReference> strippedMemory))
         {
@@ -269,13 +269,9 @@ internal sealed partial class PromptRoutingMiddleware
         }
 
         bool explicitTurn = choice is { Clear: false };
-        if (choice is { Clear: false, Model: { } calloutModel })
+        if (choice is not null)
         {
-            (requestedModel, strategy) = (calloutModel, null);
-        }
-        else if (choice is { Clear: false, Strategy: { } calloutStrategy })
-        {
-            strategy = calloutStrategy;
+            (requestedModel, strategy) = choice.Choose(requestedModel, strategy);
         }
 
         string? affinityModel = options.PinToolCallingTurns && chat.IsToolResultContinuation && requestedModel is null
@@ -299,7 +295,7 @@ internal sealed partial class PromptRoutingMiddleware
         // The prompt caches earlier turns left on models: staying on one can cost less than moving.
         IReadOnlyList<WarmCache> warmCaches = continued && conversation.StickToModel && _warmCaches is not null ? _warmCaches.Lookup(conversationKey!) : [];
 
-        bool localOnly = profile.LocalOnly || choice is { Clear: false, Local: true } || keptLocal
+        bool localOnly = profile.LocalOnly || choice is { LocalOnly: true } || keptLocal
             || (profile.Profile is { } named && runtime.Router.Profiles.TryGetValue(named, out RoutingProfile? rules) && rules.LocalOnly);
         var routingRequest = new PromptRoutingRequest
         {
@@ -307,7 +303,7 @@ internal sealed partial class PromptRoutingMiddleware
             PreferredModel = conversationContext.PreferredModel,
             WarmCaches = warmCaches,
             MinimumTier = minimumTier,
-            ExplicitTier = explicitTurn ? choice!.Tier : null,
+            ExplicitTier = choice?.ExplicitTier,
             Profile = profile.Profile,
             LocalOnly = localOnly,
             EmbeddingsAllowed = !localOnly || runtime.Configuration.Embeddings.KeepsPromptsLocal,
@@ -326,23 +322,7 @@ internal sealed partial class PromptRoutingMiddleware
             _conversations!.MarkLocalOnly(localKey);
         }
 
-        string? calloutNote = callout is { Clear: true } ? callout.Tag : null;
-        if (explicitTurn)
-        {
-            calloutNote = choice!.Tag + (remembered ? " (earlier in the conversation)" : string.Empty);
-            if (choice.Model is not null)
-            {
-                if (plan.Classification.Reason == RoutingReason.ModelOverride)
-                {
-                    plan = plan with { Classification = plan.Classification with { Reason = RoutingReason.ExplicitCallout } };
-                }
-                else
-                {
-                    // The routing profile does not allow that model, so it was routed automatically.
-                    calloutNote += " (not allowed here; routed automatically)";
-                }
-            }
-        }
+        (plan, string? calloutNote) = Callouts.Settle(choice, plan, remembered);
 
         // A cheaper model on trial for this route tries a share of its plain matches: the first turn of a conversation
         // the router decided itself (not escalated, explicit, held by the conversation, a tool result or a client's

@@ -13,7 +13,23 @@ namespace SemanticRouter.AspNetCore;
 /// <param name="Tier">The tier to route at, up or down (<c>@tier3</c>).</param>
 /// <param name="Local">Only local models (<c>@local</c>).</param>
 /// <param name="Clear">Back to automatic routing (<c>@auto</c>).</param>
-internal sealed record Callout(string Tag, string? Model = null, SelectionStrategy? Strategy = null, int? Tier = null, bool Local = false, bool Clear = false);
+internal sealed record Callout(string Tag, string? Model = null, SelectionStrategy? Strategy = null, int? Tier = null, bool Local = false, bool Clear = false)
+{
+    /// <summary>The tier to route at, when the callout names one (<c>@auto</c> names none).</summary>
+    public int? ExplicitTier => Clear ? null : Tier;
+
+    /// <summary>Whether the callout keeps the request on local models.</summary>
+    public bool LocalOnly => !Clear && Local;
+
+    /// <summary>The model and strategy to route with: the callout's model (with no strategy) or its strategy, over the ones the request asked for.</summary>
+    public (string? Model, SelectionStrategy? Strategy) Choose(string? model, SelectionStrategy? strategy) => this switch
+    {
+        { Clear: true } => (model, strategy),
+        { Model: { } named } => (named, null),
+        { Strategy: { } chosen } => (model, chosen),
+        _ => (model, strategy),
+    };
+}
 
 /// <summary>
 /// Inline callouts (<see cref="CalloutOptions"/>): a message that starts with <c>@opus</c>, <c>@local</c>,
@@ -27,6 +43,64 @@ internal static partial class Callouts
     /// without the <c>@</c>; <see langword="null"/> when it does not start with one.
     /// </summary>
     public static string? LeadingTag(string text) => Leading(text) is { } found ? found.Tag : null;
+
+    /// <summary>
+    /// The callout <paramref name="prompt"/> starts with, or <see langword="null"/> when callouts are off or it starts
+    /// with none (or with a tag that is not a callout).
+    /// </summary>
+    public static Callout? Find(string prompt, RouterRuntime runtime) =>
+        runtime.Configuration.Middleware.Callouts.Enabled && LeadingTag(prompt) is { } tag ? Resolve(tag, runtime) : null;
+
+    /// <summary>
+    /// Routes a prompt the way the gateway routes the first turn of a conversation that sends it: its leading callout
+    /// applied and taken out of the prompt. Returns the plan and the callout note the gateway would record with it.
+    /// </summary>
+    public static async Task<(RoutingPlan Plan, string? Note)> RouteAsync(
+        RouterRuntime runtime, IPromptRouter router, PromptRoutingRequest request, CancellationToken cancellationToken)
+    {
+        if (Find(request.Prompt, runtime) is not { } callout)
+        {
+            return (await router.RouteAsync(request, cancellationToken).ConfigureAwait(false), null);
+        }
+
+        (string? model, SelectionStrategy? strategy) = callout.Choose(request.RequestedModel, request.Strategy);
+        bool localOnly = request.LocalOnly || callout.LocalOnly;
+        RoutingPlan plan = await router.RouteAsync(
+            request with
+            {
+                Prompt = StripText(request.Prompt, runtime) ?? request.Prompt,
+                RequestedModel = model,
+                Strategy = strategy,
+                ExplicitTier = callout.ExplicitTier,
+                LocalOnly = localOnly,
+                EmbeddingsAllowed = request.EmbeddingsAllowed && (!localOnly || runtime.Configuration.Embeddings.KeepsPromptsLocal),
+            },
+            cancellationToken).ConfigureAwait(false);
+        return Settle(callout, plan);
+    }
+
+    /// <summary>
+    /// The plan once <paramref name="choice"/> applied, and the note shown with the decision: the tag, with "(earlier in
+    /// the conversation)" when it was made on an earlier turn. A plan that used the callout's model gets the reason
+    /// <see cref="RoutingReason.ExplicitCallout"/>; when the routing profile does not allow that model, the note says so.
+    /// </summary>
+    public static (RoutingPlan Plan, string? Note) Settle(Callout? choice, RoutingPlan plan, bool remembered = false)
+    {
+        if (choice is null or { Clear: true })
+        {
+            return (plan, choice?.Tag);
+        }
+
+        string note = choice.Tag + (remembered ? " (earlier in the conversation)" : string.Empty);
+        if (choice.Model is null)
+        {
+            return (plan, note);
+        }
+
+        return plan.Classification.Reason == RoutingReason.ModelOverride
+            ? (plan with { Classification = plan.Classification with { Reason = RoutingReason.ExplicitCallout } }, note)
+            : (plan, note + " (not allowed here; routed automatically)");
+    }
 
     /// <summary>What <paramref name="tag"/> asks for, or <see langword="null"/> when it is not a callout (a file mention, say).</summary>
     public static Callout? Resolve(string tag, RouterRuntime runtime, int depth = 0)

@@ -235,6 +235,8 @@ curl -s http://localhost:5080/semantic-router/classify \
 }
 ```
 
+A prompt that starts with a [callout](docs/clients.md#telling-the-router-what-you-want) (`@opus …`) is routed as the gateway routes a first turn with it: the response's `callout` names the tag and the prompt is classified without it.
+
 `samples/RoutingApiSample/RoutingApiSample.http` has a request for every routing outcome.
 
 ## Personal setup: LM Studio + your Claude subscription

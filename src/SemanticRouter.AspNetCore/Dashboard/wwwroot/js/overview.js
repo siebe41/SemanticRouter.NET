@@ -94,6 +94,7 @@ export function renderClassification(r) {
     <div class="result-line">
       <span class="badge signal">tier ${h(tierName(r.requiredTier))}</span>
       <span class="badge">${h(r.reason)}</span>
+      ${r.callout ? `<span class="badge accent" title="Routed as the inline callout asks; classified without it">${h(r.callout)}</span>` : ''}
       ${r.route ? `<span class="badge">route ${h(r.route)} · ${num(r.similarity, 3)}</span>` : ''}
       <span class="badge">complexity ${num(r.complexity.score, 3)}</span>
       ${r.localOnly ? '<span class="badge warn">local only</span>' : ''}

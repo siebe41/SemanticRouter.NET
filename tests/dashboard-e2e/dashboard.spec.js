@@ -202,6 +202,11 @@ test('the prompt tester classifies and sends a prompt through the gateway', asyn
   await page.locator('[data-action="tester-classify"]').click();
   await expect(page.locator('.tester')).toContainText('smalltalk');
   await expect(page.locator('.tester')).toContainText('local-small');
+  await page.locator('#tester-prompt').fill('@tier3 hello there, how are you?');
+  await page.locator('[data-action="tester-classify"]').click();
+  await expect(page.locator('.tester .result-line .badge.accent')).toHaveText('@tier3');
+  await expect(page.locator('.tester')).toContainText('ExplicitCallout');
+  await page.locator('#tester-prompt').fill('hello there, how are you?');
   await page.locator('[data-action="tester-send"]').click();
   await expect(page.locator('.tester')).toContainText('Hello from the stub backend.');
 });

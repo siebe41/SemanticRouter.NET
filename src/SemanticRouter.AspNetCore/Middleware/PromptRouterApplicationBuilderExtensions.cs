@@ -45,14 +45,18 @@ public static class PromptRouterApplicationBuilderExtensions
                 }
 
                 // Reuse the middleware's plan when it already routed this exact prompt.
-                RoutingPlan plan =
-                    context.Features.Get<IPromptRoutingFeature>() is { } feature && feature.Prompt == request.Prompt
-                        ? feature.Plan
-                        : await router.RouteAsync(
-                            new PromptRoutingRequest { Prompt = request.Prompt, Strategy = strategy, RequestedModel = requestedModel, Profile = profile },
-                            context.RequestAborted).ConfigureAwait(false);
+                if (context.Features.Get<IPromptRoutingFeature>() is { } feature && feature.Prompt == request.Prompt)
+                {
+                    return Results.Ok(PromptClassificationResponse.From(feature.Plan));
+                }
 
-                return Results.Ok(PromptClassificationResponse.From(plan));
+                // As the gateway routes a first turn: a leading callout ("@opus …") applies and is not classified.
+                var routing = new PromptRoutingRequest { Prompt = request.Prompt, Strategy = strategy, RequestedModel = requestedModel, Profile = profile };
+                (RoutingPlan plan, string? callout) = context.RequestServices.GetService<RouterRuntimeProvider>() is { } runtime
+                    ? await Callouts.RouteAsync(runtime.Current, router, routing, context.RequestAborted).ConfigureAwait(false)
+                    : (await router.RouteAsync(routing, context.RequestAborted).ConfigureAwait(false), null);
+
+                return Results.Ok(PromptClassificationResponse.From(plan) with { Callout = callout });
             })
             .WithName("ClassifyPrompt")
             .WithSummary("Routes a prompt and explains the decision without calling a model.")
@@ -152,6 +156,12 @@ public sealed record PromptClassificationResponse(
     IReadOnlyList<PromptClassificationResponse.ModelChoice> Models,
     string? Profile = null)
 {
+    /// <summary>
+    /// The inline callout the prompt starts with (<c>@opus</c>, <c>@local</c>, <c>@tier2</c>), as the gateway records it:
+    /// the prompt was routed as it asks and classified without it. <see langword="null"/> when there is none.
+    /// </summary>
+    public string? Callout { get; init; }
+
     /// <summary>A scored route.</summary>
     public sealed record RouteCandidate(string Route, int Tier, float Similarity);
 

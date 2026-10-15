@@ -94,6 +94,7 @@ The router decides by itself; you only need this when you really want something 
 - **Only a tag at the very start counts**, after anything the client injects (Claude Code's `<system-reminder>` blocks). A tag that is not one of these (`@src/Program.cs`, a file mention) is left in the message. A message that is nothing but a tag keeps it, so the model has something to answer.
 - **Your own names:** `Middleware:Callouts:Names`, e.g. `"deep": "family:opus"`, `"fast": "lmstudio-small"`, `"private": "local"`; then write `@deep`.
 - **Policy still applies.** A routing profile that does not allow the model wins (the header says "not allowed here; routed automatically"), and a profile or secret detection that keeps a conversation local still does. A model callout skips classification, so a local-only *route* does not apply to it: use `@local` for that.
+- **Trying it:** the dashboard's **Try a prompt** and the classify endpoints (`POST /semantic-router/classify`, `POST {dashboard}/api/classify`) apply a leading callout the way the gateway does for a conversation's first turn, and return it as `callout`. Each prompt is classified on its own, so no earlier callout carries over.
 - Switch it off with `Middleware:Callouts:Enabled: false`.
 
 ## OpenAI SDKs and everything with a base URL
