@@ -12,8 +12,14 @@ const ffmpeg = (args) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...
 
 // 1. Video.
 const silent = output.replace(/\.mp4$/, '.silent.mp4');
+// The browser sends frames only when the screen changes, so a still end card can stop short of the last line: hold the
+// final frame until the narration is over.
+const framesText = fs.readFileSync(path.join(frames, 'frames.txt'), 'utf8');
+const shown = [...framesText.matchAll(/^duration ([\d.]+)/gm)].reduce((sum, m) => sum + Number(m[1]), 0);
+const narrationEnd = Math.max(...timeline.map((n) => n.start + n.duration)) + 0.8;
+const hold = Math.max(0, narrationEnd - shown).toFixed(2);
 ffmpeg(['-f', 'concat', '-safe', '0', '-i', path.join(frames, 'frames.txt'),
-  '-vf', 'fps=30,scale=1920:1080:flags=lanczos,format=yuv420p', '-c:v', 'libx264', '-preset', 'slow', '-crf', '18', silent]);
+  '-vf', `fps=30,scale=1920:1080:flags=lanczos,format=yuv420p,tpad=stop_mode=clone:stop_duration=${hold}`, '-c:v', 'libx264', '-preset', 'slow', '-crf', '18', silent]);
 
 // 2. Narration: each line delayed to its start, mixed, levelled.
 const inputs = timeline.flatMap((n) => ['-i', path.join(voice, `${n.key}.wav`)]);

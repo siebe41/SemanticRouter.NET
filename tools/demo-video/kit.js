@@ -316,7 +316,8 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
     async point(target) {
       if (!k.pointer) return;
       const visible = await target.evaluate((e) => { const b = e.getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; });
-      if (!visible) { await glide(target, 'center'); await k.settle(); }
+      // A scroll takes the page away from what a highlight outlines: drop it first.
+      if (!visible) { await k.unhighlight(); await glide(target, 'center'); await k.settle(); }
       const scale = await dashScale();
       await target.evaluate((e, s) => new Promise((done) => {
         let c = document.getElementById('demo-pointer');
