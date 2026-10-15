@@ -152,6 +152,11 @@ internal sealed partial class PromptDispatcher
                     span?.SetTag("semantic_router.notes", string.Join("; ", notes.Notes));
                 }
 
+                if (notes.PromptedToolCalls is { } promptedCalls)
+                {
+                    span?.SetTag("semantic_router.prompted_tool_calls", promptedCalls);
+                }
+
                 if (result.Outcome == ConnectorOutcome.Failed)
                 {
                     span?.SetTag("semantic_router.failure.kind", result.FailureKind.ToString());
@@ -189,6 +194,7 @@ internal sealed partial class PromptDispatcher
                         activity.Budget = budgetsHit.Count > 0 ? string.Join(", ", budgetsHit.Distinct(StringComparer.OrdinalIgnoreCase)) : null;
                         activity.Dropped = dropped.Names.Count > 0 ? string.Join(", ", dropped.Names) : null;
                         activity.Notes = notes.Notes.Count > 0 ? string.Join("; ", notes.Notes) : null;
+                        activity.PromptedToolCalls = notes.PromptedToolCalls;
                     }
 
                     return;

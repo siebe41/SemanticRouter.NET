@@ -207,7 +207,7 @@ semantic-router service install   # or keep it running in the background, starte
 
 ## Quick start
 
-To work on the library or try the samples, you need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
+To work on the library or try the samples, you need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), feature band 10.0.4xx ([`global.json`](global.json)).
 
 ```bash
 git clone https://github.com/siebe41/SemanticRouter.NET.git
@@ -439,7 +439,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `ToolCalling` | CLI | `None` | `None`: decline tool-bearing requests. `Prompted`: describe the tools in the prompt and parse `tool_call` blocks from the reply. |
 | `StreamPromptedReplies` | CLI | `true` | With `Prompted`: stream the reply's text and hold back only what may be a tool call. `false` buffers the reply, so a failed run can still fail over. |
 | `RepairToolCalls` | CLI | `true` | With `Prompted`: re-ask once, briefly, for a tool call that could not be read. See [providers.md](docs/providers.md#prompted-tool-calling-in-practice). |
-| `PromptedToolParsing` | CLI | `Lenient` | With `Prompted`: `Strict` reads only the run's own randomly labelled fence, at the end of the reply, as a call; `Lenient` also takes near misses (bare JSON, other labels). See [providers.md](docs/providers.md#prompted-tool-calling-in-practice). |
+| `PromptedToolParsing` | CLI | `Lenient` | With `Prompted`: `Strict` reads only the run's own randomly labelled fence, at the end of the reply, naming one of the request's tools, as a call; `Lenient` also takes near misses (bare JSON, other labels, calls followed by text). In both, tool results are defused and a call copied from one stays text. `Lenient` stays the default until `Strict` has been measured on smaller models. See [providers.md](docs/providers.md#forged-tool-calls). |
 | `Preset` | CLI | `Custom` | `ClaudeCode`, `GitHubCopilot`, `Codex` or `Custom`. |
 | `Executable` | CLI | preset's command | Started directly, never through a shell, by its full path: a bare name is looked up on the absolute `PATH` entries only, never in the current directory. On Windows use the `.exe`. |
 | `Arguments[]` | CLI | | Custom: the full template (`{model}`, `{prompt}`). Presets: extra arguments appended. |
@@ -504,6 +504,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `ForwardedHeaders:KnownProxies`, `KnownNetworks` | none | Reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` are believed (host setting, read at start-up). See [host.md](docs/host.md#serving-over-https). |
 | `Network:Offline` / `AllowedHosts` | `false` / `[]` | Offline mode: the router reaches only this machine and these hosts; CLI and Copilot connectors are off and the ONNX model is never downloaded (host setting). See [network.md](docs/network.md#offline-mode). |
 | `Network:CaBundle` | none | A PEM file of CA certificates trusted for the router's own HTTPS connections (connectors, embeddings, webhooks, the ONNX download) in addition to the system store, for a proxy that inspects TLS (host setting, read at start-up). See [network.md](docs/network.md#proxies-and-certificates). |
+| `DataProtection:Certificate` | none | An RSA certificate (a PFX, a PEM with its key or `CertificateKey`, or a `CurrentUser\My` thumbprint) that encrypts the data-protection keys behind the secrets file, on any platform; `CertificatePassword` for its password (host setting, read at start-up). Without it they are encrypted with DPAPI on Windows and protected by file permissions only on macOS, Linux and in the container. See [host.md](docs/host.md#the-key-ring). |
 | `State:StorePrompts` | `Redacted` | How much of each prompt the activity log keeps: `Redacted` (160 characters, credentials masked), `On`, or `Off`. See [host.md](docs/host.md#what-the-router-stores). |
 | `State:Retention` | store defaults | `ActivityDays` (30), `ActivityEntries` (10,000), `UsageDays` (400), `ConfigurationVersions` (200). |
 | `Middleware:RequireGatewayKeyForLocalClients` | `false` | Require the key from loopback clients too (a local reverse proxy). |
@@ -548,7 +549,7 @@ An embedding server adds a network round trip and its own inference time to ever
 ## Production guidance
 
 - **Use a real embedding model.** The hashing provider only captures shared words. `Onnx` runs one inside the router with no server; an OpenAI-compatible server (LM Studio, Ollama) works too.
-- **Secrets.** Keep API keys in user-secrets, environment variables (`SemanticRouter__Connectors__openai__ApiKey`) or a vault, never in `appsettings.json`. Any key, header or gateway key can be a reference instead of a value: `"${env:OPENAI_API_KEY}"`. With `.UseSecretFile()`, keys typed into the dashboard are encrypted into a separate file and the configuration keeps a `${secret:…}` reference. Keys are redacted from error details, relayed upstream errors, activity entries and logs.
+- **Secrets.** Keep API keys in user-secrets, environment variables (`SemanticRouter__Connectors__openai__ApiKey`) or a vault, never in `appsettings.json`. Any key, header or gateway key can be a reference instead of a value: `"${env:OPENAI_API_KEY}"`. With `.UseSecretFile()`, keys typed into the dashboard are encrypted into a separate file and the configuration keeps a `${secret:…}` reference; the keys that decrypt it are encrypted with DPAPI on Windows, or to a certificate anywhere with `DataProtection:Certificate` ([host.md](docs/host.md#the-key-ring)). Keys are redacted from error details, relayed upstream errors, activity entries and logs.
 - **Bind to localhost** when the router fronts your personal subscriptions (the sample does). CLI connectors refuse non-loopback clients anyway, unless `AllowRemoteClients` is set. Behind a reverse proxy, every request appears to come from the proxy, so keep the proxy local too.
 - **Pipeline placement.** Call `UsePromptRouter()` after authentication and rate limiting.
 - **Diagnostics.** Protect `MapPromptClassification()` or map it only in development. Set `EmitResponseHeaders: false` to hide routing from clients.

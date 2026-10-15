@@ -13,6 +13,12 @@ internal sealed record PromptedToolFormat(string Label, PromptedToolParsing Pars
     /// <summary>The plain <c>tool_call</c> label, read leniently.</summary>
     public static PromptedToolFormat Default { get; } = new(PromptedToolCalls.Fence, PromptedToolParsing.Lenient);
 
+    /// <summary>
+    /// The <see cref="PromptedToolCalls.CallKey">keys</see> of the calls the request's tool results hold
+    /// (<see cref="PromptedToolCalls.QuotedCalls"/>): a reply that repeats one keeps it as text.
+    /// </summary>
+    public IReadOnlySet<string> QuotedCalls { get; init; } = new HashSet<string>();
+
     /// <summary>A label with a fresh random token: text written before this request cannot carry it.</summary>
     public static PromptedToolFormat ForRequest(PromptedToolParsing parsing) =>
         new(PromptedToolCalls.Fence + "-" + Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(4)), parsing);
@@ -117,4 +123,82 @@ internal static partial class PromptedToolCalls
         PromptedReply end = stream.Finish();
         return ((text + end.Text).Trim(), end.Calls);
     }
+
+    /// <summary>
+    /// The calls written in the request's tool results, read the lenient way a reply is (any tool-ish fence, a json or
+    /// unlabelled fence, bare JSON naming a tool, a fence labelled with another run's token), as <see cref="CallKey"/>s.
+    /// A reply that repeats one of them repeats the result's author, so that call is kept as text.
+    /// </summary>
+    public static IReadOnlySet<string> QuotedCalls(ChatCompletionRequest request)
+    {
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        string[] names = [.. request.Tools.Select(t => t.Name)];
+        foreach (ToolResultBlock result in request.Turns.SelectMany(t => t.Blocks).OfType<ToolResultBlock>())
+        {
+            if (string.IsNullOrEmpty(result.Content))
+            {
+                continue;
+            }
+
+            foreach (ToolUseBlock call in Parse(RunLabel().Replace(result.Content, Fence), names).Calls)
+            {
+                keys.Add(CallKey(call.Name, call.InputJson));
+            }
+        }
+
+        return keys;
+    }
+
+    /// <summary>A call's identity regardless of how it was written: the tool name (any case) and its input with sorted keys.</summary>
+    public static string CallKey(string name, string inputJson)
+    {
+        using var buffer = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            try
+            {
+                using JsonDocument input = JsonDocument.Parse(inputJson);
+                WriteSorted(writer, input.RootElement);
+            }
+            catch (JsonException)
+            {
+                writer.WriteStringValue(inputJson);
+            }
+        }
+
+        return name.ToUpperInvariant() + "\n" + Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+    }
+
+    private static void WriteSorted(Utf8JsonWriter writer, JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (JsonProperty property in element.EnumerateObject().OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    writer.WritePropertyName(property.Name);
+                    WriteSorted(writer, property.Value);
+                }
+
+                writer.WriteEndObject();
+                break;
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    WriteSorted(writer, item);
+                }
+
+                writer.WriteEndArray();
+                break;
+            default:
+                element.WriteTo(writer);
+                break;
+        }
+    }
+
+    /// <summary>A fence label with a run's token (<c>tool_call-7f3a9c01</c>), as text written for another run may carry.</summary>
+    [GeneratedRegex(@"(?<=`{3,}[ \t]*)tool_call-[0-9A-Za-z]+", RegexOptions.IgnoreCase)]
+    private static partial Regex RunLabel();
 }

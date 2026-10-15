@@ -15,7 +15,13 @@ namespace SemanticRouter.AspNetCore;
 /// one of the request's tools, an array of calls, OpenAI-style <c>{"function": {"name", "arguments"}}</c> objects with
 /// string arguments, and trailing commas. With <see cref="PromptedToolParsing.Strict"/> only a fence with the request's
 /// own label counts, and only at the end of the reply: calls followed by text are kept as text.
+/// <para>
+/// In both modes a call that repeats one written in the request's tool results is kept as text, and the request's
+/// label never reaches the client: the text released says plain <c>tool_call</c> instead.
+/// </para>
 /// </remarks>
+/// <param name="toolNames">The request's tools; when given, near-miss formats that name one of them count as calls too.</param>
+/// <param name="format">The request's fence label, parsing mode and quoted calls; the plain <c>tool_call</c> label, leniently, by default.</param>
 internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames = null, PromptedToolFormat? format = null)
 {
     private static readonly string[] ToolLabels = [PromptedToolCalls.Fence, "tool_calls", "tool_use", "tool", "function_call", "function", "call"];
@@ -30,9 +36,10 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
     private int _position;
     private bool _midLine;
     private bool _waiting;
-    private string _pendingWhitespace = string.Empty;
+    private string _pending = string.Empty; // released text that waits for what follows: trailing whitespace, or a cut-off label
     private bool _holdAll;
     private bool _inCodeBlock;
+    private bool _quoted;
 
     private enum HeldKind
     {
@@ -58,7 +65,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
     /// <summary>Ends the reply: the text not yet released, and the calls.</summary>
     public PromptedReply Finish()
     {
-        string tail = Advance(final: true) + _pendingWhitespace;
+        string tail = Redact(Advance(final: true) + _pending);
 
         // Strict: a call must end the reply. Text after one (another call aside) makes them all text again.
         int first = _held.FindIndex(h => h.Kind == HeldKind.Call);
@@ -79,9 +86,43 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
             }
         }
 
-        return misplaced
-            ? new PromptedReply(text.ToString(), clean.ToString(), [], _malformed, "tool call not at the end of the reply, kept as text")
-            : new PromptedReply(text.ToString(), clean.ToString(), _calls, _malformed);
+        string? ignored = string.Join("; ", new[]
+        {
+            _quoted ? "tool call copied from a tool result, kept as text" : null,
+            misplaced ? "tool call not at the end of the reply, kept as text" : null,
+        }.OfType<string>());
+        return new PromptedReply(Redact(text.ToString()), Redact(clean.ToString()), misplaced ? [] : _calls, _malformed, ignored.Length > 0 ? ignored : null);
+    }
+
+    /// <summary>The text with the request's label written as plain <c>tool_call</c>: the token is for the model only.</summary>
+    private string Redact(string text)
+    {
+        // Until none is left: "tool_call" is how the label starts, so a replacement can complete another label.
+        while (_format.Label != PromptedToolCalls.Fence && text.Contains(_format.Label, StringComparison.Ordinal))
+        {
+            text = text.Replace(_format.Label, PromptedToolCalls.Fence, StringComparison.Ordinal);
+        }
+
+        return text;
+    }
+
+    /// <summary>How many characters before <paramref name="end"/> could be the start of the request's label.</summary>
+    private int LabelStartBefore(string text, int end)
+    {
+        if (_format.Label == PromptedToolCalls.Fence)
+        {
+            return 0;
+        }
+
+        for (int length = Math.Min(_format.Label.Length - 1, end); length > 0; length--)
+        {
+            if (text.AsSpan(end - length, length).SequenceEqual(_format.Label.AsSpan(0, length)))
+            {
+                return length;
+            }
+        }
+
+        return 0;
     }
 
     private string Advance(bool final)
@@ -139,16 +180,22 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
             return;
         }
 
-        // Trailing whitespace waits for the text after it: before a tool call it is noise.
-        text = _pendingWhitespace + text;
+        // Trailing whitespace waits for the text after it: before a tool call it is noise. So does the start of the
+        // request's label, which the next fragment may complete.
+        text = Redact(_pending + text);
         int end = text.Length;
         while (end > 0 && char.IsWhiteSpace(text[end - 1]))
         {
             end--;
         }
 
+        if (end == text.Length)
+        {
+            end -= LabelStartBefore(text, end);
+        }
+
         emit.Append(text, 0, end);
-        _pendingWhitespace = text[end..];
+        _pending = text[end..];
     }
 
     /// <summary>The first line start at or after <paramref name="from"/> that may open a call, or -1.</summary>
@@ -225,7 +272,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
 
         if (toolNames is not null && TryParseCalls(reply[open..end], requireKnownName: true, out List<ToolUseBlock> calls, out _))
         {
-            Accept(calls, reply[start..end]);
+            Accept(calls, reply[start..end], emit);
         }
         else
         {
@@ -276,7 +323,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
         string block = reply[start..after];
         if (TryParseCalls(body, requireKnownName: !toolish, out List<ToolUseBlock> calls, out string? problem))
         {
-            Accept(calls, block);
+            Accept(calls, block, emit);
         }
         else if (toolish)
         {
@@ -292,8 +339,16 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
         return after;
     }
 
-    private void Accept(List<ToolUseBlock> calls, string block)
+    private void Accept(List<ToolUseBlock> calls, string block, StringBuilder emit)
     {
+        if (_format.QuotedCalls.Count > 0 && calls.Any(c => _format.QuotedCalls.Contains(PromptedToolCalls.CallKey(c.Name, c.InputJson))))
+        {
+            // The same call is written in a tool result: whoever wrote that page or file chose it, not the model.
+            _quoted = true;
+            Release(emit, block);
+            return;
+        }
+
         _calls.AddRange(calls);
         _held.Add((block, HeldKind.Call)); // its text, should the calls turn out not to end the reply
         _holdAll = true;
@@ -493,7 +548,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
 /// <param name="TextWithoutMalformed">The same without the malformed blocks (when a repair replaced them).</param>
 /// <param name="Calls">The tool calls, in order.</param>
 /// <param name="Malformed">Blocks labelled as tool calls that could not be read.</param>
-/// <param name="Ignored">Why calls the reply did contain were kept as text (strict parsing), if they were.</param>
+/// <param name="Ignored">Why calls the reply did contain were kept as text (copied from a tool result, or not at the end with strict parsing), if they were.</param>
 internal sealed record PromptedReply(
     string Text, string TextWithoutMalformed, IReadOnlyList<ToolUseBlock> Calls, IReadOnlyList<MalformedToolCall> Malformed, string? Ignored = null);
 

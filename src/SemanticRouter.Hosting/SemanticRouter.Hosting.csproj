@@ -11,6 +11,9 @@
     <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- The desktop app references it: restored for the app's runtimes too, built once (Directory.Build.props). -->
+    <RuntimeIdentifiers>$(DesktopRuntimeIdentifiers)</RuntimeIdentifiers>
+    <IsRidAgnostic>true</IsRidAgnostic>
   </PropertyGroup>
 
   <ItemGroup>

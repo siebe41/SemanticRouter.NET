@@ -1,5 +1,7 @@
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.WebUtilities;
 
 namespace SemanticRouter.AspNetCore;
 
@@ -25,10 +27,12 @@ public interface IRouterSecretStore
 
 /// <summary>
 /// An <see cref="IRouterSecretStore"/> backed by a JSON file whose values are encrypted with ASP.NET Core Data
-/// Protection. On Windows the data-protection keys are themselves protected with DPAPI; elsewhere they live in the
-/// user profile (<c>~/.aspnet/DataProtection-Keys</c>) unless the application configures another key ring. Either way
-/// the file next to your configuration holds only ciphertext, so the configuration directory can be copied, backed up
-/// or committed without carrying usable keys.
+/// Protection. The data-protection keys live in the user profile unless the application configures another key ring;
+/// ASP.NET Core encrypts its default key ring with DPAPI on Windows, and stores it unencrypted in
+/// <c>~/.aspnet/DataProtection-Keys</c> on macOS and Linux unless the application calls a <c>ProtectKeysWith…</c>
+/// method. Either way the file next to your configuration holds only ciphertext, so the configuration directory alone
+/// can be copied or backed up without carrying usable keys. A value encrypted with a key other than the current one
+/// is re-encrypted with the current key when it is read.
 /// </summary>
 public sealed class ProtectedFileSecretStore : IRouterSecretStore
 {
@@ -58,20 +62,51 @@ public sealed class ProtectedFileSecretStore : IRouterSecretStore
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         lock (_gate)
         {
-            if (!ReadAll().TryGetValue(name, out string? cipher))
+            Dictionary<string, string> all = ReadAll();
+            if (!all.TryGetValue(name, out string? cipher))
             {
                 return null;
             }
 
             try
             {
-                return _protector.Unprotect(cipher);
+                if (_protector is not IPersistedDataProtector persisted)
+                {
+                    return _protector.Unprotect(cipher);
+                }
+
+                byte[] plain = persisted.DangerousUnprotect(
+                    WebEncoders.Base64UrlDecode(cipher), ignoreRevocationErrors: false, out bool requiresMigration, out _);
+                string value = Encoding.UTF8.GetString(plain);
+                if (requiresMigration)
+                {
+                    Migrate(all, name, value);
+                }
+
+                return value;
             }
-            catch (System.Security.Cryptography.CryptographicException)
+            catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or FormatException)
             {
                 // Encrypted with a key this machine no longer has (a copied file, a lost key ring): treat as missing.
                 return null;
             }
+        }
+    }
+
+    /// <summary>
+    /// Re-encrypts a value that was encrypted with a key other than the one in use: an older key, or one written before
+    /// the key ring was encrypted at rest. The older key then protects nothing the store still needs.
+    /// </summary>
+    private void Migrate(Dictionary<string, string> all, string name, string value)
+    {
+        try
+        {
+            all[name] = _protector.Protect(value);
+            WriteAll(all);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+        {
+            // A read-only file, or no key can be written: the value still decrypts as it is.
         }
     }
 

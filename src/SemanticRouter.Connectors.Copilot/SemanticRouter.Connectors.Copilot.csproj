@@ -15,6 +15,9 @@
       `copilot` CLI instead (ConnectorOptions.Executable, or COPILOT_CLI_PATH).
     -->
     <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
+    <!-- The desktop app references it: restored for the app's runtimes too, built once (Directory.Build.props). -->
+    <RuntimeIdentifiers>$(DesktopRuntimeIdentifiers)</RuntimeIdentifiers>
+    <IsRidAgnostic>true</IsRidAgnostic>
   </PropertyGroup>
 
   <ItemGroup>

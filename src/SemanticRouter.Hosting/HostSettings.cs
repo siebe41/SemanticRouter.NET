@@ -42,6 +42,12 @@ internal sealed record HostSettings
     /// <summary><c>service start</c>: return as soon as the router is started, without waiting for it to listen.</summary>
     public bool NoWait { get; init; }
 
+    /// <summary>
+    /// <c>SEMANTIC_ROUTER_KEYS_DIR</c>: the folder for the data-protection keys that decrypt the secrets file;
+    /// <see langword="null"/> for ASP.NET Core's default (see <see cref="KeyRing"/>).
+    /// </summary>
+    public string? KeysDirectory { get; init; }
+
     /// <summary>Arguments for the web host (<c>--urls</c>, <c>--SemanticRouter:…=…</c>).</summary>
     public IReadOnlyList<string> HostArguments { get; init; } = [];
 
@@ -148,6 +154,7 @@ internal sealed record HostSettings
             ServiceAction = serviceAction,
             DryRun = dryRun,
             NoWait = noWait,
+            KeysDirectory = environment(KeysVariable) is { Length: > 0 } keys ? keys : null,
             HostArguments = hostArguments,
             Error = error,
         };
