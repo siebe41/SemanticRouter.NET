@@ -7,7 +7,7 @@ using Velopack;
 // SemanticRouter --quit
 // SemanticRouter --headless [options]   the router only, no window or tray (what the background service runs)
 // SemanticRouter --install-service | --uninstall-service [options]   set the background service up or remove it
-// SemanticRouter --update [options]   apply an available update (installed app only) and exit
+// SemanticRouter --update [options]   download and apply an available update (installed app only) and exit
 internal static class Program
 {
     [STAThread]
@@ -79,7 +79,8 @@ internal static class Program
 
     /// <summary>
     /// Applies an available update without the tray, for scripts and tests: the background service is stopped, and the
-    /// new version starts it again. The exit code is 0 when the app is up to date or the update was handed over.
+    /// new version starts it again. The exit code is 0 when the app is up to date or the update was handed over, 1 when
+    /// it was not (refused by the machine policy's publisher check, for one).
     /// </summary>
     private static async Task<int> UpdateAsync(DesktopOptions options)
     {
@@ -95,12 +96,16 @@ internal static class Program
         }
         else if (await updater.CheckAsync() is not { } version)
         {
-            (message, code) = ($"SemanticRouter {updater.CurrentVersion} is up to date.", 0);
+            // A refused update (not signed by the publisher the policy names) is not "up to date".
+            (message, code) = updater.Problem is { } refused ? (refused, 1) : ($"SemanticRouter {updater.CurrentVersion} is up to date.", 0);
         }
         else
         {
-            bool handed = await updater.ApplyOnExitAsync(restartApp: false);
-            (message, code) = handed ? ($"Updating SemanticRouter {updater.CurrentVersion} to {version}.", 0) : ("The update could not be applied.", 1);
+            // Asked for by name, so also when updates are otherwise only announced (Updates:Apply Notify).
+            bool handed = await updater.ApplyNowAsync(restartApp: false);
+            (message, code) = handed
+                ? ($"Updating SemanticRouter {updater.CurrentVersion} to {version}.", 0)
+                : ($"The update could not be applied{(updater.Problem is { } problem ? ": " + problem : ".")}", 1);
         }
 
         Console.WriteLine(message);

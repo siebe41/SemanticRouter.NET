@@ -84,7 +84,7 @@ public sealed class MachinePolicy
     public bool IsEmpty =>
         DisabledConnectorTypes.Count == 0 && DisabledPresets.Count == 0 && AllowedEndpoints.Count == 0 && LocalHosts is null
         && !RequireLocalOnly && StorePrompts is null && MaxRetentionDays is null && Dashboard == DashboardPolicy.Default
-        && Updates.Mode == UpdateMode.Default && Features.IsDefault;
+        && Updates.IsDefault && Features.IsDefault;
 
     /// <summary>Reads a policy document. Unknown settings are an error, so a misspelt one cannot silently do nothing.</summary>
     /// <exception cref="InvalidDataException">The document is not a valid policy.</exception>
@@ -131,6 +131,11 @@ public sealed class MachinePolicy
         if (Updates.Mode == UpdateMode.Feed && !Uri.TryCreate(Updates.Feed, UriKind.Absolute, out _))
         {
             yield return "Updates:Feed must be an absolute URL or folder path when Updates:Mode is Feed.";
+        }
+
+        if (Updates.Publisher is { } publisher && UpdatePolicy.PublisherError(publisher) is { } wrong)
+        {
+            yield return wrong;
         }
     }
 
@@ -352,7 +357,7 @@ public enum DashboardPolicy
     Off = 2,
 }
 
-/// <summary>How the desktop app updates (<see cref="UpdatePolicy.Mode"/>).</summary>
+/// <summary>Where the desktop app's updates come from, if anywhere (<see cref="UpdatePolicy.Mode"/>).</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<UpdateMode>))]
 public enum UpdateMode
 {
@@ -366,6 +371,20 @@ public enum UpdateMode
     Feed = 2,
 }
 
+/// <summary>When the desktop app applies an update it found (<see cref="UpdatePolicy.Apply"/>).</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<UpdateApply>))]
+public enum UpdateApply
+{
+    /// <summary>As the user's preference says: by default downloaded in the background and applied when the app quits.</summary>
+    Default = 0,
+
+    /// <summary>
+    /// Only when the person chooses it: the app says an update is available (in the tray menu and a notification), and
+    /// downloads and applies it on "Restart to update"; never when it quits. The user cannot turn this back to automatic.
+    /// </summary>
+    Notify = 1,
+}
+
 /// <summary>Desktop app updates (<see cref="MachinePolicy.Updates"/>).</summary>
 public sealed class UpdatePolicy
 {
@@ -374,6 +393,41 @@ public sealed class UpdatePolicy
 
     /// <summary>For <see cref="UpdateMode.Feed"/>: the update feed (a URL or a folder of Velopack packages).</summary>
     public string? Feed { get; set; }
+
+    /// <summary><c>Default</c> (the user's preference) or <c>Notify</c> (only when the person chooses to), with any <see cref="Mode"/>.</summary>
+    public UpdateApply Apply { get; set; }
+
+    /// <summary>
+    /// When set, an update is applied only when the app in it is signed by this publisher: on Windows the Authenticode
+    /// signer's certificate subject (<c>CN=…, O=…</c>), its common name, or its SHA-1 or SHA-256 thumbprint; on macOS the
+    /// Developer ID team ID. Linux packages are not signed, so there every update is refused while this is set.
+    /// </summary>
+    public string? Publisher { get; set; }
+
+    internal bool IsDefault => Mode == UpdateMode.Default && Apply == UpdateApply.Default && Publisher is null;
+
+    /// <summary>Why <paramref name="publisher"/> cannot name a publisher, or <see langword="null"/> when it can.</summary>
+    internal static string? PublisherError(string publisher)
+    {
+        if (string.IsNullOrWhiteSpace(publisher))
+        {
+            return "Updates:Publisher must name the publisher (a certificate subject, common name or thumbprint, or a team ID), or be left out.";
+        }
+
+        if (publisher.Contains('=', StringComparison.Ordinal))
+        {
+            try
+            {
+                _ = new System.Security.Cryptography.X509Certificates.X500DistinguishedName(publisher);
+            }
+            catch (System.Security.Cryptography.CryptographicException)
+            {
+                return $"Updates:Publisher '{publisher}' is not a certificate subject such as 'CN=Contoso Ltd, O=Contoso Ltd, C=US'.";
+            }
+        }
+
+        return null;
+    }
 }
 
 /// <summary>

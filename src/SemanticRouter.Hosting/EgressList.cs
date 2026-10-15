@@ -52,7 +52,7 @@ internal static class EgressList
             lines.Add(Line($"webhook {name}: {host}{(resolved.Notifications.Enabled ? string.Empty : " (Notifications:Enabled is off, so nothing is sent)")}."));
         }
 
-        lines.Add(Line($"desktop app updates: {UpdateHosts} (only the installed desktop app; untick Check for updates in its tray menu to turn this off)."));
+        lines.Add(Line(Updates(services.GetService<MachinePolicy>() ?? MachinePolicy.None)));
 
         try
         {
@@ -72,6 +72,23 @@ internal static class EgressList
     }
 
     private static RouterCheck Line(string message) => new(Subject, RouterCheckStatus.Ok, message);
+
+    /// <summary>The desktop app's updates line: where they come from, and what the machine policy says about them.</summary>
+    internal static string Updates(MachinePolicy policy)
+    {
+        UpdatePolicy updates = policy.Updates;
+        if (updates.Mode == UpdateMode.Off)
+        {
+            return "desktop app updates: off (your organization's policy).";
+        }
+
+        string from = updates.Mode == UpdateMode.Feed && Uri.TryCreate(updates.Feed, UriKind.Absolute, out Uri? feed)
+            ? (feed.IsFile ? $"the folder {feed.LocalPath}" : Host(feed)!) + " (your organization's feed)"
+            : UpdateHosts;
+        string applied = updates.Apply == UpdateApply.Notify ? "; applied only when the person chooses to" : string.Empty;
+        string signed = updates.Publisher is { } publisher ? $"; applied only when signed by {publisher}" : string.Empty;
+        return $"desktop app updates: {from} (only the installed desktop app{applied}{signed}; untick Check for updates in its tray menu to turn this off).";
+    }
 
     private static string Vendor(CliPreset preset) => preset switch
     {

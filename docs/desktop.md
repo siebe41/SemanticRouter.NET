@@ -37,7 +37,11 @@ Independently of code signing, every installer, archive and update package has a
 
 An installed app updates itself from GitHub Releases. It looks a minute after it starts and then twice a day, and downloads a new version in the background (only the changes when it can). The tray menu then offers **Restart to update to …**; otherwise the update is applied the next time you quit the app. When the background service runs, it is stopped for the update and started again with the new version, with the same configuration directory and options. **Check for updates** in the tray menu turns the checks off (kept in `desktop.json`).
 
-From a script: `SemanticRouter --update` applies an available update and exits (0 when up to date or updating).
+Untick **Install updates when quitting** to decide yourself: the app then only says a new version is available (in the tray menu, and once as a system notification) and downloads nothing until you choose **Restart to update to …**, which downloads it, applies it and starts the app again. Quitting never applies it.
+
+From a script: `SemanticRouter --update` downloads and applies an available update and exits (0 when up to date or updating, 1 when the update could not be applied).
+
+An administrator can turn updates off, take them from an internal feed, make them notify-only, or require them to be signed by a given publisher, for every user of the machine: see [Managed deployment](#managed-deployment).
 
 ### Uninstall
 
@@ -79,6 +83,7 @@ The tray menu:
 | **Keep the router running in the background** | The background service on or off; see [below](#the-app-and-the-background-service). |
 | **Start at sign-in** | Shows the app in the tray whenever you sign in. The router itself starts at sign-in through the background service. |
 | **Check for updates** | Installed app only: whether it looks for updates. |
+| **Install updates when quitting** | Installed app only: whether a downloaded update is applied when you quit. Unticked, an update is only announced and applied when you choose **Restart to update**. Greyed out when your organization's policy makes updates notify-only. |
 | **Show the log**, **Show the configuration folder** | The router's log (`logs/semantic-router.log`) and its files. |
 | **About SemanticRouter** | The version, and links to the GitHub repository, the documentation, issues, releases and the licence. |
 | **Quit SemanticRouter** | Stops the app's router and quits. |
@@ -112,13 +117,60 @@ Everything is in the router's [configuration directory](host.md#where-things-liv
 
 | | |
 |---|---|
-| `desktop.json` | The app's own settings: where the dashboard opens, where its window was, and whether the welcome window was shown. |
+| `desktop.json` | The app's own settings: where the dashboard opens, where its window was, whether the welcome window was shown, and the two update switches. |
 | `logs/semantic-router.log` | What the router logged (the app has no console). Rolled over to `.1` past 10 MB. |
 | `webview/` | The app window's web view profile. |
 
 **Start at sign-in** writes `~/.config/autostart/semantic-router.desktop` (Linux), `~/Library/LaunchAgents/io.github.siebe41.semantic-router.desktop.plist` (macOS) or the value `SemanticRouter Desktop` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (Windows; listed in Task Manager → Startup apps). Moving the app afterwards needs the item turned off and on again.
 
 Options are the tool's: `--config-dir`, `--urls` and `--SemanticRouter:<key>=<value>` work the same way.
+
+## Managed deployment
+
+For administrators deploying the app to many machines with Intune, Configuration Manager (SCCM), Jamf or similar.
+
+### What gets installed, and where
+
+The installers install for one user, with no administrator rights, and that is the only kind there is today: **there is no per-machine package yet** (no MSI, and no `.pkg` that installs for every user and keeps them from changing it). Run the installer in each user's context, not as SYSTEM or root, or it installs into that account's profile instead.
+
+| | Program | What it leaves running |
+|---|---|---|
+| Windows | `%LOCALAPPDATA%\SemanticRouter` (the app in `current\`, Velopack's `Update.exe` next to it), a Start menu entry, and an entry under **Settings → Apps** | Nothing until the person chooses in the welcome window (both boxes are ticked): the background service is the value `SemanticRouter` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, which starts the router (`SemanticRouter.exe --headless`, no window) at sign-in; what it runs is kept in `semantic-router.service.json` in the configuration directory; start at sign-in is the value `SemanticRouter Desktop` in the same key. |
+| macOS | `SemanticRouter.app` in `~/Applications` (installed for the current user) or `/Applications` | The background service is the launchd agent `~/Library/LaunchAgents/io.github.siebe41.semantic-router.plist`; start at sign-in is `~/Library/LaunchAgents/io.github.siebe41.semantic-router.desktop.plist`. |
+| Linux | The AppImage, wherever it was put | The background service is the systemd user unit `~/.config/systemd/user/semantic-router.service`; start at sign-in is `~/.config/autostart/semantic-router.desktop`. |
+
+All of these are per user. The configuration directory (configuration, state database, logs) is the router's usual one ([host.md](host.md#where-things-live)). `SemanticRouter --install-service` and `--uninstall-service` set the background service up or remove it from a script, without the welcome window; see [the app and the background service](#the-app-and-the-background-service).
+
+### Deploying the installer
+
+- **Windows (Intune as a Win32 app, Configuration Manager, a sign-in script):** `SemanticRouter-win-x64-Setup.exe --silent` installs with no window. Velopack's Setup also takes `--log <file>` (write a log), `--verbose`, and `--installto <dir>` (install somewhere else than `%LOCALAPPDATA%\SemanticRouter`). Install in the user's context (in Intune, *Install behavior: User*). Setup starts the app when it has installed it, so the person sees the welcome window at once. To uninstall: `%LOCALAPPDATA%\SemanticRouter\Update.exe uninstall --silent`, which also removes the background service and the sign-in entry. For a detection rule, `%LOCALAPPDATA%\SemanticRouter\current\SemanticRouter.exe` exists.
+- **macOS (Jamf, an MDM):** `SemanticRouter-osx-arm64-Setup.pkg` (or `osx-x64`). `installer -pkg SemanticRouter-osx-arm64-Setup.pkg -target CurrentUserHomeDirectory` installs into the user's `~/Applications`, as the release tests do. Installed as root (`-target /`, how most MDMs run packages), it goes into `/Applications` and belongs to root; the app's own updates run as the signed-in user and have not been tried against such an install, so turn them off in the policy (`Updates:Mode` `Off`) and deploy each new version with your MDM.
+- **Linux:** copy the AppImage into place and make it executable; it does not install anything else.
+
+Check what you deploy before you deploy it: [releases.md](releases.md) shows how to verify an installer with `gh attestation verify` and the release's `SHA256SUMS`, and the installers are code-signed when the release has signing certificates ([Signing](#signing)).
+
+### Controlling updates
+
+The [machine-wide policy](enterprise.md) (the registry on Windows, a configuration profile on macOS, `/etc/semantic-router/policy.json` on Linux) decides updates for every user of the machine, and the user's tray menu cannot override it:
+
+| Policy | Effect |
+|---|---|
+| `Updates:Mode` `Off` | No update checks at all; the update items are gone from the tray menu. Deploy new versions yourself. |
+| `Updates:Mode` `Feed` and `Updates:Feed` | Updates only from your own feed (below), never from GitHub. |
+| `Updates:Apply` `Notify` | Updates are announced, and downloaded and applied only when the person chooses **Restart to update**; never when the app quits. **Install updates when quitting** is greyed out. Works with either `Mode`. |
+| `Updates:Publisher` | An update is applied only when the app in it is signed by this publisher (Windows: the Authenticode certificate's subject or thumbprint; macOS: the Developer ID team ID); otherwise it is refused and deleted. On Linux it refuses every update, since AppImages are not signed. See [enterprise.md](enterprise.md#update-publisher). |
+
+`semantic-router doctor` shows the policy and, on its `desktop app updates` line, where updates come from and what the policy adds.
+
+### Mirror the update feed
+
+The update feed is static files, so any HTTPS server (or a file share the machines can read, as a folder path) can serve it. Each platform is a channel: `win-x64`, `osx-arm64`, `osx-x64` and `linux-x64`. For each release, copy from its [GitHub release](https://github.com/siebe41/SemanticRouter.NET/releases) into one folder:
+
+- `releases.<channel>.json` for each channel you serve (it lists the packages and their SHA-256 checksums),
+- `SemanticRouter-<version>-<channel>-full.nupkg`, and
+- `SemanticRouter-<version>-<channel>-delta.nupkg` when there is one (it updates from the previous version with a much smaller download; without it the app downloads the full package).
+
+Replace `releases.<channel>.json` with each new release's; the app reads the newest version from it and the package names it lists, so keep at least the packages it names. The installers (`*-Setup.exe`, `*-Setup.pkg`, the AppImage) and the zip archives are not part of the feed. Before you publish a release internally, check its files against the release's `SHA256SUMS` and attestation ([releases.md](releases.md)); the app also checks each package against the checksum in `releases.<channel>.json`. Then point the policy at the folder's URL: `Updates:Mode` `Feed` and `Updates:Feed` `https://updates.corp.example/semantic-router`.
 
 ## Finding your CLIs
 

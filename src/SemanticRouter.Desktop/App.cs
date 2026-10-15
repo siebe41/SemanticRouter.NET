@@ -28,6 +28,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private RouterService _service = null!;
     private DesktopUpdater _updater = null!;
     private bool _restartForUpdate;
+    private bool _downloadingUpdate;
+    private string? _announcedUpdate;
     private bool _switching;
     private WindowIcon _icon = null!;
     private DashboardWindow? _window;
@@ -51,6 +53,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private NativeMenuItem _needs = null!;
     private NativeMenuItem _update = null!;
     private NativeMenuItem _checkUpdates = null!;
+    private NativeMenuItem _applyOnQuit = null!;
 
     public override void Initialize()
     {
@@ -75,6 +78,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _router.Changed += () => Dispatcher.UIThread.Post(OnRouterChanged);
         _service = new RouterService(ServicePlatform.ForThisMachine(options.Host), options.Host, Installation.Executable(Environment.GetEnvironmentVariable), Environment.GetEnvironmentVariable);
         _updater = DesktopUpdater.Create(options.Host, Environment.GetEnvironmentVariable, log);
+        _updater.ApplyOnQuit = _preferences.ApplyUpdatesOnQuit;
         TrayIcon.SetIcons(this, [BuildTray()]);
         instance.Listen(command => Dispatcher.UIThread.Post(() =>
         {
@@ -133,16 +137,31 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _needs = new NativeMenuItem { IsVisible = false };
         _needs.Click += (_, _) => OpenDashboard(_digest.NeedsLink);
         _update = new NativeMenuItem { IsVisible = false };
-        _update.Click += (_, _) =>
-        {
-            _restartForUpdate = true;
-            _ = QuitAsync();
-        };
+        _update.Click += (_, _) => _ = RestartToUpdateAsync();
         _checkUpdates = new NativeMenuItem("Check for updates") { ToggleType = MenuItemToggleType.CheckBox, IsVisible = _updater.Installed };
         _checkUpdates.Click += (_, _) =>
         {
             _preferences = _preferences with { CheckForUpdates = !_preferences.CheckForUpdates };
             _preferences.Save(_directory);
+            UpdateMenu();
+            _ = CheckForUpdatesAsync();
+        };
+        _applyOnQuit = new NativeMenuItem(_updater.NotifyLocked ? "Install updates when quitting (off: your organization's policy)" : "Install updates when quitting")
+        {
+            ToggleType = MenuItemToggleType.CheckBox,
+            IsVisible = _updater.Installed,
+            IsEnabled = !_updater.NotifyLocked,
+        };
+        _applyOnQuit.Click += (_, _) =>
+        {
+            if (_updater.NotifyLocked)
+            {
+                return;
+            }
+
+            _preferences = _preferences with { ApplyUpdatesOnQuit = !_preferences.ApplyUpdatesOnQuit };
+            _preferences.Save(_directory);
+            _updater.ApplyOnQuit = _preferences.ApplyUpdatesOnQuit;
             UpdateMenu();
             _ = CheckForUpdatesAsync();
         };
@@ -178,7 +197,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         {
             Icon = _icon,
             ToolTipText = "SemanticRouter",
-            Menu = [open, _needs, _update, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, _checkUpdates, logs, configuration, new NativeMenuItemSeparator(), about, quit],
+            Menu = [open, _needs, _update, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, _checkUpdates, _applyOnQuit, logs, configuration, new NativeMenuItemSeparator(), about, quit],
         };
         tray.Clicked += (_, _) => OpenDashboard();
         UpdateMenu();
@@ -218,9 +237,13 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _week.Header = _digest.Week ?? string.Empty;
         _week.IsVisible = _digest.Week is not null;
         _needs.Header = _digest.NeedsLine ?? string.Empty;
-        _update.Header = _updater.Ready is { } ready ? $"Restart to update to {ready}" : string.Empty;
-        _update.IsVisible = _updater.Ready is not null;
+        _update.Header = _updater.Offer is not { } offer ? string.Empty
+            : _downloadingUpdate ? $"Downloading update {offer}…"
+            : $"Restart to update to {offer}";
+        _update.IsVisible = _updater.Offer is not null;
+        _update.IsEnabled = !_downloadingUpdate;
         _checkUpdates.IsChecked = _preferences.CheckForUpdates;
+        _applyOnQuit.IsChecked = !_updater.NotifyOnly;
         _needs.IsVisible = _digest.NeedsLine is not null;
         if (_tray is not null)
         {
@@ -268,18 +291,68 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         });
     }
 
-    /// <summary>Looks for an update and downloads it, when the app is installed and the preference allows.</summary>
+    /// <summary>
+    /// Looks for an update, when the app is installed and the preference allows, and downloads it unless updates are
+    /// only announced. Then a notification, once per version, when the person has to choose to update.
+    /// </summary>
     private async Task CheckForUpdatesAsync()
     {
-        if (!_updater.Installed || !_preferences.CheckForUpdates || _updater.Ready is not null)
+        if (!_updater.Installed || !_preferences.CheckForUpdates || _updater.Offer is not null)
         {
             return;
         }
 
-        if (await _updater.CheckAsync() is not null)
+        string? found = await _updater.CheckAsync();
+        Dispatcher.UIThread.Post(() =>
         {
-            Dispatcher.UIThread.Post(UpdateMenu);
+            if (_updater.Problem is { } problem)
+            {
+                ShowProblem(problem);
+            }
+
+            if (_updater.NotifyOnly && found is not null && found != _announcedUpdate)
+            {
+                _announcedUpdate = found;
+                DesktopNotifier.Show($"SemanticRouter {found} is available", "Choose Restart to update in the tray menu to install it.");
+            }
+
+            UpdateMenu();
+        });
+    }
+
+    /// <summary>
+    /// "Restart to update": downloads the update when it is not yet (only announced), checks it, then quits so it is
+    /// applied and the app starts again. When it cannot be downloaded or is refused, the app keeps running and says why.
+    /// </summary>
+    private async Task RestartToUpdateAsync()
+    {
+        if (_downloadingUpdate)
+        {
+            return;
         }
+
+        _downloadingUpdate = true;
+        ShowProblem(null);
+        UpdateMenu();
+        string? ready;
+        try
+        {
+            ready = await _updater.DownloadAsync();
+        }
+        finally
+        {
+            _downloadingUpdate = false;
+        }
+
+        if (ready is null)
+        {
+            ShowProblem(_updater.Problem ?? "The update could not be downloaded.");
+            UpdateMenu();
+            return;
+        }
+
+        _restartForUpdate = true;
+        await QuitAsync();
     }
 
     /// <summary>The preference, unless the app window cannot work on this machine.</summary>
@@ -459,8 +532,9 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         await _router.DisposeAsync();
         instance.Dispose();
 
-        // A downloaded update is applied as the app exits (the background service stopped and started around it).
-        await _updater.ApplyOnExitAsync(_restartForUpdate);
+        // A downloaded update is applied as the app exits (the background service stopped and started around it):
+        // when the person chose Restart to update, or on quit unless updates are only announced.
+        _ = _restartForUpdate ? await _updater.ApplyNowAsync(restartApp: true) : await _updater.ApplyOnQuitAsync();
         (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
     }
 }
