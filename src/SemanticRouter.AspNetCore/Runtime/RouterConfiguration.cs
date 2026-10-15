@@ -187,6 +187,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             {
                 errors.Add($"Connector '{name}' MaxQueue must not be negative.");
             }
+
+            if (connector.CacheTtl is not ("5m" or "1h"))
+            {
+                errors.Add($"Connector '{name}' CacheTtl must be 5m or 1h.");
+            }
         }
 
         foreach (ModelDefinition model in Models.Where(m => m.Enabled && !string.IsNullOrWhiteSpace(m.Connector)))

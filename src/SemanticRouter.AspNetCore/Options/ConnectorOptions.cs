@@ -67,6 +67,20 @@ public enum PromptedToolParsing
     Strict = 1,
 }
 
+/// <summary>Whether the router marks the requests it builds for an Anthropic backend for prompt caching.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<PromptCaching>))]
+public enum PromptCaching
+{
+    /// <summary>
+    /// Mark translated requests whose prompt is long enough to cache: one breakpoint on the system prompt (tools and
+    /// system) and Anthropic's automatic caching for the conversation. Default.
+    /// </summary>
+    Auto = 0,
+
+    /// <summary>Send no cache markers of the router's own. For servers that reject them.</summary>
+    Off = 1,
+}
+
 /// <summary>Ready-made settings for well-known CLIs. See <c>docs/providers.md</c>.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<CliPreset>))]
 public enum CliPreset
@@ -130,6 +144,22 @@ public sealed class ConnectorOptions
 
     /// <summary>Anthropic: the <c>anthropic-version</c> header. Default <c>2023-06-01</c>.</summary>
     public string AnthropicVersion { get; set; } = "2023-06-01";
+
+    /// <summary>
+    /// Anthropic: cache markers on the requests the router translates (from OpenAI and Responses clients). Default
+    /// <see cref="PromptCaching.Auto"/>. Requests from Anthropic clients pass through with their own markers.
+    /// </summary>
+    public PromptCaching PromptCaching { get; set; } = PromptCaching.Auto;
+
+    /// <summary>
+    /// Anthropic, with <see cref="PromptCaching.Auto"/>: how long a cache entry lives, <c>5m</c> (default) or <c>1h</c>.
+    /// A one-hour entry costs twice the input price to write instead of 1.25 times, so it only pays off when turns are
+    /// often more than five minutes apart.
+    /// </summary>
+    public string CacheTtl { get; set; } = DefaultCacheTtl;
+
+    /// <summary>The <see cref="CacheTtl"/> used when it is not set.</summary>
+    public const string DefaultCacheTtl = "5m";
 
     // ---- Cli --------------------------------------------------------------------------------------------------
 

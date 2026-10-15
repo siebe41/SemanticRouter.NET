@@ -33,7 +33,8 @@ public class ChatProtocolTests
         request.MaxTokens.Should().Be(4096);
         request.Temperature.Should().Be(0.2);
         request.Turns.Should().HaveCount(4);
-        request.Turns[0].Should().BeEquivalentTo(ChatTurn.FromText("system", "You are Claude Code.\nBe brief."));
+        request.Turns[0].Should().BeEquivalentTo(new ChatTurn("system", [new TextBlock("You are Claude Code."), new TextBlock("Be brief.")]));
+        request.Turns[0].Text.Should().Be("You are Claude Code.\nBe brief.");
         request.Turns[2].Blocks.Should().ContainSingle(b => b is ToolUseBlock).Which.Should().BeEquivalentTo(new ToolUseBlock("toolu_1", "Read", """{"path":"README.md"}"""));
         request.Turns[3].IsToolResultOnly.Should().BeTrue();
         request.IsToolResultContinuation.Should().BeTrue();

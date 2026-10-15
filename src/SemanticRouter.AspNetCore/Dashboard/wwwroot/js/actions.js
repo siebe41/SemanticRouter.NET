@@ -138,7 +138,7 @@ export const actions = {
   'connector-add'() {
     let name = 'new-connector'; let n = 1;
     while (state.config.Connectors[name]) name = 'new-connector-' + (++n);
-    state.config.Connectors[name] = { Type: 'OpenAICompatible', BaseAddress: 'http://localhost:1234', RequestPath: '/v1/chat/completions', ApiKey: null, Headers: {}, ForwardHeaders: [], AnthropicVersion: '2023-06-01', Preset: 'Custom', Executable: null, Arguments: null, PromptInput: 'Stdin', ToolCalling: 'None', QuotaErrorPatterns: [], EnvironmentVariables: {}, RemoveEnvironmentVariables: null, MaxArgumentLength: 24000, MaxConcurrency: 2, AllowRemoteClients: false, Timeout: '00:00:00' };
+    state.config.Connectors[name] = { Type: 'OpenAICompatible', BaseAddress: 'http://localhost:1234', RequestPath: '/v1/chat/completions', ApiKey: null, Headers: {}, ForwardHeaders: [], AnthropicVersion: '2023-06-01', PromptCaching: 'Auto', CacheTtl: '5m', Preset: 'Custom', Executable: null, Arguments: null, PromptInput: 'Stdin', ToolCalling: 'None', QuotaErrorPatterns: [], EnvironmentVariables: {}, RemoveEnvironmentVariables: null, MaxArgumentLength: 24000, MaxConcurrency: 2, AllowRemoteClients: false, Timeout: '00:00:00' };
     state.open.add('conn:' + name); render();
   },
   'connector-remove'(el) { delete state.config.Connectors[el.dataset.name]; render(); },
