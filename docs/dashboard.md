@@ -161,7 +161,7 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `POST api/connectors/{name}/check` | Checks the connector now without calling a model, as `semantic-router doctor` does for it: `status` (`Ok`, `Warning`, `Failed`), `milliseconds`, `messages`, `at`. The result is kept for the Endpoints card until the connector points somewhere else. A check of a connector that is already being checked joins it. |
 | `POST api/connectors/{name}/discover` | What the connector offers: `models` (ids it serves), `server` (`LM Studio`, `Ollama`), `loading` (`OnDemand`, `LoadedOnly`, `Unknown`) with `loadingNote`, and `lineup`: per model its `kind`, `listed`, `loaded`, `contextLength`, `parametersBillions`, `capabilities`, `inCatalog`, `recommended`, `reason` and a `suggestion` in the configuration document's shape. HTTP connectors are asked (`/v1/models`, plus LM Studio's and Ollama's own APIs on local addresses), the Copilot SDK lists your account's models, and CLI presets return the names they accept. A `401` is reported as "requires authentication", naming the key to set. |
 | `GET api/session` | `{ role, tokenRequired, tokensConfigured }` for the caller. |
-| `POST api/session` | `{ "token": "..." }` → sets the session cookie. |
+| `POST api/session` | `{ "token": "..." }` → sets the session cookie, good for `SessionLifetime`. After five wrong tokens from one address in 15 minutes, `429` with `Retry-After` until the first is 15 minutes old. |
 | `DELETE api/session` | Signs out. |
 
 `PUT api/config`, `POST api/config/reset`, rollback, `POST api/health/reset`, `POST api/memory/exposure/reset`, changes to the evaluation set, adding utterances and every tuning action need the admin role. So does everything that spends embedding or API calls or scans the disk: `POST api/classify`, `POST api/evaluate` and `api/evaluate/compare`, `POST api/embeddings/test`, `POST api/connectors/{name}/check` and `/discover`, and `POST api/memory/refresh`. Everything else is open to the read-only role; the dashboard disables or hides those buttons for it.
@@ -179,7 +179,7 @@ The admin API can change where prompts go, so the default is strict and opening 
 | Setup | Settings | What happens |
 |---|---|---|
 | **Loopback only** (default) | nothing | Requests from other machines get `403`. Loopback requests must carry a `Host` header naming this machine (`localhost`, `127.0.0.1`, `[::1]`, or a `PublicOrigins` entry), which stops a web page from reaching the dashboard through DNS rebinding. |
-| **Token** | `RequireLocalClient: false`, `AdminToken` (and optionally `ReadOnlyToken`) | Remote callers send `Authorization: Bearer <token>`, or sign in on the dashboard, which sets an `HttpOnly`, `SameSite=Strict` session cookie derived from the token (never the token itself; changing the token signs everyone out). The read-only token can view status, activity and the masked configuration; it cannot apply, save or reset, nor classify, evaluate, test embeddings, check or discover connectors, or rescan memory, which spend embedding or API calls or read the disk. Loopback clients still need no token. |
+| **Token** | `RequireLocalClient: false`, `AdminToken` (and optionally `ReadOnlyToken`) | Remote callers send `Authorization: Bearer <token>`, or sign in on the dashboard, which sets an `HttpOnly`, `SameSite=Strict` session cookie: the time it was issued, signed with the token (never the token itself). It lapses after `SessionLifetime` (12 hours), and changing the token signs everyone out. Five wrong tokens from one address within 15 minutes, at sign-in or as a bearer token, make that address wait (`429` with `Retry-After`) until the first is 15 minutes old; a right token does not count. The read-only token can view status, activity and the masked configuration; it cannot apply, save or reset, nor classify, evaluate, test embeddings, check or discover connectors, or rescan memory, which spend embedding or API calls or read the disk. Loopback clients still need no token. |
 | **Reverse proxy that authenticates** | `RequireLocalClient: false`, `AllowUnauthenticatedRemoteClients: true` | Remote callers are trusted. Only for a proxy that authenticates every request; a warning is logged at start-up. |
 
 ```jsonc
@@ -188,6 +188,7 @@ The admin API can change where prompts go, so the default is strict and opening 
     "RequireLocalClient": false,
     "AdminToken": "${env:ROUTER_ADMIN_TOKEN}",       // 16+ characters, e.g. `openssl rand -hex 24`
     "ReadOnlyToken": "${env:ROUTER_VIEW_TOKEN}",
+    "SessionLifetime": "12:00:00",                   // how long a sign-in lasts
     "PublicOrigins": [ "https://router.home.lan" ]    // where people browse to it, if not localhost
   }
 }

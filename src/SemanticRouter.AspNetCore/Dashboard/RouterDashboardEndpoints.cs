@@ -41,7 +41,7 @@ public sealed class RouterDashboardOptions
     /// </summary>
     public string? AdminToken { get; set; }
 
-    /// <summary>Token for view-only access: status, activity, the masked configuration and the prompt tester.</summary>
+    /// <summary>Token for view-only access: status, activity and the masked configuration, but nothing that spends embedding or API calls.</summary>
     public string? ReadOnlyToken { get; set; }
 
     /// <summary>
@@ -70,6 +70,12 @@ public sealed class RouterDashboardOptions
     /// are accepted from these origins, and loopback requests may name them in the Host header.
     /// </summary>
     public IList<string> PublicOrigins { get; } = new List<string>();
+
+    /// <summary>
+    /// How long a dashboard sign-in lasts: the session cookie then lapses and the token must be entered again. Changing
+    /// a token ends every session signed in with it. Default 12 hours.
+    /// </summary>
+    public TimeSpan SessionLifetime { get; set; } = TimeSpan.FromHours(12);
 
     /// <summary>Entries shown by the activity endpoint when the client gives no limit. Default 100.</summary>
     public int DefaultActivityLimit { get; set; } = 100;
@@ -154,8 +160,14 @@ public static partial class RouterDashboardEndpoints
 
         api.MapPost("/session", (HttpContext context, SignInRequest request) =>
             {
+                if (access.Throttle.RetryAfter(context) is { } wait)
+                {
+                    return DashboardAccess.TooManyAttempts(context, wait);
+                }
+
                 if (access.RoleForToken(request.Token) is not { } role)
                 {
+                    access.Throttle.Failed(context);
                     return Results.Problem("That token is not valid for this router.", statusCode: StatusCodes.Status401Unauthorized, title: "Sign-in failed");
                 }
 
@@ -554,6 +566,7 @@ public static partial class RouterDashboardEndpoints
             copy.AllowUnauthenticatedRemoteClients = source.AllowUnauthenticatedRemoteClients;
             copy.RequireTokenForLocalClients = source.RequireTokenForLocalClients;
             copy.AllowProcessSettings = source.AllowProcessSettings;
+            copy.SessionLifetime = source.SessionLifetime;
             copy.DefaultActivityLimit = source.DefaultActivityLimit;
             copy.ThemesDirectory = source.ThemesDirectory;
             foreach (string origin in source.PublicOrigins)
@@ -585,7 +598,13 @@ public static partial class RouterDashboardEndpoints
             throw new InvalidOperationException("SemanticRouter:Dashboard:AdminToken and ReadOnlyToken must differ.");
         }
 
-        var access = new DashboardAccess(options, admin, readOnly, services.GetService<MachinePolicy>()?.Dashboard ?? DashboardPolicy.Default);
+        if (options.SessionLifetime <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("SemanticRouter:Dashboard:SessionLifetime must be positive, e.g. 12:00:00.");
+        }
+
+        var access = new DashboardAccess(
+            options, admin, readOnly, services.GetService<MachinePolicy>()?.Dashboard ?? DashboardPolicy.Default, services.GetService<TimeProvider>());
         ILogger logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("SemanticRouter.Dashboard");
         foreach (string problem in problems)
         {

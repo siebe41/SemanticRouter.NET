@@ -510,6 +510,8 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:VirtualModels` | `{}` | Model names clients can pick: `{ "private": { "Profile": "private", "Strategy": null, "Description": "…" } }`. |
 | `Middleware:LocalOnlyWhen:Secrets` / `FilePaths` | `false` / `false` | Keep a conversation local when it contains a credential or an absolute file path. |
 | `Dashboard:AdminToken`, `Dashboard:ReadOnlyToken` | | Tokens for remote dashboard access (16+ characters). See [docs/dashboard.md](docs/dashboard.md#access-and-security). |
+| `Dashboard:SessionLifetime` | `12:00:00` | How long a dashboard sign-in lasts before the token must be entered again. Five wrong tokens from one address in 15 minutes make it wait (`429`) until the first is 15 minutes old. |
+| `Dashboard:AllowProcessSettings` | `false` | Let the admin API change what a CLI connector runs and which paths memory sources read; otherwise those change only in the configuration file. See [docs/dashboard.md](docs/dashboard.md#access-and-security). |
 | `Dashboard:RequireLocalClient` | `true` | Loopback only. Turn off together with a token to reach the dashboard from other machines. |
 | `Dashboard:ThemesDirectory` | `themes/` next to the configuration file | Drop-in theme files. See [docs/dashboard.md](docs/dashboard.md#adding-a-theme-without-rebuilding). |
 | `Memory:Sources[]` | none | `{ Name, Type, Path }`: an Obsidian vault or notes folder (`Markdown`), Claude Code's memory (`ClaudeCode`, default `~/.claude`) or the MCP memory server's graph (`KnowledgeGraph`). See [docs/memory.md](docs/memory.md) for the rest of the `Memory` keys. |
