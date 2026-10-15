@@ -15,7 +15,8 @@ WORKDIR /src
 COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props .editorconfig ./
 COPY src/ src/
 COPY deploy/third-party-notices.cs deploy/
-RUN dotnet publish src/SemanticRouter.Host/SemanticRouter.Host.csproj -c Release -o /app /p:UseAppHost=false
+# Locked restore: exactly the packages in the projects' packages.lock.json files.
+RUN dotnet publish src/SemanticRouter.Host/SemanticRouter.Host.csproj -c Release -o /app /p:UseAppHost=false /p:RestoreLockedMode=true
 # The licences and notices of the NuGet packages the image ships, from the packages restore just fetched (no network).
 RUN dotnet run --file deploy/third-party-notices.cs -- /app/THIRD-PARTY-NOTICES.txt /app
 # The runtime image has no shell to create the data directory, so it is made here and copied over.

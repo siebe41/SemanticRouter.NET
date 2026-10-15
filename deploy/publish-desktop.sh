@@ -13,8 +13,10 @@ version="$2"
 out="$3"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 
+# Restore is locked: the packages are exactly those in the projects' packages.lock.json files, whose runtime sections
+# cover every <rid> the release publishes (DesktopRuntimeIdentifiers in Directory.Build.props).
 dotnet publish "$root/src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj" \
-  --configuration Release --runtime "$rid" --self-contained \
+  --configuration Release --runtime "$rid" --self-contained -p:RestoreLockedMode=true \
   -p:Version="$version" -p:DebugType=none \
   --output "$out"
 
