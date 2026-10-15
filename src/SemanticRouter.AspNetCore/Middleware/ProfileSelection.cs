@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 
@@ -54,7 +56,7 @@ internal static partial class ProfileSelection
     {
         PromptRouterMiddlewareOptions options = runtime.Configuration.Middleware;
         IDictionary<string, RoutingProfile> profiles = runtime.Configuration.Profiles;
-        string? project = request.Headers[options.ProjectHeader].FirstOrDefault() is { Length: > 0 } header ? header : chat.UserId;
+        string? project = request.Headers[options.ProjectHeader].FirstOrDefault() is { Length: > 0 } header ? header : UserProject(chat.UserId);
 
         string? profile = null;
         if (client is not null && options.ClientProfiles.TryGetValue(client, out string? enforced))
@@ -99,6 +101,13 @@ internal static partial class ProfileSelection
 
         return new Choice(profile, signals.Count > 0, signals, project, null);
     }
+
+    /// <summary>
+    /// The project label for a client's own user id: <c>user:</c> and the first 12 hex digits of its SHA-256, stable
+    /// but never the id itself, which can name an account or a session.
+    /// </summary>
+    internal static string? UserProject(string? userId) =>
+        string.IsNullOrEmpty(userId) ? null : "user:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(userId)))[..12];
 
     /// <summary>A scan that runs out of time counts as a match: when in doubt, stay local.</summary>
     private static bool Finds(Regex pattern, string text)

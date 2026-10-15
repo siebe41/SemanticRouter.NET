@@ -104,7 +104,7 @@ On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not
 
 | Where | What | Kept for | How to delete it |
 |---|---|---|---|
-| `semantic-router.db`, table `activity` | One entry per request: time, client name, models, tiers, tokens, cost, notes, and a **prompt preview** (see below) | 30 days or 10,000 entries (`State:Retention:ActivityDays`, `ActivityEntries`) | **Gateway → Stored prompts → Delete all activity**, or `DELETE /router/api/activity?since=…&until=…` |
+| `semantic-router.db`, table `activity` | One entry per request: time, client name, project label (the `X-Router-Project` header, or else a hash of the client's user id, never the id), models, tiers, tokens, cost, notes, and a **prompt preview** (see below) | 30 days or 10,000 entries (`State:Retention:ActivityDays`, `ActivityEntries`) | **Gateway → Stored prompts → Delete all activity**, or `DELETE /router/api/activity?since=…&until=…` |
 | `semantic-router.db`, table `feedback` | Retries, corrections, labels and grades per request: tiers and short notes, no prompt text | As activity | With the activity it belongs to ageing out |
 | `semantic-router.db`, table `usage` | Tokens and cost per request, by model, connector, route, client and profile; no prompt text | 400 days (`State:Retention:UsageDays`) | Delete the file |
 | `semantic-router.db`, table `config_history` | Every applied configuration, with secrets masked | 200 versions (`State:Retention:ConfigurationVersions`) | Delete the file |
