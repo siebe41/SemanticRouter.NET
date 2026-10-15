@@ -179,6 +179,8 @@ With `AllowBelowRequiredTier` (the default), the remaining eligible models follo
 | **GitHub Copilot (SDK)** | `Copilot` | your Copilot plan (AI credits) | personal, local use; native tools and streaming; [providers.md](docs/providers.md#github-copilot-sdk) |
 | **GitHub Copilot CLI** | `Cli`, preset `GitHubCopilot` | your Copilot plan (AI credits) | personal, local use |
 | **OpenAI Codex CLI** | `Cli`, preset `Codex` | your ChatGPT plan | personal, local use |
+
+The subscription connectors (the CLIs and Copilot) answer with whatever account the CLI is signed in to, which may be a personal plan. On a work machine, read [Using it at work](docs/TERMS.md#using-it-at-work) first.
 | Anything else with a CLI | `Cli`, preset `Custom` | – | argument template with `{model}`, `{prompt}` |
 | Anything else | your own `IChatConnector` | – | |
 
@@ -201,7 +203,7 @@ semantic-router           # http://localhost:5080, dashboard at /router
 semantic-router service install   # or keep it running in the background, started whenever you sign in
 ```
 
-`init` writes `~/.config/semantic-router/semantic-router.json` (or `%APPDATA%\semantic-router` on Windows). Everything else is done on the dashboard. `service install` sets the router up as a per-user background service (systemd on Linux, launchd on macOS, a sign-in entry on Windows), so no terminal has to stay open. Prefer an icon? The [desktop app](docs/desktop.md) (an installer for Windows, macOS and Linux, with updates) runs the router from the tray and shows the dashboard in its own window or your browser. A container image covers API-key and local-model setups. See [docs/host.md](docs/host.md).
+`init` writes `~/.config/semantic-router/semantic-router.json` (or `%APPDATA%\semantic-router` on Windows). It asks before enabling each subscription CLI it finds, because that CLI answers on whatever account it is signed in to ([Using it at work](docs/TERMS.md#using-it-at-work)); `--yes` enables them without asking and `--no-cli` leaves them out. Everything else is done on the dashboard. `service install` sets the router up as a per-user background service (systemd on Linux, launchd on macOS, a sign-in entry on Windows), so no terminal has to stay open. Prefer an icon? The [desktop app](docs/desktop.md) (an installer for Windows, macOS and Linux, with updates) runs the router from the tray and shows the dashboard in its own window or your browser. A container image covers API-key and local-model setups. See [docs/host.md](docs/host.md).
 
 ## Quick start
 
