@@ -176,6 +176,16 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         }
     }
 
+    /// <summary>The machine policy every configuration is held to (<see cref="MachinePolicy.None"/> without one).</summary>
+    public MachinePolicy Policy => _services.GetService<MachinePolicy>() ?? MachinePolicy.None;
+
+    /// <summary>
+    /// Validation errors for a document that would replace the running one: <see cref="Validate"/>, and what it would
+    /// have to give up to keep within the machine policy. Empty when it could be applied.
+    /// </summary>
+    public IReadOnlyList<string> ValidateChange(RouterConfiguration configuration) =>
+        [.. Validate(configuration), .. Policy.Violations(configuration).Select(v => "Not allowed: " + v)];
+
     /// <summary>Validation errors for a document; empty when it could be applied.</summary>
     public static IReadOnlyList<string> Validate(RouterConfiguration configuration)
     {
@@ -190,7 +200,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     public RouterRuntime Apply(RouterConfiguration configuration, bool persist, string source = "admin API", string? actor = null, string? note = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        IReadOnlyList<string> errors = Validate(configuration);
+        IReadOnlyList<string> errors = ValidateChange(configuration);
         if (errors.Count > 0)
         {
             throw new InvalidOperationException("Invalid router configuration: " + string.Join("; ", errors));
@@ -332,6 +342,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
     private RouterRuntime Build(RouterConfiguration configuration, RouterConfigurationSource source, IReadOnlyList<string>? notes = null)
     {
+        // The machine policy wins over the configuration: what breaks it is turned off, and said so.
+        IReadOnlyList<string> enforced = Policy.Enforce(configuration);
         IReadOnlyList<string> errors = configuration.GetDocumentValidationErrors();
         if (errors.Count > 0)
         {
@@ -350,7 +362,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         (cache as ModelCacheTracker)?.Configure(configuration.Selection);
         _services.GetService<IStateRetention>()?.Apply(configuration.State.Retention);
 
-        var warnings = new List<string>();
+        var warnings = new List<string>(enforced);
         if (configuration.Middleware.Mode == PromptRouterMode.Dispatch && !configuration.Models.Any(m => m.Enabled))
         {
             // Allowed so a fresh install can start and be configured from the dashboard, but every request gets 503.
@@ -382,6 +394,13 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         }
 
         RouterConfiguration resolved = configuration.ResolveSecrets(_secrets, warnings);
+        foreach ((string name, string reason) in Policy.BlockedWebhooks(resolved.Notifications).ToArray())
+        {
+            // A webhook address held as a secret is only known once resolved.
+            resolved.Notifications.Webhooks.Remove(name);
+            warnings.Add($"Webhook '{name}' is not used: {reason}.");
+        }
+
         foreach (string warning in warnings)
         {
             LogConfigurationWarning(_logger, warning);
@@ -407,7 +426,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             _services.GetRequiredService<ILoggerFactory>(),
             redactor,
             _services.GetService<PromptRouterMetrics>(),
-            _services.GetServices<IChatConnectorFactory>());
+            _services.GetServices<IChatConnectorFactory>(),
+            Policy);
 
         return new RouterRuntime
         {

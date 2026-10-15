@@ -17,12 +17,18 @@ internal sealed class ConnectorCatalog : IDisposable
         ILoggerFactory loggerFactory,
         SecretRedactor? redactor = null,
         PromptRouterMetrics? metrics = null,
-        IEnumerable<IChatConnectorFactory>? factories = null)
+        IEnumerable<IChatConnectorFactory>? factories = null,
+        MachinePolicy? policy = null)
     {
         IChatConnectorFactory[] extra = factories?.ToArray() ?? [];
         foreach ((string name, ConnectorOptions connector) in options)
         {
-            if (extra.FirstOrDefault(f => f.Type == connector.Type) is { } factory)
+            if (policy?.Blocks(connector) is { } blocked)
+            {
+                // Its models are turned off already; this keeps the connector itself from ever starting.
+                _connectors[name] = new UnavailableConnector(name, blocked);
+            }
+            else if (extra.FirstOrDefault(f => f.Type == connector.Type) is { } factory)
             {
                 IChatConnector created = factory.Create(name, connector);
                 if (created is IDisposable disposable)

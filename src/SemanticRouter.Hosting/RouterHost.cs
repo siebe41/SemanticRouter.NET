@@ -73,6 +73,7 @@ internal static class RouterHost
         builder.Services
             .AddSemanticPromptRouting(builder.Configuration.GetSection(SemanticRouterOptions.SectionName))
             .UseConfigurationFile(settings.ConfigurationFile)
+            .UseMachinePolicy()
             .UseSecretFile()
             .AddOnnxEmbeddings()
             .AddCopilotConnector()
