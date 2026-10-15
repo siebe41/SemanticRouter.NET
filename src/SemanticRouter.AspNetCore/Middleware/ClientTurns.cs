@@ -36,11 +36,18 @@ internal enum ClientTurnKind
 /// <remarks>
 /// The patterns follow the clients' own prompts (<see cref="ClientTurnTable"/>: built in, overridable by a
 /// <c>client-turns.json</c> next to the configuration) and are matched on the latest user message (injected
-/// context blocks such as <c>&lt;system-reminder&gt;</c> removed) and on the system prompt. They are deliberately specific: an ordinary
+/// context blocks such as <c>&lt;system-reminder&gt;</c> removed) and on the start of the system prompt. They are deliberately specific: an ordinary
 /// request that merely asks for a title or a summary is classified as usual.
 /// </remarks>
 internal static partial class ClientTurns
 {
+    /// <summary>
+    /// How much of the system prompt is searched. A client's own side request opens its (short) system prompt with its
+    /// instructions; an agent's long system prompt that merely quotes that wording, in project docs it carries for
+    /// example, is an ordinary request.
+    /// </summary>
+    private const int SystemPromptLead = 2000;
+
     private static readonly ConcurrentDictionary<string, Regex> Configured = new(StringComparer.Ordinal);
 
     /// <summary>The kind of client turn this is, or <see langword="null"/> for an ordinary request.</summary>
@@ -107,8 +114,11 @@ internal static partial class ClientTurns
         }
     }
 
-    private static string SystemPrompt(ChatCompletionRequest chat) =>
-        string.Join("\n", chat.Messages.Where(m => m.Role is "system" or "developer").Select(m => m.Content));
+    private static string SystemPrompt(ChatCompletionRequest chat)
+    {
+        string system = string.Join("\n", chat.Messages.Where(m => m.Role is "system" or "developer").Select(m => m.Content));
+        return system.Length > SystemPromptLead ? system[..SystemPromptLead] : system;
+    }
 
     private static string OpeningMessage(ChatCompletionRequest chat) =>
         chat.Messages.FirstOrDefault(m => m.Role == "user") is { } opening ? InjectedBlocks.Remove(opening.Content).TrimStart() : string.Empty;

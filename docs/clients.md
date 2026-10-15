@@ -54,7 +54,7 @@ The wording these side requests are recognised by is a data file, not code: the 
 }
 ```
 
-`kind` is `Warmup` (matched against the whole message), `Resumed` (the start of a session's opening message, routed at `ResumedTier`), or `Title`, `Topic`, `Summary`, `CommandCheck` (anywhere in the latest user message or the system prompt). Patterns are .NET regular expressions, matched case-insensitively. The built-in ids are `warmup`, `claude-code/resumed`, `claude-code/title`, `claude-code/short-title`, `generic/title`, `claude-code/topic`, `claude-code/compaction`, `codex/compaction` and `claude-code/command-check`. An entry that cannot be used (a bad pattern, no id) is skipped and logged, and the rest of the file still applies. `Housekeeping:Patterns` is still there for a quick addition in the configuration itself.
+`kind` is `Warmup` (matched against the whole message), `Resumed` (the start of a session's opening message, routed at `ResumedTier`), or `Title`, `Topic`, `Summary`, `CommandCheck` (anywhere in the latest user message, or in the first 2,000 characters of the system prompt, where a client's own side request puts its instructions: an agent whose long system prompt merely quotes the wording is not caught). Patterns are .NET regular expressions, matched case-insensitively. The built-in ids are `warmup`, `claude-code/resumed`, `claude-code/title`, `claude-code/short-title`, `generic/title`, `claude-code/topic`, `claude-code/compaction`, `codex/compaction` and `claude-code/command-check`. An entry that cannot be used (a bad pattern, no id) is skipped and logged, and the rest of the file still applies. `Housekeeping:Patterns` is still there for a quick addition in the configuration itself.
 
 ### Where agentic turns can go
 
