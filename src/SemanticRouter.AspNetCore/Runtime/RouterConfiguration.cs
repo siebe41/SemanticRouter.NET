@@ -515,6 +515,13 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
+        // Keys written into an address (https://user:key@host, ?api-key=…) are secrets too.
+        foreach (ConnectorOptions connector in copy.Connectors.Values)
+        {
+            connector.BaseAddress = AddressDisplay.Mask(connector.BaseAddress);
+        }
+
+        copy.Embeddings.Endpoint = AddressDisplay.Mask(copy.Embeddings.Endpoint);
         return copy;
     }
 
@@ -530,6 +537,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         foreach ((string name, ConnectorOptions connector) in Connectors)
         {
             current.Connectors.TryGetValue(name, out ConnectorOptions? existing);
+            connector.BaseAddress = AddressDisplay.Unmask(connector.BaseAddress, existing?.BaseAddress);
             if (existing is not null && !SameDestination(connector, existing))
             {
                 continue;
@@ -565,6 +573,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
+        Embeddings.Endpoint = AddressDisplay.Unmask(Embeddings.Endpoint, current.Embeddings.Endpoint);
         if (Embeddings.ApiKey == MaskedSecret
             && Embeddings.Provider == current.Embeddings.Provider && Equals(Embeddings.Endpoint, current.Embeddings.Endpoint))
         {
@@ -641,13 +650,26 @@ public sealed class RouterConfiguration : SemanticRouterOptions
 
     /// <summary>
     /// Errors for secrets still masked after <see cref="UnmaskFrom"/>: their connector or the embeddings now point
-    /// somewhere else, so the stored secret is not sent there.
+    /// somewhere else, so the stored secret is not sent there, or an address with credentials in it was edited.
     /// </summary>
-    internal IEnumerable<string> MaskedSecretErrors() =>
-        Slots(secretsOnly: true)
-            .Where(s => s.Get() == MaskedSecret)
-            .Select(s => $"{s.Setting}: enter the secret again. A stored secret is only sent where it was configured, and this " +
-                         "connector (or the embeddings) now has another type, address or program.");
+    internal IEnumerable<string> MaskedSecretErrors()
+    {
+        foreach (SecretSlot slot in Slots(secretsOnly: true).Where(s => s.Get() == MaskedSecret))
+        {
+            yield return $"{slot.Setting}: enter the secret again. A stored secret is only sent where it was configured, and this " +
+                         "connector (or the embeddings) now has another type, address or program.";
+        }
+
+        foreach (string name in Connectors.Where(c => AddressDisplay.HasMask(c.Value.BaseAddress)).Select(c => c.Key))
+        {
+            yield return $"Connectors:{name}:BaseAddress: the address was changed, so enter the credentials in it (shown as ***) again.";
+        }
+
+        if (AddressDisplay.HasMask(Embeddings.Endpoint))
+        {
+            yield return "Embeddings:Endpoint: the address was changed, so enter the credentials in it (shown as ***) again.";
+        }
+    }
 
     /// <summary>
     /// The CLI and Copilot connectors whose process settings (program, arguments, environment variables, home directory)

@@ -83,6 +83,38 @@ public sealed class SecretHandlingTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_key_in_a_connector_address_is_masked_in_the_admin_api_and_kept_when_sent_back()
+    {
+        var address = new Uri("https://user:sk-in-userinfo@api.anthropic.example/v1?api-version=2024-10-21&api-key=sk-in-query");
+        HttpClient client = await StartDispatchAsync(s =>
+            s.PostConfigure<SemanticRouterConnectorsOptions>(o => o.Connectors["anthropic"].BaseAddress = address));
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+
+        JsonNode config = (await ReadNodeAsync(await client.GetAsync("/router/api/config")))["config"]!;
+        string shown = config["Connectors"]!["anthropic"]!["BaseAddress"]!.GetValue<string>();
+
+        shown.Should().NotContain("sk-in-userinfo").And.NotContain("sk-in-query").And.Contain("api-version=2024-10-21").And.Contain("***");
+        provider.History!.GetVersion(provider.History.List(1).Single().Id)!.ToJson().Should().NotContain("sk-in-");
+
+        (await client.PutAsync("/router/api/config?persist=false", JsonBody(config))).StatusCode.Should().Be(HttpStatusCode.OK);
+        provider.Current.Configuration.Connectors["anthropic"].BaseAddress.Should().Be(address);
+        provider.Current.Configuration.Connectors["anthropic"].BaseAddress!.UserInfo.Should().Be("user:sk-in-userinfo");
+
+        config["Connectors"]!["anthropic"]!["BaseAddress"] = shown.Replace("api.anthropic.example", "collector.example", StringComparison.Ordinal);
+        HttpResponseMessage moved = await client.PutAsync("/router/api/config?persist=false", JsonBody(config));
+        moved.StatusCode.Should().Be(HttpStatusCode.BadRequest, "the credentials are not carried to another address");
+        (await moved.Content.ReadAsStringAsync()).Should().Contain("Connectors:anthropic:BaseAddress");
+    }
+
+    [Theory]
+    [InlineData("https://api.example/v1", "https://api.example/v1")]
+    [InlineData("https://api.example/v1?api-version=1", "https://api.example/v1?api-version=1")]
+    [InlineData("https://u:p@api.example/v1", "https://***@api.example/v1")]
+    [InlineData("https://api.example/v1?key=abc&x=1&sig=def", "https://api.example/v1?key=***&x=1&sig=***")]
+    public void Addresses_show_their_credentials_as_stars(string address, string masked) =>
+        Uri.UnescapeDataString(AddressDisplay.Mask(new Uri(address))!.AbsoluteUri).Should().Be(masked);
+
+    [Fact]
     public async Task An_unset_reference_is_reported_in_status_and_the_log()
     {
         HttpClient client = await StartDispatchAsync(s =>

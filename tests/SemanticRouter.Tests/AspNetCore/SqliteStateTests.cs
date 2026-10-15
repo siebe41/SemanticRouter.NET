@@ -376,6 +376,18 @@ public sealed class DurableStateHostTests : RouterHostTest
         return text.ToString();
     }
 
+    /// <summary>Waits until <paramref name="count"/> entries are in the store: an entry is stored once its request finishes, which can be just after the client has the reply.</summary>
+    private async Task WaitForStoredActivityAsync(int count)
+    {
+        IRoutingActivityStore store = Services.GetRequiredService<IRoutingActivityStore>();
+        for (int i = 0; i < 200 && store.Recent(count).Count < count; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        store.Recent(count).Should().HaveCount(count);
+    }
+
     private static async Task<string> LastPreviewAsync(HttpClient client) =>
         JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray()[0]!["promptPreview"]!.GetValue<string>();
 
@@ -385,6 +397,7 @@ public sealed class DurableStateHostTests : RouterHostTest
         const string key = "sk-ant-api03-q1w2e3r4t5y6u7i8o9p0a1s2d3f4";
         HttpClient client = await StartDurableAsync();
         await client.PostAsync("/v1/chat/completions", Chat($"why does {key} get a 401?"));
+        await WaitForStoredActivityAsync(1);
 
         (await LastPreviewAsync(client)).Should().Be("why does *** get a 401?");
         DatabaseFiles().Should().NotContain(key);
@@ -392,6 +405,7 @@ public sealed class DurableStateHostTests : RouterHostTest
 
         HttpClient off = await StartDurableAsync(o => o.StorePrompts = PromptStorage.Off);
         await off.PostAsync("/v1/chat/completions", Chat("the quarterly numbers for project nightingale"));
+        await WaitForStoredActivityAsync(2);
 
         (await LastPreviewAsync(off)).Should().BeEmpty();
         string export = await off.GetStringAsync("/router/api/activity/export?format=jsonl&prompts=true");
@@ -426,6 +440,7 @@ public sealed class DurableStateHostTests : RouterHostTest
         HttpClient client = await StartDurableAsync(o => o.StorePrompts = PromptStorage.On);
         await client.PostAsync("/v1/chat/completions", Chat("purge-me 7a1c: the draft of the merger memo"));
         await client.PostAsync("/v1/chat/completions", Chat("purge-me 7a1c: and the second draft"));
+        await WaitForStoredActivityAsync(2);
         DatabaseFiles().Should().Contain("purge-me 7a1c", "the previews were stored");
 
         HttpResponseMessage purge = await client.DeleteAsync("/router/api/activity");
