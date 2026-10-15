@@ -43,10 +43,12 @@ internal sealed class DashboardAccess
     private readonly byte[]? _admin;
     private readonly byte[]? _readOnly;
     private readonly HashSet<string> _publicAuthorities;
+    private readonly DashboardPolicy _policy;
 
-    public DashboardAccess(RouterDashboardOptions options, string? adminToken, string? readOnlyToken)
+    public DashboardAccess(RouterDashboardOptions options, string? adminToken, string? readOnlyToken, DashboardPolicy policy = DashboardPolicy.Default)
     {
         _options = options;
+        _policy = policy;
         _admin = string.IsNullOrEmpty(adminToken) ? null : Encoding.UTF8.GetBytes(adminToken);
         _readOnly = string.IsNullOrEmpty(readOnlyToken) ? null : Encoding.UTF8.GetBytes(readOnlyToken);
         _publicAuthorities = LocalHosts.Authorities(options.PublicOrigins);
@@ -69,6 +71,11 @@ internal sealed class DashboardAccess
     public async ValueTask<object?> FilterAsync(EndpointFilterInvocationContext invocation, EndpointFilterDelegate next)
     {
         HttpContext context = invocation.HttpContext;
+        if (_policy == DashboardPolicy.Off)
+        {
+            return Refuse(StatusCodes.Status403Forbidden, "The router dashboard is turned off by your organization's policy.");
+        }
+
         bool local = IsLocal(context);
         if (!local && _options.RequireLocalClient)
         {
@@ -114,6 +121,17 @@ internal sealed class DashboardAccess
             return endpoint?.Metadata.GetMetadata<DashboardAnonymousMetadata>() is not null
                 ? await next(invocation).ConfigureAwait(false)
                 : Refuse(StatusCodes.Status401Unauthorized, "Sign in with the dashboard token (Authorization: Bearer <token>).");
+        }
+
+        if (_policy == DashboardPolicy.ReadOnly && role == RouterDashboardRole.Admin)
+        {
+            // Nobody changes the router from here: the role is clamped, so the page shows it read-only too.
+            if (endpoint?.Metadata.GetMetadata<DashboardWriteMetadata>() is not null)
+            {
+                return Refuse(StatusCodes.Status403Forbidden, "Your organization's policy makes the dashboard read-only: the router cannot be changed from it.");
+            }
+
+            role = RouterDashboardRole.ReadOnly;
         }
 
         if (role == RouterDashboardRole.ReadOnly && endpoint?.Metadata.GetMetadata<DashboardWriteMetadata>() is not null)

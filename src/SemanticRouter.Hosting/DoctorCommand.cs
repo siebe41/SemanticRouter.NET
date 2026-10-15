@@ -55,6 +55,10 @@ internal static class DoctorCommand
 
     private static IEnumerable<RouterCheck> HostChecks(WebApplication app)
     {
+        MachinePolicy policy = app.Services.GetRequiredService<RouterRuntimeProvider>().Policy;
+        yield return new RouterCheck("policy", RouterCheckStatus.Ok, policy.IsEmpty
+            ? "no machine-wide policy is set."
+            : $"set by your organization in {policy.Source}: {System.Text.Json.Nodes.JsonNode.Parse(policy.ToJson())!.ToJsonString()}");
         string urls = app.Configuration[WebHostDefaults.ServerUrlsKey] ?? HostSettings.DefaultUrl;
         RouterDashboardOptions dashboard = app.Services.GetRequiredService<IOptions<RouterDashboardOptions>>().Value;
         bool remote = urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(u => !RouterHost.IsLoopback(u));
