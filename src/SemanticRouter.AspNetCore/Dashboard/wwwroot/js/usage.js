@@ -44,7 +44,7 @@ function feedbackCard(f) {
   const rows = (groups) => groups.map((g) => `<tr><td>${h(g.key)}</td><td class="num">${int(g.decisions)}</td><td class="num">${int(g.withFeedback)}</td><td class="num">${pct(g.rate)}</td>${FEEDBACK_KINDS.map(([k]) => `<td class="num">${int((g.byKind || {})[k])}</td>`).join('')}</tr>`).join('');
   const head = (what) => `<tr><th>${what}</th><th>Decisions</th><th>With feedback</th><th>Rate</th>${FEEDBACK_KINDS.map(([, label]) => `<th>${label}</th>`).join('')}</tr>`;
   return `<div class="card section"><div class="card-head"><h2>Feedback</h2><span class="muted small">Signs a decision was not good enough: the prompt sent again, the answer corrected, a model chosen with a callout, failing tool calls. ${int(f.feedback)} of ${int(f.decisions)} decisions.</span></div>
-    ${f.decisions ? `<div class="table-wrap"><table>${head('Route')}${rows(f.byRoute)}</table></div><div class="table-wrap" style="margin-top:12px"><table>${head('Model')}${rows(f.byModel)}</table></div>` : '<div class="muted small">No decisions in this window yet.</div>'}
+    ${f.decisions ? `<div class="table-wrap"><table class="wrap-head">${head('Route')}${rows(f.byRoute)}</table></div><div class="table-wrap" style="margin-top:12px"><table class="wrap-head">${head('Model')}${rows(f.byModel)}</table></div>` : '<div class="muted small">No decisions in this window yet.</div>'}
   </div>`;
 }
 
