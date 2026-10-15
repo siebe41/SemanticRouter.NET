@@ -77,7 +77,22 @@ and the answers in [replies.js](replies.js). Narration reads best written the wa
 contractions, a question now and then.
 
 The voice sample for cloning: 15–30 seconds of you talking, one take, a quiet room, a headset or phone mic at normal
-distance, as if explaining the router to a colleague. WAV or M4A, no music or other voices.
+distance, as if explaining the router to a colleague. WAV or M4A, no music or other voices. Chatterbox uses about
+10 seconds of it, so cut the stretch whose tone fits the video and keep it under `out/` (ignored by git; a voice
+sample doesn't belong in the repository):
+
+```bash
+ffmpeg -i recording.m4a -ss 11 -to 26.5 -ac 1 -ar 24000 -af "highpass=f=70,loudnorm=I=-20:TP=-2" out/voice-sample/me.wav
+python tts.py chatterbox out/voice out/voice-sample/me.wav
+```
+
+Generated speech occasionally drops or repeats words. Check every line before recording, and regenerate the ones it
+flags (`TTS_ONLY=init,limit python tts.py …`):
+
+```bash
+pip install faster-whisper
+python check_narration.py out/voice
+```
 
 [PLAN.md](PLAN.md) outlines the next videos: a deep dive on routing and a how-to on the settings.
 
