@@ -1,4 +1,4 @@
-"""Speaks narration.json into <out>/<id>.wav plus <out>/durations.json, with one of two open TTS models that run locally.
+"""Speaks a narration file (NARRATION, default narration/intro.json) into <out>/<id>.wav plus <out>/durations.json, with one of two open TTS models that run locally.
 
     # Chatterbox (natural cadence; clones a voice from a 10-30 s sample):
     pip install chatterbox-tts
@@ -20,7 +20,8 @@ import soundfile as sf
 
 engine, out = sys.argv[1], sys.argv[2]
 here = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(here, "narration.json"), encoding="utf-8") as f:
+# NARRATION: the video's narration file (default narration/intro.json).
+with open(os.environ.get("NARRATION") or os.path.join(here, "narration", "intro.json"), encoding="utf-8") as f:
     narration = json.load(f)
 
 PAUSE_AFTER = {".": 0.38, "?": 0.42, "!": 0.38, ":": 0.3}
@@ -47,7 +48,7 @@ else:
     from kokoro_onnx import Kokoro
 
     kokoro = Kokoro(sys.argv[3], sys.argv[4])
-    voice = sys.argv[5] if len(sys.argv) > 5 else narration["voice"]
+    voice = sys.argv[5] if len(sys.argv) > 5 else narration.get("voice", "af_heart")
     rate = 24000
 
     def speak(sentence):

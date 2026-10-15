@@ -16,15 +16,21 @@ from faster_whisper import WhisperModel
 
 voice = sys.argv[1]
 here = os.path.dirname(os.path.abspath(__file__))
-with open(os.path.join(here, "narration.json"), encoding="utf-8") as f:
+with open(os.environ.get("NARRATION") or os.path.join(here, "narration", "intro.json"), encoding="utf-8") as f:
     lines = json.load(f)["lines"]
 
 model = WhisperModel("small.en", device="cpu", compute_type="int8")
 hint = "Semantic Router, LM Studio, Claude Code, Anthropic, OpenAI, init."
 
 
+DIGITS = "zero one two three four five six seven eight nine".split()
+
+
 def words(text):
     text = text.lower().replace("semanticrouter.net", "semantic router dot net").replace(".net", " dot net")
+    # Numbers come back as digits (".87", "tier 4"): read them out the way the narration spells them.
+    text = re.sub(r"(?<=\d)\.(?=\d)|(?<![\w])\.(?=\d)", " point ", text)
+    text = re.sub(r"\d", lambda m: f" {DIGITS[int(m.group())]} ", text).replace("labeled", "labelled")
     return re.sub(r"[^a-z' ]", " ", text).replace(" in to ", " into ").split()
 
 

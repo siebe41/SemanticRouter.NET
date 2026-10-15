@@ -2,7 +2,7 @@
 // from replies.js for the latest user message, quickly, the way a local model on a good GPU would.
 //   node lmstudio-stub.js [port]     (default 1234, LM Studio's own port)
 const http = require('http');
-const { replyFor, words } = require('./replies');
+const { replyFor, words, toolCallFor, afterTool } = require('./replies');
 
 const models = ['qwen/qwen3-8b', 'qwen/qwen3-coder-30b'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -14,7 +14,8 @@ function lastUserText(request) {
   return (user.content || []).filter((p) => p.type === 'text').map((p) => p.text).join('\n');
 }
 
-function createStub() {
+// project: the demo project's directory, for the absolute paths Claude Code's tools need.
+function createStub({ project = process.cwd() } = {}) {
   return http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
@@ -27,8 +28,30 @@ function createStub() {
 
       let request = {};
       try { request = JSON.parse(body || '{}'); } catch { /* not JSON */ }
-      if (process.env.DEMO_STUB_LOG) require('fs').appendFileSync(process.env.DEMO_STUB_LOG, `----- ${request.model}\n${lastUserText(request)}\n`);
-      const reply = replyFor(lastUserText(request));
+      if (process.env.DEMO_STUB_LOG) require('fs').appendFileSync(process.env.DEMO_STUB_LOG, `----- ${request.model} roles=${(request.messages || []).map((m) => m.role + (m.tool_calls ? '(calls)' : '')).join(',')}\n${lastUserText(request)}\n`);
+      // A tool round trip: call a tool the client offers, then answer from its result.
+      const messages = request.messages || [];
+      const toolNames = (request.tools || []).map((t) => t.function?.name).filter(Boolean);
+      // Clients add system messages mid-conversation, so the last message that isn't one says where the turn is.
+      const toolResultBack = [...messages].reverse().find((m) => m.role !== 'system')?.role === 'tool';
+      const call = toolResultBack ? null : toolCallFor(lastUserText(request), toolNames);
+      if (call) {
+        await sleep(150 + Math.random() * 150);
+        const toolCall = { id: `call_${Date.now()}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.input(project)) } };
+        if (!request.stream) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ id: 'stub', object: 'chat.completion', model: request.model, choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [toolCall] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 40, completion_tokens: 20, total_tokens: 60 } }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        const chunk = (delta, finish) => `data: ${JSON.stringify({ id: 'stub', object: 'chat.completion.chunk', model: request.model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+        res.write(chunk({ role: 'assistant', tool_calls: [{ index: 0, id: toolCall.id, type: 'function', function: { name: call.name, arguments: '' } }] }, null));
+        res.write(chunk({ tool_calls: [{ index: 0, function: { arguments: toolCall.function.arguments } }] }, null));
+        res.write(chunk({}, 'tool_calls'));
+        res.end('data: [DONE]\n\n');
+        return;
+      }
+      const reply = toolResultBack ? afterTool : replyFor(lastUserText(request));
       const usage = { prompt_tokens: Math.round(body.length / 4), completion_tokens: words(reply).length, total_tokens: 0 };
       usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
       await sleep(150 + Math.random() * 150);
@@ -57,5 +80,5 @@ module.exports = { createStub };
 
 if (require.main === module) {
   const port = Number(process.argv[2] || 1234);
-  createStub().listen(port, '127.0.0.1', () => console.log(`LM Studio stub on http://localhost:${port}`));
+  createStub({ project: process.env.DEMO_PROJECT || process.cwd() }).listen(port, '127.0.0.1', () => console.log(`LM Studio stub on http://localhost:${port}`));
 }

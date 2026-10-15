@@ -1,8 +1,17 @@
-# Demo video
+# Demo videos
 
-Records a narrated, 1¾-minute marketing video of SemanticRouter.NET: install, `init`, start, then Claude Code
-working through the router while its dashboard shows each decision, a Claude session limit with automatic
-failover, and the dashboard on its own.
+Records narrated videos of SemanticRouter.NET from scripts, so they can be re-recorded whenever the product changes.
+
+| Video | Script | Narration | Length |
+|---|---|---|---|
+| **Intro**: install, `init`, start, Claude Code routed turn by turn, failover, the dashboard | [videos/intro.js](videos/intro.js) | [narration/intro.json](narration/intro.json) | ~1:50 |
+| **Deep dive**: how a prompt gets routed (routes, the prompt tester, complexity, tiers, strategies, a tool round trip, callouts, secret detection, failover, Activity, Evaluate) | [videos/deep-dive.js](videos/deep-dive.js) | [narration/deep-dive.json](narration/deep-dive.json) | ~3:05 |
+
+[kit.js](kit.js) holds what they share (the demo user, the stand-in models, the shells, the stage, the dashboard
+helpers, the narration clock), [stage.html](stage.html) is what the camera sees, and [PLAN.md](PLAN.md) lists the
+videos still to make.
+
+### The intro
 
 | Time | Narration | On screen |
 |---|---|---|
@@ -48,10 +57,10 @@ is the lighter alternative.
 cd tools/demo-video
 npm install
 
-# 1. Narration (once, or after editing narration.json): writes out/voice/*.wav and durations.json.
-#    About 10 minutes on a 4-core CPU. Add a voice sample to speak in that voice: tts.py chatterbox out/voice me.wav
+# 1. Narration (once per video, or after editing its narration file): writes out/voice/*.wav and durations.json.
+#    About a minute per line on a 4-core CPU. Add a voice sample to speak in that voice: … out/voice me.wav
 pip install chatterbox-tts
-python tts.py chatterbox out/voice
+NARRATION=narration/intro.json python tts.py chatterbox out/voice
 #    or, faster and flatter: pip install kokoro-onnx soundfile, download kokoro-v1.0.onnx and voices-v1.0.bin from
 #    github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0, then
 #    python tts.py kokoro out/voice kokoro-v1.0.onnx voices-v1.0.bin
@@ -59,9 +68,9 @@ python tts.py chatterbox out/voice
 # 2. The package to install on camera. Without DEMO_FEED the take installs the release on nuget.org.
 dotnet pack ../../src/SemanticRouter.Host -c Release -o out/feed -p:Version=0.3.0
 
-# 3. Record (about two minutes), then encode with the narration mixed in.
-DEMO_FEED=out/feed node record.js out/frames out/voice
-node build.js out/frames out/voice out/semantic-router-demo.mp4
+# 3. Record (as long as the video), then encode with the narration mixed in.
+DEMO_FEED=out/feed node record.js intro out/frames out/voice
+node build.js out/frames out/voice out/semantic-router-demo.mp4 narration/intro.json
 ```
 
 `build.js` writes the MP4 (1920×1080, 30 fps, H.264 and AAC) and an `.srt` with the narration as subtitles.
@@ -71,8 +80,11 @@ node build.js out/frames out/voice out/semantic-router-demo.mp4
 machine. The demo shells get a minimal environment: none of your variables or credentials. `DEMO_REAL_CLAUDE` names
 the Claude Code binary if `claude` on your `PATH` is not it.
 
-To change the story, edit the lines in [narration.json](narration.json) (then run `tts.py` again; every beat waits
-for its line, and `TTS_ONLY=hello,code` redoes just those lines), the prompts and captions in [record.js](record.js),
+For the deep dive, use `deep-dive` and `narration/deep-dive.json` in the same commands. It installs and starts the
+router off camera (with secret detection turned on through the admin API), so it starts on the title card.
+
+To change the story, edit the lines in the video's narration file (then run `tts.py` again; every beat waits for its
+line, and `TTS_ONLY=hello,code` redoes just those lines), the prompts and captions in its script under `videos/`,
 and the answers in [replies.js](replies.js). Narration reads best written the way people talk: short sentences,
 contractions, a question now and then.
 
@@ -91,7 +103,7 @@ flags (`TTS_ONLY=init,limit python tts.py …`):
 
 ```bash
 pip install faster-whisper
-python check_narration.py out/voice
+NARRATION=narration/intro.json python check_narration.py out/voice
 ```
 
 [PLAN.md](PLAN.md) outlines the next videos: a deep dive on routing and a how-to on the settings.

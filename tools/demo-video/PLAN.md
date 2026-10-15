@@ -6,7 +6,7 @@ they can be re-recorded whenever the product changes.
 | | Video | Length | For | Question it answers |
 |---|---|---|---|---|
 | 1 | **Intro** ([record.js](record.js)) | ~1:45 | anyone | What is it, how fast is setup, what does it do for me? |
-| 2 | **Deep dive: how a prompt gets routed** | ~6 min | developers deciding whether to trust it | Why did *this* prompt go to *that* model, and what happens when things go wrong? |
+| 2 | **Deep dive: how a prompt gets routed** ([videos/deep-dive.js](videos/deep-dive.js), recorded) | ~3 min | developers deciding whether to trust it | Why did *this* prompt go to *that* model, and what happens when things go wrong? |
 | 3 | **How-to: the settings** | ~6 min | new users after `init` | How do I make it fit my models, my budget and my privacy rules? |
 
 Later candidates, each 1–2 minutes: per-client setup clips (Codex CLI, GitHub Copilot, Open WebUI, the OpenAI SDK);
@@ -33,7 +33,11 @@ the memory map and privacy; a vertical cut of the intro for social media.
   the Claude Code lines, the intro can show `/model` picking "auto (SemanticRouter.NET)" instead of
   `--model semantic-router`.
 
-## 2. Deep dive: how a prompt gets routed (~6 min)
+## 2. Deep dive: how a prompt gets routed (recorded, ~3 min)
+
+Recorded as [videos/deep-dive.js](videos/deep-dive.js). Left out until siebe41/SemanticRouter.NET#130 is fixed:
+chapter 7's conversation floor ("ok, go ahead" keeping the task's tier), which doesn't carry over between Claude Code
+turns yet; and side requests going to the smallest model (#123). The outline it was built from:
 
 Setup: the `init` configuration, Claude Code and an OpenAI client, the dashboard full screen most of the time, with
 zoomed callouts. Chapter cards between sections.

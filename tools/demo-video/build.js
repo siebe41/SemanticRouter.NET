@@ -1,13 +1,13 @@
 // Turns a recording into the finished video: the frames from record.js as 1080p30 H.264, the narration from tts.py
 // mixed in at the times record.js logged, and an .srt with the narration as subtitles.
-//   node build.js <frames-dir> <voice-dir> <out.mp4>
+//   node build.js <frames-dir> <voice-dir> <out.mp4> [narration file, default narration/intro.json]
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const [frames, voice, output] = process.argv.slice(2).map((p) => path.resolve(p));
+const [frames, voice, output, narrationFile = path.join(__dirname, 'narration', 'intro.json')] = process.argv.slice(2).map((p) => path.resolve(p));
 const timeline = JSON.parse(fs.readFileSync(path.join(frames, 'timeline.json'), 'utf8'));
-const lines = JSON.parse(fs.readFileSync(path.join(__dirname, 'narration.json'), 'utf8')).lines;
+const lines = JSON.parse(fs.readFileSync(narrationFile, 'utf8')).lines;
 const ffmpeg = (args) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...args], { stdio: 'inherit' });
 
 // 1. Video.

@@ -10,6 +10,10 @@ const replies = [
     "Found it. `CacheWarmer` runs before the new config is loaded, so after a deploy it re-caches prices from the old snapshot. Moving the warm-up after `ConfigLoaded` fixes it; I've drafted the change in `Startup.cs`."],
   [/deadlock|root cause|memory leak|race condition/i,
     "The invoice job blocks on `.Result` inside `LedgerClient.GetBalance`, which runs on the request's synchronization context. Under load every worker thread waits on a continuation that needs that same context, so the pool starves.\n\nFix: make `GetBalance` async all the way down and `await` it in `InvoiceJob.RunAsync`, or call `ConfigureAwait(false)` in the client. I'd do the first; it's a three-file change."],
+  [/regex/i,
+    "Here's a practical one:\n\n```\n^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$\n```\n\nIt accepts one `@`, no spaces, and a dot in the domain. It deliberately doesn't try to cover every RFC 5322 edge case."],
+  [/call fail|401|unauthori[sz]ed/i,
+    "The API answers 401 because that key belongs to the sandbox workspace, and `api.billing.example` is production. Use the production key from your secret store, and don't paste keys into prompts: rotate this one."],
   [/customer record|account number|salary/i,
     'Account 4471 belongs to Acme Corp: contract renews in March, billing contact is Bob, and the account is still on the legacy ledger.'],
   [/summari[sz]e/i,
@@ -21,6 +25,13 @@ const replies = [
 ];
 
 const fallback = 'Sure. Here you go.';
+
+// Prompts that make a local model call one of the client's tools first (Claude Code's Read), and what it says once the
+// tool result comes back.
+const toolCalls = [
+  [/what does this (project|repo) do|read the readme/i, { name: 'Read', input: (project) => ({ file_path: `${project}/README.md` }) }],
+];
+const afterTool = "It's the billing service: it builds invoices from ledger events, applies tax per line, and converts currencies through the FX client. The README lists two open risks, duplicate invoices on replay and reused account numbers, both tracked under the billing migration.";
 
 /** The prompt without the <system-reminder> blocks clients add, and only its last 400 characters (the latest turn). */
 function latest(prompt) {
@@ -38,4 +49,10 @@ function words(text) {
   return text.match(/\s*\S+/g) || [text];
 }
 
-module.exports = { replyFor, words };
+/** The tool call to make first for a prompt, when the client offers that tool, or null. */
+function toolCallFor(prompt, toolNames) {
+  const hit = toolCalls.find(([pattern, call]) => pattern.test(latest(prompt)) && toolNames.includes(call.name));
+  return hit ? hit[1] : null;
+}
+
+module.exports = { replyFor, words, toolCallFor, afterTool };

@@ -36,7 +36,7 @@
   .behind { opacity: 0.35; transform: scale(0.97); filter: blur(1px); }
 
   #caption {
-    position: absolute; left: 24px; right: 24px; bottom: 22px; height: 112px; box-sizing: border-box; padding: 18px 28px;
+    position: absolute; z-index: 6; left: 24px; right: 24px; bottom: 22px; height: 112px; box-sizing: border-box; padding: 18px 28px;
     background: rgba(12, 16, 19, 0.95); border: 1px solid var(--border-strong); border-radius: 14px;
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); transition: opacity 400ms ease, transform 400ms ease;
   }
@@ -72,6 +72,24 @@
   #card .muted { font-size: 24px; color: var(--text-muted); }
   #card .fade { opacity: 0; transform: translateY(14px); transition: opacity 700ms ease, transform 700ms ease; }
   #card .fade.in { opacity: 1; transform: none; }
+  #card .kicker { font-size: 26px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--signal-ink); }
+  #card .chapter { display: flex; align-items: center; gap: 36px; text-align: left; }
+  #card .chapter .n { font-size: 150px; font-weight: 700; color: var(--accent); line-height: 1; }
+  #card .chapter .t { font-size: 64px; font-weight: 700; letter-spacing: -0.02em; }
+  #card .chapter .s { font-size: 28px; color: var(--text-muted); margin-top: 10px; }
+  #card .diagram { display: flex; align-items: center; gap: 22px; }
+  #card .diagram .node { position: relative; width: 300px; padding: 26px 24px; border-radius: 16px; border: 1px solid var(--border-strong); background: var(--bg-elevated); text-align: left; }
+  #card .diagram .node b { display: block; font-size: 28px; margin-bottom: 10px; }
+  #card .diagram .node small { display: block; font-size: 20px; color: var(--text-muted); line-height: 1.45; }
+  #card .diagram .q { border-top: 4px solid var(--accent); }
+  #card .diagram .model { border-top: 4px solid var(--signal); width: 260px; }
+  #card .diagram .prompt { width: 260px; }
+  #card .diagram .qn { position: absolute; top: -22px; left: 20px; width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: #0a1114; font-weight: 700; font-size: 22px; display: flex; align-items: center; justify-content: center; }
+  #card .diagram .ans { margin-top: 14px; font-family: var(--font-mono); font-size: 19px; color: var(--accent-ink); }
+  #card .diagram .arrow { font-size: 44px; color: var(--text-faint); }
+  #highlight { position: absolute; z-index: 5; border: 3px solid var(--signal); border-radius: 10px; box-shadow: 0 0 0 9999px rgba(5, 8, 10, 0.45), 0 0 24px rgba(208, 140, 52, 0.55);
+    opacity: 0; pointer-events: none; transition: opacity 400ms ease, left 500ms ease, top 500ms ease, width 500ms ease, height 500ms ease; }
+  #highlight.on { opacity: 1; }
 </style>
 </head>
 <body>
@@ -79,6 +97,7 @@
   <div class="win term off" id="w-claude"><div class="bar"><i></i><i></i><i></i><span>~/billing — claude</span></div><div class="body"><div class="scaler"><div id="t-claude"></div></div></div></div>
   <div class="win off" id="w-dash"><div class="bar"><i></i><i></i><i></i><div class="url">localhost:5080/router/#/live</div></div><div class="body"><div class="scaler"><iframe id="dash" src="about:blank"></iframe></div></div></div>
   <div id="caption" class="hidden"><div class="headline"></div><div class="sub"></div></div>
+  <div id="highlight"></div>
   <div id="card"></div>
 
 <script src="/node_modules/@xterm/xterm/lib/xterm.js"></script>
@@ -95,11 +114,6 @@
     brightBlack: '#5c6b74', brightRed: '#ff8a8f', brightGreen: '#bfe85a', brightYellow: '#f5c06f', brightBlue: '#7cc4f2', brightMagenta: '#ddb3f5', brightCyan: '#5fd3ea', brightWhite: '#ffffff',
   };
   const terms = {};
-  for (const [id, cols, rows] of [['router', 96, 26], ['claude', 88, 34]]) {
-    const term = new Terminal({ cols, rows, fontFamily: 'DejaVu Sans Mono, monospace', fontSize: 16, lineHeight: 1.12, theme, allowTransparency: true, scrollback: 0, cursorBlink: false });
-    term.open($('t-' + id));
-    terms[id] = term;
-  }
 
   // Window placement per layout: [left, top, width, height] or 'off' / 'behind'.
   const layouts = {
@@ -107,6 +121,7 @@
     setup:   { router: [190, 50, 1540, 860], claude: 'off', dash: 'off' },
     connect: { router: [190, 50, 1540, 860, 'behind'], claude: [300, 90, 1320, 820], dash: 'off' },
     split:   { router: [190, 50, 1540, 860, 'off'], claude: [24, 24, 1010, 892], dash: [1058, 24, 838, 892, 1180] },
+    // The dashboard on its own, with Claude Code waiting off to the left.
     dash:    { router: [190, 50, 1540, 860, 'off'], claude: [-1010, 24, 1010, 892, 'off'], dash: [24, 24, 1872, 892, 1440] },
   };
 
@@ -133,6 +148,12 @@
   }
 
   window.stage = {
+    /** Creates the xterm for a shell; kit.js sizes the pty to match. */
+    terminal(id, cols, rows) {
+      const term = new Terminal({ cols, rows, fontFamily: 'DejaVu Sans Mono, monospace', fontSize: 16, lineHeight: 1.12, theme, allowTransparency: true, scrollback: 0, cursorBlink: false });
+      term.open($('t-' + id));
+      terms[id] = term;
+    },
     write(id, data) { terms[id].write(data); },
     screen(id) {
       const b = terms[id].buffer.active; const lines = [];
@@ -143,7 +164,7 @@
       const l = layouts[name];
       place($('w-router'), l.router); place($('w-claude'), l.claude); place($('w-dash'), l.dash);
     },
-    dash(url) { $('dash').src = url; },
+    dash(url) { $('dash').src = url; $('w-dash').querySelector('.url').textContent = url.replace(/^https?:\/\//, ''); },
     async caption(headline, sub) {
       const c = $('caption');
       c.querySelector('.headline').textContent = headline;
@@ -153,21 +174,25 @@
     },
     sub(html) { const s = $('caption').querySelector('.sub'); s.innerHTML = html; s.classList.add('in'); },
     hideCaption() { $('caption').classList.add('hidden'); },
-    async title() {
+    /** The opening card; a video can give its own tagline and kicker (e.g. "Deep dive"). */
+    async title(tagline = 'Every prompt goes to the cheapest model<br>that can answer it.', kicker = '', pills = true) {
       $('card').innerHTML = `
+        ${kicker ? `<div class="kicker fade">${kicker}</div>` : ''}
         <div class="brand">${logo}<div class="name">SemanticRouter<span>.NET</span></div></div>
-        <div class="tagline fade">Every prompt goes to the cheapest model<br>that can answer it.</div>
+        <div class="tagline fade">${tagline}</div>
+        ${pills ? `
         <div class="row">
           <div class="pill l fade"><b>Local models</b><small>LM Studio · Ollama · vLLM</small></div>
           <div class="pill s fade"><b>Your subscriptions</b><small>Claude Code · Copilot · Codex</small></div>
           <div class="pill a fade"><b>Paid APIs</b><small>OpenAI · Anthropic · Gemini</small></div>
-        </div>`;
+        </div>` : ''}`;
       $('card').classList.remove('hidden');
       for (const el of $('card').querySelectorAll('.fade')) { await sleep(700); el.classList.add('in'); }
     },
-    async end() {
+    async end(next = '') {
       $('card').innerHTML = `
         <div class="brand">${logo}<div class="name">SemanticRouter<span>.NET</span></div></div>
+        ${next ? `<div class="muted fade">${next}</div>` : ''}
         <code class="fade"><span class="p">$</span> dotnet tool install -g SemanticRouter.Host<br><span class="p">$</span> semantic-router init<br><span class="p">$</span> semantic-router</code>
         <div class="url fade">github.com/siebe41/SemanticRouter.NET</div>
         <div class="muted fade">Open source · MIT · .NET 10</div>`;
@@ -175,6 +200,37 @@
       for (const el of $('card').querySelectorAll('.fade')) { await sleep(900); el.classList.add('in'); }
     },
     hideCard() { $('card').classList.add('hidden'); },
+
+    /** A full-screen chapter card: number and title. */
+    async chapter(n, title, sub = '') {
+      $('card').innerHTML = `<div class="chapter fade"><span class="n">${n}</span><div><div class="t">${title}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div></div>`;
+      $('card').classList.remove('hidden');
+      await sleep(250); $('card').querySelector('.fade').classList.add('in');
+    },
+
+    /** The two questions every request gets, as a diagram that builds up step by step. */
+    async diagram() {
+      $('card').innerHTML = `
+        <div class="diagram">
+          <div class="node prompt fade"><b>Prompt</b><small>“find the memory leak<br>in the cache service”</small></div>
+          <div class="arrow fade">→</div>
+          <div class="node q fade"><span class="qn">1</span><b>What does it need?</b><small>route · similarity<br>complexity · tools · images</small><div class="ans">tier 4 · code</div></div>
+          <div class="arrow fade">→</div>
+          <div class="node q fade"><span class="qn">2</span><b>Who should answer?</b><small>catalog · strategy<br>cooldowns · privacy</small><div class="ans">cheapest capable</div></div>
+          <div class="arrow fade">→</div>
+          <div class="node model fade"><b>claude-opus</b><small>tier 4 · Claude subscription</small></div>
+        </div>`;
+      $('card').classList.remove('hidden');
+      for (const el of $('card').querySelectorAll('.fade')) { await sleep(800); el.classList.add('in'); }
+    },
+
+    /** An outline around part of the stage (kit.highlight maps dashboard elements onto it). */
+    highlight(x, y, w, h) {
+      const b = $('highlight');
+      Object.assign(b.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' });
+      b.classList.add('on');
+    },
+    unhighlight() { $('highlight').classList.remove('on'); },
   };
   stage.layout('blank');
 </script>
