@@ -272,6 +272,12 @@ public static partial class RouterDashboardEndpoints
             return Results.Json(new ActivityResponse(entries, activity.NextId - 1, kinds), ApiJson);
         });
 
+        // Deletes activity (and its prompt previews) for good: everything, or since/until. The state database zeroes and
+        // compacts what it deleted, so the rows cannot be recovered from its files.
+        api.MapDelete("/activity", (RoutingActivityLog activity, DateTimeOffset? since, DateTimeOffset? until) =>
+            Results.Json(new { removed = activity.Purge(since ?? DateTimeOffset.MinValue, until ?? DateTimeOffset.MaxValue) }, ApiJson))
+            .WithMetadata(DashboardWriteMetadata.Instance);
+
         api.MapGet("/feedback", (RoutingFeedbackLog feedback, int? limit) =>
             Results.Json(feedback.Recent(Math.Clamp(limit ?? 200, 1, 5000)), ApiJson));
 

@@ -320,12 +320,26 @@ views.gateway = () => {
       <label class="check"><input type="checkbox" data-bind="Middleware.AllowUnauthenticatedRemoteClients" data-kind="bool" ${m.AllowUnauthenticatedRemoteClients ? 'checked' : ''}> Serve other machines without a key while none is set (only behind a proxy that authenticates callers)</label>
     </div></div>
     ${rateLimitsCard(m)}
+    ${storedPromptsCard(state.config.State || {})}
     <div class="card section"><div class="card-head"><h2>Model aliases</h2><span class="muted small">Map the names clients send to routing aliases or catalog models. Globs, first match wins.</span><span class="spacer"></span><button class="btn small" data-action="alias-add">Add alias</button><button class="btn ghost small" data-action="alias-claude">Add Claude Code defaults</button></div>
       <table><tr><th>Client model (glob)</th><th>Routes as</th><th></th></tr>
         ${aliases.map(([k, v], i) => `<tr><td><input type="text" data-action-input="alias-key" data-index="${i}" value="${h(k)}"></td><td><input type="text" data-action-input="alias-value" data-index="${i}" value="${h(v)}" list="alias-targets"></td><td><button class="btn ghost small" data-action="alias-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="3" class="muted small">No aliases. Unknown names route as <code>auto</code>.</td></tr>'}
       </table>
       <datalist id="alias-targets">${['auto', 'auto:cheapest', 'auto:best', 'auto:fastest', 'auto:balanced', 'auto:priority'].concat((state.config.Models || []).map((x) => x.Name)).map((x) => `<option value="${h(x)}">`).join('')}</datalist>
     </div>`;
+};
+
+/* What the activity log keeps of each prompt, for how long, and deleting it. */
+const storedPromptsCard = (st) => {
+  const r = st.Retention || {};
+  const days = (key, label, hint) => `<label class="field"><span class="name">${label}</span><input type="number" min="1" data-bind="State.Retention.${key}" data-kind="number" data-nullable="1" value="${r[key] ?? ''}" placeholder="${hint}"></label>`;
+  return `<div class="card section"><div class="card-head"><h2>Stored prompts</h2><span class="muted small">What the activity log keeps of each prompt, and how long the state database keeps records. Retention applies at the next prune.</span><span class="spacer"></span><button class="btn danger small" data-action="activity-purge">Delete all activity</button></div><div class="form-grid">
+      <label class="field"><span class="name">Prompt previews</span><select data-bind="State.StorePrompts">${['Redacted', 'On', 'Off'].map((x) => `<option ${x === (st.StorePrompts || 'Redacted') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Redacted: the first 160 characters with API keys and tokens masked. Off: no prompt text in activity, exports or the live view.</span></label>
+      ${days('ActivityDays', 'Activity (days)', '30')}
+      ${days('ActivityEntries', 'Activity (entries)', '10000')}
+      ${days('UsageDays', 'Usage (days)', '400')}
+      ${days('ConfigurationVersions', 'Configuration versions', '200')}
+    </div></div>`;
 };
 
 /* Rate limits per gateway client ("*" for every other client), with what each client used in the last minute. */

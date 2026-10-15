@@ -31,6 +31,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.AddOptions<MemoryOptions>().Bind(configuration.GetSection("Memory"));
         services.AddOptions<TuningOptions>().Bind(configuration.GetSection("Tuning"));
         services.AddOptions<NotificationOptions>().Bind(configuration.GetSection("Notifications"));
+        services.AddOptions<StateOptions>().Bind(configuration.GetSection("State"));
         services.AddOptions<Microsoft.AspNetCore.Builder.RouterDashboardOptions>().Bind(configuration.GetSection("Dashboard"));
 
         return AddCore(services);

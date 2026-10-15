@@ -16,7 +16,6 @@ namespace SemanticRouter.AspNetCore;
 internal sealed partial class PromptRoutingMiddleware
 {
     private const int ReadChunkSize = 16 * 1024;
-    private const int PreviewLength = 160;
 
     private readonly RequestDelegate _next;
     private readonly RouterRuntimeProvider _runtime;
@@ -377,7 +376,7 @@ internal sealed partial class PromptRoutingMiddleware
             Path = context.Request.Path.Value ?? string.Empty,
             Client = client,
             RequestedModel = chat.Model,
-            PromptPreview = prompt.Length <= PreviewLength ? prompt : prompt[..PreviewLength] + "…",
+            PromptPreview = PromptPreviews.Of(prompt, runtime.Configuration.State.StorePrompts),
             Tier = result.RequiredTier,
             Reason = result.Reason,
             Route = result.RouteName,
@@ -884,7 +883,7 @@ internal sealed partial class PromptRoutingMiddleware
             Path = context.Request.Path.Value ?? string.Empty,
             Client = client,
             RequestedModel = chat.Model,
-            PromptPreview = prompt.Length <= PreviewLength ? prompt : prompt[..PreviewLength] + "…",
+            PromptPreview = PromptPreviews.Of(prompt, _runtime.Current.Configuration.State.StorePrompts),
             Reason = RoutingReason.RateLimited,
             Profile = profile,
             HasTools = chat.HasTools,

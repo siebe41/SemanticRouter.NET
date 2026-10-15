@@ -21,7 +21,7 @@ public sealed class RoutingActivityEntry
     /// <summary>The model the client asked for, before alias mapping.</summary>
     public string? RequestedModel { get; init; }
 
-    /// <summary>The first 160 characters of the classified prompt.</summary>
+    /// <summary>The first 160 characters of the classified prompt, as <see cref="StateOptions.StorePrompts"/> allows (empty when off).</summary>
     public string PromptPreview { get; init; } = string.Empty;
 
     /// <summary>The required tier.</summary>
@@ -184,6 +184,12 @@ public interface IRoutingActivityStore
 
     /// <summary>Entries with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/>, oldest first, at most <paramref name="limit"/>.</summary>
     IReadOnlyList<RoutingActivityEntry> Between(DateTimeOffset since, DateTimeOffset until, int limit);
+
+    /// <summary>
+    /// Deletes the entries with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/> so they cannot be
+    /// recovered from the store's files, and returns how many there were.
+    /// </summary>
+    int Purge(DateTimeOffset since, DateTimeOffset until) => 0;
 }
 
 /// <summary>
@@ -285,6 +291,28 @@ public sealed class RoutingActivityLog
         Updated?.Invoke(entry);
     }
 
+    /// <summary>
+    /// Deletes the entries with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/>, in memory and in the
+    /// store, and returns how many the store held (or memory, without a store).
+    /// </summary>
+    public int Purge(DateTimeOffset since, DateTimeOffset until)
+    {
+        int removed = 0;
+        lock (_gate)
+        {
+            for (int i = 0; i < _entries.Length; i++)
+            {
+                if (_entries[i] is { } entry && entry.Timestamp >= since && entry.Timestamp < until)
+                {
+                    _entries[i] = null;
+                    removed++;
+                }
+            }
+        }
+
+        return _store?.Purge(since, until) ?? removed;
+    }
+
     /// <summary>Reserves the next id.</summary>
     public long Reserve()
     {
@@ -303,7 +331,12 @@ public sealed class RoutingActivityLog
             for (long i = _next - 1; i >= 0 && i >= _next - _entries.Length && result.Count < limit; i--)
             {
                 RoutingActivityEntry? entry = _entries[i % _entries.Length];
-                if (entry is null || (after is { } a && entry.Id <= a))
+                if (entry is null)
+                {
+                    continue; // never filled, or purged
+                }
+
+                if (after is { } a && entry.Id <= a)
                 {
                     break;
                 }

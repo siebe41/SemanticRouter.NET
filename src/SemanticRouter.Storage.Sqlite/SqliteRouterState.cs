@@ -52,6 +52,7 @@ public static class SqliteStateBuilderExtensions
             configure?.Invoke(o);
         });
         services.TryAddSingleton<SqliteRouterDatabase>();
+        services.TryAddSingleton<IStateRetention>(provider => provider.GetRequiredService<SqliteRouterDatabase>());
         services.Replace(ServiceDescriptor.Singleton<ICooldownStore, SqliteCooldownStore>());
         services.Replace(ServiceDescriptor.Singleton<IToolCallAffinity, SqliteToolCallAffinity>());
         services.Replace(ServiceDescriptor.Singleton<IRoutingActivityStore, SqliteActivityStore>());
@@ -68,7 +69,7 @@ public static class SqliteStateBuilderExtensions
 /// The shared database: schema, connections and failure handling. Every operation degrades to a fallback value when
 /// the database is unavailable, so routing never fails because of state storage.
 /// </summary>
-internal sealed partial class SqliteRouterDatabase
+internal sealed partial class SqliteRouterDatabase : IStateRetention
 {
     // 2: usage.profile (routing profiles). Version 1 files are migrated in place.
     private const int SchemaVersion = 2;
@@ -114,6 +115,23 @@ internal sealed partial class SqliteRouterDatabase
 
     public SqliteStateOptions Options { get; }
 
+    private volatile StateRetentionOptions _retention = new();
+
+    /// <summary>Oldest activity and feedback kept: <c>State:Retention:ActivityDays</c>, or <see cref="SqliteStateOptions.ActivityMaxAge"/>.</summary>
+    public TimeSpan ActivityMaxAge => _retention.ActivityDays is int days ? TimeSpan.FromDays(days) : Options.ActivityMaxAge;
+
+    /// <summary>Most activity entries kept: <c>State:Retention:ActivityEntries</c>, or <see cref="SqliteStateOptions.ActivityMaxEntries"/>.</summary>
+    public int ActivityMaxEntries => _retention.ActivityEntries ?? Options.ActivityMaxEntries;
+
+    /// <summary>Oldest usage kept: <c>State:Retention:UsageDays</c>, or <see cref="SqliteStateOptions.UsageRetention"/>.</summary>
+    public TimeSpan UsageRetention => _retention.UsageDays is int days ? TimeSpan.FromDays(days) : Options.UsageRetention;
+
+    /// <summary>Most configuration versions kept: <c>State:Retention:ConfigurationVersions</c>, or <see cref="SqliteStateOptions.HistoryMaxEntries"/>.</summary>
+    public int HistoryMaxEntries => _retention.ConfigurationVersions ?? Options.HistoryMaxEntries;
+
+    /// <summary>Takes the retention of the configuration just applied; records past it go at the next prune.</summary>
+    public void Apply(StateRetentionOptions retention) => _retention = retention ?? new StateRetentionOptions();
+
     public TimeProvider Time { get; }
 
     public string Location { get; }
@@ -155,6 +173,13 @@ internal sealed partial class SqliteRouterDatabase
             return true;
         });
 
+    /// <summary>Checkpoints the write-ahead log into the database and truncates it. Skipped quietly while another connection reads.</summary>
+    public static void TruncateLog(SqliteConnection connection)
+    {
+        using SqliteCommand checkpoint = Command(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
+        checkpoint.ExecuteNonQuery();
+    }
+
     public static SqliteCommand Command(SqliteConnection connection, string sql, params (string Name, object? Value)[] parameters)
     {
         SqliteCommand command = connection.CreateCommand();
@@ -178,9 +203,11 @@ internal sealed partial class SqliteRouterDatabase
             // not flush to disk on every commit. FULL did, holding the write lock for each flush: on Windows, where
             // flushes are slow, a burst of writes (two routers sharing the file) queued past the busy timeout and was
             // dropped.
-            using (SqliteCommand synchronous = Command(connection, "PRAGMA synchronous=NORMAL;"))
+            // secure_delete: a deleted row (a pruned or purged prompt preview) is overwritten with zeros, not left in a
+            // free page where a copy of the file would still hold it.
+            using (SqliteCommand pragmas = Command(connection, "PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;"))
             {
-                synchronous.ExecuteNonQuery();
+                pragmas.ExecuteNonQuery();
             }
 
             return connection;
@@ -455,7 +482,7 @@ internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRout
             {
                 using SqliteCommand old = SqliteRouterDatabase.Command(
                     connection, "DELETE FROM feedback WHERE timestamp_ticks < $oldest;",
-                    ("$oldest", (database.Time.GetUtcNow() - database.Options.ActivityMaxAge).UtcTicks));
+                    ("$oldest", (database.Time.GetUtcNow() - database.ActivityMaxAge).UtcTicks));
                 old.ExecuteNonQuery();
             }
         });
@@ -609,7 +636,7 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
             var entries = new List<RoutingActivityEntry>();
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection, "SELECT entry FROM activity WHERE timestamp_ticks >= $oldest ORDER BY id DESC LIMIT $limit;",
-                ("$oldest", (database.Time.GetUtcNow() - database.Options.ActivityMaxAge).UtcTicks), ("$limit", Math.Max(0, limit)));
+                ("$oldest", (database.Time.GetUtcNow() - database.ActivityMaxAge).UtcTicks), ("$limit", Math.Max(0, limit)));
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
             {
@@ -643,13 +670,40 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
 
     internal void Prune(SqliteConnection connection)
     {
-        using SqliteCommand command = SqliteRouterDatabase.Command(
+        using (SqliteCommand command = SqliteRouterDatabase.Command(
             connection,
             "DELETE FROM activity WHERE timestamp_ticks < $oldest;" +
             "DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY id DESC LIMIT $max);",
-            ("$oldest", (database.Time.GetUtcNow() - database.Options.ActivityMaxAge).UtcTicks), ("$max", database.Options.ActivityMaxEntries));
-        command.ExecuteNonQuery();
+            ("$oldest", (database.Time.GetUtcNow() - database.ActivityMaxAge).UtcTicks), ("$max", database.ActivityMaxEntries)))
+        {
+            command.ExecuteNonQuery();
+        }
+
+        // The write-ahead log still holds the pages as they were before; move them into the file and empty it.
+        SqliteRouterDatabase.TruncateLog(connection);
     }
+
+    public int Purge(DateTimeOffset since, DateTimeOffset until) =>
+        database.Run("purging activity", 0, connection =>
+        {
+            int removed;
+            using (SqliteCommand command = SqliteRouterDatabase.Command(
+                connection, "DELETE FROM activity WHERE timestamp_ticks >= $since AND timestamp_ticks < $until;",
+                ("$since", since.UtcTicks), ("$until", until.UtcTicks)))
+            {
+                removed = command.ExecuteNonQuery();
+            }
+
+            // secure_delete zeroes what this delete freed; VACUUM rewrites the file without free pages left by deletes
+            // from before it was on, and the log is emptied last.
+            using (SqliteCommand vacuum = SqliteRouterDatabase.Command(connection, "VACUUM;"))
+            {
+                vacuum.ExecuteNonQuery();
+            }
+
+            SqliteRouterDatabase.TruncateLog(connection);
+            return removed;
+        });
 }
 
 /// <summary>Every applied configuration document, for the dashboard's history, diff and rollback.</summary>
@@ -668,7 +722,7 @@ internal sealed class SqliteConfigurationHistory(SqliteRouterDatabase database) 
                 "DELETE FROM config_history WHERE id NOT IN (SELECT id FROM config_history ORDER BY id DESC LIMIT $max);" +
                 "SELECT last_insert_rowid();",
                 ("$ts", database.Time.GetUtcNow().UtcTicks), ("$source", source), ("$actor", actor), ("$note", note),
-                ("$document", document.ToJson()), ("$max", database.Options.HistoryMaxEntries));
+                ("$document", document.ToJson()), ("$max", database.HistoryMaxEntries));
             return (long)command.ExecuteScalar()!;
         });
 
@@ -736,7 +790,7 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
                 ("$client", record.Client), ("$local", record.IsLocal ? 1 : 0), ("$input", record.InputTokens), ("$output", record.OutputTokens),
                 ("$cacheRead", record.CacheReadTokens), ("$cacheWrite", record.CacheWriteTokens),
                 ("$cost", record.CostUsd.ToString(CultureInfo.InvariantCulture)), ("$reference", record.ReferenceCostUsd.ToString(CultureInfo.InvariantCulture)),
-                ("$oldest", (record.Timestamp - database.Options.UsageRetention).UtcTicks), ("$profile", record.Profile));
+                ("$oldest", (record.Timestamp - database.UsageRetention).UtcTicks), ("$profile", record.Profile));
             command.ExecuteNonQuery();
             return true;
         });

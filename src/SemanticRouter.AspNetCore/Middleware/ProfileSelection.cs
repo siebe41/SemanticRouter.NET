@@ -145,7 +145,7 @@ internal static partial class ProfileSelection
     [GeneratedRegex(
         @"\bsk-(?:ant-|proj-)?[A-Za-z0-9_\-]{20,}|\bgh[pousr]_[A-Za-z0-9]{36,}|\bgithub_pat_[A-Za-z0-9_]{22,}|\bAKIA[0-9A-Z]{16}\b|\bxox[abprs]-[A-Za-z0-9\-]{10,}|\bAIza[0-9A-Za-z_\-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----|\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}",
         RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 250)]
-    private static partial Regex SecretPattern();
+    internal static partial Regex SecretPattern();
 
     // Absolute paths: /home/…, /Users/…, ~/…, C:\…
     [GeneratedRegex(

@@ -1,0 +1,52 @@
+using System.Text.Json.Serialization;
+
+namespace SemanticRouter.AspNetCore;
+
+/// <summary>How much of each prompt the activity log keeps.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<PromptStorage>))]
+public enum PromptStorage
+{
+    /// <summary>The first 160 characters, with credentials (API keys, tokens, private keys) masked as <c>***</c>. Default.</summary>
+    Redacted = 0,
+
+    /// <summary>The first 160 characters as they are.</summary>
+    On = 1,
+
+    /// <summary>No prompt text: the activity log, its exports and the live view show none, and tuning learns nothing from them.</summary>
+    Off = 2,
+}
+
+/// <summary>What the router keeps about requests, and for how long (<c>SemanticRouter:State</c>).</summary>
+public sealed class StateOptions
+{
+    /// <summary>How much of each prompt the activity log keeps. Default <see cref="PromptStorage.Redacted"/>.</summary>
+    public PromptStorage StorePrompts { get; set; } = PromptStorage.Redacted;
+
+    /// <summary>How long the state database keeps each kind of record.</summary>
+    public StateRetentionOptions Retention { get; set; } = new();
+}
+
+/// <summary>
+/// How long the state database (<c>UseSqliteState</c>) keeps records. Unset values keep the store's own defaults:
+/// activity and feedback 30 days and 10,000 entries, usage 400 days, 200 configuration versions.
+/// </summary>
+public sealed class StateRetentionOptions
+{
+    /// <summary>Days of activity (with its prompt previews) and feedback kept.</summary>
+    public int? ActivityDays { get; set; }
+
+    /// <summary>Most activity entries kept.</summary>
+    public int? ActivityEntries { get; set; }
+
+    /// <summary>Days of usage records kept. Budgets need the current period; the dashboard shows up to a year.</summary>
+    public int? UsageDays { get; set; }
+
+    /// <summary>Most configuration versions kept for history and rollback.</summary>
+    public int? ConfigurationVersions { get; set; }
+}
+
+/// <summary>Takes the retention settings of each applied configuration (implemented by durable state stores).</summary>
+internal interface IStateRetention
+{
+    void Apply(StateRetentionOptions retention);
+}

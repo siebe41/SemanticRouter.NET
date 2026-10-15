@@ -92,13 +92,34 @@ On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not
 |---|---|
 | Configuration directory | `SEMANTIC_ROUTER_HOME` if set; otherwise `%APPDATA%\semantic-router` (Windows), `~/Library/Application Support/semantic-router` (macOS) or `$XDG_CONFIG_HOME/semantic-router`, default `~/.config/semantic-router` (Linux). |
 | `semantic-router.json` | The configuration. The dashboard's **Apply & save** writes it. |
-| `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. |
+| `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. See [What the router stores](#what-the-router-stores). |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [dashboard.md](dashboard.md#keeping-secrets-out-of-the-file). |
 | `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [routing-quality.md](routing-quality.md). |
 | `semantic-router.instance.json` | The running router's process id, addresses, start time and version. Removed when it stops. |
 | `semantic-router.service.json`, `logs/` | Windows background service only: what the sign-in entry starts, and what it logs. |
 | `models/` | Downloaded ONNX embedding models, one directory per model. Copy a `models/{name}` directory here to run without internet access. |
 | `appsettings.json` (optional) | Host settings: logging, Kestrel, `SemanticRouter:Dashboard`, overrides. |
+
+### What the router stores
+
+| Where | What | Kept for | How to delete it |
+|---|---|---|---|
+| `semantic-router.db`, table `activity` | One entry per request: time, client name, models, tiers, tokens, cost, notes, and a **prompt preview** (see below) | 30 days or 10,000 entries (`State:Retention:ActivityDays`, `ActivityEntries`) | **Gateway → Stored prompts → Delete all activity**, or `DELETE /router/api/activity?since=…&until=…` |
+| `semantic-router.db`, table `feedback` | Retries, corrections, labels and grades per request: tiers and short notes, no prompt text | As activity | With the activity it belongs to ageing out |
+| `semantic-router.db`, table `usage` | Tokens and cost per request, by model, connector, route, client and profile; no prompt text | 400 days (`State:Retention:UsageDays`) | Delete the file |
+| `semantic-router.db`, table `config_history` | Every applied configuration, with secrets masked | 200 versions (`State:Retention:ConfigurationVersions`) | Delete the file |
+| `semantic-router.db`, tables `cooldowns`, `affinity`, `tuning_changes` | Model cooldowns, which model issued each tool call (ids only), learned routing changes (which can include short utterances learned from prompt previews) | Until they expire, 24 hours, until undone | Undo on **Router learned**, or delete the file |
+| `semantic-router.evaluation.jsonl` | Prompts you labelled, in full | Until you remove them | Edit or delete the file (the **Evaluate** page) |
+| `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted | Until removed from the configuration | Remove the key on the dashboard |
+| Logs (console, `logs/` for the Windows service) | Routing decisions and errors, with keys redacted. No prompt text, but a CLI run that fails logs the start of what it wrote, which can quote the model's reply | As your log setup keeps them | Delete the files |
+
+**Prompt previews.** `State:StorePrompts` decides how much of each prompt the activity log keeps:
+
+- `Redacted` (default): the first 160 characters, with API keys, tokens and private keys masked as `***` (the patterns `LocalOnlyWhen: Secrets` looks for).
+- `On`: the first 160 characters as they are.
+- `Off`: none. The activity page, its exports and the live view show no prompt text, and automatic tuning learns no utterances from activity.
+
+The setting applies to new requests; delete earlier activity to remove previews already stored. The database is opened with `secure_delete` and its write-ahead log is truncated after each prune, so deleted rows are overwritten rather than left in free pages. A purge also compacts the file (`VACUUM`). The evaluation set is not affected: it holds what you chose to label.
 
 On Linux and macOS the configuration directory is kept at mode 0700 and the files the router writes in it at 0600, since they hold prompt previews and configuration; Windows profile folders are private already.
 

@@ -46,6 +46,9 @@ public sealed class RouterConfiguration : SemanticRouterOptions
     /// <summary>When the router asks for a person's attention.</summary>
     public NotificationOptions Notifications { get; set; } = new();
 
+    /// <summary>What the router keeps about requests (prompt previews), and for how long.</summary>
+    public StateOptions State { get; set; } = new();
+
     /// <summary>Serializes a document (secrets included).</summary>
     public string ToJson() => JsonSerializer.Serialize(this, Json);
 
@@ -94,7 +97,19 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         UsageOptions usage,
         MemoryOptions? memory,
         TuningOptions? tuning,
-        NotificationOptions? notifications)
+        NotificationOptions? notifications) => Compose(routing, connectors, embeddings, middleware, usage, memory, tuning, notifications, state: null);
+
+    /// <summary>Builds a document from separately bound option objects, including every optional section.</summary>
+    public static RouterConfiguration Compose(
+        SemanticRouterOptions routing,
+        IReadOnlyDictionary<string, ConnectorOptions> connectors,
+        EmbeddingProviderOptions embeddings,
+        PromptRouterMiddlewareOptions middleware,
+        UsageOptions usage,
+        MemoryOptions? memory,
+        TuningOptions? tuning,
+        NotificationOptions? notifications,
+        StateOptions? state)
     {
         ArgumentNullException.ThrowIfNull(usage);
         ArgumentNullException.ThrowIfNull(routing);
@@ -125,6 +140,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         if (notifications is not null)
         {
             document.Notifications = JsonSerializer.Deserialize<NotificationOptions>(JsonSerializer.Serialize(notifications, Json), Json)!;
+        }
+
+        if (state is not null)
+        {
+            document.State = JsonSerializer.Deserialize<StateOptions>(JsonSerializer.Serialize(state, Json), Json)!;
         }
 
         return document;
@@ -281,6 +301,12 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         if (Middleware.RetryEscalation.Enabled && Middleware.RetryEscalation.Window <= TimeSpan.Zero)
         {
             errors.Add("Middleware:RetryEscalation:Window must be positive.");
+        }
+
+        StateRetentionOptions retention = State.Retention;
+        if (retention.ActivityDays is < 1 || retention.ActivityEntries is < 1 || retention.UsageDays is < 1 || retention.ConfigurationVersions is < 1)
+        {
+            errors.Add("State:Retention values must be at least 1 (leave one out for the default).");
         }
 
         foreach ((string client, string key) in Middleware.GatewayKeys)

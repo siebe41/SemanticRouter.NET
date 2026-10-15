@@ -167,7 +167,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                         _services.GetService<IOptions<UsageOptions>>()?.Value ?? new UsageOptions(),
                         _services.GetService<IOptions<MemoryOptions>>()?.Value,
                         _services.GetService<IOptions<TuningOptions>>()?.Value,
-                        _services.GetService<IOptions<NotificationOptions>>()?.Value);
+                        _services.GetService<IOptions<NotificationOptions>>()?.Value,
+                        _services.GetService<IOptions<StateOptions>>()?.Value);
                 }
             }
 
@@ -345,6 +346,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
         IModelLatency? latency = _services.GetService<IModelLatency>();
         (latency as ModelLatencyTracker)?.Configure(configuration.Selection);
+        _services.GetService<IStateRetention>()?.Apply(configuration.State.Retention);
 
         var warnings = new List<string>();
         if (configuration.Middleware.Mode == PromptRouterMode.Dispatch && !configuration.Models.Any(m => m.Enabled))

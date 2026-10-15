@@ -32,7 +32,7 @@ The router sits between your clients and models you pay for, holds the keys for 
 - **Gateway keys.** `Middleware:GatewayKeys`: a remote request served without a valid key, a key that is logged or forwarded to a backend, or a timing difference that reveals a key.
 - **CLI connector process spawning.** Subscription CLI connectors start `claude`, `copilot` or `codex` as child processes with an argument list, a scrubbed environment and an empty working directory in a parent only the user can write to, and refuse `.cmd` shims. Prompt text that becomes extra arguments or shell commands, an API key or other variable leaking into the child, or a remote client reaching a CLI connector while `AllowRemoteClients` is off.
 - **The LocalOnly guarantee.** A route, routing profile or `LocalOnlyWhen` signal marked local-only must only be served by models marked `IsLocal`, including on failover. A local-only prompt that reaches a non-local model is a security issue.
-- **Stored prompts.** The activity log and the SQLite state database (`semantic-router.db`) hold prompt previews; the evaluation set export leaves local-only prompts out unless asked. A way to read these without dashboard access is in scope.
+- **Stored prompts.** The activity log and the SQLite state database (`semantic-router.db`) hold prompt previews, with credentials masked unless `State:StorePrompts` is `On`; the evaluation set export leaves local-only prompts out unless asked. A way to read these without dashboard access, prompt text stored with `StorePrompts: Off`, or purged activity that can still be read from the database files is in scope.
 
 Out of scope:
 
