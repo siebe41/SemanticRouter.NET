@@ -97,6 +97,8 @@ On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not
 
 `copilot-cli` is never asked about: it is always added disabled, as above.
 
+A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnectorTypes` or `DisabledPresets`) is not added or asked about, even with `--yes`; the notes say which.
+
 ## Where things live
 
 | | Default |

@@ -200,6 +200,30 @@ public sealed class HostTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("""{"DisabledConnectorTypes":["Cli"]}""", new string[0])]
+    [InlineData("""{"DisabledPresets":["Codex","GitHubCopilot"]}""", new[] { "claude-cli" })]
+    public async Task Init_leaves_out_the_clis_the_machine_policy_turns_off(string policy, string[] kept)
+    {
+        string bin = Directory.CreateDirectory(Path.Combine(_directory, "bin")).FullName;
+        foreach (string cli in new[] { "claude", "codex", "copilot" })
+        {
+            File.WriteAllText(Path.Combine(bin, cli), string.Empty);
+        }
+
+        var handler = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("Connection refused"));
+        var output = new StringWriter();
+        var probes = new InitProbes(new HttpClient(handler), bin, Windows: false, MachinePolicy.FromJson(policy));
+
+        (await InitCommand.RunAsync(Settings("init", "--yes"), probes, output, new StringReader("y\ny\n"))).Should().Be(0, output.ToString());
+
+        RouterConfiguration written = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+        written.Connectors.Keys.Where(k => k.EndsWith("-cli", StringComparison.Ordinal)).Should().BeEquivalentTo(kept, "even --yes does not add what the policy turns off");
+        string report = output.ToString();
+        report.Should().Contain("codex: found at").And.Contain("but not added").And.Contain("your organization's policy");
+        report.Should().NotContain("Enable codex", "it is not asked about either");
+    }
+
     [Fact]
     public async Task Init_explains_an_lm_studio_that_wants_a_token_and_never_overwrites_without_force()
     {

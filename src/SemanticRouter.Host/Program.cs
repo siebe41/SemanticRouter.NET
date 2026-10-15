@@ -23,7 +23,18 @@ switch (settings.Command)
         using var http = new HttpClient();
         // It asks before enabling a subscription CLI only at a terminal; scripted, it leaves them disabled.
         TextReader? terminal = Console.IsInputRedirected || Console.IsOutputRedirected ? null : Console.In;
-        return await InitCommand.RunAsync(settings, InitProbes.ForThisMachine(http), Console.Out, terminal);
+        InitProbes probes;
+        try
+        {
+            probes = InitProbes.ForThisMachine(http);
+        }
+        catch (InvalidDataException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+
+        return await InitCommand.RunAsync(settings, probes, Console.Out, terminal);
     }
 
     case "doctor":

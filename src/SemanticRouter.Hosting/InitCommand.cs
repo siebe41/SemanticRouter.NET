@@ -4,14 +4,18 @@ using SemanticRouter.Embeddings.Onnx;
 
 namespace SemanticRouter.Host;
 
-/// <summary>Where <c>init</c> looks for local servers and CLIs; replaceable in tests.</summary>
-internal sealed record InitProbes(HttpClient Http, string? SearchPath, bool Windows)
+/// <summary>
+/// Where <c>init</c> looks for local servers and CLIs, and the machine policy it keeps to (<see cref="MachinePolicy"/>:
+/// a connector type or CLI preset it turns off is not added); replaceable in tests.
+/// </summary>
+internal sealed record InitProbes(HttpClient Http, string? SearchPath, bool Windows, MachinePolicy? Policy = null)
 {
     public static readonly Uri LmStudio = new("http://localhost:1234");
     public static readonly Uri Ollama = new("http://localhost:11434");
 
+    /// <exception cref="InvalidDataException">A machine policy is set but cannot be read.</exception>
     public static InitProbes ForThisMachine(HttpClient http) =>
-        new(http, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows());
+        new(http, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows(), MachinePolicyLoader.Load());
 }
 
 /// <summary>
@@ -228,6 +232,13 @@ internal static class InitCommand
         foreach ((string executable, string connector, CliPreset preset, int maxConcurrency, bool ask) in clis)
         {
             CliExecutableLookup lookup = CliExecutableLocator.Find(executable, probes.SearchPath, probes.Windows);
+            if (lookup.Found && probes.Policy?.Blocks(new ConnectorOptions { Type = ConnectorType.Cli, Preset = preset }) is { } blocked)
+            {
+                // Not added, not asked about: the router would turn it off at start-up anyway.
+                notes.Add($"{executable}: found at {lookup.Path}, but not added: {blocked}.");
+                continue;
+            }
+
             if (lookup.Found)
             {
                 found.Add((executable, connector, preset, maxConcurrency, ask, lookup.Path!));
