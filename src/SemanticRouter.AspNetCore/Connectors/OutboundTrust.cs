@@ -128,6 +128,11 @@ internal sealed class NetworkOptionsValidator(IHostEnvironment? environment = nu
 {
     public ValidateOptionsResult Validate(string? name, NetworkOptions options)
     {
+        if (options.AllowedHosts.FirstOrDefault(h => !MachinePolicy.IsHostPattern(h)) is { } host)
+        {
+            return ValidateOptionsResult.Fail($"SemanticRouter:Network:AllowedHosts: '{host}' is not a host name, *.domain or IP address (with an optional :port).");
+        }
+
         try
         {
             OutboundTrust.From(options, environment?.ContentRootPath);

@@ -176,8 +176,13 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         }
     }
 
-    /// <summary>The machine policy every configuration is held to (<see cref="MachinePolicy.None"/> without one).</summary>
-    public MachinePolicy Policy => _services.GetService<MachinePolicy>() ?? MachinePolicy.None;
+    /// <summary>
+    /// The rules every configuration is held to: the machine policy, with the user's offline mode
+    /// (<see cref="NetworkOptions.Offline"/>); <see cref="MachinePolicy.None"/> without either.
+    /// </summary>
+    public MachinePolicy Policy => _policy ??= MachinePolicy.Effective(_services.GetService<MachinePolicy>(), NetworkOptions.Of(_services));
+
+    private MachinePolicy? _policy;
 
     /// <summary>
     /// Validation errors for a document that would replace the running one: <see cref="Validate"/>, and what it would

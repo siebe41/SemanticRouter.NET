@@ -26,12 +26,13 @@ Every setting is optional.
 |---|---|---|
 | `DisabledConnectorTypes` | `["Cli", "Copilot"]` | Connector types that may not be used. `Cli` and `Copilot` use whatever subscription account the vendor CLI is signed into; see [TERMS.md](TERMS.md#using-it-at-work). Also `OpenAICompatible`, `Anthropic`, `Responses`. |
 | `DisabledPresets` | `["Codex"]` | CLI presets that may not be used: `ClaudeCode`, `GitHubCopilot`, `Codex`, `Custom`. |
-| `AllowedEndpoints` | `["api.anthropic.com", "*.corp.example", "10.0.0.5:8443"]` | The only hosts connectors, the embeddings endpoint and webhooks may reach: a host name, a domain and its subdomains (`*.corp.example`), or an IP address, each with an optional port. This machine (loopback) is always allowed. Empty or absent: any host. |
+| `AllowedEndpoints` | `["api.anthropic.com", "*.corp.example", "10.0.0.5:8443"]` | The only hosts connectors, the embeddings endpoint, webhooks and the ONNX model download may reach: a host name, a domain and its subdomains (`*.corp.example`), or an IP address, each with an optional port. This machine (loopback) is always allowed. Empty or absent: any host. |
 | `LocalHosts` | `["gpu.corp.example"]` | When set, the only hosts a model or the embeddings endpoint may be marked local on (`IsLocal`); this machine always counts. A model elsewhere, or served by a CLI or Copilot, is treated as not local, so local-only requests (local-only routes and profiles, conversations that contained a credential) never go there. Use it so a corporate gateway that forwards to a cloud provider cannot be marked local. `[]`: only this machine. |
 | `RequireLocalOnly` | `true` | Only local models may be used (after `LocalHosts`), and only embeddings that keep prompts local; remote embeddings fall back to the in-process hashing provider. |
 | `StorePrompts` | `"Off"` | The most prompt text the activity log may keep: `Off` or `Redacted` caps `State:StorePrompts`. |
 | `MaxRetentionDays` | `7` | The most days activity (with its prompt previews) and feedback are kept; caps `State:Retention:ActivityDays`. |
 | `Dashboard` | `"ReadOnly"` | `ReadOnly`: everyone gets the read-only role, so the router can be watched but not changed from the dashboard or admin API (the dashboard shows it read-only). `Off`: the dashboard and its API answer `403`. |
+| `Offline` | `true` | [Offline mode](network.md#offline-mode) for the whole machine: only this machine and `AllowedEndpoints` are reachable, CLI and Copilot connectors are off, the ONNX model is never downloaded (place it yourself), and the desktop app does not update. The user's `Network:AllowedHosts` cannot widen it. |
 | `Updates:Mode` / `Updates:Feed` | `"Off"`, or `"Feed"` and `"https://updates.corp.example/semantic-router"` | Desktop app updates. `Off`: never checked; the menu item is hidden. `Feed`: only from this feed (a URL or a folder of Velopack packages, e.g. your internal mirror of the GitHub releases); it wins over `SEMANTICROUTER_UPDATE_SOURCE`. The user's **Check for updates** switch still applies within it. A feed over plain HTTP (other than to this machine) is always refused. |
 | `Features:Memory` | `false` | No memory sources are read. |
 | `Features:Judge` | `false` | The judge, which sends a sample of answers to another model, is off. |
@@ -111,5 +112,4 @@ The router reads the managed preferences with macOS's own `plutil` and ignores t
 ## Not covered yet
 
 - Settings are shown as locked only through the warnings; the editors do not grey them out.
-- The ONNX embedding model download (from Hugging Face) is not limited by `AllowedEndpoints`; see [network.md](network.md) for how to place the model yourself.
 - There are no ADMX templates for Group Policy yet.
