@@ -34,6 +34,8 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly ClientRateLimiter? _rateLimiter;
     private readonly CorrectionDetector? _corrections;
     private readonly ModelTrials? _trials;
+    private readonly IWarmCacheStore? _warmCaches;
+    private readonly TimeProvider _time;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -54,7 +56,9 @@ internal sealed partial class PromptRoutingMiddleware
         ClientTurnPatterns? clientTurns = null,
         ClientRateLimiter? rateLimiter = null,
         CorrectionDetector? corrections = null,
-        ModelTrials? trials = null)
+        ModelTrials? trials = null,
+        IWarmCacheStore? warmCaches = null,
+        TimeProvider? time = null)
     {
         _next = next;
         _runtime = runtime;
@@ -73,6 +77,8 @@ internal sealed partial class PromptRoutingMiddleware
         _rateLimiter = rateLimiter;
         _corrections = corrections;
         _trials = trials;
+        _warmCaches = warmCaches;
+        _time = time ?? TimeProvider.System;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -170,6 +176,7 @@ internal sealed partial class PromptRoutingMiddleware
         }
 
         long started = Stopwatch.GetTimestamp();
+        DateTimeOffset routedAt = _time.GetUtcNow();
         ProfileSelection.ModelChoice modelChoice = ProfileSelection.ResolveModel(runtime, chat.Model);
         SelectionStrategy? strategy = modelChoice.Strategy;
         string? requestedModel = modelChoice.RequestedModel;
@@ -229,6 +236,7 @@ internal sealed partial class PromptRoutingMiddleware
         if (conversationKey is not null && firstTurn)
         {
             _conversations!.Forget(conversationKey);
+            _warmCaches?.Forget(conversationKey);
         }
 
         // A conversation that was kept local stays local on every later turn: follow-ups that match no local-only route,
@@ -285,9 +293,11 @@ internal sealed partial class PromptRoutingMiddleware
         // Route by the conversation: keep the tier recent turns needed and the model that answered them. Not for
         // tool-result turns (pinned above), explicit choices, or a conversation's first turn.
         bool classifiedTurn = requestedModel is null && !chat.IsToolResultContinuation;
-        ConversationContext conversationContext = conversation.Enabled && conversationKey is not null && classifiedTurn && !explicitTurn && !firstTurn
-            ? _conversations!.Lookup(conversationKey, prompt, conversation)
-            : default;
+        bool continued = conversation.Enabled && conversationKey is not null && classifiedTurn && !explicitTurn && !firstTurn;
+        ConversationContext conversationContext = continued ? _conversations!.Lookup(conversationKey!, prompt, conversation) : default;
+
+        // The prompt caches earlier turns left on models: staying on one can cost less than moving.
+        IReadOnlyList<WarmCache> warmCaches = continued && conversation.StickToModel && _warmCaches is not null ? _warmCaches.Lookup(conversationKey!) : [];
 
         bool localOnly = profile.LocalOnly || choice is { Clear: false, Local: true } || keptLocal
             || (profile.Profile is { } named && runtime.Router.Profiles.TryGetValue(named, out RoutingProfile? rules) && rules.LocalOnly);
@@ -295,6 +305,7 @@ internal sealed partial class PromptRoutingMiddleware
         {
             ConversationFloor = conversationContext.Floor,
             PreferredModel = conversationContext.PreferredModel,
+            WarmCaches = warmCaches,
             MinimumTier = minimumTier,
             ExplicitTier = explicitTurn ? choice!.Tier : null,
             Profile = profile.Profile,
@@ -497,6 +508,11 @@ internal sealed partial class PromptRoutingMiddleware
             }
         }
 
+        if (conversationKey is not null && entry.ServedBy is { } servedBy && _warmCaches is not null && conversation.Enabled && conversation.StickToModel)
+        {
+            RememberCache(conversationKey, servedBy, entry, routedAt, conversation.CacheLifetime);
+        }
+
         if (rateLimit is not null && (entry.InputTokens is not null || entry.OutputTokens is not null))
         {
             // Admission charged the estimate; charge the rest now that the real usage is known.
@@ -511,6 +527,24 @@ internal sealed partial class PromptRoutingMiddleware
             {
                 _judge!.Enqueue(runtime, entry, prompt, protocol, answer, highestTier);
             }
+        }
+    }
+
+    /// <summary>
+    /// Records the prompt cache the served turn left on its model: what it read and wrote, warm for the cache's lifetime
+    /// from the turn's start (a read refreshes it). A turn that reported usage without touching the cache means the
+    /// model's cache is cold, or that it does not cache.
+    /// </summary>
+    private void RememberCache(string conversation, string model, RoutingActivityEntry entry, DateTimeOffset started, TimeSpan lifetime)
+    {
+        int cached = (entry.CacheReadTokens ?? 0) + (entry.CacheCreationTokens ?? 0);
+        if (cached > 0)
+        {
+            _warmCaches!.Remember(conversation, new WarmCache(model, cached, started + lifetime));
+        }
+        else if (entry.InputTokens is not null)
+        {
+            _warmCaches!.Forget(conversation, model);
         }
     }
 

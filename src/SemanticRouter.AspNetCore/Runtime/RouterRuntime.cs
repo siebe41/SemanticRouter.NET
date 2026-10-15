@@ -391,7 +391,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         IPromptClassifier classifier = ResolveCustom<IPromptClassifier>() ?? new SemanticPromptClassifier(embeddings, configuration, complexity, routeSelector);
         IModelSelector modelSelector = ResolveCustom<IModelSelector>() ?? new DefaultModelSelector(configuration.Selection, latency);
         IModelHealth health = _services.GetRequiredService<IModelHealth>();
-        IPromptRouter router = ResolveCustom<IPromptRouter>() ?? new PromptRouter(classifier, configuration, modelSelector, health, reliability: _services.GetService<IModelReliability>(), latency: latency);
+        IPromptRouter router = ResolveCustom<IPromptRouter>() ?? new PromptRouter(classifier, configuration, modelSelector, health, _services.GetService<TimeProvider>(), _services.GetService<IModelReliability>(), latency);
         IPromptExtractor extractor = ResolveCustom<IPromptExtractor>() ?? new JsonPromptExtractor(
             configuration.Middleware.MessageSelection, configuration.Middleware.StripSystemReminders, configuration.Middleware.InjectedTags);
 

@@ -37,8 +37,8 @@ public sealed class SqliteStateOptions
 public static class SqliteStateBuilderExtensions
 {
     /// <summary>
-    /// Keeps model cooldowns, tool-call affinity, the activity log, feedback, usage, learned changes, connector incidents
-    /// and the configuration history in one SQLite file, so they survive restarts. Several router instances on one machine may share the file (cooldowns and affinity
+    /// Keeps model cooldowns, tool-call affinity, conversations' warm prompt caches, the activity log, feedback, usage,
+    /// learned changes, connector incidents and the configuration history in one SQLite file, so they survive restarts. Several router instances on one machine may share the file (cooldowns and affinity
     /// are then shared); a database that cannot be opened or written falls back to memory with a warning.
     /// </summary>
     public static SemanticRouterBuilder UseSqliteState(this SemanticRouterBuilder builder, string path, Action<SqliteStateOptions>? configure = null)
@@ -55,6 +55,7 @@ public static class SqliteStateBuilderExtensions
         services.TryAddSingleton<IStateRetention>(provider => provider.GetRequiredService<SqliteRouterDatabase>());
         services.Replace(ServiceDescriptor.Singleton<ICooldownStore, SqliteCooldownStore>());
         services.Replace(ServiceDescriptor.Singleton<IToolCallAffinity, SqliteToolCallAffinity>());
+        services.Replace(ServiceDescriptor.Singleton<IWarmCacheStore, SqliteWarmCaches>());
         services.Replace(ServiceDescriptor.Singleton<IRoutingActivityStore, SqliteActivityStore>());
         services.Replace(ServiceDescriptor.Singleton<IRoutingFeedbackStore, SqliteFeedbackStore>());
         services.Replace(ServiceDescriptor.Singleton<IRouterConfigurationHistory, SqliteConfigurationHistory>());
@@ -234,6 +235,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
             CREATE TABLE IF NOT EXISTS cooldowns (model TEXT PRIMARY KEY COLLATE NOCASE, until_ticks INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS affinity (tool_use_id TEXT PRIMARY KEY, model TEXT NOT NULL, created_ticks INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS affinity_created ON affinity (created_ticks);
+            CREATE TABLE IF NOT EXISTS warm_caches (
+                conversation TEXT NOT NULL, model TEXT NOT NULL COLLATE NOCASE, tokens INTEGER NOT NULL, expires_ticks INTEGER NOT NULL,
+                PRIMARY KEY (conversation, model));
+            CREATE INDEX IF NOT EXISTS warm_caches_expires ON warm_caches (expires_ticks);
             CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY, timestamp_ticks INTEGER NOT NULL, entry TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS activity_timestamp ON activity (timestamp_ticks);
             CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, timestamp_ticks INTEGER NOT NULL, entry_id INTEGER NOT NULL, item TEXT NOT NULL);
@@ -457,6 +462,80 @@ internal sealed class SqliteToolCallAffinity(SqliteRouterDatabase database) : IT
             }
 
             return null;
+        });
+    }
+}
+
+/// <summary>
+/// Conversations' warm prompt caches that survive restarts: an in-memory copy in front of the database, so a
+/// conversation that spans a restart (or moves to another instance sharing the file) still weighs its warm cache.
+/// Expired entries are pruned as new ones are written.
+/// </summary>
+internal sealed class SqliteWarmCaches(SqliteRouterDatabase database) : IWarmCacheStore
+{
+    private readonly WarmCacheStore _cache = new(database.Time);
+    private int _writes;
+
+    public IReadOnlyList<WarmCache> Lookup(string conversation)
+    {
+        IReadOnlyList<WarmCache> cached = _cache.Lookup(conversation);
+        if (cached.Count > 0)
+        {
+            return cached;
+        }
+
+        IReadOnlyList<WarmCache> stored = database.Run<IReadOnlyList<WarmCache>>("reading warm prompt caches", [], connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "SELECT model, tokens, expires_ticks FROM warm_caches WHERE conversation = $conversation AND expires_ticks > $now;",
+                ("$conversation", conversation), ("$now", database.Time.GetUtcNow().UtcTicks));
+            using SqliteDataReader reader = command.ExecuteReader();
+            var caches = new List<WarmCache>();
+            while (reader.Read())
+            {
+                caches.Add(new WarmCache(reader.GetString(0), reader.GetInt32(1), new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero)));
+            }
+
+            return caches;
+        });
+
+        foreach (WarmCache cache in stored)
+        {
+            _cache.Remember(conversation, cache);
+        }
+
+        return stored;
+    }
+
+    public void Remember(string conversation, WarmCache cache)
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        _cache.Remember(conversation, cache);
+        bool prune = Interlocked.Increment(ref _writes) % 200 == 0;
+        database.Run("saving a warm prompt cache", connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "INSERT INTO warm_caches (conversation, model, tokens, expires_ticks) VALUES ($conversation, $model, $tokens, $expires) " +
+                "ON CONFLICT(conversation, model) DO UPDATE SET model = excluded.model, tokens = excluded.tokens, expires_ticks = excluded.expires_ticks;" +
+                (prune ? "DELETE FROM warm_caches WHERE expires_ticks <= $now;" : string.Empty),
+                ("$conversation", conversation), ("$model", cache.Model), ("$tokens", cache.CachedTokens),
+                ("$expires", cache.ExpiresAt.UtcTicks), ("$now", database.Time.GetUtcNow().UtcTicks));
+            command.ExecuteNonQuery();
+        });
+    }
+
+    public void Forget(string conversation, string? model = null)
+    {
+        _cache.Forget(conversation, model);
+        database.Run("forgetting a warm prompt cache", connection =>
+        {
+            using SqliteCommand command = model is null
+                ? SqliteRouterDatabase.Command(connection, "DELETE FROM warm_caches WHERE conversation = $conversation;", ("$conversation", conversation))
+                : SqliteRouterDatabase.Command(
+                    connection, "DELETE FROM warm_caches WHERE conversation = $conversation AND model = $model;", ("$conversation", conversation), ("$model", model));
+            command.ExecuteNonQuery();
         });
     }
 }

@@ -67,6 +67,7 @@ The classifier looks at the latest message, but a conversation is more than that
 - **Short follow-ups keep the full floor.** A message of up to `ShortFollowUpLength` characters (default 60, without code blocks), such as "yes", "try again" or "looks good, commit it", is not classified on its own.
 - **It decays.** Every `DecayTurns` turns (default 3) that need less than the conversation's peak lower the floor by one tier, so a conversation that moved on to simpler work gets cheaper models again. A harder turn raises the peak at once. After `IdleTimeout` (default 30 minutes) without a turn, the conversation is forgotten.
 - **It sticks to a model.** While the model that answered the last turn is available and exactly on the required tier, it is tried first (`X-Prompt-Route-Sticky: true`, and **sticky** on the Activity page): answers stay coherent and the provider's prompt cache keeps working.
+- **It weighs the warm prompt cache.** Caches are per model, so moving a conversation sends its whole context again and writes it to the new model's cache. After each turn the router notes how much of the context the serving model reported reading or writing from its cache, and keeps it warm for `CacheLifetime` (default 5 minutes, refreshed by every turn that uses it). On the next turn it compares two costs, at the models' configured prices: staying, which reads the cached part at the warm model's cache-read price and sends the rest at its input price, and moving to the ranking's first choice, which sends the whole context at its cache-write price. It stays when that is cheaper, also on a model above the required tier, and moves when it is not, for example down to a much cheaper, local or flat-rate model. A model below the required tier is never kept. After a failover it goes back to the warm model when that comes out of its cooldown before the cache expires. The reason shows on the Activity page and in `X-Prompt-Route-Selection`, e.g. `cache: stayed on opus (80k cached); moving to sonnet would cost $0.252 more`. Without a warm cache (expired, or a backend that reports no cache use) the rule above applies.
 
 What it leaves alone:
 
@@ -74,10 +75,10 @@ What it leaves alone:
 - **Requests for a specific catalog model** and **tool-result turns** (which stay on the model that issued the calls).
 - **A client's own cheap side tasks.** Claude Code sends titles, summaries and other housekeeping under a Haiku model name, which `ModelAliases` maps to `auto:cheapest`; those are not raised.
 
-A conversation is recognised by a hash of the client, the system prompt and the first user message, which chat clients resend on every turn. No prompt text is kept, the state is in memory, and the activity log shows only a short prefix of the hash. Clients that send only the newest message (relying on a server-side history) start a new conversation on each turn, so they are routed per message as before.
+A conversation is recognised by a hash of the client, the system prompt and the first user message, which chat clients resend on every turn. No prompt text is kept, the state is in memory (warm caches are also kept in the SQLite state, so they survive a restart), and the activity log shows only a short prefix of the hash. Clients that send only the newest message (relying on a server-side history) start a new conversation on each turn, so they are routed per message as before.
 
 ```jsonc
-"Middleware": { "Conversation": { "Enabled": true, "DecayTurns": 3, "IdleTimeout": "00:30:00", "ShortFollowUpLength": 60, "StickToModel": true } }
+"Middleware": { "Conversation": { "Enabled": true, "DecayTurns": 3, "IdleTimeout": "00:30:00", "ShortFollowUpLength": 60, "StickToModel": true, "CacheLifetime": "00:05:00" } }
 ```
 
 ## Feedback

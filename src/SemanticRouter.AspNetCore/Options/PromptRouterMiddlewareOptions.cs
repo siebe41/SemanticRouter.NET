@@ -301,6 +301,14 @@ public sealed class ConversationRoutingOptions
     /// coherent and prompt caches keep working. Default <see langword="true"/>.
     /// </summary>
     public bool StickToModel { get; set; } = true;
+
+    /// <summary>
+    /// How long a model's prompt cache stays warm after a turn that read or wrote it. While it does, the conversation
+    /// stays on that model when moving would cost more (re-sending and re-writing the cached context), above the
+    /// required tier too, and returns to it after a failover. 5 minutes matches Anthropic's default entries and
+    /// OpenAI's; set 1 hour when your requests ask for 1-hour entries. Default 5 minutes.
+    /// </summary>
+    public TimeSpan CacheLifetime { get; set; } = TimeSpan.FromMinutes(5);
 }
 
 /// <summary>
