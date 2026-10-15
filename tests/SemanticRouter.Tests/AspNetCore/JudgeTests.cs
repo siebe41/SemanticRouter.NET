@@ -66,7 +66,13 @@ public sealed class JudgeTests : RouterHostTest
                 o.Models.Add(cloud);
                 routing?.Invoke(o);
             },
-            services: s => s.AddSingleton<TimeProvider>(_time));
+            services: s => s.AddSingleton<TimeProvider>(_time).AddSingleton<IModelResidency>(new OnlyLoaded("qwen3-8b")));
+
+    /// <summary>LM Studio with only the small model loaded, so it answers and the 32B judge loads only to grade.</summary>
+    private sealed class OnlyLoaded(string model) : IModelResidency
+    {
+        public bool? IsLoaded(ModelDefinition candidate) => candidate.IsLocal ? candidate.Model == model : null;
+    }
 
     private async Task AskAsync(HttpClient client, string prompt = Prompt, string model = "auto")
     {
@@ -190,7 +196,7 @@ public sealed class JudgeTests : RouterHostTest
                 judge.Model = "judge-32b";
                 o.Models.Add(judge);
             },
-            services: s => s.AddSingleton<TimeProvider>(_time).AddSingleton<IStateValueStore>(store));
+            services: s => s.AddSingleton<TimeProvider>(_time).AddSingleton<IStateValueStore>(store).AddSingleton<IModelResidency>(new OnlyLoaded("qwen3-8b")));
 
         HttpClient client = await Start();
         await AskAsync(client, "first question");

@@ -38,7 +38,8 @@ public sealed class ModelDefinition
 
     /// <summary>
     /// Marginal price in USD per million input tokens. Use 0 for local models and for flat-rate subscriptions
-    /// (whose marginal cost is zero until their quota runs out).
+    /// (whose marginal cost is zero until their quota runs out). <see cref="SelectionStrategy.CheapestCapable"/> still
+    /// puts a free model that is not <see cref="IsLocal"/> after the local ones, because it uses up quota.
     /// </summary>
     public decimal InputCostPerMillionTokens { get; set; }
 

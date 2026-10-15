@@ -328,7 +328,7 @@ public static partial class RouterDashboardEndpoints
                 since, until, grouping, usage.ReferenceModel, ledger.Total(since, until), ledger.Summarize(since, until, grouping, zone), budgets.Status(usage)), ApiJson);
         });
 
-        api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, CancellationToken cancellationToken) =>
+        api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, IServiceProvider services, CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.Prompt))
             {
@@ -346,7 +346,7 @@ public static partial class RouterDashboardEndpoints
             RoutingPlan plan = await runtime.Router.RouteAsync(
                 new PromptRoutingRequest { Prompt = request.Prompt, Strategy = choice.Strategy, RequestedModel = choice.RequestedModel, Profile = profile },
                 cancellationToken).ConfigureAwait(false);
-            return Results.Ok(PromptClassificationResponse.From(plan));
+            return Results.Ok(PromptClassificationResponse.From(plan, services.GetService<IModelResidency>()));
         });
 
         api.MapPost("/health/reset", (IModelHealth health) =>
