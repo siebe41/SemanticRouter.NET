@@ -145,7 +145,8 @@ public sealed class PromptRouterMiddlewareOptions
 
     /// <summary>
     /// The request header that carries a project label for <see cref="ProfileRules"/> and the activity log. Default
-    /// <c>X-Router-Project</c>. Without it, the Anthropic <c>metadata.user_id</c> or OpenAI <c>user</c> field is used.
+    /// <c>X-Router-Project</c>. Without it, a hash of the Anthropic <c>metadata.user_id</c> or OpenAI <c>user</c> field is
+    /// used (<c>user:</c> and 12 hex digits), never the id itself.
     /// </summary>
     public string ProjectHeader { get; set; } = "X-Router-Project";
 

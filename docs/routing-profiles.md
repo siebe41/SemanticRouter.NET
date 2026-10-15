@@ -59,7 +59,7 @@ A rule matches when every condition it sets holds:
 | Condition | Matches when |
 |---|---|
 | `Clients[]` | The gateway client is one of these. |
-| `Projects[]` | The project matches one of these globs. The project is the `X-Router-Project` header, or else the client's own user id: Anthropic `metadata.user_id`, OpenAI `user`. |
+| `Projects[]` | The project matches one of these globs. The project is the `X-Router-Project` header, or else a hash of the client's own user id (Anthropic `metadata.user_id`, OpenAI `user`): `user:` and the first 12 hex digits of its SHA-256, as Activity shows it. The id itself can name an account or a session, so it is never stored. |
 | `ToolsInclude[]` | The request offers at least one tool matching these globs (for example `Bash`, `mcp__github__*`). |
 | `ToolsExclude[]` | The request offers no tool matching these globs. |
 

@@ -1,6 +1,6 @@
 /* Semantic Router dashboard: Profiles page and the JSON page. */
 import { historyCard } from './config.js';
-import { STRATEGIES, csv, h, kv, state, tiers, views, when } from './core.js';
+import { STRATEGIES, adminOnly, csv, h, kv, state, tiers, views, when } from './core.js';
 
 /* Profiles: named routing policies, how requests pick one, and a tester that compares them for one prompt. */
 export const STRATEGY_OPTIONS = (value) => `<option value="" ${value ? '' : 'selected'}>(configured)</option>` + STRATEGIES.map((x) => `<option ${x === value ? 'selected' : ''}>${x}</option>`).join('');
@@ -12,7 +12,7 @@ export function profileTesterCard() {
     ${r.error ? `<td colspan="3" class="small"><span class="badge danger">error</span> ${h(r.error)}</td>` : `<td><span class="tier">T${r.plan.requiredTier}</span>${r.plan.localOnly ? ' <span class="badge warn">local only</span>' : ''}</td><td class="small">${h(r.plan.reason)}</td>
     <td class="small">${r.plan.models.map((m, i) => `${i ? ' → ' : ''}<b>${h(m.model)}</b>`).join('') || '<span class="badge danger">no model</span>'}</td>`}</tr>`).join('');
   return `<div class="card section"><div class="card-head"><h2>What would each profile do?</h2><span class="muted small">Routes the prompt under every profile without calling a model.</span></div>
-    <div class="inline"><input type="text" id="profile-prompt" aria-label="Prompt to compare" data-state="profileTester.prompt" value="${h(t.prompt)}" placeholder="design a multi-tenant billing system" style="flex:1"><button class="btn primary small" data-action="profiles-compare" ${t.busy ? 'disabled' : ''}>${t.busy ? 'Routing…' : 'Compare'}</button></div>
+    <div class="inline"><input type="text" id="profile-prompt" aria-label="Prompt to compare" data-state="profileTester.prompt" value="${h(t.prompt)}" placeholder="design a multi-tenant billing system" style="flex:1"><button class="btn primary small" data-action="profiles-compare" ${adminOnly(t.busy)}>${t.busy ? 'Routing…' : 'Compare'}</button></div>
     ${t.results ? `<table style="margin-top:10px"><tr><th>Profile</th><th>Tier</th><th>Reason</th><th>Models, in order</th></tr>${rows}</table>` : ''}</div>`;
 }
 

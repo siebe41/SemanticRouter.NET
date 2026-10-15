@@ -1,7 +1,7 @@
 /* Semantic Router dashboard: Overview and Activity pages, the prompt tester result and the label form. */
 import { fmtMs, trendsCard } from './charts.js';
 import { tierOptions } from './config.js';
-import { h, num, readOnly, state, tierName, views, when } from './core.js';
+import { adminOnly, h, num, readOnly, state, tierName, views, when } from './core.js';
 import { digestCard, noticesCard } from './digest.js';
 import { endpointsCard } from './endpoints.js';
 import { learnedBadge, learnedCard } from './learned.js';
@@ -75,7 +75,7 @@ views.overview = () => {
         <select id="tester-model" aria-label="Model" style="width:220px">
           ${['auto', 'auto:cheapest', 'auto:best', 'auto:fastest', 'auto:balanced', 'auto:priority'].concat(s.models.map((m) => m.name)).map((m) => `<option ${m === t.model ? 'selected' : ''}>${h(m)}</option>`).join('')}
         </select>
-        <button class="btn primary" data-action="tester-classify" ${t.busy ? 'disabled' : ''}>Classify</button>
+        <button class="btn primary" data-action="tester-classify" ${adminOnly(t.busy)}>Classify</button>
         <button class="btn" data-action="tester-send" ${t.busy ? 'disabled' : ''}>Send</button>
         ${t.busy ? '<span class="muted small">working…</span>' : ''}
       </div>

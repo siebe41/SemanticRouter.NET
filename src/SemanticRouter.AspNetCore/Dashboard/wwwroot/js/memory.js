@@ -104,8 +104,8 @@ views.memory = () => {
   return `
     <div class="section-head"><h1>Memory</h1><span class="muted small" id="memory-summary">${memorySummaryText()}</span><span class="spacer"></span>
       <button class="btn small" data-action="memory-fit">Fit</button>
-      <button class="btn small" data-action="memory-refresh">Rescan</button>
-      ${admin ? '<button class="btn small" data-action="memory-reset" title="Forget which notes were sent where">Clear sharing</button>' : ''}</div>
+      ${admin ? `<button class="btn small" data-action="memory-refresh">Rescan</button>
+      <button class="btn small" data-action="memory-reset" title="Forget which notes were sent where">Clear sharing</button>` : ''}</div>
     ${m.mode && m.mode !== 'Dispatch' ? '<div class="card section small" style="border-color:var(--warn)">The gateway is in <b>Annotate</b> mode: your own endpoint calls the model, so the router can show which notes were in a request but not where they went.</div>' : ''}
     ${m.trackSharing === false ? '<div class="card section small" style="border-color:var(--warn)">Sharing is not tracked (<code>Memory:TrackSharing</code> is off): the map shows your notes, but requests are not checked for them.</div>' : ''}
     ${hasNotes ? `
@@ -196,7 +196,7 @@ export function memorySourcesCard() {
           <label class="field"><span class="name">Name</span><input type="text" data-bind="Memory.Sources.${i}.Name" value="${h(src.Name)}"></label>
           <label class="field"><span class="name">Type</span><select data-bind="Memory.Sources.${i}.Type">${MEMORY_TYPES.map((t) => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
           <label class="field wide"><span class="name">Path</span><input type="text" data-bind="Memory.Sources.${i}.Path" data-kind="nulltext" value="${h(src.Path || '')}" placeholder="${h(MEMORY_PATH_HINTS[type] || '')}">
-            <span class="hint">${type === 'Markdown' ? 'A folder of notes, read recursively; dot-folders (.obsidian, .git, .trash) are skipped.' : type === 'ClaudeCode' ? 'Reads CLAUDE.md and every project\'s auto-memory folder (projects/*/memory). Add a repository\'s CLAUDE.md files as a Markdown folder.' : 'The JSONL file of @modelcontextprotocol/server-memory, or the folder holding memory.jsonl.'} <code>~</code> and <code>%VARIABLES%</code> are expanded.</span></label>
+            <span class="hint">${type === 'Markdown' ? 'A folder of notes, read recursively; dot-folders (.obsidian, .git, .trash) are skipped.' : type === 'ClaudeCode' ? 'Reads CLAUDE.md and every project\'s auto-memory folder (projects/*/memory). Add a repository\'s CLAUDE.md files as a Markdown folder.' : 'The JSONL file of @modelcontextprotocol/server-memory, or the folder holding memory.jsonl.'} <code>~</code> and <code>%VARIABLES%</code> are expanded. A new path is set in the configuration file, unless <code>Dashboard:AllowProcessSettings</code> is on.</span></label>
           ${type === 'Markdown' ? `<label class="field"><span class="name">Exclude</span><input type="text" data-bind="Memory.Sources.${i}.Exclude" data-kind="csv" value="${h(csv(src.Exclude))}" placeholder="Templates/*, *.excalidraw.md"></label>
           <label class="field"><span class="name">Extensions</span><input type="text" data-bind="Memory.Sources.${i}.Extensions" data-kind="csv" value="${h(csv(src.Extensions))}" placeholder=".md"></label>` : ''}
           <label class="check wide"><input type="checkbox" data-bind="Memory.Sources.${i}.Enabled" data-kind="bool" ${src.Enabled !== false ? 'checked' : ''}> Enabled</label>

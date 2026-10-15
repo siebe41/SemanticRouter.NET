@@ -41,7 +41,7 @@ public sealed class RouterDashboardOptions
     /// </summary>
     public string? AdminToken { get; set; }
 
-    /// <summary>Token for view-only access: status, activity, the masked configuration and the prompt tester.</summary>
+    /// <summary>Token for view-only access: status, activity and the masked configuration, but nothing that spends embedding or API calls.</summary>
     public string? ReadOnlyToken { get; set; }
 
     /// <summary>
@@ -57,10 +57,11 @@ public sealed class RouterDashboardOptions
     public bool RequireTokenForLocalClients { get; set; }
 
     /// <summary>
-    /// Let the admin API change what a CLI or Copilot connector runs: its program, arguments, environment variables and
-    /// home directory, beyond a preset started from PATH. Off by default, because loopback clients are admin without a
-    /// token, and with this any program on the machine (or any user, on a shared one) could run whatever it liked as
-    /// you. Those settings are then changed in the configuration file. Default <see langword="false"/>.
+    /// Let the admin API change what a CLI or Copilot connector runs (its program, arguments, environment variables and
+    /// home directory, beyond a preset started from PATH) and which folders and files memory sources read. Off by
+    /// default, because loopback clients are admin without a token, and with this any program on the machine (or any
+    /// user, on a shared one) could run whatever it liked as you, or have the router read any file you can. Those
+    /// settings are then changed in the configuration file. Default <see langword="false"/>.
     /// </summary>
     public bool AllowProcessSettings { get; set; }
 
@@ -69,6 +70,12 @@ public sealed class RouterDashboardOptions
     /// are accepted from these origins, and loopback requests may name them in the Host header.
     /// </summary>
     public IList<string> PublicOrigins { get; } = new List<string>();
+
+    /// <summary>
+    /// How long a dashboard sign-in lasts: the session cookie then lapses and the token must be entered again. Changing
+    /// a token ends every session signed in with it. Default 12 hours.
+    /// </summary>
+    public TimeSpan SessionLifetime { get; set; } = TimeSpan.FromHours(12);
 
     /// <summary>Entries shown by the activity endpoint when the client gives no limit. Default 100.</summary>
     public int DefaultActivityLimit { get; set; } = 100;
@@ -153,8 +160,14 @@ public static partial class RouterDashboardEndpoints
 
         api.MapPost("/session", (HttpContext context, SignInRequest request) =>
             {
+                if (access.Throttle.RetryAfter(context) is { } wait)
+                {
+                    return DashboardAccess.TooManyAttempts(context, wait);
+                }
+
                 if (access.RoleForToken(request.Token) is not { } role)
                 {
+                    access.Throttle.Failed(context);
                     return Results.Problem("That token is not valid for this router.", statusCode: StatusCodes.Status401Unauthorized, title: "Sign-in failed");
                 }
 
@@ -310,7 +323,8 @@ public static partial class RouterDashboardEndpoints
         });
 
         api.MapPost("/memory/refresh", async (RouterRuntimeProvider provider, MemoryIndex memory, MemoryExposureLog exposure, CancellationToken cancellationToken) =>
-            Results.Json(BuildMemoryMap(provider.Current, await memory.RefreshAsync(cancellationToken).ConfigureAwait(false), exposure), ApiJson));
+            Results.Json(BuildMemoryMap(provider.Current, await memory.RefreshAsync(cancellationToken).ConfigureAwait(false), exposure), ApiJson))
+            .WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapPost("/memory/exposure/reset", (MemoryExposureLog exposure) =>
         {
@@ -366,7 +380,7 @@ public static partial class RouterDashboardEndpoints
                 new PromptRoutingRequest { Prompt = request.Prompt, Strategy = choice.Strategy, RequestedModel = choice.RequestedModel, Profile = profile },
                 cancellationToken).ConfigureAwait(false);
             return Results.Ok(PromptClassificationResponse.From(plan));
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance); // classifying embeds the prompt, which can cost an embedding call
 
         api.MapPost("/health/reset", (IModelHealth health) =>
         {
@@ -393,7 +407,7 @@ public static partial class RouterDashboardEndpoints
             {
                 return Results.Json(new EmbeddingTestResponse(false, 0, Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1), ex.Message), ApiJson);
             }
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapPost("/connectors/{name}/discover", async (string name, IServiceProvider services, CancellationToken cancellationToken) =>
         {
@@ -408,7 +422,7 @@ public static partial class RouterDashboardEndpoints
             }
 
             return Results.Json(DiscoverResponse.From(report), ApiJson);
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance);
 
         api.MapPost("/connectors/{name}/check", async (string name, IServiceProvider services, RouterRuntimeProvider provider) =>
         {
@@ -422,7 +436,7 @@ public static partial class RouterDashboardEndpoints
             string target = EndpointHealth.TargetKey(provider.Current.Configuration, name);
             EndpointCheck result = await checks.RunAsync(name, target, () => RouterDoctor.CheckConnectorAsync(services, name)).ConfigureAwait(false);
             return Results.Json(result, ApiJson);
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance);
 
         EvaluationApi.Map(api, ApiJson, Actor);
         TuningApi.Map(api, ApiJson, Actor);
@@ -520,13 +534,26 @@ public static partial class RouterDashboardEndpoints
             : $"{role} from {context.Connection.RemoteIpAddress}";
     }
 
-    /// <summary>Errors for CLI and Copilot connectors whose program, arguments or environment the request would change.</summary>
-    private static IEnumerable<string> ProcessSettingErrors(RouterConfiguration candidate, RouterRuntimeProvider provider, RouterDashboardOptions options) =>
-        options.AllowProcessSettings ? [] : candidate.ProcessSettingChanges(provider.Current.Configuration).Select(name =>
-            $"Connectors:{name}: what a CLI runs (its program, arguments, environment variables and home directory) is changed in the " +
-            $"configuration file{(provider.Store is { } store ? $" ({store.Location})" : string.Empty)}, not over the admin API, which " +
-            "any program on this machine can reach. Presets started from PATH can be added here. To allow it, set " +
-            "SemanticRouter:Dashboard:AllowProcessSettings.");
+    /// <summary>
+    /// Errors for CLI and Copilot connectors whose program, arguments or environment the request would change, and for
+    /// memory sources it would point at another folder or file.
+    /// </summary>
+    private static IEnumerable<string> ProcessSettingErrors(RouterConfiguration candidate, RouterRuntimeProvider provider, RouterDashboardOptions options)
+    {
+        if (options.AllowProcessSettings)
+        {
+            return [];
+        }
+
+        string file = $"configuration file{(provider.Store is { } store ? $" ({store.Location})" : string.Empty)}";
+        return candidate.ProcessSettingChanges(provider.Current.Configuration).Select(name =>
+                $"Connectors:{name}: what a CLI runs (its program, arguments, environment variables and home directory) is changed in the " +
+                $"{file}, not over the admin API, which any program on this machine can reach. Presets started from PATH can be added here. " +
+                "To allow it, set SemanticRouter:Dashboard:AllowProcessSettings.")
+            .Concat(candidate.MemoryPathChanges(provider.Current.Configuration).Select(name =>
+                $"Memory:Sources:{name}:Path: which folders and files the router reads is changed in the {file}, not over the admin API, " +
+                "which any program on this machine can reach. To allow it, set SemanticRouter:Dashboard:AllowProcessSettings."));
+    }
 
     private static RouterDashboardOptions CopyOf(RouterDashboardOptions? source)
     {
@@ -539,6 +566,7 @@ public static partial class RouterDashboardEndpoints
             copy.AllowUnauthenticatedRemoteClients = source.AllowUnauthenticatedRemoteClients;
             copy.RequireTokenForLocalClients = source.RequireTokenForLocalClients;
             copy.AllowProcessSettings = source.AllowProcessSettings;
+            copy.SessionLifetime = source.SessionLifetime;
             copy.DefaultActivityLimit = source.DefaultActivityLimit;
             copy.ThemesDirectory = source.ThemesDirectory;
             foreach (string origin in source.PublicOrigins)
@@ -570,7 +598,13 @@ public static partial class RouterDashboardEndpoints
             throw new InvalidOperationException("SemanticRouter:Dashboard:AdminToken and ReadOnlyToken must differ.");
         }
 
-        var access = new DashboardAccess(options, admin, readOnly, services.GetService<MachinePolicy>()?.Dashboard ?? DashboardPolicy.Default);
+        if (options.SessionLifetime <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("SemanticRouter:Dashboard:SessionLifetime must be positive, e.g. 12:00:00.");
+        }
+
+        var access = new DashboardAccess(
+            options, admin, readOnly, services.GetService<MachinePolicy>()?.Dashboard ?? DashboardPolicy.Default, services.GetService<TimeProvider>());
         ILogger logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("SemanticRouter.Dashboard");
         foreach (string problem in problems)
         {
