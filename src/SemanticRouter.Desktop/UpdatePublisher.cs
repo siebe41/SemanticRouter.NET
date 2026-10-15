@@ -31,8 +31,11 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
         Linux,
     }
 
-    /// <summary>The subject of Microsoft's code-signing certificates, which sign the .NET runtime and ONNX Runtime.</summary>
-    internal const string Microsoft = "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US";
+    /// <summary>
+    /// The organization in Microsoft's code-signing certificates (the .NET runtime, ONNX Runtime). Their common names
+    /// vary (<c>Microsoft Corporation</c>, <c>.NET</c>); the organization is what a certificate authority checks.
+    /// </summary>
+    internal const string Microsoft = "O=Microsoft Corporation, L=Redmond, S=Washington, C=US";
 
     /// <summary>Where the app's files are in a Velopack package.</summary>
     private const string AppFolder = "lib/app/";
@@ -118,7 +121,7 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
             // file with the release's certificate) or Microsoft's (the .NET runtime, ONNX Runtime): a valid signature
             // from anyone else is not enough, or a cheap code-signing certificate would let a tampered package through.
             bool own = relative == mainExe || Path.GetFileName(relative).StartsWith(id + ".", StringComparison.OrdinalIgnoreCase);
-            if (!Matches(signature) && (own || signature.Signer is not { } signer || !SignedBy(signer, Microsoft)))
+            if (!Matches(signature) && (own || signature.Signer is not { } signer || !IsMicrosoft(signer)))
             {
                 return $"{relative} is signed by {Describe(signature)}, not by {publisher}{(own ? string.Empty : " or Microsoft")}";
             }
@@ -204,12 +207,20 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
         }
 
         return string.Equals(certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false), value, StringComparison.OrdinalIgnoreCase);
+    }
 
-        static IEnumerable<string> Names(X500DistinguishedName name) => name.EnumerateRelativeDistinguishedNames()
-            .Select(n => n.HasMultipleElements
-                ? Convert.ToHexString(n.RawData.Span)
-                : n.GetSingleElementType().Value + "=" + n.GetSingleElementValue()?.Trim().ToUpperInvariant())
-            .Order(StringComparer.Ordinal);
+    /// <summary>A name's parts as <c>oid=VALUE</c>, sorted, so the same names in any order compare equal.</summary>
+    private static IEnumerable<string> Names(X500DistinguishedName name) => name.EnumerateRelativeDistinguishedNames()
+        .Select(n => n.HasMultipleElements
+            ? Convert.ToHexString(n.RawData.Span)
+            : n.GetSingleElementType().Value + "=" + n.GetSingleElementValue()?.Trim().ToUpperInvariant())
+        .Order(StringComparer.Ordinal);
+
+    /// <summary>Whether <paramref name="certificate"/> was issued to Microsoft: its subject is <see cref="Microsoft"/> plus a common name.</summary>
+    internal static bool IsMicrosoft(X509Certificate2 certificate)
+    {
+        string[] names = [.. Names(certificate.SubjectName).Where(n => !n.StartsWith("2.5.4.3=", StringComparison.Ordinal))];
+        return names.SequenceEqual(Names(new X500DistinguishedName(Microsoft)));
     }
 
     private static string Describe(CodeSignature signature) =>

@@ -220,7 +220,7 @@ public sealed class UpdateControlTests : IDisposable
     [Fact]
     public void On_Windows_the_apps_own_code_must_be_the_publishers_and_the_rest_the_publishers_or_microsofts()
     {
-        using X509Certificate2 microsoft = Certificate(UpdatePublisher.Microsoft);
+        using X509Certificate2 microsoft = Certificate("CN=.NET, " + UpdatePublisher.Microsoft);
         string package = WindowsPackage();
         UpdatePublisher Check(Func<string, CodeSignature> read) => new("Contoso Ltd", UpdatePublisher.Platform.Windows, new FakeSignatures(read));
         CodeSignature Ours(string file) => Path.GetFileName(file).StartsWith("SemanticRouter", StringComparison.Ordinal) ? new CodeSignature(null, Contoso) : new CodeSignature(null, microsoft);
@@ -311,8 +311,7 @@ public sealed class UpdateControlTests : IDisposable
 
         CodeSignature microsoft = signatures.Read(signed);
         microsoft.Problem.Should().BeNull();
-        microsoft.Signer!.GetNameInfo(X509NameType.SimpleName, false).Should().Be("Microsoft Corporation");
-        UpdatePublisher.SignedBy(microsoft.Signer, UpdatePublisher.Microsoft).Should().BeTrue("the runtime's files are signed with the subject the check accepts");
+        UpdatePublisher.IsMicrosoft(microsoft.Signer!).Should().BeTrue($"the runtime's files are signed by Microsoft ({microsoft.Signer!.Subject})");
         signatures.Read(typeof(UpdateControlTests).Assembly.Location).Problem.Should().Be("is not signed");
 
         string changed = Path.Combine(_directory, "changed.dll");
@@ -329,8 +328,8 @@ public sealed class UpdateControlTests : IDisposable
             zip.CreateEntryFromFile(signed, "lib/app/SemanticRouter.exe");
         }
 
-        new UpdatePublisher("Microsoft Corporation", UpdatePublisher.Platform.Windows, signatures).Refuses(package).Should().BeNull();
-        new UpdatePublisher("Contoso Ltd", UpdatePublisher.Platform.Windows, signatures).Refuses(package).Should().StartWith("SemanticRouter.exe is signed by CN=Microsoft Corporation");
+        new UpdatePublisher(microsoft.Signer!.Subject, UpdatePublisher.Platform.Windows, signatures).Refuses(package).Should().BeNull();
+        new UpdatePublisher("Contoso Ltd", UpdatePublisher.Platform.Windows, signatures).Refuses(package).Should().Be($"SemanticRouter.exe is signed by {microsoft.Signer.Subject}, not by Contoso Ltd");
     }
 
     [Fact]
