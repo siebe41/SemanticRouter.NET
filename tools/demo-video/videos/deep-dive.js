@@ -28,6 +28,7 @@ module.exports = async function deepDive(k) {
 
   // The tester: type a prompt, pick a strategy, classify, wait for the result.
   const classify = async (prompt, model = 'auto') => {
+    await k.unhighlight();
     await k.dashScroll('.tester', 'start');
     await k.dashSelect('#tester-model', model);
     await k.dashType('#tester-prompt', prompt);

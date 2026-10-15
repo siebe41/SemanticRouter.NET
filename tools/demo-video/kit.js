@@ -120,6 +120,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
   const frames = [];
   const narration = [];
   let background = null;
+  let tracker = null;
 
   const k = {
     home, project, router, limitFile, env, sleep, page, shells,
@@ -212,6 +213,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
     // The dashboard, in the stage's browser window.
     frame: () => page.frames().find((f) => f.url().startsWith(`${router}/router`)),
     async go(view) {
+      await k.unhighlight();
       await k.stage('dash', `${router}/router/#/${view}`);
       await page.waitForFunction((u) => document.getElementById('dash').src === u, `${router}/router/#/${view}`);
       await sleep(900);
@@ -224,24 +226,51 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
     },
     dashClick: (selector) => k.frame().locator(selector).first().click(),
     dashSelect: (selector, value) => k.frame().locator(selector).first().selectOption(value),
-    async dashScroll(selector, block = 'center') {
-      await k.frame().locator(selector).first().evaluate((e, b) => e.scrollIntoView({ behavior: 'smooth', block: b }), block);
-      await sleep(900);
+    /** Waits until the dashboard has stopped scrolling (smooth scrolls take a variable time). */
+    async settle() {
+      let last = null; let still = 0;
+      for (let i = 0; i < 40 && still < 3; i++) {
+        const y = await k.frame().evaluate(() => scrollY);
+        still = y === last ? still + 1 : 0;
+        last = y;
+        await sleep(100);
+      }
     },
-    /** Outlines a dashboard element on the stage. */
+    /** Scrolls the dashboard; a highlight would stay where it was on screen while the page moves, so it goes first. */
+    async dashScroll(selector, block = 'center') {
+      await k.unhighlight();
+      await k.frame().locator(selector).first().evaluate((e, b) => e.scrollIntoView({ behavior: 'smooth', block: b }), block);
+      await sleep(300);
+      await k.settle();
+    },
+    /**
+     * Outlines a dashboard element on the stage, and keeps following it: the dashboard re-renders as status arrives,
+     * and the element can move under a box drawn once.
+     */
     async highlight(selector, pad = 8) {
+      if (tracker) await k.unhighlight();
       // Bring it into view first, and measure only once the page has stopped scrolling.
       const target = k.frame().locator(selector).first();
       const visible = await target.evaluate((e) => { const b = e.getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; });
       if (!visible) {
+        await k.unhighlight();
         await target.evaluate((e) => e.scrollIntoView({ behavior: 'smooth', block: 'center' }));
-        await sleep(900);
+        await sleep(300);
       }
-      const r = await target.evaluate((e) => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: Math.min(b.width, innerWidth - b.left - 8), h: b.height }; });
-      const f = await page.evaluate(() => { const i = document.getElementById('dash'); const b = i.getBoundingClientRect(); return { x: b.left, y: b.top, s: b.width / i.offsetWidth }; });
-      await k.stage('highlight', f.x + r.x * f.s - pad, f.y + r.y * f.s - pad, r.w * f.s + 2 * pad, r.h * f.s + 2 * pad);
+      await k.settle();
+      const measure = async () => {
+        const r = await target.evaluate((e) => { const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, w: Math.min(b.width, innerWidth - b.left - 8), h: b.height }; });
+        const f = await page.evaluate(() => { const i = document.getElementById('dash'); const b = i.getBoundingClientRect(); return { x: b.left, y: b.top, s: b.width / i.offsetWidth }; });
+        await k.stage('highlight', f.x + r.x * f.s - pad, f.y + r.y * f.s - pad, r.w * f.s + 2 * pad, r.h * f.s + 2 * pad);
+      };
+      await measure();
+      tracker = setInterval(() => measure().catch(() => {}), 100);
     },
-    unhighlight: () => k.stage('unhighlight'),
+    async unhighlight() {
+      if (tracker) { clearInterval(tracker); tracker = null; }
+      await k.stage('unhighlight');
+      await sleep(250);
+    },
 
     async record() {
       cdp.on('Page.screencastFrame', async ({ data, metadata, sessionId }) => {
@@ -275,7 +304,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       frames.forEach((f, i) => lines.push(`file '${f.file}'`, `duration ${((frames[i + 1]?.t ?? f.t + 1) - f.t).toFixed(4)}`));
       lines.push(`file '${frames[frames.length - 1].file}'`);
       fs.writeFileSync(path.join(out, 'frames.txt'), lines.join('\n') + '\n');
-      const timeline = narration.map((n) => ({ key: n.key, start: +(n.wall - lag - t0).toFixed(3), duration: durations[n.key] }));
+      const timeline = narration.map((n) => ({ key: n.key, start: Math.max(0, +(n.wall - lag - t0).toFixed(3)), duration: durations[n.key] }));
       fs.writeFileSync(path.join(out, 'timeline.json'), JSON.stringify(timeline, null, 2));
       console.log(`${frames.length} frames, ${(frames[frames.length - 1].t - t0).toFixed(1)} s; narration at ${timeline.map((n) => n.start.toFixed(1)).join(', ')}`);
     },

@@ -1,8 +1,9 @@
-"""Listens to the narration tts.py made and flags lines that don't say what narration.json says: missing words, and
-words or phrases said twice (a known slip of generative TTS). Regenerate a flagged line with TTS_ONLY=<key>.
+"""Listens to the narration tts.py made and flags lines that don't say what the narration file says: missing words,
+and words or phrases said twice (a known slip of generative TTS). Regenerate a flagged line with TTS_ONLY=<key>.
+tts.py also uses these checks to choose the best of several takes.
 
     pip install faster-whisper soundfile
-    python check_narration.py <voice-dir>
+    NARRATION=narration/<video>.json python check_narration.py <voice-dir>
 """
 import json
 import os
@@ -12,18 +13,10 @@ import sys
 import tempfile
 
 import soundfile as sf
-from faster_whisper import WhisperModel
 
-voice = sys.argv[1]
-here = os.path.dirname(os.path.abspath(__file__))
-with open(os.environ.get("NARRATION") or os.path.join(here, "narration", "intro.json"), encoding="utf-8") as f:
-    lines = json.load(f)["lines"]
-
-model = WhisperModel("small.en", device="cpu", compute_type="int8")
-hint = "Semantic Router, LM Studio, Claude Code, Anthropic, OpenAI, init."
-
-
+HINT = "Semantic Router, LM Studio, Claude Code, Anthropic, OpenAI, init."
 DIGITS = "zero one two three four five six seven eight nine".split()
+_model = None
 
 
 def words(text):
@@ -44,19 +37,40 @@ def repeats(said, max_len=6):
     return found
 
 
-failed = 0
-for key, text in lines.items():
-    with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
-        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", os.path.join(voice, f"{key}.wav"),
-                        "-ac", "1", "-ar", "16000", tmp.name], check=True)
-        audio, _ = sf.read(tmp.name, dtype="float32")
-    heard = " ".join(s.text.strip() for s in model.transcribe(audio, initial_prompt=hint)[0])
+def transcribe(audio16k):
+    """Speech to text for 16 kHz mono float32 audio."""
+    global _model
+    if _model is None:
+        from faster_whisper import WhisperModel
+        _model = WhisperModel("small.en", device="cpu", compute_type="int8")
+    return " ".join(s.text.strip() for s in _model.transcribe(audio16k, initial_prompt=HINT)[0])
+
+
+def check(text, heard):
+    """(ok, missing words, doubled phrases, extra word count) for a line and what was heard."""
     want, said = words(text), words(heard)
     missing = [w for w in want if w not in said]
     doubled = repeats(said)
     extra = len(said) - len(want)
-    ok = len(missing) <= 1 and not doubled and extra <= 2
-    failed += not ok
-    print(f"{'ok   ' if ok else 'CHECK'} {key:10} missing={missing} doubled={doubled} extra={extra}\n      heard: {heard}")
+    return len(missing) <= 1 and not doubled and extra <= 2, missing, doubled, extra
 
-sys.exit(1 if failed else 0)
+
+def load16k(path):
+    with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", path, "-ac", "1", "-ar", "16000", tmp.name], check=True)
+        audio, _ = sf.read(tmp.name, dtype="float32")
+    return audio
+
+
+if __name__ == "__main__":
+    voice = sys.argv[1]
+    here = os.path.dirname(os.path.abspath(__file__))
+    with open(os.environ.get("NARRATION") or os.path.join(here, "narration", "intro.json"), encoding="utf-8") as f:
+        lines = json.load(f)["lines"]
+    failed = 0
+    for key, text in lines.items():
+        heard = transcribe(load16k(os.path.join(voice, f"{key}.wav")))
+        ok, missing, doubled, extra = check(text, heard)
+        failed += not ok
+        print(f"{'ok   ' if ok else 'CHECK'} {key:10} missing={missing} doubled={doubled} extra={extra}\n      heard: {heard}")
+    sys.exit(1 if failed else 0)
