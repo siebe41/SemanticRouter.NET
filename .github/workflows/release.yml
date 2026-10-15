@@ -49,6 +49,11 @@ jobs:
       - name: Version from the tag
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
+      # Exactly the packages in the projects' packages.lock.json files; the restores in test and pack below then find
+      # nothing to change.
+      - name: Restore
+        run: dotnet restore --locked-mode
+
       - name: Test
         run: dotnet test --configuration Release
 
@@ -298,7 +303,7 @@ jobs:
             esac
           done
           mkdir -p tool && unzip -q packages/SemanticRouter.Host.*.nupkg -d tool
-          dotnet restore src/SemanticRouter.Host/SemanticRouter.Host.csproj
+          dotnet restore src/SemanticRouter.Host/SemanticRouter.Host.csproj --locked-mode
           dotnet run --file deploy/third-party-notices.cs -- artifacts/THIRD-PARTY-NOTICES.txt sbom tool
 
       - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3

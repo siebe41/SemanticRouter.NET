@@ -207,7 +207,7 @@ semantic-router service install   # or keep it running in the background, starte
 
 ## Quick start
 
-To work on the library or try the samples, you need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
+To work on the library or try the samples, you need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), feature band 10.0.4xx ([`global.json`](global.json)).
 
 ```bash
 git clone https://github.com/siebe41/SemanticRouter.NET.git
