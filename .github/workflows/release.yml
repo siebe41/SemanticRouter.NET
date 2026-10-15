@@ -105,13 +105,10 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
+      # Built and scanned before the registry login, so the build never runs next to a token that can push.
       - name: Build
         run: |
           image="ghcr.io/$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/semantic-router"
@@ -128,24 +125,30 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
 
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Push
         run: |
           docker push "$IMAGE:${GITHUB_REF_NAME#v}"
           docker push "$IMAGE:latest"
 
-  desktop:
+  # The desktop app is built in jobs that hold no secret and only read the repository; the jobs that sign, publish or
+  # write to the release download what they built and run no build. So no third-party build code (NuGet packages'
+  # MSBuild tasks included) ever runs next to a signing credential or a token that can change the release.
+  desktop-build:
     needs: packages
     runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      contents: write
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      AVALONIA_TELEMETRY_OPTOUT: 1
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
@@ -163,16 +166,68 @@ jobs:
           name: desktop
           path: artifacts/*
 
+  desktop:
+    needs: desktop-build
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop
+          path: artifacts
+
       - name: Attach to the release
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
-          gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag
+          gh release upload "$GITHUB_REF_NAME" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
 
-  # The installers (Velopack): the Linux AppImage is built here, the Windows Setup.exe on Windows (signing needs
-  # signtool) and the macOS .pkg on macOS. Each platform is a channel with its own update feed; the previous release's
-  # package is fetched for a delta update. Signing happens only when its secrets are set (docs/desktop.md#signing).
+  # The app each installer packages, published on the installer's own OS (as before the split), without secrets. Tar
+  # keeps the executable bits that an artifact would lose.
+  installer-build:
+    needs: packages
+    strategy:
+      matrix:
+        include:
+          - { rid: linux-x64, os: ubuntu-latest }
+          - { rid: win-x64, os: windows-latest }
+          - { rid: osx-arm64, os: macos-latest }
+          - { rid: osx-x64, os: macos-latest }
+    runs-on: ${{ matrix.os }}
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      RID: ${{ matrix.rid }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Publish
+        shell: bash
+        run: |
+          deploy/publish-desktop.sh "$RID" "${GITHUB_REF_NAME#v}" "publish/$RID"
+          tar -C "publish/$RID" -czf "publish-$RID.tar.gz" .
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: publish-${{ matrix.rid }}
+          path: publish-${{ matrix.rid }}.tar.gz
+
+  # The installers (Velopack): each platform is a channel with its own update feed; the previous release's package is
+  # fetched for a delta update. These jobs only pack, sign and upload what installer-build published (PUBLISH_DIR);
+  # vpk, the packaging and signing tool itself, is the one tool installed. Signing happens only when its secrets are
+  # set (docs/desktop.md#signing).
   installers:
-    needs: desktop
+    needs: [ desktop, installer-build ]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -180,11 +235,16 @@ jobs:
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      AVALONIA_TELEMETRY_OPTOUT: 1
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: publish-linux-x64
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
@@ -197,12 +257,13 @@ jobs:
 
       - name: Package and attach
         run: |
-          deploy/package-installer.sh linux-x64 "${GITHUB_REF_NAME#v}" installers/linux-x64
+          mkdir -p published && tar -C published -xzf publish-linux-x64.tar.gz
+          PUBLISH_DIR=published deploy/package-installer.sh linux-x64 "${GITHUB_REF_NAME#v}" installers/linux-x64
           vpk upload github --outputDir installers/linux-x64 --channel linux-x64 \
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
 
   installer-windows:
-    needs: desktop
+    needs: [ desktop, installer-build ]
     environment: release
     runs-on: windows-latest
     permissions:
@@ -210,7 +271,6 @@ jobs:
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      AVALONIA_TELEMETRY_OPTOUT: 1
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
       # Azure Trusted Signing: the credentials (DefaultAzureCredential reads them from the environment) and the
@@ -223,6 +283,12 @@ jobs:
       SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: publish-win-x64
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
@@ -245,12 +311,13 @@ jobs:
       - name: Package and attach
         shell: bash
         run: |
-          deploy/package-installer.sh win-x64 "${GITHUB_REF_NAME#v}" installers/win-x64
+          mkdir -p published && tar -C published -xzf publish-win-x64.tar.gz
+          PUBLISH_DIR=published deploy/package-installer.sh win-x64 "${GITHUB_REF_NAME#v}" installers/win-x64
           vpk upload github --outputDir installers/win-x64 --channel win-x64 \
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
 
   installer-macos:
-    needs: desktop
+    needs: [ desktop, installer-build ]
     runs-on: macos-latest
     environment: release
     permissions:
@@ -258,7 +325,6 @@ jobs:
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      AVALONIA_TELEMETRY_OPTOUT: 1
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
       # Signing and notarization (an Apple Developer account): the two Developer ID certificates as base64 .p12 files,
@@ -273,6 +339,13 @@ jobs:
       INSTALL_IDENTITY: ${{ vars.APPLE_SIGN_INSTALL_IDENTITY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: publish-osx-*
+          merge-multiple: true
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
@@ -307,7 +380,8 @@ jobs:
       - name: Package and attach
         run: |
           for rid in osx-arm64 osx-x64; do
-            deploy/package-installer.sh "$rid" "${GITHUB_REF_NAME#v}" "installers/$rid"
+            mkdir -p "published/$rid" && tar -C "published/$rid" -xzf "publish-$rid.tar.gz"
+            PUBLISH_DIR="published/$rid" deploy/package-installer.sh "$rid" "${GITHUB_REF_NAME#v}" "installers/$rid"
             vpk upload github --outputDir "installers/$rid" --channel "$rid" \
               --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
           done

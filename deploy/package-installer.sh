@@ -12,7 +12,8 @@
 # packages the installed app updates from. Windows and Linux packages can be built on any OS; macOS needs macOS.
 #
 # Needs `vpk` (dotnet tool install -g vpk). With VPK_PREVIOUS_FROM=<repository url> (and GITHUB_TOKEN), the previous
-# release's package is downloaded first so a delta update is built.
+# release's package is downloaded first so a delta update is built. With PUBLISH_DIR=<dir>, the app already published
+# there (deploy/publish-desktop.sh) is packaged and nothing is built: the release signs in a job that builds nothing.
 #
 # Signing, when configured (unsigned otherwise):
 #   Windows (on Windows): AZURE_SIGN_METADATA=<metadata.json> for Azure Trusted Signing; the Azure credentials come
@@ -28,10 +29,12 @@ assets="$root/src/SemanticRouter.Desktop/Assets"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-dotnet publish "$root/src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj" \
-  --configuration Release --runtime "$rid" --self-contained \
-  -p:Version="$version" -p:DebugType=none \
-  --output "$work/publish"
+if [ -n "${PUBLISH_DIR:-}" ]; then
+  publish="$(cd "$PUBLISH_DIR" && pwd)"
+else
+  publish="$work/publish"
+  "$root/deploy/publish-desktop.sh" "$rid" "$version" "$publish"
+fi
 
 # Cross-packaging needs a directive naming the target; packaging for the OS vpk runs on needs none.
 case "$(uname -s)" in
@@ -55,7 +58,7 @@ common=(
   --packVersion "$version"
   --packTitle SemanticRouter
   --packAuthors "SemanticRouter contributors"
-  --packDir "$work/publish"
+  --packDir "$publish"
   --channel "$rid"
   --runtime "$rid"
   --outputDir "$out"
