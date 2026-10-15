@@ -37,6 +37,8 @@
 {"prompt":"thanks, that's perfect","tier":1,"route":"smalltalk"}
 {"prompt":"good night, talk tomorrow","tier":1,"route":"smalltalk"}
 {"prompt":"are you a bot?","tier":1,"route":"smalltalk"}
+{"prompt":"hey! what can you help me with in this repo?","tier":1,"route":"smalltalk"}
+{"prompt":"hello! how can you help with this project?","tier":1,"route":"smalltalk"}
 {"prompt":"make this paragraph more concise","tier":1,"route":"rewrite-summarize"}
 {"prompt":"give me the key points of this meeting transcript","tier":1,"route":"rewrite-summarize"}
 {"prompt":"turn these notes into a polite email to the team","tier":1,"route":"rewrite-summarize"}
@@ -91,3 +93,5 @@
 {"prompt":"split this service into two projects and fix all the references","tier":4,"route":"agentic-coding"}
 {"prompt":"add a feature flag around the new search and wire it through the UI","tier":4,"route":"agentic-coding"}
 {"prompt":"set up continuous integration for this repository","tier":4,"route":"agentic-coding"}
+{"prompt":"help me add tests to this repo","tier":4,"route":"agentic-coding"}
+{"prompt":"what can you improve in this project?","tier":4,"route":"agentic-coding"}

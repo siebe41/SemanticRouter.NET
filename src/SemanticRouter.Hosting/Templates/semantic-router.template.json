@@ -36,7 +36,8 @@
       "Utterances": [
         "hi there", "hello, how are you?", "good morning", "thanks a lot",
         "thank you for your help", "who are you?", "tell me a joke", "what can you do?",
-        "hey!", "is this a chatbot?", "see you later", "nice to meet you"
+        "hey!", "is this a chatbot?", "see you later", "nice to meet you", "what can you help me with?",
+        "hey, what can you help me with?"
       ]
     },
     {
@@ -95,7 +96,7 @@
         "implement this feature across the codebase", "add a new endpoint and wire it into the service",
         "fix the failing tests and make the build pass", "migrate this project to the new framework version",
         "refactor the module and update every caller", "write the integration tests for this flow",
-        "implement the feature described in this issue", "the build is broken, make it pass again", "replace this library with another one across the repository", "add pagination to this API and update its callers", "set up a CI pipeline for this repository", "add a feature flag and wire it through the app", "upgrade the dependencies and fix whatever breaks"
+        "implement the feature described in this issue", "the build is broken, make it pass again", "replace this library with another one across the repository", "add pagination to this API and update its callers", "set up a CI pipeline for this repository", "add a feature flag and wire it through the app", "upgrade the dependencies and fix whatever breaks", "improve the code quality of this project"
       ]
     },
     {
