@@ -253,6 +253,9 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       const field = k.frame().locator(selector).first();
       await field.fill('');
       await field.pressSequentially(text, { delay: text.length > 80 ? 8 : 28 });
+      // Keystrokes that land while the dashboard re-renders are lost if it drops the focus: fail the take, not the viewer.
+      const typed = await field.inputValue();
+      if (typed !== text) throw new Error(`Typed "${text}" but the field holds "${typed}"`);
     },
     dashClick: (selector) => k.frame().locator(selector).first().click(),
     dashSelect: (selector, value) => k.frame().locator(selector).first().selectOption(value),
