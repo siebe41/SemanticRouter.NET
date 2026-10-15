@@ -10,6 +10,10 @@ Security fixes go to `main` and into the next release. Only the latest release i
 | Latest release (NuGet packages, `semantic-router` tool, container image, desktop app) | yes |
 | Anything older | no |
 
+## Verifying a release
+
+Every release asset has a build provenance attestation and a line in `SHA256SUMS`; the container image is signed with keyless cosign and has provenance and SBOM attestations. CycloneDX SBOMs and `THIRD-PARTY-NOTICES.txt` are attached to each release. [docs/releases.md](docs/releases.md) has the commands (`gh attestation verify`, `sha256sum -c SHA256SUMS`, `cosign verify`). A file or image that fails these checks did not come from this repository's release workflow; please report where you got it.
+
 ## Reporting a vulnerability
 
 Please do not open a public issue, discussion or pull request for a security problem.

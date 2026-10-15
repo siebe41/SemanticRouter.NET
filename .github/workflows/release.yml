@@ -4,11 +4,18 @@ name: Release
 # `semantic-router` dotnet tool), the container image (ghcr.io/<owner>/semantic-router) and the desktop app
 # (self-contained downloads for Windows, macOS and Linux, and the installers with their update feeds, attached to the
 # GitHub release).
+#
+# Every release can be verified (docs/releases.md): the image is signed with keyless cosign and carries provenance and
+# SBOM attestations; every release asset, the NuGet packages included, has a build provenance attestation and a line in
+# SHA256SUMS; CycloneDX SBOMs and THIRD-PARTY-NOTICES.txt are attached. Signatures and attestations use short-lived
+# Sigstore certificates issued to this workflow (GitHub OIDC), so no signing key is stored anywhere. The jobs that hold
+# the OIDC token build nothing; they sign and attest what the build jobs produced, after any code signing.
 on:
   push:
     tags: [ 'v*' ]
 
-# Read-only by default; each job that publishes asks for the one extra permission it needs. Every publishing job runs
+# Read-only by default; each job that publishes, signs or attests asks for the extra permissions it needs (id-token and
+# attestations only in image-sign and checksums, the jobs that build nothing). Every publishing job runs
 # in the `release` environment, so the repository owner can require an approval (and restrict it to v* tags) under
 # Settings > Environments. Publishing to nuget.org needs the `NUGET_USER` variable there (see the nuget job).
 permissions:
@@ -45,13 +52,41 @@ jobs:
       - name: Test
         run: dotnet test --configuration Release
 
+      # The tool package carries the licences and notices of the packages it ships.
+      - name: Third-party notices
+        run: dotnet run --file deploy/third-party-notices.cs -- notices/THIRD-PARTY-NOTICES.txt src/SemanticRouter.Host/bin/Release/net10.0
+
       - name: Pack
-        run: dotnet pack --configuration Release --output artifacts -p:Version="$VERSION"
+        run: |
+          dotnet pack --configuration Release --output artifacts -p:Version="$VERSION" \
+            -p:ThirdPartyNoticesFile="$PWD/notices/THIRD-PARTY-NOTICES.txt"
+
+      # A CycloneDX SBOM of the NuGet packages, read from their contents: the tool's deps.json and each package's
+      # assemblies.
+      - name: SBOM input
+        run: |
+          for package in artifacts/*.nupkg; do
+            name="$(basename "$package" .nupkg)"
+            mkdir -p "sbom/$name" && unzip -q "$package" -d "sbom/$name"
+          done
+
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: sbom
+          format: cyclonedx-json
+          output-file: SemanticRouter-${{ env.VERSION }}-packages.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages
           path: artifacts/*.nupkg
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-packages
+          path: SemanticRouter-${{ env.VERSION }}-packages.cdx.json
 
   # NuGet Trusted Publishing: no NuGet key is stored anywhere. This job exchanges its GitHub OIDC token for an API key
   # that nuget.org issues for one hour, under the policy on the nuget.org account (repository, release.yml, environment
@@ -103,16 +138,20 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # Built and scanned before the registry login, so the build never runs next to a token that can push.
+      # Built, scanned and inventoried before the registry login, so the build never runs next to a token that can push.
       - name: Build
         run: |
           image="ghcr.io/$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/semantic-router"
           echo "IMAGE=$image" >> "$GITHUB_ENV"
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
           docker build -f src/SemanticRouter.Host/Dockerfile -t "$image:${GITHUB_REF_NAME#v}" -t "$image:latest" .
 
       # Nothing with a fixable high or critical vulnerability is published.
@@ -125,16 +164,92 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
 
+      # The image's CycloneDX SBOM: attached to the release, and to the image as an attestation (image-sign).
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE }}:latest
+          format: cyclonedx-json
+          output-file: SemanticRouter-${{ env.VERSION }}-image.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-image
+          path: SemanticRouter-${{ env.VERSION }}-image.cdx.json
+
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The digest is read back from the registry: what the version tag points to is what is signed and attested.
       - name: Push
+        id: push
         run: |
-          docker push "$IMAGE:${GITHUB_REF_NAME#v}"
+          docker push "$IMAGE:$VERSION"
           docker push "$IMAGE:latest"
+          digest="$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)"
+          if [[ "$digest" != sha256:* ]]; then
+            echo "::error::No digest for $IMAGE:$VERSION in the registry."
+            exit 1
+          fi
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+  # Keyless signing of the pushed image, then its provenance and SBOM attestations, stored in the registry next to it.
+  # cosign and actions/attest get a short-lived Sigstore certificate for this workflow from the job's GitHub OIDC token.
+  # This job builds and runs nothing from the repository; the image job, which builds, never holds the OIDC token.
+  image-sign:
+    needs: image
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      IMAGE: ${{ needs.image.outputs.image }}
+      DIGEST: ${{ needs.image.outputs.digest }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sbom-image
+          path: sbom
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign
+        run: cosign sign --yes "$IMAGE@$DIGEST"
+
+      - name: Version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      # Storage records need an organization account and artifact-metadata: write; the attestations do not.
+      - name: Provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: SBOM attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ env.DIGEST }}
+          sbom-path: sbom/SemanticRouter-${{ env.VERSION }}-image.cdx.json
+          push-to-registry: true
+          create-storage-record: false
 
   # The desktop app is built in jobs that hold no secret and only read the repository; the jobs that sign, publish or
   # write to the release download what they built and run no build. So no third-party build code (NuGet packages'
@@ -154,12 +269,45 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
       # Every platform cross-publishes from Linux: the app is self-contained and its native parts come from NuGet.
       - name: Package
         run: |
           for rid in win-x64 win-arm64 osx-arm64 osx-x64 linux-x64 linux-arm64; do
-            deploy/package-desktop.sh "$rid" "${GITHUB_REF_NAME#v}" artifacts
+            deploy/package-desktop.sh "$rid" "$VERSION" artifacts
           done
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: packages
+
+      # The release's own THIRD-PARTY-NOTICES.txt covers all it ships: the desktop app for every platform and the tool
+      # (whose packages are also the image's). Each archive, installer, the tool package and the image carry their own
+      # copy. The desktop SBOM is read from the archives' contents.
+      - name: Notices and SBOM input
+        run: |
+          for archive in artifacts/*.zip artifacts/*.tar.gz; do
+            name="$(basename "$archive")" && name="${name%.zip}" && name="${name%.tar.gz}"
+            mkdir -p "sbom/$name"
+            case "$archive" in
+              *.zip) unzip -q "$archive" -d "sbom/$name" ;;
+              *) tar -C "sbom/$name" -xzf "$archive" ;;
+            esac
+          done
+          mkdir -p tool && unzip -q packages/SemanticRouter.Host.*.nupkg -d tool
+          dotnet restore src/SemanticRouter.Host/SemanticRouter.Host.csproj
+          dotnet run --file deploy/third-party-notices.cs -- artifacts/THIRD-PARTY-NOTICES.txt sbom tool
+
+      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: sbom
+          format: cyclonedx-json
+          output-file: artifacts/SemanticRouter-${{ env.VERSION }}-desktop.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -385,3 +533,46 @@ jobs:
             vpk upload github --outputDir "installers/$rid" --channel "$rid" \
               --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
           done
+
+  # Last, once every asset is signed and attached: SHA256SUMS over all the release's assets; the NuGet packages (as
+  # pushed to nuget.org, before nuget.org adds its repository signature) and the packages' and image's SBOMs attached;
+  # and one build provenance attestation covering every asset and SHA256SUMS, for `gh attestation verify`. The job
+  # downloads, hashes and uploads; it builds and runs nothing from the repository.
+  checksums:
+    needs: [ packages, image, desktop, installers, installer-windows, installer-macos ]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      LC_ALL: C
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: attach
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: sbom-*
+          merge-multiple: true
+          path: attach
+
+      - name: Checksums
+        run: |
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir release --clobber
+          cp attach/* release/
+          rm -f release/SHA256SUMS
+          (cd release && sha256sum -- * > SHA256SUMS)
+          cat release/SHA256SUMS
+
+      - name: Provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release/*
+
+      - name: Attach to the release
+        run: gh release upload "$GITHUB_REF_NAME" attach/* release/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
