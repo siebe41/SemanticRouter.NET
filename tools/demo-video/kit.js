@@ -132,10 +132,12 @@ function captionPhrases(words) {
  *   paidApi        model ids for a stand-in paid OpenAI-compatible API at http://paid-api.example:4000 (the name
  *                  needs an /etc/hosts entry, which this adds when it can: an address that is not this machine's,
  *                  so the router treats it as a cloud API, and a reserved domain, so nobody mistakes it for one)
+ *   fullAnswers    the stand-in models answer at real length (replies.js), for videos that show token counts and costs
  *   vertical       record the 9:16 stage (1080×1920) for Shorts and Reels, with captions that follow the voice word by
  *                  word (words.py times them into the voice folder's words.json)
  */
-async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], ['claude', 88, 34]], loaded, paidApi, vertical = false }) {
+async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], ['claude', 88, 34]], loaded, paidApi, vertical = false, fullAnswers = false }) {
+  if (fullAnswers) process.env.DEMO_FULL_ANSWERS = env.DEMO_FULL_ANSWERS = '1';
   const durations = JSON.parse(fs.readFileSync(path.join(voiceDir, 'durations.json'), 'utf8'));
   const size = vertical ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
   const wordsFile = path.join(voiceDir, 'words.json');

@@ -1,29 +1,37 @@
-// "What it saves you" (~1 min): a day's worth of requests sent through the router off camera (quick questions, small
-// coding tasks, hard debugging; Claude's session limit hits partway, so the rest spill over to a paid API), then the
-// Usage page and the Overview's weekly digest. Every figure on screen is the router's own accounting of that traffic.
+// "What it saves you" (~1 min): a day's worth of requests sent through the router off camera (90 of them: quick
+// questions, small coding tasks, hard debugging, with a coding agent's context and answers of real length; Claude's
+// session limit hits partway, so the rest spill over to a paid API), then the Usage page and the Overview's weekly
+// digest. Every figure on screen is the router's own accounting of that traffic, routed as the default routes do.
 const fs = require('fs');
 const path = require('path');
 
-// What a coding agent sends along with each prompt: instructions and project context, about 12k tokens (within the
-// local models' 32k context).
+// What a coding agent sends along with each prompt: its instructions and the conversation so far, which grows through
+// a session, from about 8k to 20k tokens (within the local models' 32k context).
 const docs = path.join(__dirname, '../../../docs');
-const context = ['clients.md', 'providers.md'].map((f) => fs.readFileSync(path.join(docs, f), 'utf8')).join('\n\n').slice(0, 48000);
+const context = ['providers.md', 'dashboard.md', 'routing-quality.md'].map((f) => fs.readFileSync(path.join(docs, f), 'utf8')).join('\n\n');
+const contextAt = (i) => context.slice(0, 32000 + (i % 12) * 4000);
 
 // Every prompt once: the router counts the same prompt sent again soon as a sign the first answer fell short.
+const PARTS = ['InvoiceTotal', 'ParseInvoice', 'LedgerWriter', 'SendInvoiceAsync', 'CacheWarmer', 'InvoiceJob', 'the FX client', 'the PDF renderer', 'the webhook handler'];
 const QUICK = ['hi! what can you do?', 'summarize this function in one sentence', 'translate this error message into plain English',
   'rename the variable total to subtotal', 'what does this pattern match?', 'format this JSON', 'thanks, that worked',
   'write a commit message for this change', 'what does HTTP 409 mean?', 'shorten this log message', 'is this date format ISO 8601?',
   'list the files this change touches', 'fix the spelling in this comment', 'what time zone does the server use?',
-  'explain what this flag does', 'make this sentence friendlier', 'what is the default port?', 'summarize the last test run'];
+  'explain what this flag does', 'make this sentence friendlier', 'what is the default port?', 'summarize the last test run',
+  ...PARTS.flatMap((p) => [`what does ${p} return?`, `which file is ${p} in?`, `one-line summary of ${p}`])];
 const CODE = ['write a unit test for the InvoiceTotal function', 'write a regex that matches email addresses',
   'add null checks to ParseInvoice', 'convert this loop to LINQ', 'add XML docs to the public methods',
   'write a bash script that backs up the database', 'add a CancellationToken to SendInvoiceAsync', 'write a SQL query for unpaid invoices',
   'turn this class into a record', 'add retry with backoff to the HTTP client', 'write a test for the currency rounding',
-  'extract this block into a method'];
+  'extract this block into a method', ...PARTS.flatMap((p) => [`add logging to ${p}`, `add a unit test for ${p}`])];
 const HARD = ['the invoice job deadlocks under load, find the root cause', 'design a scalable architecture for a multi-tenant SaaS platform',
   'why does the cache serve stale data after a deploy?', 'review this migration plan for data loss risks, step by step',
   'explain step by step how to shard this database', 'find the race condition in the ledger writer and prove the fix',
-  'plan the split of the billing monolith into services', 'diagnose the memory growth in the export worker'];
+  'plan the split of the billing monolith into services', 'diagnose the memory growth in the export worker',
+  'why does the export worker time out on large invoices?', 'the FX client returns stale rates under load, find the root cause',
+  'design the retry strategy for webhook delivery, with the trade-offs', 'review the tax rounding change for correctness, step by step',
+  'figure out why ParseInvoice drops lines on Windows', 'explain step by step why InvoiceJob bills twice after a crash',
+  'plan how to make the ledger replay idempotent'];
 
 const usd = (n) => (n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
 
@@ -42,18 +50,22 @@ module.exports = async function savings(k) {
     config.Usage.ReferenceModel = 'claude-opus-api';
   });
 
-  // A day of requests, as an agent sends them. Most are quick or small; a few are hard.
-  const ask = (prompt) => fetch(`${router}/v1/chat/completions`, {
+  // A day of requests, as an agent sends them: mostly quick questions and small tasks, with a hard one every few.
+  const ask = (prompt, i) => fetch(`${router}/v1/chat/completions`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'auto', messages: [{ role: 'system', content: context }, { role: 'user', content: prompt }] }),
+    body: JSON.stringify({ model: 'auto', messages: [{ role: 'system', content: contextAt(i) }, { role: 'user', content: prompt }] }),
   }).then((r) => r.text());
-  // Mixed through the day, about three quick questions and two small tasks for each hard one.
   const day = [];
-  for (let i = 0; i < 6; i++) day.push(...QUICK.slice(i * 3, i * 3 + 3), ...CODE.slice(i * 2, i * 2 + 2), HARD[i]);
-  for (const prompt of day.slice(0, 24)) await ask(prompt);
-  // Claude's session limit runs out mid-afternoon: the rest of the day's hard prompts go elsewhere.
-  fs.writeFileSync(k.limitFile, '');
-  for (const prompt of [...day.slice(24), HARD[6], HARD[7]]) await ask(prompt);
+  for (let q = 0, c = 0, h = 0; q < QUICK.length || c < CODE.length || h < HARD.length;) {
+    day.push(...QUICK.slice(q, q += 3), ...CODE.slice(c, c += 2));
+    if (h < HARD.length) day.push(HARD[h++]);
+  }
+  // Claude's session limit runs out mid-afternoon, two thirds of the way through: the rest go elsewhere.
+  const limitAt = Math.round(day.length * 0.65);
+  for (const [i, prompt] of day.entries()) {
+    if (i === limitAt) fs.writeFileSync(k.limitFile, '');
+    await ask(prompt, i);
+  }
 
   const figures = async (by) => k.api('GET', `/usage?window=day&by=${by}`);
   const byLocation = await figures('location');
@@ -61,6 +73,8 @@ module.exports = async function savings(k) {
   const local = byLocation.groups.find((g) => g.key === 'local')?.totals ?? { requests: 0 };
   const byModel = await figures('model');
   const paidRow = byModel.groups.find((g) => g.key === 'paid-api-deepseek-chat-v3')?.totals;
+  const onClaude = byModel.groups.filter((g) => g.key.startsWith('claude-')).reduce((n, g) => n + g.totals.requests, 0);
+  console.log(JSON.stringify({ total, byModel: byModel.groups.map((g) => [g.key, g.totals.requests, g.totals.inputTokens, g.totals.outputTokens, g.totals.costUsd, g.totals.subscriptionValueUsd]) }));
 
   await k.stage('layout', 'zoom');
   await k.go('usage');
@@ -85,7 +99,7 @@ module.exports = async function savings(k) {
 
   // Subscription value.
   line = k.say('subscription');
-  await k.stage('caption', `${usd(total.subscriptionValueUsd)} of Claude use, at API prices`, 'included in your subscription · not spent');
+  await k.stage('caption', `${usd(total.subscriptionValueUsd)} of Claude use, at API prices`, `${onClaude} requests · included in your subscription · not spent`);
   await k.highlight('.card.stat:has-text("subscription use")');
   await line;
   await k.unhighlight();
@@ -104,7 +118,8 @@ module.exports = async function savings(k) {
 
   // Saved, and the weekly total.
   line = k.say('saved');
-  await k.stage('caption', `${usd(total.referenceCostUsd - total.costUsd)} saved`, 'against sending everything to Opus through its API · Usage:ReferenceModel');
+  await k.stage('caption', `${usd(total.referenceCostUsd - total.costUsd)} saved`,
+    `${usd(total.referenceCostUsd)} if all ${total.requests} went to Opus through its API − ${usd(total.costUsd)} spent · Usage:ReferenceModel`);
   await k.highlight('.card.stat:has-text("saved compared with")');
   await sleep(3500);
   await k.nav('overview');
@@ -122,3 +137,4 @@ module.exports = async function savings(k) {
 };
 
 module.exports.paidApi = ['deepseek/deepseek-chat-v3', 'claude-opus-5-5'];
+module.exports.fullAnswers = true;

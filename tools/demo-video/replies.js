@@ -45,11 +45,38 @@ function latest(prompt) {
   return (prompt || '').replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim().slice(-400);
 }
 
+// With DEMO_FULL_ANSWERS set (the savings video), answers run as long as real ones: a quick answer about a hundred
+// words, a coding task a few hundred, a hard debugging question about a thousand. The usual replies are a sentence or
+// two, which would leave the output side of the bill, where most of the price is, nearly empty.
+const more = [
+  'The relevant code is in the billing project, and the change stays inside the invoice pipeline.',
+  'I checked the callers as well, and none of them depend on the old behaviour.',
+  'The existing tests still pass, and I added cases for the edge conditions mentioned above.',
+  'If you want, I can also update the documentation and the changelog entry for this.',
+  'One thing to watch: the nightly job runs with a different configuration than the web app.',
+  'The same pattern appears in the export worker, so it may be worth fixing there too.',
+  'This keeps the public API unchanged, so nothing outside the project needs to be rebuilt.',
+  'I would roll it out behind the existing feature flag and watch the error rate for a day.',
+  'Here is the reasoning step by step, so you can check each assumption against the logs.',
+  'The numbers line up with what the metrics showed during last week\'s incident.',
+];
+function fullAnswer(text, reply) {
+  const target = /root cause|step by step|race condition|diagnose|deadlock|design|plan |why does|review|figure out/i.test(text) ? 1000
+    : /^(write|add|convert|turn|extract|refactor|implement|make)\b/i.test(text) ? 380 : 110;
+  // The same prompt always gets the same length, somewhere within a quarter either side of the target.
+  const hash = [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const length = Math.round(target * (0.75 + (hash % 1000) / 2000));
+  let answer = reply;
+  for (let i = hash % more.length; words(answer).length < length; i++) answer += ` ${more[i % more.length]}`;
+  return answer;
+}
+
 /** The reply for a prompt, and its words for streaming. */
 function replyFor(prompt) {
   const text = latest(prompt);
   const hit = replies.find(([pattern]) => pattern.test(text));
-  return hit ? hit[1] : fallback;
+  const reply = hit ? hit[1] : fallback;
+  return process.env.DEMO_FULL_ANSWERS ? fullAnswer(text, reply) : reply;
 }
 
 function words(text) {

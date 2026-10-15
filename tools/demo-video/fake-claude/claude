@@ -41,7 +41,7 @@ process.stdin.on('end', async () => {
   write({ type: 'system', subtype: 'init', model });
   for (const word of words(reply)) {
     write({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: word } } });
-    await sleep(28);
+    if (!process.env.DEMO_FULL_ANSWERS) await sleep(28); // long answers off camera need no typing pace
   }
   // Everything Claude would read counts: the conversation on stdin and the system prompt passed as an argument.
   write({ type: 'result', subtype: 'success', is_error: false, result: reply, usage: { input_tokens: Math.round((input.length + process.argv.slice(2).join(' ').length) / 4), output_tokens: words(reply).length } });
