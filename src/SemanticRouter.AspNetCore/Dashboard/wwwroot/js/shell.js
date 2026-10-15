@@ -1,4 +1,5 @@
 /* Semantic Router dashboard: Loading, the sidebar and top bar, themes, rendering and hash routing. */
+import { loadTrends } from './charts.js';
 import { $, $$, api, banner, h, isDirty, PREFIX, readOnly, state, THEME_KEY, THEMES, views } from './core.js';
 import { loadDigest } from './digest.js';
 import { endpointPill } from './endpoints.js';
@@ -38,7 +39,9 @@ export async function refreshStatus() {
     if (state.view === 'overview' || state.view === 'learned') await loadTuning();
     if (state.view === 'overview') await loadDigest();
     renderChrome();
-    if (state.view === 'overview') { state.trends.data = null; }
+    // Fresh trends in the background: the card keeps its last figures meanwhile, rather than shrinking to "Loading…"
+    // and back, which made the page jump for anyone scrolled down.
+    if (state.view === 'overview') loadTrends();
     if (state.view === 'usage') { loadUsage(); }
     if (state.view === 'overview' || state.view === 'learned' || (state.view === 'activity' && !state.label)) render();
     else if (state.view === 'live') scheduleLive();
