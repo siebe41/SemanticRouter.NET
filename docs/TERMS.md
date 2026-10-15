@@ -136,7 +136,7 @@ A subscription CLI connector sends prompts through **whatever account that CLI i
 
 - **Check your company's AI policy first.** Many companies allow only approved tools and accounts for work code.
 - **Use the account your company provides.** Sign each CLI in to your company's plan (for example Claude for Work, ChatGPT Enterprise or Copilot Business), or use an API-key connector under the company's agreement. A company seat keeps its own terms: the router does not change who the vendor is serving or under which agreement.
-- **Keep the CLI connectors off where they are not allowed.** `semantic-router init` asks before enabling each subscription CLI it finds, and adds them disabled when it cannot ask (no terminal, a script, CI). `semantic-router init --no-cli` adds none at all. A connector that is already set up is turned off by disabling its models on the dashboard's **Models** page. A machine-wide policy that lets an administrator turn off connector types is planned; see [#100](https://github.com/siebe41/SemanticRouter.NET/issues/100).
+- **Keep the CLI connectors off where they are not allowed.** `semantic-router init` asks before enabling each subscription CLI it finds, and adds them disabled when it cannot ask (no terminal, a script, CI). `semantic-router init --no-cli` adds none at all. A connector that is already set up is turned off by disabling its models on the dashboard's **Models** page. An administrator can turn off connector types for the whole machine with a [machine-wide policy](enterprise.md) (`DisabledConnectorTypes: ["Cli", "Copilot"]`), which the user's configuration cannot override.
 
 ## Your checklist
 
