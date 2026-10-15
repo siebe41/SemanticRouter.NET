@@ -52,6 +52,22 @@ public sealed class ModelDefinition
     /// <summary>Price per million input tokens written to the provider's prompt cache. Defaults to <see cref="InputCostPerMillionTokens"/>.</summary>
     public decimal? CacheWriteCostPerMillionTokens { get; set; }
 
+    /// <summary>
+    /// For a subscription (marginal cost 0, not local): the provider's pay-as-you-go API price per million input
+    /// tokens for the same model. Each request is valued at these prices, as what the subscription saved you; the value
+    /// is reported apart from spend and never counts against budgets or ranking. <see langword="null"/>: not valued.
+    /// </summary>
+    public decimal? ApiInputCostPerMillionTokens { get; set; }
+
+    /// <summary>The API price per million output tokens. See <see cref="ApiInputCostPerMillionTokens"/>.</summary>
+    public decimal? ApiOutputCostPerMillionTokens { get; set; }
+
+    /// <summary>The API price per million cache-read input tokens. Defaults to <see cref="ApiInputCostPerMillionTokens"/>.</summary>
+    public decimal? ApiCacheReadCostPerMillionTokens { get; set; }
+
+    /// <summary>The API price per million cache-write input tokens. Defaults to <see cref="ApiInputCostPerMillionTokens"/>.</summary>
+    public decimal? ApiCacheWriteCostPerMillionTokens { get; set; }
+
     /// <summary>User preference: lower values are preferred. Breaks ties, and is the primary key for <see cref="SelectionStrategy.Priority"/>. Default 0.</summary>
     public int Priority { get; set; }
 
@@ -100,6 +116,24 @@ public sealed class ModelDefinition
          + (outputTokens * OutputCostPerMillionTokens)
          + (cacheReadTokens * (CacheReadCostPerMillionTokens ?? InputCostPerMillionTokens))
          + (cacheWriteTokens * (CacheWriteCostPerMillionTokens ?? InputCostPerMillionTokens))) / 1_000_000m;
+
+    /// <summary>
+    /// What a request on a subscription would have cost at its API prices (<see cref="ApiInputCostPerMillionTokens"/>):
+    /// the value it got from the subscription. 0 for a model with a marginal cost, or without API prices.
+    /// </summary>
+    public decimal ApiValue(long inputTokens, long outputTokens, long cacheReadTokens = 0, long cacheWriteTokens = 0)
+    {
+        if (InputCostPerMillionTokens > 0 || OutputCostPerMillionTokens > 0 || (ApiInputCostPerMillionTokens is null && ApiOutputCostPerMillionTokens is null))
+        {
+            return 0m;
+        }
+
+        decimal input = ApiInputCostPerMillionTokens ?? 0m;
+        return ((inputTokens * input)
+                + (outputTokens * (ApiOutputCostPerMillionTokens ?? 0m))
+                + (cacheReadTokens * (ApiCacheReadCostPerMillionTokens ?? input))
+                + (cacheWriteTokens * (ApiCacheWriteCostPerMillionTokens ?? input))) / 1_000_000m;
+    }
 
     /// <summary>Estimated marginal cost in USD for a request of the given size.</summary>
     public decimal EstimateCost(int inputTokens, int outputTokens) =>

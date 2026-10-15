@@ -45,6 +45,19 @@ public class DefaultModelSelectorTests
             .Select(c => c.Model.Name).Should().Equal("claude-sonnet", "claude-opus", "api-frontier", "local-coder");
     }
 
+    [Fact]
+    public void A_subscription_is_valued_at_its_api_prices_and_nothing_else_is()
+    {
+        ModelDefinition subscription = Model("claude-cli", 4);
+        (subscription.ApiInputCostPerMillionTokens, subscription.ApiOutputCostPerMillionTokens) = (4m, 20m);
+        ModelDefinition paid = Model("api", 4, costPerMillion: 4m);
+        paid.ApiInputCostPerMillionTokens = 4m;
+
+        subscription.ApiValue(1_000_000, 100_000, cacheReadTokens: 1_000_000).Should().Be(4m + 2m + 4m, "cache reads default to the API input price");
+        paid.ApiValue(1_000_000, 0).Should().Be(0m, "a model with a price is spend, not subscription value");
+        LocalSmall.ApiValue(1_000_000, 0).Should().Be(0m);
+    }
+
     private sealed class Residency(params ModelDefinition[] loaded) : IModelResidency
     {
         public HashSet<ModelDefinition> Loaded { get; } = [.. loaded];

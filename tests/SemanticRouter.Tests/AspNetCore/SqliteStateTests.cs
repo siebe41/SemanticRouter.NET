@@ -59,10 +59,11 @@ public sealed class SqliteStateTests : IDisposable
         }
 
         var ledger = new SqliteUsageLedger(Open());
-        ledger.Record(new UsageRecord(_time.GetUtcNow(), "new", "c", null, null, false, 20, 10, 0, 0, 0.2m, 0.2m, "work"));
+        ledger.Record(new UsageRecord(_time.GetUtcNow(), "new", "c", null, null, false, 20, 10, 0, 0, 0.2m, 0.2m, "work", SubscriptionValueUsd: 0.5m));
 
         DateTimeOffset since = _time.GetUtcNow().AddHours(-1), until = _time.GetUtcNow().AddHours(1);
         ledger.Total(since, until).Requests.Should().Be(2, "the old row survives the migration");
+        ledger.Total(since, until).SubscriptionValueUsd.Should().Be(0.5m, "the old row has no subscription value");
         ledger.Total(since, until, profile: "work").InputTokens.Should().Be(20);
         ledger.Summarize(since, until, UsageGrouping.Profile).Select(g => g.Key).Should().BeEquivalentTo("work", "(no profile)");
         _logs.Messages.Should().NotContain(m => m.Contains("cannot be used", StringComparison.Ordinal));

@@ -70,8 +70,9 @@ public static class SqliteStateBuilderExtensions
 /// </summary>
 internal sealed partial class SqliteRouterDatabase
 {
-    // 2: usage.profile (routing profiles). Version 1 files are migrated in place.
-    private const int SchemaVersion = 2;
+    // 2: usage.profile (routing profiles). 3: usage.subscription_value (subscriptions at API prices). Older files are
+    // migrated in place.
+    private const int SchemaVersion = 3;
 
     private readonly string _connectionString;
     private readonly ILogger _logger;
@@ -215,7 +216,8 @@ internal sealed partial class SqliteRouterDatabase
             CREATE TABLE IF NOT EXISTS usage (
                 timestamp_ticks INTEGER NOT NULL, model TEXT NOT NULL, connector TEXT NOT NULL, route TEXT, client TEXT,
                 is_local INTEGER NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL, cache_read INTEGER NOT NULL,
-                cache_write INTEGER NOT NULL, cost TEXT NOT NULL, reference_cost TEXT NOT NULL, profile TEXT);
+                cache_write INTEGER NOT NULL, cost TEXT NOT NULL, reference_cost TEXT NOT NULL, profile TEXT,
+                subscription_value TEXT NOT NULL DEFAULT '0');
             CREATE INDEX IF NOT EXISTS usage_timestamp ON usage (timestamp_ticks);
             CREATE TABLE IF NOT EXISTS config_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp_ticks INTEGER NOT NULL,
@@ -231,11 +233,11 @@ internal sealed partial class SqliteRouterDatabase
         {
             check.Transaction = transaction;
             string? version = check.ExecuteScalar() as string;
-            if (version == "1")
+            if (version is "1" or "2")
             {
-                using SqliteCommand migrate = Command(connection, """
-                    ALTER TABLE usage ADD COLUMN profile TEXT;
-                    UPDATE meta SET value = '2' WHERE key = 'schema_version';
+                using SqliteCommand migrate = Command(connection, (version == "1" ? "ALTER TABLE usage ADD COLUMN profile TEXT;" : string.Empty) + """
+                    ALTER TABLE usage ADD COLUMN subscription_value TEXT NOT NULL DEFAULT '0';
+                    UPDATE meta SET value = '3' WHERE key = 'schema_version';
                     """);
                 migrate.Transaction = transaction;
                 migrate.ExecuteNonQuery();
@@ -729,14 +731,15 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
-                "INSERT INTO usage (timestamp_ticks, model, connector, route, client, is_local, input, output, cache_read, cache_write, cost, reference_cost, profile) " +
-                "VALUES ($ts, $model, $connector, $route, $client, $local, $input, $output, $cacheRead, $cacheWrite, $cost, $reference, $profile);" +
+                "INSERT INTO usage (timestamp_ticks, model, connector, route, client, is_local, input, output, cache_read, cache_write, cost, reference_cost, profile, subscription_value) " +
+                "VALUES ($ts, $model, $connector, $route, $client, $local, $input, $output, $cacheRead, $cacheWrite, $cost, $reference, $profile, $value);" +
                 (prune ? "DELETE FROM usage WHERE timestamp_ticks < $oldest;" : string.Empty),
                 ("$ts", record.Timestamp.UtcTicks), ("$model", record.Model), ("$connector", record.Connector), ("$route", record.Route),
                 ("$client", record.Client), ("$local", record.IsLocal ? 1 : 0), ("$input", record.InputTokens), ("$output", record.OutputTokens),
                 ("$cacheRead", record.CacheReadTokens), ("$cacheWrite", record.CacheWriteTokens),
                 ("$cost", record.CostUsd.ToString(CultureInfo.InvariantCulture)), ("$reference", record.ReferenceCostUsd.ToString(CultureInfo.InvariantCulture)),
-                ("$oldest", (record.Timestamp - database.Options.UsageRetention).UtcTicks), ("$profile", record.Profile));
+                ("$oldest", (record.Timestamp - database.Options.UsageRetention).UtcTicks), ("$profile", record.Profile),
+                ("$value", record.SubscriptionValueUsd.ToString(CultureInfo.InvariantCulture)));
             command.ExecuteNonQuery();
             return true;
         });
@@ -759,7 +762,7 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
 
     private static UsageTotals Merge(IEnumerable<UsageTotals> totals) => totals.Aggregate(UsageTotals.Zero, (a, b) => new UsageTotals(
         a.Requests + b.Requests, a.InputTokens + b.InputTokens, a.OutputTokens + b.OutputTokens, a.CacheReadTokens + b.CacheReadTokens,
-        a.CacheWriteTokens + b.CacheWriteTokens, a.CostUsd + b.CostUsd, a.ReferenceCostUsd + b.ReferenceCostUsd));
+        a.CacheWriteTokens + b.CacheWriteTokens, a.CostUsd + b.CostUsd, a.ReferenceCostUsd + b.ReferenceCostUsd, a.SubscriptionValueUsd + b.SubscriptionValueUsd));
 
     private List<UsageRecord> Read(DateTimeOffset since, DateTimeOffset until, string? model, string? connector, string? profile) =>
         database.Run("reading usage", new List<UsageRecord>(), connection =>
@@ -767,7 +770,7 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
             var records = new List<UsageRecord>();
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
-                "SELECT timestamp_ticks, model, connector, route, client, is_local, input, output, cache_read, cache_write, cost, reference_cost, profile FROM usage " +
+                "SELECT timestamp_ticks, model, connector, route, client, is_local, input, output, cache_read, cache_write, cost, reference_cost, profile, subscription_value FROM usage " +
                 "WHERE timestamp_ticks >= $since AND timestamp_ticks < $until AND ($model IS NULL OR model = $model COLLATE NOCASE) " +
                 "AND ($connector IS NULL OR connector = $connector COLLATE NOCASE) AND ($profile IS NULL OR profile = $profile COLLATE NOCASE);",
                 ("$since", since.UtcTicks), ("$until", until.UtcTicks), ("$model", model), ("$connector", connector), ("$profile", profile));
@@ -779,7 +782,7 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
                     reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetInt64(5) != 0,
                     reader.GetInt64(6), reader.GetInt64(7), reader.GetInt64(8), reader.GetInt64(9),
                     decimal.Parse(reader.GetString(10), CultureInfo.InvariantCulture), decimal.Parse(reader.GetString(11), CultureInfo.InvariantCulture),
-                    reader.IsDBNull(12) ? null : reader.GetString(12)));
+                    reader.IsDBNull(12) ? null : reader.GetString(12), decimal.Parse(reader.GetString(13), CultureInfo.InvariantCulture)));
             }
 
             return records;

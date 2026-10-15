@@ -16,14 +16,22 @@ namespace SemanticRouter.AspNetCore;
 /// <param name="CostUsd">Cost at the model's configured prices.</param>
 /// <param name="ReferenceCostUsd">Cost at the reference model's prices (<see cref="UsageOptions.ReferenceModel"/>), or <see cref="CostUsd"/>.</param>
 /// <param name="Profile">The routing profile the request was routed under, if any.</param>
+/// <param name="SubscriptionValueUsd">
+/// For a subscription model, the request at the provider's API prices (<see cref="ModelDefinition.ApiValue"/>): value
+/// received, not spend. 0 otherwise.
+/// </param>
 public sealed record UsageRecord(
     DateTimeOffset Timestamp, string Model, string Connector, string? Route, string? Client, bool IsLocal,
     long InputTokens, long OutputTokens, long CacheReadTokens, long CacheWriteTokens, decimal CostUsd, decimal ReferenceCostUsd,
-    string? Profile = null);
+    string? Profile = null, decimal SubscriptionValueUsd = 0m);
 
-/// <summary>Usage added up.</summary>
+/// <summary>
+/// Usage added up. <c>SubscriptionValueUsd</c> is what the subscriptions' requests would have cost at API prices; it is
+/// not part of <c>CostUsd</c>.
+/// </summary>
 public sealed record UsageTotals(
-    long Requests, long InputTokens, long OutputTokens, long CacheReadTokens, long CacheWriteTokens, decimal CostUsd, decimal ReferenceCostUsd)
+    long Requests, long InputTokens, long OutputTokens, long CacheReadTokens, long CacheWriteTokens, decimal CostUsd, decimal ReferenceCostUsd,
+    decimal SubscriptionValueUsd = 0m)
 {
     /// <summary>Nothing.</summary>
     public static UsageTotals Zero { get; } = new(0, 0, 0, 0, 0, 0, 0);
@@ -39,7 +47,8 @@ public sealed record UsageTotals(
     {
         ArgumentNullException.ThrowIfNull(record);
         return new(Requests + 1, InputTokens + record.InputTokens, OutputTokens + record.OutputTokens, CacheReadTokens + record.CacheReadTokens,
-            CacheWriteTokens + record.CacheWriteTokens, CostUsd + record.CostUsd, ReferenceCostUsd + record.ReferenceCostUsd);
+            CacheWriteTokens + record.CacheWriteTokens, CostUsd + record.CostUsd, ReferenceCostUsd + record.ReferenceCostUsd,
+            SubscriptionValueUsd + record.SubscriptionValueUsd);
     }
 }
 

@@ -27,6 +27,9 @@ public sealed class ModelLineupTests : RouterHostTest
         lineup.Should().OnlyContain(e => e.Recommended && !e.Suggestion!.IsLocal && e.Suggestion.InputCostPerMillionTokens == 0 && e.Suggestion.ContextWindow == 200_000);
         lineup.Select(e => e.Suggestion!.Capabilities).Should().AllSatisfy(c => c.Should().Contain(["chat", "code", "reasoning", "tools"]).And.NotContain("vision"));
         lineup[3].Reason.Should().Contain("enable it if your plan includes");
+        lineup.Select(e => (e.Suggestion!.ApiInputCostPerMillionTokens, e.Suggestion.ApiOutputCostPerMillionTokens)).Should().Equal(
+            [(0.10m, 0.50m), (2m, 10m), (4m, 20m), (10m, 50m)], "a subscription's use is valued at the API price of the family's latest model");
+        lineup[2].Suggestion!.ApiCacheReadCostPerMillionTokens.Should().Be(0.4m);
     }
 
     [Fact]

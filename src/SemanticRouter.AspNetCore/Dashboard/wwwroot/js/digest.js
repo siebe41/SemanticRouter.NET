@@ -26,8 +26,9 @@ export function digestCard() {
   const d = state.digest;
   if (!d) return '';
   const signals = Object.entries(d.signalsByKind || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${int(v)} ${SIGNALS[k] || k}`).join(', ');
-  const saved = d.referenceModel ? `<div class="card stat"><span class="value">${usd(d.savedUsd)}</span><span class="label">saved vs ${h(d.referenceModel)} · spent ${usd(d.costUsd)}</span></div>`
-    : `<div class="card stat"><span class="value">${usd(d.costUsd)}</span><span class="label">spent (set <span class="mono">Usage:ReferenceModel</span> to see savings)</span></div>`;
+  const plan = d.subscriptionValueUsd ? ` · <span title="Not spent: subscription use at the provider's API prices">${usd(d.subscriptionValueUsd)} of subscription use at API prices</span>` : '';
+  const saved = d.referenceModel ? `<div class="card stat"><span class="value">${usd(d.savedUsd)}</span><span class="label">saved vs ${h(d.referenceModel)} · spent ${usd(d.costUsd)}${plan}</span></div>`
+    : `<div class="card stat"><span class="value">${usd(d.costUsd)}</span><span class="label">spent (set <span class="mono">Usage:ReferenceModel</span> to see savings)${plan}</span></div>`;
   return `<div class="section digest">
     <div class="card-head"><h2>This week</h2><span class="small muted">${h(new Date(d.since).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }))} – today</span><span class="spacer"></span><a href="#/usage" class="small">usage →</a></div>
     <div class="grid cols-4">

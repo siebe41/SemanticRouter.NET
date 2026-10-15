@@ -313,6 +313,21 @@ public static partial class ModelLineup
                 suggestion.ContextWindow = model.MaxContextLength ?? 0;
             }
 
+            // A subscription costs nothing per request, but its use is worth what the API would charge: Claude Code's
+            // aliases (opus) follow the family's latest model, the first listed.
+            (string Prefix, int Context, decimal Input, decimal Output)[] api = listed.Length == 1 || lower != claude.Groups[1].Value
+                ? listed
+                : AnthropicModels.Where(m => m.Prefix.Contains($"-{lower}-", StringComparison.Ordinal)).Take(1).ToArray();
+            if (subscription && api.Length == 1)
+            {
+                (_, _, decimal input, decimal output) = api[0];
+                suggestion.ApiInputCostPerMillionTokens = input;
+                suggestion.ApiOutputCostPerMillionTokens = output;
+                suggestion.ApiCacheReadCostPerMillionTokens = input / 10;
+                suggestion.ApiCacheWriteCostPerMillionTokens = input * 1.25m;
+                reasons.Add($"its use valued at Anthropic's API price, ${input.ToString(CultureInfo.InvariantCulture)}/${output.ToString(CultureInfo.InvariantCulture)} per million tokens, shown on Usage apart from spend");
+            }
+
             if (subscription && claude.Groups[1].Value is "fable" or "mythos")
             {
                 suggestion.Enabled = false;

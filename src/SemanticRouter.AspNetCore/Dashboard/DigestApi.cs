@@ -52,7 +52,8 @@ internal static class DigestApi
             learned,
             tuner.Changes().Count(c => c.State == TuningChangeState.Suggested),
             notices.Current(),
-            configuration.Notifications.Enabled);
+            configuration.Notifications.Enabled,
+            totals.SubscriptionValueUsd);
     }
 }
 
@@ -77,6 +78,7 @@ internal static class DigestApi
 /// <param name="Suggestions">Tuning suggestions waiting.</param>
 /// <param name="Notices">What needs a decision now.</param>
 /// <param name="Notify">Whether notifications are on (<see cref="NotificationOptions.Enabled"/>).</param>
+/// <param name="SubscriptionValueUsd">What the subscriptions' requests would have cost at API prices (not spent).</param>
 internal sealed record DigestResponse(
     DateTimeOffset Since,
     DateTimeOffset Until,
@@ -97,7 +99,8 @@ internal sealed record DigestResponse(
     IReadOnlyList<DigestChange> Learned,
     int Suggestions,
     IReadOnlyList<RouterNotice> Notices,
-    bool Notify);
+    bool Notify,
+    decimal SubscriptionValueUsd = 0m);
 
 /// <summary>A change automatic tuning made: its id (for undo), when, what, and the configuration version it became.</summary>
 internal sealed record DigestChange(long Id, DateTimeOffset Timestamp, string Summary, TuningChangeState State, long? Version);

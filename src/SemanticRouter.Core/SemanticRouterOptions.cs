@@ -345,7 +345,9 @@ public class SemanticRouterOptions
                 errors.Add($"Model '{model.Name}' must name a {nameof(ModelDefinition.Connector)}.");
             }
 
-            if (model.Tier < 0 || model.ContextWindow < 0 || model.InputCostPerMillionTokens < 0 || model.OutputCostPerMillionTokens < 0)
+            if (model.Tier < 0 || model.ContextWindow < 0 || model.InputCostPerMillionTokens < 0 || model.OutputCostPerMillionTokens < 0
+                || model.ApiInputCostPerMillionTokens < 0 || model.ApiOutputCostPerMillionTokens < 0
+                || model.ApiCacheReadCostPerMillionTokens < 0 || model.ApiCacheWriteCostPerMillionTokens < 0)
             {
                 errors.Add($"Model '{model.Name}' must not have a negative tier, context window or cost.");
             }

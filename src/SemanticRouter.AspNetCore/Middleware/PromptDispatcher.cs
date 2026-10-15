@@ -273,7 +273,7 @@ internal sealed partial class PromptDispatcher
 
         _ledger?.Record(new UsageRecord(
             _time.GetUtcNow(), model.Name, connector, activity?.Route, activity?.Client, model.IsLocal,
-            input, output, cacheRead, cacheWrite, cost, referenceCost, profile));
+            input, output, cacheRead, cacheWrite, cost, referenceCost, profile, model.ApiValue(input, output, cacheRead, cacheWrite)));
     }
 
     /// <summary>The model being tried, for the response-started callback.</summary>
