@@ -33,6 +33,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     private readonly string[] _removedEnvironment;
     private readonly SecretRedactor _redactor;
     private readonly PromptRouterMetrics? _metrics;
+    private readonly PromptStorage _storePrompts;
     private int _waiting; // requests waiting for a free process, for MaxQueue
 
     public CliChatConnector(
@@ -42,7 +43,8 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         ILogger logger,
         IToolCallAffinity? affinity = null,
         SecretRedactor? redactor = null,
-        PromptRouterMetrics? metrics = null)
+        PromptRouterMetrics? metrics = null,
+        PromptStorage storePrompts = PromptStorage.Redacted)
     {
         Name = name;
         _options = options;
@@ -52,6 +54,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         _logger = logger;
         _redactor = redactor ?? SecretRedactor.None;
         _metrics = metrics;
+        _storePrompts = storePrompts;
         _gate = new SemaphoreSlim(Math.Max(1, options.MaxConcurrency));
         _executable = string.IsNullOrWhiteSpace(options.Executable) ? _adapter.DefaultExecutable : options.Executable;
         _quotaPatterns = _adapter.DefaultQuotaPatterns.Concat(options.QuotaErrorPatterns).ToArray();
@@ -293,17 +296,17 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         if (writer.HasStarted)
         {
             // Too late to fail over: end the stream cleanly and record what happened.
-            LogMidStreamFailure(_logger, Name, exitCode, Truncate(diagnostics));
+            LogMidStreamFailure(_logger, Name, exitCode, Output(diagnostics, 1000));
             await writer.CompleteAsync(ChatStopReason.EndTurn, default, cancellationToken).ConfigureAwait(false);
             return ConnectorResult.Completed;
         }
 
         bool quota = quotaSignal || _quotaPatterns.Any(p => diagnostics.Contains(p, StringComparison.OrdinalIgnoreCase));
         DateTimeOffset? retryAt = quota && QuotaResetParser.TryParse(diagnostics, DateTimeOffset.UtcNow, null, out DateTimeOffset reset) ? reset : null;
-        LogRunFailed(_logger, Name, exitCode, quota, Truncate(diagnostics));
+        LogRunFailed(_logger, Name, exitCode, quota, Output(diagnostics, 1000));
         return ConnectorResult.Failed(
             quota ? ModelFailureKind.QuotaExceeded : ModelFailureKind.Unavailable,
-            $"exit code {exitCode}: {Truncate(diagnostics, 200)}",
+            $"exit code {exitCode}{(quota && _storePrompts == PromptStorage.Off ? ", usage limit" : string.Empty)}: {Output(diagnostics, 200)}",
             affectsAllConnectorModels: quota && !ModelSpecificLimitPatterns.Any(p => diagnostics.Contains(p, StringComparison.OrdinalIgnoreCase)),
             retryAt: retryAt);
     }
@@ -451,6 +454,13 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         IPAddress? remote = context.Connection.RemoteIpAddress;
         return remote is null || IPAddress.IsLoopback(remote);
     }
+
+    /// <summary>
+    /// What the logs and the activity log keep of a failed run's output (the model's reply and the CLI's errors), as
+    /// <see cref="StateOptions.StorePrompts"/> allows: the output can quote the reply, and the reply the prompt.
+    /// </summary>
+    private string Output(string diagnostics, int max) =>
+        PromptPreviews.Excerpt(diagnostics, _storePrompts, max) ?? "output omitted (StorePrompts: Off)";
 
     private static string Truncate(string value, int max = 1000) => value.Length <= max ? value : value[..max] + "…";
 

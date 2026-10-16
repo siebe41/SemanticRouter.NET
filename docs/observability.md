@@ -1,6 +1,6 @@
 # Usage, budgets and observability
 
-What the router spent, where, and why. All of this works without extra packages: usage and budgets live in the router (in memory, or on disk with `UseSqliteState`). Traces and metrics use the .NET `ActivitySource` and `Meter` APIs, which OpenTelemetry, `dotnet-counters` and Prometheus exporters read. No span, metric or log line carries prompt text.
+What the router spent, where, and why. All of this works without extra packages: usage and budgets live in the router (in memory, or on disk with `UseSqliteState`). Traces and metrics use the .NET `ActivitySource` and `Meter` APIs, which OpenTelemetry, `dotnet-counters` and Prometheus exporters read. No span, metric or log line carries prompt text. A failed CLI run's output, which can quote the model's reply, is in its log line and attempt span only as `State:StorePrompts` allows ([host.md](host.md#what-the-router-stores)).
 
 ## Usage and cost
 

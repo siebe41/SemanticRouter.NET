@@ -18,7 +18,8 @@ internal sealed class ConnectorCatalog : IDisposable
         SecretRedactor? redactor = null,
         PromptRouterMetrics? metrics = null,
         IEnumerable<IChatConnectorFactory>? factories = null,
-        MachinePolicy? policy = null)
+        MachinePolicy? policy = null,
+        PromptStorage storePrompts = PromptStorage.Redacted)
     {
         IChatConnectorFactory[] extra = factories?.ToArray() ?? [];
         foreach ((string name, ConnectorOptions connector) in options)
@@ -45,7 +46,7 @@ internal sealed class ConnectorCatalog : IDisposable
             }
             else if (connector.Type == ConnectorType.Cli)
             {
-                var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity, redactor, metrics);
+                var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity, redactor, metrics, storePrompts);
                 _owned.Add(cli);
                 _connectors[name] = cli;
             }

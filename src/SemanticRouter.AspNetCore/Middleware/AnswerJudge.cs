@@ -262,7 +262,12 @@ internal sealed partial class AnswerJudge : IDisposable
         RoutingActivityEntry entry = job.Entry;
         entry.Grade = grade.Grade;
         entry.PromptKey = job.PromptKey;
-        entry.GradeNote = grade.Reason is { Length: > 0 } reason ? $"{judge.Name}: {reason}" : judge.Name;
+        // The reason is the judge's own words about the answer, which can quote it (and the prompt): kept as
+        // State:StorePrompts allows.
+        entry.GradeNote = grade.Reason is { Length: > 0 } reason
+                          && PromptPreviews.Excerpt(reason, runtime.Configuration.State.StorePrompts, reason.Length) is { Length: > 0 } kept
+            ? $"{judge.Name}: {kept}"
+            : judge.Name;
         _activity.Revise(entry);
         LogGraded(_logger, entry.Id, entry.ServedBy ?? "?", grade.Grade, judge.Name);
 

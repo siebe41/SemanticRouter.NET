@@ -90,7 +90,10 @@ public sealed class RoutingActivityEntry
     /// <summary>What happened: <c>planned</c> (Annotate mode), <c>served</c> or <c>failed</c>.</summary>
     public string Outcome { get; set; } = "planned";
 
-    /// <summary>Failover notes, when models were skipped.</summary>
+    /// <summary>
+    /// Failover notes, when models were skipped. A failed CLI run's output is in them only as
+    /// <see cref="StateOptions.StorePrompts"/> allows.
+    /// </summary>
     public string? Detail { get; set; }
 
     /// <summary>Total time from routing to the end of the response, in milliseconds: what the client waited, failed attempts included.</summary>
@@ -165,7 +168,10 @@ public sealed class RoutingActivityEntry
     /// <summary>The judge's grade of the answer, 1 (wrong) to 5 (excellent), when it was graded (<see cref="JudgeOptions"/>).</summary>
     public int? Grade { get; set; }
 
-    /// <summary>The model that graded the answer and its reason, e.g. <c>qwen3-32b: misses the second question</c>.</summary>
+    /// <summary>
+    /// The model that graded the answer and its reason, e.g. <c>qwen3-32b: misses the second question</c>; the reason only
+    /// as <see cref="StateOptions.StorePrompts"/> allows (none with <c>Off</c>).
+    /// </summary>
     public string? GradeNote { get; set; }
 
     /// <summary>

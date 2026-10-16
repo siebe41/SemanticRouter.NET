@@ -126,13 +126,18 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | `semantic-router.evaluation.jsonl` | Prompts you labelled, in full | Until you remove them | Edit or delete the file (the **Evaluate** page) |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted | Until removed from the configuration | Remove the key on the dashboard |
 | The data-protection key ring (see [The key ring](#the-key-ring)) | The keys that decrypt `semantic-router.secrets.json`; a new one every 90 days | Kept, so older secrets stay readable | Only with the secrets file: without its keys, the file cannot be read |
-| Logs (console, `logs/` for the Windows service) | Routing decisions and errors, with keys redacted. No prompt text, but a CLI run that fails logs the start of what it wrote, which can quote the model's reply | As your log setup keeps them | Delete the files |
+| Logs (console, `logs/` for the Windows service) | Routing decisions and errors, with keys redacted. No prompt text. A CLI run that fails logs the start of what it wrote, which can quote the model's reply, only as `State:StorePrompts` allows (see below) | As your log setup keeps them | Delete the files |
 
 **Prompt previews.** `State:StorePrompts` decides how much of each prompt the activity log keeps:
 
 - `Redacted` (default): the first 160 characters, with API keys, tokens and private keys masked as `***` (the patterns `LocalOnlyWhen: Secrets` looks for).
 - `On`: the first 160 characters as they are.
 - `Off`: none. The activity page, its exports and the live view show no prompt text, and automatic tuning learns no utterances from activity.
+
+The same setting covers text a model wrote about the prompt, which can quote it:
+
+- **A failed CLI run's output.** When a CLI exits with an error, the activity entry's failover notes, the log line and the attempt span keep the start of its reply and error output: 200 characters in the activity entry, 1,000 in the log. `Redacted` masks credentials in it as above, `On` keeps it as it is, and `Off` keeps only the exit code (and that it was a usage limit), as `exit code 1: output omitted (StorePrompts: Off)`.
+- **The judge's reason.** The [judge](routing-quality.md#the-judge)'s one-line reason for its grade is kept with the grade, masked with `Redacted`. With `Off` only the grade and the judge's name are kept.
 
 The setting applies to new requests; delete earlier activity to remove previews already stored. The database is opened with `secure_delete` and its write-ahead log is truncated after each prune, so deleted rows are overwritten rather than left in free pages. A purge also compacts the file (`VACUUM`). The evaluation set is not affected: it holds what you chose to label.
 
