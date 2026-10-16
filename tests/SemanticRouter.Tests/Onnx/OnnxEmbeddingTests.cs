@@ -206,6 +206,49 @@ public sealed class OnnxEmbeddingTests : IDisposable
         first.ToArray().Should().Equal(second.ToArray());
     }
 
+    /// <summary>
+    /// Everyday small questions and edits (#153) reach a tier-2 route with each ONNX model at the threshold <c>init</c>
+    /// sets for it, instead of the tier-3 fallback, and the hard work next to them stays on tier 4.
+    /// </summary>
+    [Theory]
+    [InlineData("all-MiniLM-L6-v2")]
+    [InlineData("bge-small-en-v1.5")]
+    public async Task Short_questions_and_small_edits_stay_on_tier_2_and_hard_work_on_tier_4(string name)
+    {
+        RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
+        template.DefaultSimilarityThreshold = OnnxEmbeddingModels.Find(name)!.SuggestedThreshold;
+        using OnnxEmbeddingProviderFactory factory = RealFactory();
+        var classifier = new SemanticPromptClassifier(factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx, Model = name }), template);
+        (string Prompt, string Route, int Tier)[] expected =
+        [
+            ("what does HTTP 409 mean?", "quick-answers", 2),
+            ("what is the default port?", "quick-answers", 2),
+            ("what time zone does the server use?", "quick-answers", 2),
+            ("is this date format ISO 8601?", "quick-answers", 2),
+            ("what does this pattern match?", "quick-answers", 2),
+            ("add null checks to ParseInvoice", "simple-code", 2),
+            ("convert this loop to LINQ", "simple-code", 2),
+            ("add a CancellationToken to SendInvoiceAsync", "simple-code", 2),
+            ("write a test for the currency rounding", "simple-code", 2),
+            ("extract this block into a method", "simple-code", 2),
+            ("turn this class into a record", "simple-code", 2),
+            ("explain why this deadlock happens under load", "(any)", 4),
+            ("what's the root cause of this memory leak", "(any)", 4),
+            ("design a caching layer for the invoice service", "(any)", 4),
+            ("add retry with backoff to every service client and make the tests pass", "(any)", 4),
+        ];
+
+        var routed = new List<string>();
+        foreach ((string prompt, string route, _) in expected)
+        {
+            PromptClassificationResult result = await classifier.ClassifyAsync(prompt);
+            // Hard work may land on any tier-4 route; the small requests must reach their own.
+            routed.Add($"{prompt} -> {(route == "(any)" ? route : result.RouteName)} {result.RequiredTier} ({result.Similarity:0.000})");
+        }
+
+        routed.Select(r => r[..r.LastIndexOf(' ')]).Should().Equal(expected.Select(e => $"{e.Prompt} -> {e.Route} {e.Tier}"), string.Join("; ", routed));
+    }
+
     /// <summary>Prompts the template once misrouted with the default model at the threshold <c>init</c> sets for it.</summary>
     [Fact]
     public async Task With_MiniLM_a_question_about_the_assistant_and_an_instruction_above_pasted_code_reach_their_routes()
