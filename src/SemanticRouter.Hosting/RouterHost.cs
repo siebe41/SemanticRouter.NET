@@ -79,6 +79,7 @@ internal static class RouterHost
             .AddCopilotConnector()
             .UseSqliteState(Path.Combine(settings.ConfigurationDirectory, HostSettings.StateFileName));
 
+        builder.Services.AddSingleton<IRouterSetupDetector, SetupDetector>(); // the dashboard's first-run setup finds what init would
         bool behindProxy = ConfigureForwardedHeaders(builder);
         configure?.Invoke(builder);
 
@@ -99,6 +100,7 @@ internal static class RouterHost
         app.MapAnthropicTokenCount();
         app.MapPromptClassification();
         app.MapRouterDashboard("/router");
+        app.MapRouterDashboardRedirect("/router");
         return app;
     }
 
