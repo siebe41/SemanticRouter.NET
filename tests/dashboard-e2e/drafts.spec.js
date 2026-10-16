@@ -129,22 +129,88 @@ test('Apply sends the version the draft started from; a 409 offers reload, compa
   expect(config.Routes[0].Utterances).toContain('good evening');
 });
 
-test('a change made elsewhere reloads a clean draft and warns about a dirty one', async ({ page, request }) => {
+test('a change made elsewhere reloads a clean draft, moves a dirty one onto it, and warns when both changed the same', async ({ page, request }) => {
   await open(page, 'routes');
   // Clean: the page takes the new configuration on the next refresh.
   const renamed = JSON.parse(JSON.stringify(fixture)); renamed.Routes[1].Name = 'design';
   await request.put('/router/api/config?persist=false', { data: renamed });
   await expect(page.locator('.item-head', { hasText: 'design' })).toBeVisible({ timeout: 12000 });
-  // Dirty: the draft stays and the notice says what happened.
+  // Dirty, another route changed: the draft moves onto it.
   await page.locator('.item-head', { hasText: 'smalltalk' }).click();
   await page.locator('input[data-bind="Routes.0.Name"]').fill('chat');
   renamed.Routes[1].Name = 'systems';
   await request.put('/router/api/config?persist=false', { data: renamed });
+  await expect(page.locator('#toast')).toContainText('kept on top', { timeout: 12000 });
+  await expect(page.locator('.item-head', { hasText: 'systems' })).toBeVisible();
+  await expect(page.locator('input[data-bind="Routes.0.Name"]')).toHaveValue('chat');
+  await expect(page.locator('#draft-notice')).toBeHidden();
+  await expect(page.locator('#save-bar')).toContainText('1 unapplied change');
+  // Dirty, the route the draft renamed changed too: the draft stays and the notice says what happened.
+  renamed.Routes[0].Tier = 2;
+  await request.put('/router/api/config?persist=false', { data: renamed });
   await expect(page.locator('#draft-notice')).toContainText('Configuration changed', { timeout: 12000 });
   await expect(page.locator('input[data-bind="Routes.0.Name"]')).toHaveValue('chat');
   await page.locator('#draft-notice').getByRole('button', { name: 'Reload (lose your changes)' }).click();
-  await expect(page.locator('.item-head', { hasText: 'systems' })).toBeVisible();
+  await expect(page.locator('.item-head', { hasText: 'smalltalk' })).toBeVisible();
   await expect(page.locator('#save-bar')).toBeHidden();
+});
+
+test('a restart counts as a change: Apply sends the instance with the version, and the refresh compares both', async ({ page }) => {
+  // The router may not send an instance (an id of its process) yet: the test adds one to the configuration envelopes
+  // and the status, and takes it off what Apply sends, so the real router checks the version alone. A "restart" keeps
+  // the version number and changes the instance, with a configuration that differs in the second route's name.
+  let instance = 'aaaaaaaaaaaa';
+  let refuse = false;
+  let version;
+  const sent = [];
+  const renameTo = { bbbbbbbbbbbb: 'after-restart', cccccccccccc: 'second-restart' };
+  await page.route(/\/router\/api\/config(\?|$)/, async (route) => {
+    const req = route.request();
+    if (req.method() === 'PUT') {
+      const url = new URL(req.url());
+      sent.push({ baseVersion: url.searchParams.get('baseVersion'), instance: url.searchParams.get('instance') });
+      if (refuse) {
+        refuse = false;
+        return route.fulfill({ status: 409, json: { title: 'The configuration changed since you loaded it.', currentVersion: Number(version), instance: 'dddddddddddd', actor: null, at: new Date().toISOString(), source: 'Configuration' } });
+      }
+      url.searchParams.delete('instance');
+      const res = await route.fetch({ url: url.toString() });
+      return route.fulfill({ response: res, json: { ...(await res.json()), instance } });
+    }
+    const res = await route.fetch();
+    const json = await res.json();
+    if (renameTo[instance]) json.config.Routes[1].Name = renameTo[instance];
+    await route.fulfill({ response: res, json: { ...json, instance } });
+  });
+  await patchStatus(page, (s) => { s.instance = instance; });
+  await open(page, 'routes');
+  version = String((await (await page.request.get('/router/api/config')).json()).version);
+  await page.locator('.item-head', { hasText: 'smalltalk' }).click();
+  await page.locator('textarea[data-bind="Routes.0.Utterances"]').fill('hello there\ngood evening');
+  await page.locator('#save-bar [data-action="apply"]').click();
+  await expect(page.locator('#toast')).toContainText('Applied');
+  expect(sent[0]).toEqual({ baseVersion: version, instance: 'aaaaaaaaaaaa' });
+  version = String(Number(version) + 1);
+  // Restarted with the same version number: a clean draft reloads.
+  instance = 'bbbbbbbbbbbb';
+  await expect(page.locator('.item-head', { hasText: 'after-restart' })).toBeVisible({ timeout: 12000 });
+  // Restarted again with unapplied edits: they move onto the new configuration.
+  await page.locator('input[data-bind="Routes.0.Name"]').fill('chat');
+  instance = 'cccccccccccc';
+  await expect(page.locator('#toast')).toContainText('kept on top', { timeout: 12000 });
+  await expect(page.locator('.item-head', { hasText: 'second-restart' })).toBeVisible();
+  await expect(page.locator('input[data-bind="Routes.0.Name"]')).toHaveValue('chat');
+  // Apply names the new instance; a 409 from yet another instance says the router restarted, and Apply mine anyway
+  // names that one.
+  refuse = true;
+  await page.locator('#save-bar [data-action="apply"]').click();
+  const notice = page.locator('#draft-notice');
+  await expect(notice).toContainText('before the router restarted');
+  expect(sent[1]).toEqual({ baseVersion: version, instance: 'cccccccccccc' });
+  await notice.getByRole('button', { name: 'Apply mine anyway' }).click();
+  await expect(page.locator('#toast')).toContainText('Applied');
+  expect(sent[2]).toEqual({ baseVersion: version, instance: 'dddddddddddd' });
+  await expect(notice).toBeHidden();
 });
 
 test('an utterance added from Evaluate keeps unapplied edits on top of the new configuration', async ({ page }) => {

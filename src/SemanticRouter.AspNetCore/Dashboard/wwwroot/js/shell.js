@@ -1,6 +1,6 @@
 /* Semantic Router dashboard: Loading, the rail, tabs and top bar, themes, rendering and hash routing. */
 import { loadTrends } from './charts.js';
-import { $, $$, actionKey, api, banner, h, isDirty, METRICS_VIEWS, metricsOnly, plural, PREFIX, readOnly, SECTIONS, sectionOf, sourceLabel, state, THEME_KEY, THEMES, views, whenDate } from './core.js';
+import { $, $$, actionKey, api, banner, h, isDirty, METRICS_VIEWS, metricsOnly, plural, PREFIX, readOnly, SECTIONS, sectionOf, sourceLabel, state, THEME_KEY, THEMES, toast, views, whenDate } from './core.js';
 import { loadDigest } from './digest.js';
 import { draftChanges, itemKeyForPath, rebase } from './draft.js';
 import { endpointPill } from './endpoints.js';
@@ -37,7 +37,7 @@ export async function loadAll() {
 export function setConfig(envelope) {
   state.config = envelope.config;
   state.original = JSON.stringify(envelope.config);
-  state.meta = { version: envelope.version, source: envelope.source, store: envelope.store, secretStore: envelope.secretStore, warning: envelope.warning, createdAt: envelope.createdAt };
+  state.meta = { version: envelope.version, instance: envelope.instance, source: envelope.source, store: envelope.store, secretStore: envelope.secretStore, warning: envelope.warning, createdAt: envelope.createdAt };
   state.errors = null;
   state.issues = null;
   state.conflict = null;
@@ -52,29 +52,36 @@ export function adoptConfig(envelope) {
   if (!isDirty()) { setConfig(envelope); return 'replaced'; }
   const r = rebase(JSON.parse(state.original), state.config, envelope.config);
   if (r.ok) { setConfig(envelope); state.config = r.value; return 'rebased'; }
-  noteConflict({ currentVersion: envelope.version, at: envelope.createdAt });
+  noteConflict({ currentVersion: envelope.version, instance: envelope.instance, at: envelope.createdAt });
   return 'kept';
 }
 
+/*
+ * The version counter starts again at 1 when the router restarts, so a version number alone can name another
+ * configuration: the router also sends an id of the running process (instance). Same configuration = same version on
+ * the same instance. A router that sends no instance is compared by version only.
+ */
+export const sameConfig = (version, instance, v2, i2) => version === v2 && (instance == null || i2 == null || instance === i2);
+
 /* After signing in again: the draft from before goes back on top of what was loaded. */
 export function keepDraft(draft) {
-  if (state.meta.version === draft.version) { state.config = draft.config; return; }
-  const loaded = { version: state.meta.version, createdAt: state.meta.createdAt };
+  if (sameConfig(state.meta.version, state.meta.instance, draft.version, draft.instance)) { state.config = draft.config; return; }
+  const loaded = { version: state.meta.version, instance: state.meta.instance, createdAt: state.meta.createdAt };
   const r = rebase(JSON.parse(draft.original), draft.config, state.config);
   if (r.ok) { state.config = r.value; return; }
-  state.config = draft.config; state.original = draft.original; state.meta.version = draft.version;
-  noteConflict({ currentVersion: loaded.version, at: loaded.createdAt });
+  state.config = draft.config; state.original = draft.original; state.meta.version = draft.version; state.meta.instance = draft.instance;
+  noteConflict({ currentVersion: loaded.version, instance: loaded.instance, at: loaded.createdAt });
 }
 
 /* The configuration changed under the draft: show the notice, with who changed it when the history says. */
 export function noteConflict(info) {
-  const before = state.conflict && state.conflict.currentVersion === info.currentVersion ? state.conflict : {};
+  const before = state.conflict && sameConfig(state.conflict.currentVersion, state.conflict.instance, info.currentVersion, info.instance) ? state.conflict : {};
   state.conflict = { ...before, ...Object.fromEntries(Object.entries(info).filter(([, v]) => v !== undefined)), dismissed: false };
   renderChrome();
   if (info.actor) return;
   api('GET', '/config/history?limit=1').then((r) => {
     const v = r && r.versions && r.versions[0];
-    if (v && state.conflict && state.conflict.currentVersion === info.currentVersion && !state.conflict.actor) {
+    if (v && state.conflict && sameConfig(state.conflict.currentVersion, state.conflict.instance, info.currentVersion, info.instance) && !state.conflict.actor) {
       Object.assign(state.conflict, { actor: v.actor, at: v.timestamp, source: v.source });
       renderChrome();
     }
@@ -82,15 +89,21 @@ export function noteConflict(info) {
 }
 
 /*
- * Someone else applied a configuration (another tab, the CLI, a learned change): with a clean draft, load it quietly;
- * with unapplied edits, say so rather than letting Apply overwrite it unseen. Returns true when it reloaded.
+ * Someone else applied a configuration (another tab, the CLI, a learned change, a restart): with a clean draft, load it
+ * quietly; with unapplied edits, move them onto it when they don't touch what changed, and otherwise say so rather
+ * than letting Apply overwrite it unseen. Any other version counts (not only a higher one): after a restart the
+ * counter starts again. Returns true when it reloaded.
  */
 async function checkVersion() {
   const s = state.status;
-  if (!s || metricsOnly() || s.version == null || state.meta.version == null || s.version <= state.meta.version) return false;
+  if (!s || metricsOnly() || s.version == null || state.meta.version == null || sameConfig(s.version, s.instance, state.meta.version, state.meta.instance)) return false;
   if (!isDirty()) { setConfig(await api('GET', '/config')); return true; }
-  if (!state.conflict || state.conflict.currentVersion !== s.version) noteConflict({ currentVersion: s.version, at: s.createdAt });
-  return false;
+  // Already said for this configuration: don't fetch and try again every refresh.
+  if (state.conflict && sameConfig(state.conflict.currentVersion, state.conflict.instance, s.version, s.instance)) return false;
+  const result = adoptConfig(await api('GET', '/config'));
+  if (result === 'kept') return false;
+  toast(`The configuration changed elsewhere (now version ${state.meta.version}).${isDirty() ? ' Your unapplied changes are kept on top of it.' : ''}`, 'ok');
+  return true;
 }
 
 /* Is text selected on the page? A refresh then would drop the selection, so it waits. */
@@ -205,7 +218,8 @@ function conflictNotice() {
   const by = c.actor ? `by ${h(c.actor)}` : '';
   const at = c.at ? `at ${h(whenDate(c.at))}` : '';
   const via = c.source && !/^(Memory|Store|Configuration)$/.test(c.source) ? ` <span class="faint">(${h(c.source)})</span>` : '';
-  setHtml(el, `<div><b>Configuration changed ${[by, at].filter(Boolean).join(' ')}</b>${via}. Your draft started from version ${h(state.meta.version)}; the router now runs version ${h(c.currentVersion)}.</div>
+  const restarted = c.instance != null && state.meta.instance != null && c.instance !== state.meta.instance;
+  setHtml(el, `<div><b>Configuration changed ${[by, at].filter(Boolean).join(' ')}</b>${via}. Your draft started from version ${h(state.meta.version)}${restarted ? ' before the router restarted' : ''}; the router now runs version ${h(c.currentVersion)}.</div>
     <div class="row-actions"><button class="btn small danger" type="button" data-action="conflict-reload">Reload (lose your changes)</button><button class="btn small" type="button" data-action="conflict-compare">Compare</button><button class="btn small primary" type="button" data-action="conflict-apply">Apply mine anyway</button><button class="btn ghost small" type="button" data-action="conflict-dismiss" aria-label="Hide; Apply asks again" title="Hide; Apply asks again">×</button></div>`);
 }
 

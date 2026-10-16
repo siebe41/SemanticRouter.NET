@@ -282,7 +282,7 @@ export function showSignIn(message) {
   $('#signin-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     // The draft and the JSON editor's text survive signing in again: loading would replace them.
-    const draft = isDirty() ? { config: state.config, original: state.original, version: state.meta.version } : null;
+    const draft = isDirty() ? { config: state.config, original: state.original, version: state.meta.version, instance: state.meta.instance } : null;
     const jsonText = state.jsonText;
     try {
       state.session = await api('POST', '/session', { token: $('#signin-token').value });

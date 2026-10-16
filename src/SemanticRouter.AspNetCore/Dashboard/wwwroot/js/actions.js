@@ -175,7 +175,7 @@ export const actions = {
     render();
     toast('Loaded the running configuration; your changes were dropped.', 'ok', { action: { label: 'Undo', run: () => {
       Object.assign(state, { config: before.config, original: before.original, meta: before.meta, open: before.open });
-      noteConflict({ currentVersion: state.status ? state.status.version : null });
+      noteConflict({ currentVersion: state.status ? state.status.version : null, instance: state.status ? state.status.instance : undefined });
       render();
     } } });
   },
@@ -185,7 +185,7 @@ export const actions = {
   },
   async 'conflict-apply'() {
     const c = state.conflict || {};
-    await applyConfig(c.persist === true, c.currentVersion);
+    await applyConfig(c.persist === true, c.currentVersion, c.instance);
   },
   'conflict-dismiss'() { if (state.conflict) state.conflict.dismissed = true; renderChrome(); },
   // A problem in the list: its field, on its page.
@@ -751,15 +751,19 @@ export function readTester() {
 }
 
 /*
- * Apply the draft. It names the version it started from (baseVersion): when someone else applied a configuration in
- * the meantime the router refuses (409) and the conflict notice offers Reload, Compare or Apply mine anyway.
+ * Apply the draft. It names the version it started from (baseVersion) and the router process that ran it (instance,
+ * when the router sends one: the version counter starts again after a restart): when someone else applied a
+ * configuration in the meantime, or the router restarted, it refuses (409) and the conflict notice offers Reload,
+ * Compare or Apply mine anyway. Apply mine anyway names the version (and instance) the notice was about.
  */
-export async function applyConfig(persist, baseVersion) {
+export async function applyConfig(persist, baseVersion, baseInstance) {
   const local = localProblems();
   if (local.length) { showProblems(local.map((x) => x.message), local, true); return; }
   const base = baseVersion != null ? baseVersion : state.meta.version;
+  const instance = baseVersion != null ? baseInstance : state.meta.instance;
+  const query = `persist=${persist}${base != null ? '&baseVersion=' + encodeURIComponent(base) : ''}${base != null && instance != null ? '&instance=' + encodeURIComponent(instance) : ''}`;
   try {
-    const r = await api('PUT', `/config?persist=${persist}${base != null ? '&baseVersion=' + encodeURIComponent(base) : ''}`, state.config);
+    const r = await api('PUT', `/config?${query}`, state.config);
     setConfig(r);
     clearProblems();
     await refreshStatus();
@@ -771,7 +775,7 @@ export async function applyConfig(persist, baseVersion) {
     if (e.status === 401) return; // signing in again keeps the draft
     if (e.status === 409) {
       const d = e.data || {};
-      noteConflict({ currentVersion: d.currentVersion, actor: d.actor, at: d.at, source: d.source, persist });
+      noteConflict({ currentVersion: d.currentVersion, instance: d.instance, actor: d.actor, at: d.at, source: d.source, persist });
       return;
     }
     const d = e.data || {};
