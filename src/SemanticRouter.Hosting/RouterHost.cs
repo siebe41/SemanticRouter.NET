@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Net;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
@@ -14,7 +15,7 @@ using SemanticRouter.AspNetCore;
 namespace SemanticRouter.Host;
 
 /// <summary>Builds and runs the router web application.</summary>
-internal static class RouterHost
+internal static partial class RouterHost
 {
     private const string TemplateResource = "semantic-router.template.json";
 
@@ -206,19 +207,14 @@ internal static class RouterHost
     public static async Task<RunningRouter?> StartAsync(
         HostSettings settings, TextWriter output, Action<WebApplicationBuilder>? configure = null, Func<string, string?>? environment = null)
     {
-        var store = new JsonFileRouterConfigurationStore(settings.ConfigurationFile);
-        bool create = !File.Exists(settings.ConfigurationFile);
-        RouterConfiguration? fresh = create ? RouterConfiguration.FromJson(Template())
-            : FirstRun.IsUntouchedTemplate(settings.ConfigurationFile) ? store.Load()
-            : null;
-        if (fresh is not null)
+        // Only the start that creates the file seeds connectors from the API keys: on a later start, a template without them
+        // may be one someone deleted them from, and that must stick.
+        if (!File.Exists(settings.ConfigurationFile))
         {
+            RouterConfiguration fresh = RouterConfiguration.FromJson(Template());
             IReadOnlyList<string> seeded = FirstRun.SeedFromEnvironment(fresh, environment ?? Environment.GetEnvironmentVariable);
-            if (create || seeded.Count > 0)
-            {
-                store.Save(fresh);
-                await output.WriteLineAsync(FirstRun.Describe(settings.ConfigurationFile, create, seeded)).ConfigureAwait(false);
-            }
+            new JsonFileRouterConfigurationStore(settings.ConfigurationFile).Save(fresh);
+            await output.WriteLineAsync(FirstRun.Describe(settings.ConfigurationFile, seeded)).ConfigureAwait(false);
         }
 
         WebApplication app = Build(settings, configure);
@@ -247,11 +243,12 @@ internal static class RouterHost
 
     /// <summary>
     /// Why the router could not listen, without a stack trace: when the router recorded for this configuration
-    /// directory is the one listening, where its dashboard is; otherwise that another program holds the address.
+    /// directory is the one listening on the address in use, where its dashboard is; otherwise that another program
+    /// holds the address (the recorded router may listen elsewhere, while something else took this one).
     /// </summary>
     internal static string AddressInUse(string problem, RouterInstance? running)
     {
-        if (running is null)
+        if (running is null || InUse(problem) is not { } address || !running.Urls.Any(u => SameListenAddress(u, address)))
         {
             return $"{problem} Another program is listening there, or a router for another configuration directory " +
                    "(`semantic-router service status` shows the background one). Stop it, or pick another address with --urls, e.g. --urls http://localhost:5081.";
@@ -261,6 +258,39 @@ internal static class RouterHost
         return $"SemanticRouter is already running for this configuration (process {running.ProcessId}, version {running.Version}): " +
                $"its dashboard is {url}/router. Use that one, or stop it first (`semantic-router service stop` when it runs in the background).";
     }
+
+    /// <summary>The address Kestrel says is taken (<c>Failed to bind to address http://127.0.0.1:5080: address already in use.</c>).</summary>
+    private static string? InUse(string problem) => BoundAddress().Match(problem) is { Success: true } match ? match.Groups["url"].Value : null;
+
+    /// <summary>
+    /// Whether two listen addresses take the same port: the same port and the same host, or a wildcard or this machine's
+    /// name on either side.
+    /// </summary>
+    internal static bool SameListenAddress(string a, string b)
+    {
+        if (ListenAddress().Match(a) is not { Success: true } first || ListenAddress().Match(b) is not { Success: true } second
+            || Port(first) != Port(second))
+        {
+            return false;
+        }
+
+        string one = first.Groups["host"].Value, other = second.Groups["host"].Value;
+        return string.Equals(one, other, StringComparison.OrdinalIgnoreCase) || IsWildcard(one) || IsWildcard(other) || (IsLoopback(one) && IsLoopback(other));
+
+        static int Port(Match match) => match.Groups["port"].Success
+            ? int.Parse(match.Groups["port"].Value, CultureInfo.InvariantCulture)
+            : string.Equals(match.Groups["scheme"].Value, "https", StringComparison.OrdinalIgnoreCase) ? 443 : 80;
+
+        static bool IsWildcard(string host) => host is "*" or "+" or "0.0.0.0" or "[::]";
+
+        static bool IsLoopback(string host) => host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || host is "[::1]" || host.StartsWith("127.", StringComparison.Ordinal);
+    }
+
+    [GeneratedRegex(@"address (?<url>[A-Za-z]+://\S+?):?\s")]
+    private static partial Regex BoundAddress();
+
+    [GeneratedRegex(@"^(?<scheme>[A-Za-z]+)://(?<host>\[[^\]]*\]|[^:/\[]+)(?::(?<port>\d+))?")]
+    private static partial Regex ListenAddress();
 
     private static async Task WriteBannerAsync(WebApplication app, HostSettings settings, TextWriter output)
     {
