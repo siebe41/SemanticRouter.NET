@@ -51,10 +51,14 @@ internal static partial class SetupApi
 {
     private static readonly TimeSpan DetectionLifetime = TimeSpan.FromSeconds(30);
 
+    // A refresh within this long of the last look reuses it: refreshing must not become a way to start programs in a loop.
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(10);
+
     public static void Map(RouteGroupBuilder api)
     {
         // Admin only, like a connector check: detection starts programs and probes ports. Remembered for a short while,
-        // so a page that asks on every render does not start them again each time.
+        // so a page that asks on every render does not start them again each time. Marked as acting, so it is refused
+        // from other sites like a change (DashboardAccess), although the dashboard calls it with GET.
         var cache = new DetectionCache();
         api.MapGet("/setup", async (RouterRuntimeProvider provider, IServiceProvider services, bool? refresh, CancellationToken cancellationToken) =>
             {
@@ -66,10 +70,13 @@ internal static partial class SetupApi
                 {
                     try
                     {
-                        found = await cache.GetAsync(detector, refresh == true, cancellationToken).ConfigureAwait(false);
+                        TimeProvider time = services.GetService<TimeProvider>() ?? TimeProvider.System;
+                        found = await cache.GetAsync(detector, refresh == true, time, cancellationToken).ConfigureAwait(false);
                     }
-                    catch (Exception ex) when (ex is IOException or InvalidDataException or HttpRequestException or InvalidOperationException or UnauthorizedAccessException)
+                    catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
                     {
+                        // Whatever went wrong while looking (a program that would not start, a probe that timed out), the
+                        // presets still work: say what happened and answer with them.
                         problem = "Could not look for models on this machine: " + ex.Message;
                     }
                 }
@@ -279,12 +286,13 @@ internal static partial class SetupApi
         private Task<IReadOnlyList<SetupDetection>>? _running;
         private DateTimeOffset _at;
 
-        public Task<IReadOnlyList<SetupDetection>> GetAsync(IRouterSetupDetector detector, bool refresh, CancellationToken cancellationToken)
+        public Task<IReadOnlyList<SetupDetection>> GetAsync(IRouterSetupDetector detector, bool refresh, TimeProvider time, CancellationToken cancellationToken)
         {
             lock (_gate)
             {
-                DateTimeOffset now = DateTimeOffset.UtcNow;
-                bool usable = _running is { IsFaulted: false, IsCanceled: false } && (!_running.IsCompleted || (!refresh && now - _at < DetectionLifetime));
+                DateTimeOffset now = time.GetUtcNow();
+                bool usable = _running is { IsFaulted: false, IsCanceled: false }
+                    && (!_running.IsCompleted || now - _at < (refresh ? RefreshInterval : DetectionLifetime));
                 if (!usable)
                 {
                     // Not tied to this request: another caller may be waiting for the same run.

@@ -57,6 +57,30 @@ public sealed class FirstRunTests : IDisposable
     }
 
     [Fact]
+    public async Task Init_keeps_a_template_whose_embeddings_someone_chose()
+    {
+        RouterConfiguration chosen = RouterConfiguration.FromJson(RouterHost.Template());
+        chosen.Embeddings.Provider = EmbeddingProviderKind.OpenAICompatible;
+        chosen.Embeddings.Endpoint = new Uri("http://embeddings.lan:8080");
+        chosen.Embeddings.Model = "nomic-embed-text";
+        var store = new JsonFileRouterConfigurationStore(ConfigurationFile);
+        store.Save(chosen);
+
+        FirstRun.IsUntouchedTemplate(ConfigurationFile).Should().BeFalse("only the embeddings an init that found nothing picks are the template's");
+        var refused = new StringWriter();
+        (await InitCommand.RunAsync(Settings("init"), NothingRunning(), refused)).Should().Be(1);
+        refused.ToString().Should().Contain("--force");
+        store.Load()!.Embeddings.Model.Should().Be("nomic-embed-text");
+
+        // What an init that found nothing writes is still the template, so running init again, as it suggests, works.
+        RouterConfiguration initialised = RouterConfiguration.FromJson(RouterHost.Template());
+        InitCommand.UseInProcessEmbeddings(initialised);
+        store.Save(initialised);
+        FirstRun.IsUntouchedTemplate(ConfigurationFile).Should().BeTrue();
+        FirstRun.IsUntouchedTemplate(ConfigurationFile, exactly: true).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Init_with_nothing_found_points_to_the_dashboard_setup_and_not_to_claude_code()
     {
         var output = new StringWriter();
@@ -131,8 +155,17 @@ public sealed class FirstRunTests : IDisposable
         RouterHost.AddressInUse("Failed to bind to address http://127.0.0.1:5080: address already in use.", null)
             .Should().StartWith("Failed to bind").And.Contain("Another program").And.Contain("--urls");
 
-        RouterHost.AddressInUse("ignored", new RouterInstance(4242, ["http://127.0.0.1:5080"], DateTimeOffset.UtcNow, "1.2.3"))
-            .Should().Contain("already running for this configuration (process 4242, version 1.2.3)").And.Contain("http://127.0.0.1:5080/router").And.NotContain("ignored");
+        const string taken = "Failed to bind to address http://127.0.0.1:5080: address already in use.";
+        RouterHost.AddressInUse(taken, new RouterInstance(4242, ["http://127.0.0.1:5080"], DateTimeOffset.UtcNow, "1.2.3"))
+            .Should().Contain("already running for this configuration (process 4242, version 1.2.3)").And.Contain("http://127.0.0.1:5080/router").And.NotContain("Failed to bind");
+        RouterHost.AddressInUse(taken, new RouterInstance(4242, ["http://[::]:5080"], DateTimeOffset.UtcNow, "1.2.3"))
+            .Should().Contain("already running for this configuration", "a router on every address holds this one too");
+
+        // This configuration's router listens elsewhere: something else holds the address.
+        RouterHost.AddressInUse(taken, new RouterInstance(4242, ["http://127.0.0.1:5090"], DateTimeOffset.UtcNow, "1.2.3"))
+            .Should().StartWith("Failed to bind").And.Contain("Another program").And.NotContain("already running");
+        RouterHost.AddressInUse(taken, new RouterInstance(4242, ["http://192.168.1.20:5080"], DateTimeOffset.UtcNow, "1.2.3"))
+            .Should().Contain("Another program");
 
         RouterHost.LocalAddress(Settings("--urls", "http://0.0.0.0:9000;https://0.0.0.0:9001")).Should().Be("http://localhost:9000");
         RouterHost.LocalAddress(Settings()).Should().Be("http://localhost:5080");
@@ -167,12 +200,12 @@ public sealed class FirstRunTests : IDisposable
         document.Connectors["anthropic"].Should().BeEquivalentTo(new { Type = ConnectorType.Anthropic, BaseAddress = new Uri("https://api.anthropic.com"), ApiKey = "${env:ANTHROPIC_API_KEY}" });
         document.ToJson().Should().NotContain("sk-seed-test").And.NotContain("sk-ant-seed-test");
         document.GetDocumentValidationErrors().Should().BeEmpty();
-        FirstRun.Describe("/data/semantic-router.json", created: true, ["openai", "anthropic"])
+        FirstRun.Describe("/data/semantic-router.json", ["openai", "anthropic"])
             .Should().Contain("openai and anthropic connectors for OPENAI_API_KEY and ANTHROPIC_API_KEY").And.Contain("Discover models");
     }
 
     [Fact]
-    public async Task The_router_seeds_the_untouched_template_on_start_but_never_a_configured_file()
+    public async Task The_router_seeds_connectors_only_on_the_start_that_creates_the_file()
     {
         var environment = new Dictionary<string, string?> { [HostSettings.SeedVariable] = "1", ["ANTHROPIC_API_KEY"] = "sk-ant-seed-test" };
         HostSettings settings = Settings("--urls", "http://127.0.0.1:0", "--SemanticRouter:Embeddings:Provider=Hashing");
@@ -195,5 +228,16 @@ public sealed class FirstRunTests : IDisposable
         }
 
         new JsonFileRouterConfigurationStore(ConfigurationFile).Load()!.Connectors.Keys.Should().Equal("anthropic");
+
+        // Deleting the seeded connector leaves the template again; that sticks on the next start.
+        new JsonFileRouterConfigurationStore(ConfigurationFile).Save(RouterConfiguration.FromJson(RouterHost.Template()));
+        var later = new StringWriter();
+        await using (RunningRouter? router = await RouterHost.StartAsync(settings, later, b => b.Logging.ClearProviders(), environment.GetValueOrDefault))
+        {
+            router.Should().NotBeNull();
+        }
+
+        new JsonFileRouterConfigurationStore(ConfigurationFile).Load()!.Connectors.Should().BeEmpty();
+        later.ToString().Should().NotContain("connector");
     }
 }

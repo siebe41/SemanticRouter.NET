@@ -19,36 +19,37 @@ internal static class FirstRun
 
     /// <summary>
     /// Whether <paramref name="configurationFile"/> still holds the built-in template, as the router or an <c>init</c>
-    /// that found nothing wrote it: no models, no connectors, and every other setting the template's, apart from the
-    /// embeddings <c>init</c> picks. Compared as configurations, so formatting and property order do not matter. A file
-    /// that cannot be read is not the template.
+    /// that found nothing wrote it: no models, no connectors, and every setting the template's, the embeddings included,
+    /// except that they may be the in-process ones such an <c>init</c> picks (so running <c>init</c> again, as it
+    /// suggests, still works). Embeddings someone chose are a change. Compared as configurations, so formatting and
+    /// property order do not matter. A file that cannot be read is not the template.
     /// </summary>
     /// <param name="configurationFile">The configuration file.</param>
-    /// <param name="exactly">Count a different embeddings choice as a change: the file is the template as the router writes it, so no <c>init</c> ran.</param>
+    /// <param name="exactly">Count the embeddings <c>init</c> picks as a change too: the file is the template as the router writes it, so no <c>init</c> ran.</param>
     public static bool IsUntouchedTemplate(string configurationFile, bool exactly = false)
     {
         try
         {
             RouterConfiguration? stored = new JsonFileRouterConfigurationStore(configurationFile).Load();
-            return stored is { Models.Count: 0, Connectors.Count: 0 }
-                   && JsonNode.DeepEquals(Comparable(stored, exactly), Comparable(RouterConfiguration.FromJson(RouterHost.Template()), exactly));
+            if (stored is not { Models.Count: 0, Connectors.Count: 0 })
+            {
+                return false;
+            }
+
+            JsonNode? mine = JsonNode.Parse(stored.ToJson());
+            RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
+            if (JsonNode.DeepEquals(mine, JsonNode.Parse(template.ToJson())))
+            {
+                return true;
+            }
+
+            InitCommand.UseInProcessEmbeddings(template);
+            return !exactly && JsonNode.DeepEquals(mine, JsonNode.Parse(template.ToJson()));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or NotSupportedException)
         {
             return false;
         }
-    }
-
-    private static JsonNode? Comparable(RouterConfiguration configuration, bool exactly)
-    {
-        JsonNode? json = JsonNode.Parse(configuration.ToJson());
-        if (json is JsonObject document && !exactly)
-        {
-            document.Remove(nameof(RouterConfiguration.Embeddings));
-            document.Remove(nameof(RouterConfiguration.DefaultSimilarityThreshold));
-        }
-
-        return json;
     }
 
     /// <summary>
@@ -81,10 +82,10 @@ internal static class FirstRun
         return added;
     }
 
-    /// <summary>The line the router prints when it wrote the template (<paramref name="created"/>) or seeded connectors into it.</summary>
-    public static string Describe(string configurationFile, bool created, IReadOnlyList<string> seeded)
+    /// <summary>The line the router prints when it wrote the template, with the connectors it seeded.</summary>
+    public static string Describe(string configurationFile, IReadOnlyList<string> seeded)
     {
-        string what = created ? $"Created {configurationFile} from the built-in template" : $"Updated {configurationFile}, which still held the built-in template";
+        string what = $"Created {configurationFile} from the built-in template";
         if (seeded.Count == 0)
         {
             return $"{what}: no models yet. Run `semantic-router init` to add the ones on this machine, or set them up on the dashboard.";

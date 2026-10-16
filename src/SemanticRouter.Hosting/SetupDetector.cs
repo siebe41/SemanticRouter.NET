@@ -18,8 +18,15 @@ internal sealed class SetupDetector(IServiceProvider services) : IRouterSetupDet
     {
         // The router's own client settings (Network:CaBundle, a proxy), as for a connector.
         HttpClient http = services.GetRequiredService<IHttpClientFactory>().CreateClient(OpenAICompatibleConnector.HttpClientNamePrefix + "setup");
-        return DetectAsync(services, new InitProbes(http, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows(), services.GetService<MachinePolicy>()), cancellationToken);
+        return DetectAsync(services, new InitProbes(http, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows(), PolicyOf(services)), cancellationToken);
     }
+
+    /// <summary>
+    /// The policy the router keeps to, with Network:Offline and AllowedEndpoints folded in: offline, a CLI is not even
+    /// started to ask its version, since the router would turn it off anyway.
+    /// </summary>
+    internal static MachinePolicy PolicyOf(IServiceProvider services) =>
+        services.GetService<RouterRuntimeProvider>()?.Policy ?? MachinePolicy.Effective(services.GetService<MachinePolicy>(), NetworkOptions.Of(services));
 
     /// <summary>Detects with <paramref name="probes"/>, which say where to look (replaceable in tests).</summary>
     internal static async Task<IReadOnlyList<SetupDetection>> DetectAsync(IServiceProvider services, InitProbes probes, CancellationToken cancellationToken)

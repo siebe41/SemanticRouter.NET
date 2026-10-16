@@ -159,6 +159,19 @@ internal static class InitCommand
     }
 
     /// <summary>
+    /// The embeddings <c>init</c> picks when it finds no embedding server: a small model in this process, which beats
+    /// lexical hashing. <see cref="FirstRun.IsUntouchedTemplate"/> recognises a file with only this change.
+    /// </summary>
+    internal static OnnxModelInfo UseInProcessEmbeddings(RouterConfiguration document)
+    {
+        OnnxModelInfo model = OnnxEmbeddingModels.Find(OnnxEmbeddingModels.DefaultModel)!;
+        document.Embeddings.Provider = EmbeddingProviderKind.Onnx;
+        document.Embeddings.Model = model.Name;
+        document.DefaultSimilarityThreshold = model.SuggestedThreshold;
+        return model;
+    }
+
+    /// <summary>
     /// Adds connectors, models and embeddings for what is found. Notes say what was added and why. Without
     /// <paramref name="cli"/> (<c>--no-cli</c>) no subscription CLI connector is added.
     /// </summary>
@@ -237,11 +250,7 @@ internal static class InitCommand
         }
         else
         {
-            // No embedding server: a small model in this process beats lexical hashing.
-            OnnxModelInfo model = OnnxEmbeddingModels.Find(OnnxEmbeddingModels.DefaultModel)!;
-            document.Embeddings.Provider = EmbeddingProviderKind.Onnx;
-            document.Embeddings.Model = model.Name;
-            document.DefaultSimilarityThreshold = model.SuggestedThreshold;
+            OnnxModelInfo model = UseInProcessEmbeddings(document);
             notes.Add($"embeddings: no embedding server found, so '{model.Name}' runs in this process to recognise what each prompt asks for " +
                       $"({Math.Round(model.ModelBytes / 1e6):0} MB, downloaded from huggingface.co on first start).");
         }

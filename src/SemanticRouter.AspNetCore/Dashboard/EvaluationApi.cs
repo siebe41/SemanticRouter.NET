@@ -178,33 +178,56 @@ internal static class EvaluationApi
                 return Results.Problem("'utterance' is required.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            RouterRuntime runtime = provider.Current;
-            RouterConfiguration next = runtime.Configuration.Clone();
-            RouteDefinition? route = next.Routes.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
-            if (route is null)
+            // Made on a copy of the running configuration, and again on a newer one if another change comes in meanwhile.
+            RouteDefinition? route = null;
+            IResult? refused = null;
+            string routeName = provider.Current.Configuration.Routes.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase))?.Name ?? name.Trim();
+            bool AddTo(RouterConfiguration next)
             {
-                if (request.Tier is not { } tier)
+                route = next.Routes.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (route is null)
                 {
-                    return Results.Problem($"Route '{name}' does not exist; give a 'tier' to create it.", statusCode: StatusCodes.Status404NotFound);
+                    if (request.Tier is not { } tier)
+                    {
+                        refused = Results.Problem($"Route '{name}' does not exist; give a 'tier' to create it.", statusCode: StatusCodes.Status404NotFound);
+                        return false;
+                    }
+
+                    route = new RouteDefinition { Name = name.Trim(), Tier = tier, Description = request.Description, LocalOnly = request.LocalOnly ?? false };
+                    next.Routes.Add(route);
                 }
 
-                route = new RouteDefinition { Name = name.Trim(), Tier = tier, Description = request.Description, LocalOnly = request.LocalOnly ?? false };
-                next.Routes.Add(route);
-            }
+                if (!route.Utterances.Contains(utterance, StringComparer.OrdinalIgnoreCase))
+                {
+                    route.Utterances.Add(utterance);
+                }
 
-            if (!route.Utterances.Contains(utterance, StringComparer.OrdinalIgnoreCase))
-            {
-                route.Utterances.Add(utterance);
-            }
+                IReadOnlyList<string> errors = RouterRuntimeProvider.Validate(next);
+                if (errors.Count > 0)
+                {
+                    refused = Results.Problem(string.Join(" ", errors), statusCode: StatusCodes.Status400BadRequest);
+                    return false;
+                }
 
-            IReadOnlyList<string> errors = RouterRuntimeProvider.Validate(next);
-            if (errors.Count > 0)
-            {
-                return Results.Problem(string.Join(" ", errors), statusCode: StatusCodes.Status400BadRequest);
+                return true;
             }
 
             // Saved only when the running configuration is: saving now would also save changes applied without saving.
-            (RouterRuntime applied, bool saved) = provider.ApplyKeepingSaveState(next, "dashboard", actor(context), $"added an utterance to '{route.Name}'");
+            (RouterRuntime Runtime, bool Saved)? result;
+            try
+            {
+                result = provider.ApplyKeepingSaveState(AddTo, "dashboard", actor(context), $"added an utterance to '{routeName}'");
+            }
+            catch (RouterConfigurationConflictException)
+            {
+                return Results.Problem("The configuration kept changing while the utterance was added. Try again.", statusCode: StatusCodes.Status409Conflict);
+            }
+
+            if (result is not (RouterRuntime applied, bool saved) || route is null)
+            {
+                return refused!;
+            }
+
             DashboardAudit.Detail(context, $"route {route.Name}, version {applied.Version}{(saved || provider.Store is null ? string.Empty : ", not saved")}");
             PromptClassificationResult classification = await applied.Classifier.ClassifyAsync(utterance, context.RequestAborted).ConfigureAwait(false);
             return Results.Json(

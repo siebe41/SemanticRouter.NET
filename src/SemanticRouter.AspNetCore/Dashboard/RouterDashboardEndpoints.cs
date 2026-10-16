@@ -253,7 +253,7 @@ public static partial class RouterDashboardEndpoints
                 StatusResponse status = BuildStatus(
                     provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>(),
                     services.GetService<IModelCacheShare>(), Listening(services), options.PublicOrigins);
-                status = status with { Unsaved = provider.Unsaved };
+                status = status with { Unsaved = provider.Unsaved, Instance = provider.Instance };
 
                 // A connector's last error comes from the activity log's details, which can quote a reply.
                 return Results.Json(
@@ -289,11 +289,14 @@ public static partial class RouterDashboardEndpoints
 
         // baseVersion: the version the caller's draft started from. When another version runs by now, nothing is applied
         // and the answer (409) says who changed it when, so the caller can reload or compare instead of undoing that change.
-        api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist, string? note, int? baseVersion) =>
+        // instance: the provider that version came from. Versions start again at 1 on every start, so after a restart the
+        // same number can be another document: a different instance is the same conflict.
+        api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist, string? note, int? baseVersion, string? instance) =>
         {
-            if (baseVersion is { } expected && provider.Current is { } running && running.Version != expected)
+            bool restarted = instance is not null && !string.Equals(instance, provider.Instance, StringComparison.Ordinal);
+            if ((restarted || baseVersion is not null) && provider.Current is { } running && (restarted || running.Version != baseVersion))
             {
-                return Conflict(running);
+                return Conflict(running, provider, restarted);
             }
 
             (RouterConfiguration? candidate, IResult? unreadable) = await ReadConfigurationAsync(context, provider).ConfigureAwait(false);
@@ -316,7 +319,7 @@ public static partial class RouterDashboardEndpoints
             }
             catch (RouterConfigurationConflictException ex)
             {
-                return Conflict(ex.Current);
+                return Conflict(ex.Current, provider, restarted: false);
             }
 
             DashboardAudit.Detail(context, $"version {runtime.Version}{(shouldPersist ? ", saved" : ", not saved")}");
@@ -346,7 +349,17 @@ public static partial class RouterDashboardEndpoints
                     statusCode: StatusCodes.Status409Conflict, title: "Not saved");
             }
 
-            RouterRuntime runtime = provider.SaveRunning(Actor(context));
+            RouterRuntime runtime;
+            try
+            {
+                runtime = provider.SaveRunning(Actor(context));
+            }
+            catch (RouterConfigurationConflictException ex)
+            {
+                // Another version came in while saving: saving that one would save something nobody here saw.
+                return Conflict(ex.Current, provider, restarted: false);
+            }
+
             DashboardAudit.Detail(context, $"version {runtime.Version}");
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), runtime.ApplyNotes.Count > 0 ? string.Join(" ", runtime.ApplyNotes) : null);
         }).WithMetadata(DashboardWriteMetadata.Instance).Audited("saved the running configuration");
@@ -586,6 +599,10 @@ public static partial class RouterDashboardEndpoints
 
             errors.AddRange(candidate.MaskedSecretErrors());
             errors.AddRange(ProcessSettingErrors(candidate, provider, options));
+
+            // The same reference rules as PUT api/config, on purpose: a new connector may name an ${env:…} key, a moved one
+            // may not. Whoever can discover here can apply the same draft there, so being stricter here would protect
+            // nothing; the audit detail records where the key went instead.
             errors.AddRange(candidate.ReferenceErrors(current));
             if (errors.Count > 0)
             {
@@ -626,7 +643,7 @@ public static partial class RouterDashboardEndpoints
                     report = report with { Note = string.Join(" ", [.. unresolved, report.Note ?? string.Empty]).Trim() };
                 }
 
-                DashboardAudit.Detail(context, $"{name} ({connector.Type}), not applied");
+                DashboardAudit.Detail(context, $"{name} ({connector.Type}) at {Destination(settings)}, not applied");
                 return Results.Json(DiscoverResponse.From(report), ApiJson);
             }
             finally
@@ -768,6 +785,25 @@ public static partial class RouterDashboardEndpoints
     /// </summary>
     private static string Actor(HttpContext context) =>
         DashboardAccess.ActorOf(context) ?? (DashboardAccess.IsLocal(context) ? "this machine" : "unknown");
+
+    /// <summary>
+    /// Where a connector sends requests, for the audit log: <c>scheme://host:port</c> (never a path, query or credentials
+    /// in the address), or for a CLI or Copilot the program's name.
+    /// </summary>
+    internal static string Destination(ConnectorOptions connector)
+    {
+        if (connector.Type is ConnectorType.Cli or ConnectorType.Copilot)
+        {
+            string? program = connector.Executable is { Length: > 0 } executable ? Path.GetFileName(executable)
+                : connector.Type == ConnectorType.Copilot ? "copilot"
+                : CliAdapter.For(connector.Preset).DefaultExecutable;
+            return string.IsNullOrEmpty(program) ? "no program" : program;
+        }
+
+        return connector.BaseAddress is { IsAbsoluteUri: true } address
+            ? $"{address.Scheme}://{address.Host}:{address.Port.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+            : "no address";
+    }
 
     /// <summary>
     /// Errors for CLI and Copilot connectors whose program, arguments or environment the request would change, and for
@@ -1022,15 +1058,19 @@ public static partial class RouterDashboardEndpoints
         new(errors) { Issues = ConfigurationIssues.Locate(errors, candidate) };
 
     /// <summary>The 409 for a change made against a version that is no longer running.</summary>
-    private static IResult Conflict(RouterRuntime running) => Results.Json(
+    private static IResult Conflict(RouterRuntime running, RouterRuntimeProvider provider, bool restarted) => Results.Json(
         new ConflictResponse(
             "The configuration changed since you loaded it.",
             running.Version,
             running.ChangedBy,
             running.CreatedAt,
             running.ChangeSource,
+            (restarted ? "The router restarted since you loaded it. " : string.Empty) +
             $"Version {running.Version} is running now ({running.ChangeSource ?? "applied"}{(running.ChangedBy is null ? string.Empty : " by " + running.ChangedBy)}). " +
-            "Nothing was applied: reload it, or apply yours again on top of it."),
+            "Nothing was applied: reload it, or apply yours again on top of it.")
+        {
+            Instance = provider.Instance,
+        },
         ApiJson,
         statusCode: StatusCodes.Status409Conflict);
 
@@ -1039,6 +1079,7 @@ public static partial class RouterDashboardEndpoints
         var envelope = new JsonObject
         {
             ["version"] = runtime.Version,
+            ["instance"] = provider.Instance,
             ["source"] = runtime.Source.ToString(),
             ["createdAt"] = runtime.CreatedAt,
             ["store"] = provider.Store?.Location,
@@ -1162,7 +1203,8 @@ public static partial class RouterDashboardEndpoints
     }
 
     /// <summary>
-    /// <c>409</c> from <c>PUT api/config?baseVersion=N</c> when another version runs by now: nothing was applied.
+    /// <c>409</c> from <c>PUT api/config?baseVersion=N&amp;instance=X</c> when another version runs by now, or the router
+    /// restarted since (another <see cref="Instance"/>): nothing was applied.
     /// </summary>
     /// <param name="Title">What happened.</param>
     /// <param name="CurrentVersion">The version running now.</param>
@@ -1174,6 +1216,9 @@ public static partial class RouterDashboardEndpoints
     {
         /// <summary>The HTTP status, as in a problem document.</summary>
         public int Status { get; } = StatusCodes.Status409Conflict;
+
+        /// <summary>The running router's instance id (<c>instance</c> in <c>api/config</c>).</summary>
+        public string? Instance { get; init; }
     }
 
     /// <summary>Usage over a window.</summary>
@@ -1304,6 +1349,12 @@ public static partial class RouterDashboardEndpoints
         /// else, so a restart would bring that back. <c>POST api/config/save</c> keeps it; <c>POST api/config/revert</c> undoes it.
         /// </summary>
         public bool Unsaved { get; init; }
+
+        /// <summary>
+        /// A random id for this run of the router. Versions start again at 1 on every start, so a client that sees another
+        /// instance knows the configuration may have changed even when the version number is the same.
+        /// </summary>
+        public string? Instance { get; init; }
     }
 
     /// <summary>Embedding provider in use.</summary>
