@@ -33,6 +33,49 @@ public sealed class SecretHandlingTests : RouterHostTest
 
     private static StringContent JsonBody(JsonNode node) => new(node.ToJsonString(), Encoding.UTF8, "application/json");
 
+    [Theory]
+    [InlineData(PromptStorage.Off)]
+    [InlineData(PromptStorage.Redacted)]
+    [InlineData(PromptStorage.On)]
+    public async Task A_failed_cli_runs_output_is_kept_and_logged_as_StorePrompts_allows(PromptStorage storage)
+    {
+        const string key = "sk-ant-api03-q1w2e3r4t5y6u7i8o9p0a1s2d3f4";
+        Cli = FakeCliProcessRunner.Failing(1, stdout: ClaudeStream.Error($"the merger memo needs {key}"), stderr: "aborted in memo.txt");
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+            },
+            services: s =>
+            {
+                s.AddSingleton<ILoggerProvider>(_logs);
+                s.Configure<StateOptions>(o => o.StorePrompts = storage);
+            },
+            withCli: true);
+
+        await client.PostAsync("/v1/chat/completions", Json("""{"model":"claude-cli","messages":[{"role":"user","content":"hello there"}]}"""));
+
+        string detail = Services.GetRequiredService<RoutingActivityLog>().Recent(1).Single().Detail!;
+        string logged = string.Join('\n', _logs.Messages.Where(m => m.Contains("exited with", StringComparison.Ordinal)));
+        logged.Should().NotBeEmpty();
+        switch (storage)
+        {
+            case PromptStorage.Off:
+                detail.Should().Contain("claude-cli: exit code 1: output omitted (StorePrompts: Off)").And.NotContain("memo");
+                logged.Should().Contain("output omitted (StorePrompts: Off)").And.NotContain("memo");
+                break;
+            case PromptStorage.Redacted:
+                detail.Should().Contain("the merger memo needs *** | aborted in memo.txt").And.NotContain(key);
+                logged.Should().Contain("the merger memo needs ***").And.NotContain(key);
+                break;
+            default:
+                detail.Should().Contain($"the merger memo needs {key}", "On keeps the output as it was");
+                logged.Should().Contain(key);
+                break;
+        }
+    }
+
     [Fact]
     public async Task Connector_keys_can_be_environment_references()
     {

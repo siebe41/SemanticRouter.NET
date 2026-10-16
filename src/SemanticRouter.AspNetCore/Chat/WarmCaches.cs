@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace SemanticRouter.AspNetCore;
 
@@ -76,6 +77,53 @@ public sealed class WarmCacheStore : IWarmCacheStore
             {
                 _caches.TryRemove(key, out _);
             }
+        }
+    }
+}
+
+/// <summary>How long the prompt cache entries a turn writes live, when the router can tell.</summary>
+internal static class PromptCacheLifetime
+{
+    private static readonly TimeSpan FiveMinutes = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan OneHour = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// The lifetime of the cache entries <paramref name="chat"/> writes through <paramref name="connector"/>. On an
+    /// Anthropic connector it is set by the markers: the longest <c>ttl</c> among the client's own markers, or else the
+    /// connector's <see cref="ConnectorOptions.CacheTtl"/> when the router adds them (<see cref="PromptCaching.Auto"/>).
+    /// <see langword="null"/> when it is not known: other backends decide for themselves how long they cache.
+    /// </summary>
+    public static TimeSpan? Of(ChatCompletionRequest chat, ConnectorOptions connector)
+    {
+        if (connector.Type != ConnectorType.Anthropic)
+        {
+            return null;
+        }
+
+        if (chat.HasCacheMarkers)
+        {
+            IEnumerable<string?> markers = chat.Tools.Select(t => t.CacheControl)
+                .Concat(chat.Turns.SelectMany(t => t.Blocks).Select(b => b.CacheControl))
+                .Append(chat.CacheControl);
+            return markers.Any(m => m is not null && Ttl(m) == "1h") ? OneHour : FiveMinutes;
+        }
+
+        return connector.PromptCaching == PromptCaching.Auto ? (connector.CacheTtl == "1h" ? OneHour : FiveMinutes) : null;
+    }
+
+    private static string? Ttl(string marker)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(marker);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                   && document.RootElement.TryGetProperty("ttl", out JsonElement ttl) && ttl.ValueKind == JsonValueKind.String
+                ? ttl.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 }

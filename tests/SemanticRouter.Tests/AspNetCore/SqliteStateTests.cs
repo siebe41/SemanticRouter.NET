@@ -355,13 +355,20 @@ public sealed class DurableStateHostTests : RouterHostTest
 {
     private readonly string _directory = Directory.CreateTempSubdirectory("router-durable").FullName;
 
-    private Task<HttpClient> StartDurableAsync(Action<StateOptions>? state = null) =>
+    private Task<HttpClient> StartDurableAsync(
+        Action<StateOptions>? state = null,
+        Action<PromptRouterMiddlewareOptions>? middleware = null,
+        Action<SemanticRouterOptions>? routing = null,
+        bool withCli = false) =>
         StartAsync(
             o =>
             {
                 o.Mode = PromptRouterMode.Dispatch;
                 o.PathPrefixes.Add("/v1/chat/completions");
+                middleware?.Invoke(o);
             },
+            routing: routing,
+            withCli: withCli,
             services: s =>
             {
                 s.AddSingleton<IRouterConfigurationStore>(new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")));
@@ -437,14 +444,97 @@ public sealed class DurableStateHostTests : RouterHostTest
         DatabaseFiles().Should().NotContain(key);
         await DisposeAsync();
 
-        HttpClient off = await StartDurableAsync(o => o.StorePrompts = PromptStorage.Off);
-        await off.PostAsync("/v1/chat/completions", Chat("the quarterly numbers for project nightingale"));
-        await WaitForStoredActivityAsync(2);
+        // Off: no prompt text, and none of what models wrote about it either: a failed CLI run's reply and errors, and
+        // the judge's reason for its grade.
+        LocalHttp = new StubHttpMessageHandler((_, body) => OpenAIReply(
+            body.Contains("\"model\":\"judge-32b\"", StringComparison.Ordinal)
+                ? """{"grade": 2, "reason": "the nightingale figures are wrong"}"""
+                : "Revenue rose."));
+        Cli = FakeCliProcessRunner.Failing(1, stdout: ClaudeStream.Error("I cannot share the nightingale numbers"), stderr: "error: nightingale run aborted");
+        HttpClient off = await StartDurableAsync(
+            o => o.StorePrompts = PromptStorage.Off,
+            middleware: o => (o.Judge.Enabled, o.Judge.Model, o.Judge.SampleRate) = (true, "judge", 1),
+            routing: o =>
+            {
+                ModelDefinition judge = Model("judge", 3, local: true, connector: "lmstudio");
+                judge.Model = "judge-32b";
+                o.Models.Add(judge);
+            },
+            withCli: true);
+        var events = new StringBuilder();
+        using var listening = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using HttpResponseMessage stream = await off.GetAsync("/router/api/events", HttpCompletionOption.ResponseHeadersRead, listening.Token);
+        Task listener = ListenAsync(stream, events, listening.Token);
 
+        await off.PostAsync("/v1/chat/completions", Chat("the quarterly numbers for project nightingale"));
+        await Services.GetRequiredService<AnswerJudge>().WhenIdleAsync(TimeSpan.FromSeconds(10));
+        HttpResponseMessage failed = await off.PostAsync("/v1/chat/completions", JsonBody(new JsonObject
+        {
+            ["model"] = "claude-cli",
+            ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = "the nightingale numbers again" }),
+        }));
+        await WaitForStoredActivityAsync(3);
+
+        failed.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        IReadOnlyList<RoutingActivityEntry> entries = Services.GetRequiredService<IRoutingActivityStore>().Recent(2);
+        entries.Should().Contain(e => e.Grade == 2 && e.GradeNote == "judge", "the grade is kept, the reason is not");
+        entries.Should().Contain(e => e.Detail != null && e.Detail.Contains("claude-cli: exit code 1: output omitted (StorePrompts: Off)", StringComparison.Ordinal));
         (await LastPreviewAsync(off)).Should().BeEmpty();
         string export = await off.GetStringAsync("/router/api/activity/export?format=jsonl&prompts=true");
-        export.Should().NotContain("nightingale");
+        export.Should().Contain("exit code 1").And.NotContain("nightingale");
         DatabaseFiles().Should().NotContain("nightingale");
+        Services.GetRequiredService<RoutingFeedbackLog>().Recent().Should().ContainSingle().Which.Detail.Should().Be("graded 2/5 by judge");
+        string Events()
+        {
+            lock (events)
+            {
+                return events.ToString();
+            }
+        }
+
+        for (int i = 0; i < 200 && !Events().Contains("exit code 1", StringComparison.Ordinal); i++)
+        {
+            await Task.Delay(10);
+        }
+
+        await listening.CancelAsync();
+        await listener;
+        Events().Should().Contain("\"grade\":2").And.Contain("exit code 1").And.NotContain("nightingale");
+    }
+
+    private static HttpResponseMessage OpenAIReply(string content) => new(HttpStatusCode.OK)
+    {
+        Content = JsonBody(new JsonObject
+        {
+            ["id"] = "x",
+            ["object"] = "chat.completion",
+            ["choices"] = new JsonArray(new JsonObject
+            {
+                ["index"] = 0,
+                ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = content },
+                ["finish_reason"] = "stop",
+            }),
+        }),
+    };
+
+    /// <summary>Appends what the event stream sends to <paramref name="events"/> until <paramref name="cancellationToken"/> stops it.</summary>
+    private static async Task ListenAsync(HttpResponseMessage stream, StringBuilder events, CancellationToken cancellationToken)
+    {
+        using var reader = new StreamReader(await stream.Content.ReadAsStreamAsync(cancellationToken));
+        try
+        {
+            while (await reader.ReadLineAsync(cancellationToken) is { } line)
+            {
+                lock (events)
+                {
+                    events.AppendLine(line);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopped listening.
+        }
     }
 
     [Fact]

@@ -6,13 +6,19 @@ namespace SemanticRouter.AspNetCore;
 [JsonConverter(typeof(JsonStringEnumConverter<PromptStorage>))]
 public enum PromptStorage
 {
-    /// <summary>The first 160 characters, with credentials (API keys, tokens, private keys) masked as <c>***</c>. Default.</summary>
+    /// <summary>
+    /// The first 160 characters, with credentials (API keys, tokens, private keys) masked as <c>***</c>, and the same masking
+    /// in a failed CLI run's output and the judge's reason. Default.
+    /// </summary>
     Redacted = 0,
 
     /// <summary>The first 160 characters as they are.</summary>
     On = 1,
 
-    /// <summary>No prompt text: the activity log, its exports and the live view show none, and tuning learns nothing from them.</summary>
+    /// <summary>
+    /// No prompt text: the activity log, its exports and the live view show none, and tuning learns nothing from them.
+    /// Nor what models wrote about it: a failed CLI run's output (in the activity log and the logs) and the judge's reason.
+    /// </summary>
     Off = 2,
 }
 

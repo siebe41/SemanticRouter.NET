@@ -432,7 +432,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             redactor,
             _services.GetService<PromptRouterMetrics>(),
             _services.GetServices<IChatConnectorFactory>(),
-            Policy);
+            Policy,
+            configuration.State.StorePrompts);
 
         return new RouterRuntime
         {

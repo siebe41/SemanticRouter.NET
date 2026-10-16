@@ -154,7 +154,8 @@ public sealed class ConnectorOptions
     /// <summary>
     /// Anthropic, with <see cref="PromptCaching.Auto"/>: how long a cache entry lives, <c>5m</c> (default) or <c>1h</c>.
     /// A one-hour entry costs twice the input price to write instead of 1.25 times, so it only pays off when turns are
-    /// often more than five minutes apart.
+    /// often more than five minutes apart. Conversation routing counts the cache warm for as long
+    /// (<see cref="ConversationRoutingOptions.CacheLifetime"/>).
     /// </summary>
     public string CacheTtl { get; set; } = DefaultCacheTtl;
 
