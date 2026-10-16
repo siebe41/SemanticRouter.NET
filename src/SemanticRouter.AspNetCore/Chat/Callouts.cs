@@ -322,7 +322,7 @@ internal static partial class Callouts
 /// <summary>Finds a catalog model by family, such as <c>opus</c> or <c>qwen</c>, for callouts and <c>family:</c> aliases.</summary>
 internal static class ModelFamilies
 {
-    /// <summary>The alias target prefix: <c>"*opus*": "family:opus"</c> prefers the catalog's Opus model.</summary>
+    /// <summary>The alias target prefix: <c>"opus-pinned": "family:opus"</c> prefers the catalog's Opus model.</summary>
     public const string Prefix = "family:";
 
     /// <summary>
