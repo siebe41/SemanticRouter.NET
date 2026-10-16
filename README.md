@@ -50,7 +50,7 @@ Three front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/mode
 - [Extensibility](#extensibility)
 - [Building and testing](#building-and-testing)
 - [Roadmap](#roadmap)
-- [Changes and contributing](#changes-and-contributing)
+- [Changes, contributing and governance](#changes-contributing-and-governance)
 
 Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md) (pointing Claude Code, Codex and SDKs at the router), [dashboard.md](docs/dashboard.md) (the UI and admin API), [memory.md](docs/memory.md) (the memory map and what you share with which model), [routing-quality.md](docs/routing-quality.md) (evaluation sets, threshold calibration, automatic tuning, model reliability, route health and retry escalation), [routing-profiles.md](docs/routing-profiles.md) (policy per project, client or content), [providers.md](docs/providers.md) (connector setup per provider), [enterprise.md](docs/enterprise.md) (a machine-wide policy for administrators), [architecture.md](docs/architecture.md) (how a request flows, hot reload, extension points), [roadmap.md](docs/roadmap.md) (where the project is going) and [TERMS.md](docs/TERMS.md) (why the subscription CLI connectors are designed the way they are, and where the lines are).
 
@@ -626,9 +626,9 @@ A leaked key must be revoked at the provider; removing it from the code does not
 
 Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: in-process embeddings and a classification cache, and routing profiles.
 
-## Changes and contributing
+## Changes, contributing and governance
 
-What changed in each release, and what is merged but not released yet, is in [CHANGELOG.md](CHANGELOG.md). [CONTRIBUTING.md](CONTRIBUTING.md) says how to build, test and send a change; [SECURITY.md](SECURITY.md) says how to report a vulnerability and which versions get fixes.
+What changed in each release, and what is merged but not released yet, is in [CHANGELOG.md](CHANGELOG.md). [CONTRIBUTING.md](CONTRIBUTING.md) says how to build, test and send a change; [GOVERNANCE.md](GOVERNANCE.md) says who maintains the project, how decisions are made, who can release and what happens if the maintainer is not available; [SECURITY.md](SECURITY.md) says how to report a vulnerability and which versions get fixes.
 
 ## License
 

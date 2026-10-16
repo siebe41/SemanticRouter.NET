@@ -2,6 +2,8 @@
 
 Thanks for helping. Bug reports, fixes and documentation changes are welcome as issues and pull requests. For a larger change, open an issue first so the approach can be agreed before you write it; planned work is in [docs/roadmap.md](docs/roadmap.md).
 
+Who maintains the project, how decisions are made and who can release is in [GOVERNANCE.md](GOVERNANCE.md).
+
 ## Reporting routing quality
 
 You do not need to write code to help. If a prompt went to a model that was stronger than it needed (wasted quota or cost) or weaker than it needed (a poor answer), open a **Routed to the wrong tier** issue. The form asks for the router's decision (from the `X-Prompt-Route-*` headers, the dashboard's Activity page or the classify endpoint), the model that answered, what the prompt really needed, and your embedding settings. Describe or paraphrase the prompt instead of pasting anything private.
