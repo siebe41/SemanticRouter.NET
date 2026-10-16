@@ -39,3 +39,12 @@ updates:
     groups:
       e2e:
         patterns: [ "*" ]
+
+  # VitePress and Mermaid for the documentation site (site/README.md).
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+    groups:
+      site:
+        patterns: [ "*" ]

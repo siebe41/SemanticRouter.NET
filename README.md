@@ -52,7 +52,7 @@ Three front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/mode
 - [Roadmap](#roadmap)
 - [Changes, contributing and governance](#changes-contributing-and-governance)
 
-The [documentation index](docs/README.md) says which guide covers what: pointing Claude Code, Codex and SDKs at the router, the tool, its background service and the desktop app, the dashboard, each provider, routing quality and routing profiles, the memory map, usage and telemetry, network traffic, a machine-wide policy for administrators, verifying a release, the architecture, the roadmap, and why the subscription CLI connectors are built the way they are ([TERMS.md](docs/TERMS.md)).
+The guides are also a website with search and the demo videos: <https://siebe41.github.io/SemanticRouter.NET/>. The [documentation index](docs/README.md) says which guide covers what: pointing Claude Code, Codex and SDKs at the router, the tool, its background service and the desktop app, the dashboard, each provider, routing quality and routing profiles, the memory map, usage and telemetry, network traffic, a machine-wide policy for administrators, verifying a release, the architecture, the roadmap, and why the subscription CLI connectors are built the way they are ([TERMS.md](docs/TERMS.md)).
 
 ---
 
