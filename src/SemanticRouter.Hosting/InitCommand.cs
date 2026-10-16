@@ -28,7 +28,10 @@ internal sealed record InitProbes(HttpClient Http, string? SearchPath, bool Wind
 internal sealed record CliConsent(bool Yes, TextReader? Input, TextWriter Output)
 {
     /// <summary>Which of the CLIs found (executable and path) to enable. Anything but <c>y</c> or <c>yes</c> means no.</summary>
-    public async Task<IReadOnlySet<string>> AskAsync(IReadOnlyList<(string Executable, string Path)> found, CancellationToken cancellationToken)
+    /// <param name="found">The CLIs to ask about.</param>
+    /// <param name="nothingElse">Nothing else was found to answer prompts, so saying no to all of them leaves the router without a model.</param>
+    /// <param name="cancellationToken">Cancels the questions.</param>
+    public async Task<IReadOnlySet<string>> AskAsync(IReadOnlyList<(string Executable, string Path)> found, bool nothingElse, CancellationToken cancellationToken)
     {
         if (Yes)
         {
@@ -43,7 +46,14 @@ internal sealed record CliConsent(bool Yes, TextReader? Input, TextWriter Output
 
         await Output.WriteLineAsync("Found " + string.Join(", ", found.Select(f => $"{f.Executable} ({f.Path})")) + ".").ConfigureAwait(false);
         await Output.WriteLineAsync("A CLI connector answers prompts with whatever account that CLI is signed in to, which may be a personal subscription.").ConfigureAwait(false);
-        await Output.WriteLineAsync("On a work machine, check your company's AI policy first: see \"Using it at work\" in docs/TERMS.md.").ConfigureAwait(false);
+        await Output.WriteLineAsync($"On a work machine, check your company's AI policy first: {SiteLinks.WorkUse}").ConfigureAwait(false);
+        if (nothingElse)
+        {
+            await Output.WriteLineAsync(found.Count == 1
+                ? $"Nothing else was found to answer prompts (no LM Studio or Ollama with a model), so without {found[0].Executable} the router has no model to use."
+                : "Nothing else was found to answer prompts (no LM Studio or Ollama with a model), so without one of these the router has no model to use.").ConfigureAwait(false);
+        }
+
         foreach ((string executable, _) in found)
         {
             await Output.WriteAsync($"Enable {executable} on the account it is signed in to? [y/N] ").ConfigureAwait(false);
@@ -76,10 +86,17 @@ internal static class InitCommand
     public static async Task<int> RunAsync(
         HostSettings settings, InitProbes probes, TextWriter output, TextReader? input = null, CancellationToken cancellationToken = default)
     {
+        // A file that still holds the built-in template (the router writes it on its first start) has nothing to lose.
+        bool replacingTemplate = false;
         if (File.Exists(settings.ConfigurationFile) && !settings.Force)
         {
-            await output.WriteLineAsync($"{settings.ConfigurationFile} already exists. Edit it on the dashboard, or run `semantic-router init --force` to start over.").ConfigureAwait(false);
-            return 1;
+            if (!FirstRun.IsUntouchedTemplate(settings.ConfigurationFile))
+            {
+                await output.WriteLineAsync($"{settings.ConfigurationFile} already exists. Edit it on the dashboard, or run `semantic-router init --force` to start over.").ConfigureAwait(false);
+                return 1;
+            }
+
+            replacingTemplate = true;
         }
 
         RouterConfiguration document = RouterConfiguration.FromJson(RouterHost.Template());
@@ -102,7 +119,7 @@ internal static class InitCommand
         Directory.CreateDirectory(settings.ConfigurationDirectory);
         new JsonFileRouterConfigurationStore(settings.ConfigurationFile).Save(document);
 
-        await output.WriteLineAsync($"Wrote {settings.ConfigurationFile}").ConfigureAwait(false);
+        await output.WriteLineAsync($"Wrote {settings.ConfigurationFile}{(replacingTemplate ? " (it held only the built-in template)" : string.Empty)}").ConfigureAwait(false);
         string evaluation = SemanticRouterServiceCollectionExtensions.EvaluationSetFileNextTo(settings.ConfigurationFile);
         if (!File.Exists(evaluation))
         {
@@ -111,20 +128,33 @@ internal static class InitCommand
             await output.WriteLineAsync($"Wrote {evaluation}").ConfigureAwait(false);
         }
 
+        if (document.Models.Count > 0)
+        {
+            // The notes give each model's tier by number.
+            await output.WriteLineAsync("  Tiers: " + string.Join(" · ", document.EffectiveTiers.Select(t => $"{t.Level} {t.Name}")) +
+                                        " (a prompt goes to a model on the tier it needs, or a higher one).").ConfigureAwait(false);
+        }
+
         foreach (string note in notes)
         {
             await output.WriteLineAsync("  " + note).ConfigureAwait(false);
         }
 
+        string router = RouterHost.LocalAddress(settings);
         if (!document.Models.Any(m => m.Enabled))
         {
             await output.WriteLineAsync(document.Models.Count > 0
-                ? "  No model is enabled. Enable one on the dashboard (Models), start LM Studio or Ollama, or add an API model (Models and Connectors)."
-                : "  No model was found. Start LM Studio or Ollama, install a CLI, or add an API model on the dashboard (Models and Connectors).").ConfigureAwait(false);
+                ? "  No model is enabled, so the router has nothing to answer with yet."
+                : "  No model was found: no LM Studio or Ollama server with a model answered, and no subscription CLI was added.").ConfigureAwait(false);
+            await output.WriteLineAsync($"Next: start the router with `semantic-router` and set up a model on its dashboard: {router}/router#/overview").ConfigureAwait(false);
+            await output.WriteLineAsync(document.Models.Count > 0
+                ? "Or enable one there under Providers → Models."
+                : $"Or start LM Studio's server (Developer → Start server) or Ollama with a model, and run `semantic-router init{(document.Connectors.Count > 0 ? " --force" : string.Empty)}` again.").ConfigureAwait(false);
+            return 0;
         }
 
-        await output.WriteLineAsync("Next: `semantic-router doctor` checks every connector; `semantic-router` starts the router and the dashboard.").ConfigureAwait(false);
-        await output.WriteLineAsync($"Then, with ANTHROPIC_BASE_URL pointing at the router: {RouterHost.ClaudeCodeStart(document.Models, probes.Windows)}").ConfigureAwait(false);
+        await output.WriteLineAsync($"Next: `semantic-router doctor` checks every connector; `semantic-router` starts the router and its dashboard ({router}/router).").ConfigureAwait(false);
+        await output.WriteLineAsync($"Then start Claude Code through it: {RouterHost.ClaudeCodeCommand(router, document.Models, probes.Windows)}").ConfigureAwait(false);
         return 0;
     }
 
@@ -203,7 +233,7 @@ internal static class InitCommand
             document.Embeddings.Endpoint = embeddingEndpoint;
             document.Embeddings.Model = embeddingModel;
             document.DefaultSimilarityThreshold = embeddingModel.Contains("mxbai", StringComparison.OrdinalIgnoreCase) ? 0.68f : 0.62f;
-            notes.Add($"embeddings: '{embeddingModel}' on {embeddingEndpoint}; similarity threshold {document.DefaultSimilarityThreshold:0.00} (calibrate on the dashboard's Evaluate page).");
+            notes.Add($"embeddings: '{embeddingModel}' on {embeddingEndpoint}, to recognise what each prompt asks for.");
         }
         else
         {
@@ -212,8 +242,8 @@ internal static class InitCommand
             document.Embeddings.Provider = EmbeddingProviderKind.Onnx;
             document.Embeddings.Model = model.Name;
             document.DefaultSimilarityThreshold = model.SuggestedThreshold;
-            notes.Add($"embeddings: no embedding server found, so '{model.Name}' runs in this process ({Math.Round(model.ModelBytes / 1e6):0} MB, downloaded on first start); " +
-                      $"similarity threshold {model.SuggestedThreshold:0.00} (calibrate on the dashboard's Evaluate page).");
+            notes.Add($"embeddings: no embedding server found, so '{model.Name}' runs in this process to recognise what each prompt asks for " +
+                      $"({Math.Round(model.ModelBytes / 1e6):0} MB, downloaded from huggingface.co on first start).");
         }
 
         if (cli is null)
@@ -250,7 +280,9 @@ internal static class InitCommand
             }
         }
 
-        IReadOnlySet<string> yes = await cli.AskAsync(found.Where(f => f.Ask).Select(f => (f.Executable, f.Path)).ToArray(), cancellationToken).ConfigureAwait(false);
+        // Whether the CLIs are all there is: then saying no leaves the router with nothing to answer, and the question says so.
+        bool nothingElse = !document.Models.Any(m => m.Enabled);
+        IReadOnlySet<string> yes = await cli.AskAsync(found.Where(f => f.Ask).Select(f => (f.Executable, f.Path)).ToArray(), nothingElse, cancellationToken).ConfigureAwait(false);
         foreach ((string executable, string connector, CliPreset preset, int maxConcurrency, bool ask, string path) in found)
         {
             // Why a CLI is added disabled, and how to turn it on.
@@ -265,7 +297,7 @@ internal static class InitCommand
         if (unasked.Length > 0)
         {
             notes.Add($"{string.Join(", ", unasked)}: init asks before enabling a subscription CLI, because it answers on whatever account that CLI is signed in to, " +
-                      "which may be a personal plan (at work, see \"Using it at work\" in docs/TERMS.md). " +
+                      $"which may be a personal plan (at work, see {SiteLinks.WorkUse}). " +
                       $"Enable {(unasked.Length == 1 ? "it" : "them")} on the dashboard, or run `semantic-router init --force --yes` to enable {(unasked.Length == 1 ? "it" : "them")} without asking.");
         }
     }
@@ -283,7 +315,7 @@ internal static class InitCommand
             ToolCalling = preset == CliPreset.ClaudeCode ? CliToolCalling.Prompted : CliToolCalling.None,
         };
         document.Connectors[connector] = options;
-        string description = $"{executable} CLI on your own subscription (personal, local use; see docs/TERMS.md).";
+        string description = $"{executable} CLI on your own subscription (personal, local use; see {SiteLinks.Terms}).";
 
         if (preset == CliPreset.ClaudeCode)
         {

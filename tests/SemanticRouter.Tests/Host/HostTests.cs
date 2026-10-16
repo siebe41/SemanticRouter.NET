@@ -110,9 +110,14 @@ public sealed class HostTests : IDisposable
         RouterHost.ClaudeCodeContextTokens([Model("coder", 0), Model("opus", 200_000)]).Should().BeNull("an unknown context window is not guessed");
         RouterHost.ClaudeCodeContextTokens([Model("small", 8_192, tools: false)]).Should().BeNull();
 
-        RouterHost.ClaudeCodeStart([Model("opus", 200_000)], windows: false).Should().Be("export CLAUDE_CODE_MAX_CONTEXT_TOKENS=200000; claude --model semantic-router");
-        RouterHost.ClaudeCodeStart([Model("opus", 200_000)], windows: true).Should().Be("$env:CLAUDE_CODE_MAX_CONTEXT_TOKENS=\"200000\"; claude --model semantic-router");
-        RouterHost.ClaudeCodeStart([], windows: false).Should().Be("claude --model semantic-router");
+        // One line with the variables inline, as docs/clients.md has it; PowerShell sets them for the session instead.
+        RouterHost.ClaudeCodeCommand("http://localhost:5080", [Model("opus", 200_000)], windows: false).Should().Be(
+            "ANTHROPIC_BASE_URL=http://localhost:5080 ANTHROPIC_AUTH_TOKEN=semantic-router CLAUDE_CODE_MAX_CONTEXT_TOKENS=200000 CLAUDE_CODE_AUTO_MODE_SERVER=0 claude --model semantic-router");
+        RouterHost.ClaudeCodeCommand("http://localhost:5080", [Model("opus", 200_000)], windows: true).Should().Be(
+            "$env:ANTHROPIC_BASE_URL=\"http://localhost:5080\"; $env:ANTHROPIC_AUTH_TOKEN=\"semantic-router\"; $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS=\"200000\"; " +
+            "$env:CLAUDE_CODE_AUTO_MODE_SERVER=\"0\"; claude --model semantic-router");
+        RouterHost.ClaudeCodeCommand("http://localhost:5080", [], windows: false).Should().Be(
+            "ANTHROPIC_BASE_URL=http://localhost:5080 ANTHROPIC_AUTH_TOKEN=semantic-router CLAUDE_CODE_AUTO_MODE_SERVER=0 claude --model semantic-router");
     }
 
     [Fact]
@@ -173,7 +178,11 @@ public sealed class HostTests : IDisposable
         written.Embeddings.Model.Should().Be("text-embedding-nomic-embed-text-v1.5");
         written.DefaultSimilarityThreshold.Should().BeApproximately(0.62f, 0.001f);
         output.ToString().Should().Contain("lmstudio: http://localhost:1234/").And.Contain("copilot").And.Contain("disabled");
-        output.ToString().Should().Contain("claude --model semantic-router").And.NotContain("CLAUDE_CODE_MAX_CONTEXT_TOKENS", "the local coder model's context window is unknown");
+        output.ToString().Should().Contain("ANTHROPIC_BASE_URL=http://localhost:5080 ANTHROPIC_AUTH_TOKEN=semantic-router CLAUDE_CODE_AUTO_MODE_SERVER=0 claude --model semantic-router")
+            .And.NotContain("CLAUDE_CODE_MAX_CONTEXT_TOKENS", "the local coder model's context window is unknown")
+            .And.NotContain("export ", "the command is one line that changes nothing in the shell");
+        output.ToString().Should().Contain("Tiers: 1 Local small · 2 Local coder / mini · 3 Strong general · 4 Frontier · 5 Frontier + deep reasoning")
+            .And.NotContain("similarity threshold", "a threshold means nothing yet on a first run");
         EvaluationSet.Parse(File.ReadAllText(Path.Combine(_directory, "semantic-router.evaluation.jsonl"))).Should().NotBeEmpty("init writes the sample set next to the configuration");
         File.ReadAllText(Path.Combine(_directory, "semantic-router.json")).Should().NotContain("Effective", "computed properties are not settings");
     }
@@ -225,18 +234,20 @@ public sealed class HostTests : IDisposable
             report.Should().NotContain("Enable claude", "without a terminal init asks nothing");
             if (!enabled)
             {
-                report.Should().Contain("claude, codex: init asks before enabling").And.Contain("whatever account").And.Contain("docs/TERMS.md").And.Contain("--force --yes");
+                report.Should().Contain("claude, codex: init asks before enabling").And.Contain("whatever account").And.Contain(SiteLinks.WorkUse).And.Contain("--force --yes");
             }
         }
         else
         {
-            report.Should().Contain("whatever account that CLI is signed in to").And.Contain("docs/TERMS.md")
-                .And.Contain("Enable claude on the account it is signed in to? [y/N]").And.NotContain("Enable copilot");
+            report.Should().Contain("whatever account that CLI is signed in to").And.Contain(SiteLinks.WorkUse)
+                .And.Contain("Enable claude on the account it is signed in to? [y/N]").And.NotContain("Enable copilot")
+                .And.Contain("Nothing else was found to answer prompts", "no local server answered, so saying no leaves the router without a model");
         }
 
         if (!enabled)
         {
-            report.Should().Contain("all disabled").And.Contain(answers is null ? "no terminal to ask on" : "you did not say yes").And.Contain("No model is enabled");
+            report.Should().Contain("all disabled").And.Contain(answers is null ? "no terminal to ask on" : "you did not say yes").And.Contain("No model is enabled")
+                .And.Contain("http://localhost:5080/router#/overview").And.NotContain("claude --model", "there is no model to start Claude Code against");
         }
     }
 
@@ -310,8 +321,9 @@ public sealed class HostTests : IDisposable
         string report = output.ToString();
         exit.Should().Be(1, report);
         report.Should().Contain("[ OK ] model small: 'qwen3-8b' is offered by lmstudio.");
-        report.Should().Contain("[FAIL] model typo: 'qwen3-8 b' is not offered by lmstudio; set SemanticRouter:Models:1:Model to one of: qwen3-8b.");
-        report.Should().Contain("[FAIL] connector openai:").And.Contain("rejected the credentials; check SemanticRouter:Connectors:openai:ApiKey");
+        report.Should().Contain("[FAIL] model typo: 'qwen3-8 b' is not offered by lmstudio; set SemanticRouter:Models:1:Model (dashboard: Providers → Models → typo → Model) to one of: qwen3-8b.");
+        report.Should().Contain("[FAIL] connector openai:").And.Contain("rejected the credentials; check SemanticRouter:Connectors:openai:ApiKey (dashboard: Providers → Connectors → openai → API key)");
+        report.Should().NotContain("[FAIL] models:", "models are enabled");
         report.Should().Contain("[ OK ] connector tool:");
         report.Should().Contain("[FAIL] connector missing:").And.Contain("SemanticRouter:Connectors:missing:Executable");
         report.Should().Contain("[WARN] embeddings: the Hashing provider");

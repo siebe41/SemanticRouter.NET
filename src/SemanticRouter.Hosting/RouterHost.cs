@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration.Json;
+using Microsoft.Extensions.Configuration.Memory;
 using Microsoft.Extensions.Options;
 using SemanticRouter.AspNetCore;
 
@@ -52,10 +53,20 @@ internal static class RouterHost
             ContentRootPath = settings.ConfigurationDirectory,
         });
 
+        // Below everything else, so appsettings.json or Logging__LogLevel__… can turn any of it back up. Added before
+        // the template: adding a source reloads the others, and the template's stream can be read only once.
+        builder.Configuration.Sources.Insert(0, new MemoryConfigurationSource { InitialData = QuietLogging });
         builder.Configuration.Sources.Insert(0, new JsonStreamConfigurationSource
         {
             Stream = new MemoryStream(Encoding.UTF8.GetBytes("{\"SemanticRouter\":" + Template() + "}")),
         });
+
+        var starting = new StartingQuietly();
+        builder.Services.AddSingleton(starting);
+
+        // While Kestrel binds, the generic host logs a failed start with its stack trace before StartAsync throws; the
+        // start-up code below explains the one failure people meet (an address in use) itself.
+        builder.Logging.AddFilter(HostCategory, level => level >= LogLevel.Warning && (!starting.On || level >= LogLevel.Critical));
 
         if (string.IsNullOrEmpty(builder.Configuration[WebHostDefaults.ServerUrlsKey])
             && string.IsNullOrEmpty(builder.Configuration[WebHostDefaults.HttpPortsKey])
@@ -100,6 +111,29 @@ internal static class RouterHost
         app.MapPromptClassification();
         app.MapRouterDashboard("/router");
         return app;
+    }
+
+    /// <summary>The generic host's own log category: it reports a failed start, and a background service that failed.</summary>
+    private const string HostCategory = "Microsoft.Extensions.Hosting.Internal.Host";
+
+    /// <summary>
+    /// Default log levels for the tool: ASP.NET Core's lines per request, Kestrel's binding notes and the hosting
+    /// lifetime's "Application started" add nothing to the router's own line per request and the banner, and data
+    /// protection's notes about where its keys live and that they are not encrypted are what <see cref="KeyRing"/>
+    /// reports, once, in plain words.
+    /// </summary>
+    private static readonly Dictionary<string, string?> QuietLogging = new()
+    {
+        ["Logging:LogLevel:Microsoft.AspNetCore"] = "Warning",
+        ["Logging:LogLevel:Microsoft.Hosting.Lifetime"] = "Warning",
+        ["Logging:LogLevel:Microsoft.AspNetCore.DataProtection"] = "Error",
+        ["Logging:LogLevel:System.Net.Http.HttpClient"] = "Warning",
+    };
+
+    /// <summary>Set while the web host starts, to keep its failed-start report (a stack trace) off the console.</summary>
+    private sealed class StartingQuietly
+    {
+        public volatile bool On;
     }
 
     /// <summary>The configuration section that names the reverse proxies whose forwarded headers are trusted.</summary>
@@ -166,16 +200,28 @@ internal static class RouterHost
     /// Starts the router and records it in <c>semantic-router.instance.json</c>. Returns <see langword="null"/> after
     /// explaining it on <paramref name="output"/> when the address is already taken. Disposing the result stops it.
     /// </summary>
-    public static async Task<RunningRouter?> StartAsync(HostSettings settings, TextWriter output, Action<WebApplicationBuilder>? configure = null)
+    /// <param name="environment">Reads environment variables (the API keys a container seeds connectors from); the process's by default.</param>
+    public static async Task<RunningRouter?> StartAsync(
+        HostSettings settings, TextWriter output, Action<WebApplicationBuilder>? configure = null, Func<string, string?>? environment = null)
     {
-        if (!File.Exists(settings.ConfigurationFile))
+        var store = new JsonFileRouterConfigurationStore(settings.ConfigurationFile);
+        bool create = !File.Exists(settings.ConfigurationFile);
+        RouterConfiguration? fresh = create ? RouterConfiguration.FromJson(Template())
+            : FirstRun.IsUntouchedTemplate(settings.ConfigurationFile) ? store.Load()
+            : null;
+        if (fresh is not null)
         {
-            RouterConfiguration template = RouterConfiguration.FromJson(Template());
-            new JsonFileRouterConfigurationStore(settings.ConfigurationFile).Save(template);
-            await output.WriteLineAsync($"Created {settings.ConfigurationFile} from the built-in template. Run `semantic-router init` to add the models on this machine.").ConfigureAwait(false);
+            IReadOnlyList<string> seeded = FirstRun.SeedFromEnvironment(fresh, environment ?? Environment.GetEnvironmentVariable);
+            if (create || seeded.Count > 0)
+            {
+                store.Save(fresh);
+                await output.WriteLineAsync(FirstRun.Describe(settings.ConfigurationFile, create, seeded)).ConfigureAwait(false);
+            }
         }
 
         WebApplication app = Build(settings, configure);
+        StartingQuietly starting = app.Services.GetRequiredService<StartingQuietly>();
+        starting.On = true;
         try
         {
             await app.StartAsync().ConfigureAwait(false);
@@ -183,10 +229,12 @@ internal static class RouterHost
         catch (IOException ex) when (ex.InnerException is AddressInUseException)
         {
             await app.DisposeAsync().ConfigureAwait(false);
-            await output.WriteLineAsync(
-                $"{ex.Message} Another program is listening there, or the router already runs in the background " +
-                "(`semantic-router service status`). Pick another address with --urls.").ConfigureAwait(false);
+            await output.WriteLineAsync(AddressInUse(ex.Message, RouterInstance.ReadRunning(settings.ConfigurationDirectory))).ConfigureAwait(false);
             return null;
+        }
+        finally
+        {
+            starting.On = false;
         }
 
         var instance = new RouterInstance(Environment.ProcessId, [.. app.Urls], DateTimeOffset.UtcNow, Version);
@@ -195,46 +243,106 @@ internal static class RouterHost
         return new RunningRouter(app, instance, settings.ConfigurationDirectory, stopListener);
     }
 
+    /// <summary>
+    /// Why the router could not listen, without a stack trace: when the router recorded for this configuration
+    /// directory is the one listening, where its dashboard is; otherwise that another program holds the address.
+    /// </summary>
+    internal static string AddressInUse(string problem, RouterInstance? running)
+    {
+        if (running is null)
+        {
+            return $"{problem} Another program is listening there, or a router for another configuration directory " +
+                   "(`semantic-router service status` shows the background one). Stop it, or pick another address with --urls, e.g. --urls http://localhost:5081.";
+        }
+
+        string url = LocalAddress(running.Urls.FirstOrDefault(u => u.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) ?? (running.Urls.Count > 0 ? running.Urls[0] : null) ?? HostSettings.DefaultUrl);
+        return $"SemanticRouter is already running for this configuration (process {running.ProcessId}, version {running.Version}): " +
+               $"its dashboard is {url}/router. Use that one, or stop it first (`semantic-router service stop` when it runs in the background).";
+    }
+
     private static async Task WriteBannerAsync(WebApplication app, HostSettings settings, TextWriter output)
     {
-        string[] urls = [.. app.Urls];
-        string url = urls.FirstOrDefault(u => u.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) ?? urls.FirstOrDefault() ?? HostSettings.DefaultUrl;
-        string local = LocalAddress(url);
-        bool windows = OperatingSystem.IsWindows();
-        string Set(string name, string value) => windows ? $"$env:{name}=\"{value}\"" : $"export {name}={value}";
+        RouterRuntime runtime = app.Services.GetRequiredService<RouterRuntimeProvider>().Current;
+        await output.WriteLineAsync(Banner(Version, [.. app.Urls], settings.ConfigurationFile, runtime.Configuration, OperatingSystem.IsWindows())).ConfigureAwait(false);
+    }
 
+    /// <summary>
+    /// What the router prints once it listens: where, the dashboard, and either how to try it (a request, where to watch
+    /// it, the Claude Code command) or, while no model is enabled, where to set one up.
+    /// </summary>
+    internal static string Banner(string version, IReadOnlyList<string> urls, string configurationFile, RouterConfiguration configuration, bool windows)
+    {
+        string url = urls.FirstOrDefault(u => u.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) ?? (urls.Count > 0 ? urls[0] : null) ?? HostSettings.DefaultUrl;
+        string local = LocalAddress(url);
+        string dashboard = local + "/router";
         var banner = new StringBuilder()
             .AppendLine()
-            .AppendLine(CultureInfo.InvariantCulture, $"SemanticRouter {Version} is listening on {string.Join(", ", urls)}")
-            .AppendLine(CultureInfo.InvariantCulture, $"  Configuration  {settings.ConfigurationFile}")
-            .AppendLine(CultureInfo.InvariantCulture, $"  Dashboard      {local}/router")
-            .AppendLine(CultureInfo.InvariantCulture, $"  Claude Code    {Set("ANTHROPIC_BASE_URL", local)}; {Set("ANTHROPIC_AUTH_TOKEN", "semantic-router")}")
-            .AppendLine(CultureInfo.InvariantCulture, $"                 {ClaudeCodeStart(app.Services.GetRequiredService<RouterRuntimeProvider>().Current.Router.Models, windows)}")
-            .AppendLine(CultureInfo.InvariantCulture, $"  OpenAI clients {Set("OPENAI_BASE_URL", local + "/v1")}; model \"auto\"");
+            .AppendLine(CultureInfo.InvariantCulture, $"SemanticRouter {version} is listening on {string.Join(", ", urls)}")
+            .AppendLine(CultureInfo.InvariantCulture, $"  Configuration  {configurationFile}")
+            .AppendLine(CultureInfo.InvariantCulture, $"  Dashboard      {dashboard}");
+
+        bool dispatch = configuration.Middleware.Mode == PromptRouterMode.Dispatch;
+        if (dispatch && !configuration.Models.Any(m => m.Enabled))
+        {
+            banner
+                .AppendLine()
+                .AppendLine("  No model is enabled yet, so the router cannot answer any prompt.")
+                .AppendLine(CultureInfo.InvariantCulture, $"  Set one up on the dashboard: {dashboard}#/overview");
+        }
+        else if (dispatch)
+        {
+            banner
+                .AppendLine()
+                .AppendLine("  Try it")
+                .AppendLine(CultureInfo.InvariantCulture, $"    {TryRequest(local, windows)}")
+                .AppendLine(CultureInfo.InvariantCulture, $"    Watch it: {dashboard}#/live")
+                .AppendLine("  Claude Code")
+                .AppendLine(CultureInfo.InvariantCulture, $"    {ClaudeCodeCommand(local, configuration.Models, windows)}")
+                .AppendLine(CultureInfo.InvariantCulture, $"  OpenAI clients: base URL {local}/v1, model \"auto\"");
+        }
 
         if (urls.Any(u => !IsLoopback(u)))
         {
             banner
                 .AppendLine()
                 .AppendLine("  Listening beyond this machine:")
-                .AppendLine("  - Subscription CLI connectors (claude, codex, copilot) still answer only requests from this machine (docs/TERMS.md).")
-                .AppendLine("  - The dashboard needs SemanticRouter:Dashboard:AdminToken and RequireLocalClient=false for remote use.")
-                .AppendLine(CultureInfo.InvariantCulture, $"  - {RemoteGatewayAccess(app.Services.GetRequiredService<RouterRuntimeProvider>().Current.Configuration.Middleware)}");
+                .AppendLine(CultureInfo.InvariantCulture, $"  - Subscription CLI connectors (claude, codex, copilot) still answer only requests from this machine ({SiteLinks.Terms}).")
+                .AppendLine(CultureInfo.InvariantCulture, $"  - The dashboard needs SemanticRouter:Dashboard:AdminToken and RequireLocalClient=false for remote use ({SiteLinks.DashboardAccess}).")
+                .AppendLine(CultureInfo.InvariantCulture, $"  - {RemoteGatewayAccess(configuration.Middleware)}");
         }
 
-        await output.WriteLineAsync(banner.ToString()).ConfigureAwait(false);
+        return banner.ToString();
+    }
+
+    /// <summary>A first request to the router, for the banner: PowerShell's own command on Windows, curl elsewhere.</summary>
+    internal static string TryRequest(string local, bool windows)
+    {
+        const string Body = """{"model":"auto","messages":[{"role":"user","content":"Say hello in five words"}]}""";
+        return windows
+            ? $"Invoke-RestMethod {local}/v1/chat/completions -Method Post -ContentType application/json -Body '{Body}'"
+            : $"curl {local}/v1/chat/completions -H 'Content-Type: application/json' -d '{Body}'";
     }
 
     /// <summary>
-    /// How to start Claude Code against the router, for the banner and <c>init</c>: the router's own model name, and
-    /// <c>CLAUDE_CODE_MAX_CONTEXT_TOKENS</c> set to <see cref="ClaudeCodeContextTokens"/> when it is known.
+    /// How to start Claude Code against the router, for the banner and <c>init</c>, as docs/clients.md has it: the
+    /// router's address and a placeholder token, <c>CLAUDE_CODE_MAX_CONTEXT_TOKENS</c> set to
+    /// <see cref="ClaudeCodeContextTokens"/> when it is known, auto mode without Anthropic's server, and the router's own
+    /// model name. Inline, so nothing changes in the shell; PowerShell has no inline form, so there it sets them for the
+    /// session.
     /// </summary>
-    internal static string ClaudeCodeStart(IEnumerable<ModelDefinition> models, bool windows)
+    internal static string ClaudeCodeCommand(string local, IEnumerable<ModelDefinition> models, bool windows)
     {
+        var variables = new List<(string Name, string Value)> { ("ANTHROPIC_BASE_URL", local), ("ANTHROPIC_AUTH_TOKEN", "semantic-router") };
+        if (ClaudeCodeContextTokens(models) is { } tokens)
+        {
+            variables.Add(("CLAUDE_CODE_MAX_CONTEXT_TOKENS", tokens.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        variables.Add(("CLAUDE_CODE_AUTO_MODE_SERVER", "0"));
         string start = $"claude --model {ModelAliases.Router}";
-        return ClaudeCodeContextTokens(models) is { } tokens
-            ? (windows ? $"$env:CLAUDE_CODE_MAX_CONTEXT_TOKENS=\"{tokens}\"" : $"export CLAUDE_CODE_MAX_CONTEXT_TOKENS={tokens}") + "; " + start
-            : start;
+        return windows
+            ? string.Concat(variables.Select(v => $"$env:{v.Name}=\"{v.Value}\"; ")) + start
+            : string.Concat(variables.Select(v => $"{v.Name}={v.Value} ")) + start;
     }
 
     /// <summary>
@@ -254,7 +362,31 @@ internal static class RouterHost
             ? "Clients on other machines must send a gateway key (SemanticRouter:Middleware:GatewayKeys)."
             : middleware.AllowUnauthenticatedRemoteClients
                 ? "Clients on other machines can use the gateway without a key (AllowUnauthenticatedRemoteClients): only behind a proxy that authenticates them."
-                : "Clients on other machines are refused until you set SemanticRouter:Middleware:GatewayKeys (docs/host.md).";
+                : $"Clients on other machines are refused until you set SemanticRouter:Middleware:GatewayKeys ({SiteLinks.ListeningBeyond}).";
+
+    /// <summary>
+    /// The address the router will answer on for clients on this machine, from <c>--urls</c> on the command line, for
+    /// commands that print it before the router runs (<c>init</c>, <c>doctor</c>).
+    /// </summary>
+    internal static string LocalAddress(HostSettings settings)
+    {
+        string? urls = null;
+        for (int i = 0; i < settings.HostArguments.Count; i++)
+        {
+            string argument = settings.HostArguments[i];
+            if (argument == "--urls" && i + 1 < settings.HostArguments.Count)
+            {
+                urls = settings.HostArguments[i + 1];
+            }
+            else if (argument.StartsWith("--urls=", StringComparison.Ordinal))
+            {
+                urls = argument["--urls=".Length..];
+            }
+        }
+
+        string[] each = (urls ?? HostSettings.DefaultUrl).Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return LocalAddress(each.FirstOrDefault(u => u.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) ?? each.FirstOrDefault() ?? HostSettings.DefaultUrl);
+    }
 
     /// <summary>The address to print for clients on this machine: a wildcard bind is reached through localhost.</summary>
     internal static string LocalAddress(string url)

@@ -162,8 +162,17 @@ public sealed class KeyRingTests : IDisposable
         File.ReadAllText(key).Should().NotContain("encryptedSecret");
         File.GetUnixFileMode(Keys).Should().Be(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         File.GetUnixFileMode(key).Should().Be(UnixFileMode.UserRead | UnixFileMode.UserWrite, "ASP.NET Core writes new keys 0600");
-        checks[0].Status.Should().Be(RouterCheckStatus.Warning);
-        checks[0].Message.Should().StartWith($"{Keys} (SEMANTIC_ROUTER_KEYS_DIR), not encrypted").And.Contain(KeyRing.CertificateSetting);
+        checks[0].Status.Should().Be(RouterCheckStatus.Ok, "the secrets file holds nothing the keys could give away yet");
+        checks[0].Message.Should().StartWith($"{Keys} (SEMANTIC_ROUTER_KEYS_DIR), not encrypted, which is fine while the secrets file holds no key")
+            .And.Contain(KeyRing.CertificateSetting).And.Contain(SiteLinks.KeyRing);
+
+        File.WriteAllText(SecretsFile, "{}");
+        ring.Checks().First().Status.Should().Be(RouterCheckStatus.Ok, "an empty secrets file holds nothing either");
+        File.WriteAllText(SecretsFile, "{\"connectors/openai/ApiKey\":\"CfDJ8…\"}");
+        RouterCheck warning = ring.Checks().First();
+        warning.Status.Should().Be(RouterCheckStatus.Warning);
+        warning.Message.Should().StartWith($"{Keys} (SEMANTIC_ROUTER_KEYS_DIR), not encrypted: only its owner-only file permissions protect it")
+            .And.Contain(KeyRing.CertificateSetting).And.Contain(SiteLinks.KeyRing).And.NotContain("docs/");
     }
 
     [Fact]

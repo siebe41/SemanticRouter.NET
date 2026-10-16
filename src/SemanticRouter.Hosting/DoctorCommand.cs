@@ -38,7 +38,9 @@ internal static class DoctorCommand
             {
                 // The egress list first: the embeddings check may download the ONNX model it reports.
                 IReadOnlyList<RouterCheck> egress = EgressList.For(app.Services, settings.ConfigurationDirectory);
-                checks = [.. HostChecks(app), .. egress, .. await RouterDoctor.CheckAsync(app.Services).ConfigureAwait(false)];
+                IReadOnlyList<RouterCheck> router = await RouterDoctor.CheckAsync(app.Services).ConfigureAwait(false);
+                RouterCheck? models = ModelsCheck(app.Services.GetRequiredService<RouterRuntimeProvider>().Current.Configuration, settings);
+                checks = [.. HostChecks(app), .. egress, .. models is null ? [] : new[] { models }, .. router.Where(c => models is null || !IsNoModelWarning(c))];
             }
             catch (InvalidOperationException ex)
             {
@@ -63,9 +65,36 @@ internal static class DoctorCommand
         int warnings = checks.Count(c => c.Status == RouterCheckStatus.Warning);
         await output.WriteLineAsync(failed == 0
             ? $"All checks passed{(warnings > 0 ? $" ({warnings} warning(s))" : string.Empty)}."
-            : $"{failed} check(s) failed. Each [FAIL] line names the setting to change.").ConfigureAwait(false);
+            : $"{failed} check(s) failed. Each [FAIL] line says what to change.").ConfigureAwait(false);
         return failed == 0 ? 0 : 1;
     }
+
+    /// <summary>
+    /// A router that dispatches but has no enabled model refuses every request: that fails the check, with where to add
+    /// one. Running <c>init</c> is suggested only while the configuration is still the template, since an <c>init</c>
+    /// that already ran found nothing to add.
+    /// </summary>
+    internal static RouterCheck? ModelsCheck(RouterConfiguration configuration, HostSettings settings)
+    {
+        if (configuration.Middleware.Mode != PromptRouterMode.Dispatch || configuration.Models.Any(m => m.Enabled))
+        {
+            return null;
+        }
+
+        string setup = $"{RouterHost.LocalAddress(settings)}/router#/overview";
+        bool template = !File.Exists(settings.ConfigurationFile) || FirstRun.IsUntouchedTemplate(settings.ConfigurationFile, exactly: true);
+        string fix = template
+            ? $"Run `semantic-router init` to add the models on this machine, or start the router (`semantic-router`) and set one up on its dashboard: {setup}"
+            : configuration.Models.Count > 0
+                ? $"Start the router (`semantic-router`) and enable one on its dashboard under Providers → Models, or use the setup on {setup}"
+                : $"Start the router (`semantic-router`) and set one up on its dashboard: {setup}. For a local model, start LM Studio's server (Developer → Start server) or Ollama first.";
+        return new RouterCheck("models", RouterCheckStatus.Failed,
+            $"no model is enabled{(configuration.Models.Count > 0 ? $" ({configuration.Models.Count} configured, all disabled)" : string.Empty)}, so the router cannot answer any prompt. {fix}");
+    }
+
+    /// <summary>The runtime's own warning about the same thing, which <see cref="ModelsCheck"/> replaces.</summary>
+    private static bool IsNoModelWarning(RouterCheck check) =>
+        check.Subject == "configuration" && check.Message.StartsWith("No model is enabled", StringComparison.OrdinalIgnoreCase);
 
     private static IEnumerable<RouterCheck> HostChecks(WebApplication app)
     {

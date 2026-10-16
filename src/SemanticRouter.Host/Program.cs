@@ -68,8 +68,10 @@ static string Help() => $"""
                                         Write a starting configuration with the models found on this machine
                                         (LM Studio, Ollama, and the claude / codex / copilot CLIs on PATH).
                                         It asks before enabling each subscription CLI, since that CLI answers
-                                        on whatever account it is signed in to (see "Using it at work" in
-                                        docs/TERMS.md); without a terminal they are added disabled.
+                                        on whatever account it is signed in to (at work, see
+                                        {SiteLinks.WorkUse}); without a terminal they are added
+                                        disabled. A file that still holds the built-in template is replaced
+                                        without --force.
       semantic-router doctor            Check every connector, model and the embeddings, and list every host the
                                         router will contact. Exit code 1 on failure.
       semantic-router models [name]     List the models each connector (or the one named) offers: loaded or not,
@@ -85,12 +87,14 @@ static string Help() => $"""
           uninstall                     Stop it and stop starting it at sign-in.
       semantic-router --version | --help
 
+    The guides: {SiteLinks.Root}
+
     Options:
       --config-dir <dir>   Configuration directory. Default: ${HostSettings.HomeVariable}, else
                            %APPDATA%\semantic-router, ~/Library/Application Support/semantic-router
                            or ~/.config/semantic-router.
       --urls <urls>        Where to listen, e.g. http://localhost:5080 (the default). Binding beyond this machine
-                           needs a dashboard token for remote dashboard use; see docs/dashboard.md.
+                           needs a dashboard token for remote dashboard use; see {SiteLinks.DashboardAccess}.
       --no-detect          init: write the template without probing this machine.
       --yes, -y            init: enable the claude and codex CLIs it finds without asking.
       --no-cli             init: add no subscription CLI connectors (claude, codex, copilot).
