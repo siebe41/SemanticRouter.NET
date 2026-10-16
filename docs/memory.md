@@ -52,7 +52,7 @@ Memory kept by claude.ai and the Claude apps for your account lives with Anthrop
 
 ## How notes are spotted in a request
 
-Every string in the request body is scanned (system prompt, messages, tool calls and tool results), so it works the same for both protocols and whatever a client injects.
+Every string in the request body is scanned (system prompt, messages, tool calls and tool results), so it works the same for every protocol and whatever a client injects.
 
 - **Text.** Each note is fingerprinted line by line: lines of at least `MinimumLineLength` characters (default 24), with whitespace collapsed. Lines that appear in more than three notes (template boilerplate, footers) are dropped as not distinctive. A request line that matches a fingerprint counts as that note's **text** being sent; the dashboard shows how many of its distinctive lines were present (`2/3 lines`). The line-number prefixes that file-reading tools add (Claude Code's Read returns `   12→text`) are ignored, so a file Claude Code read is recognised.
 - **Mentioned.** A note's path or file name (`projects/Billing.md`, `Billing.md` when only one note has that name) or its `[[title]]`/`[[alias]]` in the request counts as a **mention**: the model saw the note's name, not its text.
