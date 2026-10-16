@@ -26,8 +26,8 @@ if (args is ["tool-calls", ..])
 }
 
 string root = FindRepository();
-string template = File.ReadAllText(Path.Combine(root, "src", "SemanticRouter.Host", "Templates", "semantic-router.template.json"));
-IReadOnlyList<EvaluationCase> cases = EvaluationSet.Parse(File.ReadAllText(Path.Combine(root, "src", "SemanticRouter.Host", "Templates", "semantic-router.evaluation.jsonl")));
+string template = File.ReadAllText(Path.Combine(root, "src", "SemanticRouter.Hosting", "Templates", "semantic-router.template.json"));
+IReadOnlyList<EvaluationCase> cases = EvaluationSet.Parse(File.ReadAllText(Path.Combine(root, "src", "SemanticRouter.Hosting", "Templates", "semantic-router.evaluation.jsonl")));
 string models = Environment.GetEnvironmentVariable("SEMANTIC_ROUTER_TEST_MODELS") is { Length: > 0 } cache ? cache : Path.Combine(Path.GetTempPath(), "semantic-router-test-models");
 const int Rounds = 5;
 
