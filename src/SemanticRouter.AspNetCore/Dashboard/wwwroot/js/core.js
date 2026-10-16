@@ -56,6 +56,17 @@ export const state = {
   checking: new Set(), // connectors whose endpoint check is running
   audit: { entries: null, loading: false, limit: 200, error: null }, // GET api/audit (Audit log)
   lineups: [],         // Discover models: one { connector, busy, error, server, loading, loadingNote, note, lineup } per connector asked
+  issues: null,        // [{ path, message }] behind state.errors: each problem tied to its field (data-bind path)
+  focusIssue: false,   // after Validate or Apply: focus the first problem on the page
+  focusPath: null,     // a problem picked in the list: focus its field once its page is rendered
+  focusAfter: null,    // selectors to focus after the next render, the first that exists (a new item's name, the next item)
+  conflict: null,      // the configuration changed under the draft: { currentVersion, actor, at, source, persist, dismissed }
+  saveApi: null,       // false once POST config/save answered 404 (an older router): no Save / Revert buttons
+  jsonText: null,      // the JSON editor's text while it differs from the draft (null: it shows the draft)
+  aliasRows: null,     // Gateway model aliases as rows while editing: { sig, rows: [{ key, value }] }
+  limitRows: null,     // Gateway rate limits as rows: { sig, rows: [{ key, value }] }
+  busy: new Set(),     // actions whose promise is still pending (actionKey), so a second click is ignored
+  activityNew: 0,      // entries that arrived while the Activity table was held still
 };
 export const lineupFor = (connector) => state.lineups.find((l) => l.connector === connector);
 
@@ -68,6 +79,19 @@ export const h = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
 export const num = (v, d) => (v == null || v === '' ? '' : (typeof v === 'number' ? Number(v.toFixed(d == null ? 3 : d)) : v));
 export const when = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString(); };
 export const isDirty = () => state.config && JSON.stringify(state.config) !== state.original;
+// Typed text outside the draft that a reload would lose: the JSON editor, the evaluation set.
+export const jsonEdited = () => state.jsonText != null && state.jsonText !== JSON.stringify(state.config, null, 2);
+export const evaluationEdited = () => state.evaluation.text != null && state.evaluation.savedText != null && state.evaluation.text !== state.evaluation.savedText;
+// Where the running configuration came from, in words (the API keeps the enum value).
+export const sourceLabel = (source) => ({ Memory: 'not saved', Store: 'saved', Configuration: 'app settings' }[source] || String(source || '').toLowerCase());
+// The time, with the date when it was not today.
+export const whenDate = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? time : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' + time;
+};
+export const plural = (n, one, many) => `${n} ${n === 1 ? one : (many || one + 's')}`;
 export const readOnly = () => state.session.role === 'ReadOnly' || state.session.role === 'Metrics';
 // The metrics role sees figures only (no prompts, configuration or activity): the Overview's counts and the Usage page.
 export const metricsOnly = () => state.session.role === 'Metrics';
@@ -112,28 +136,106 @@ export async function api(method, path, body) {
   try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
   if (res.status === 401 && path !== '/session') { showSignIn(); }
   if (!res.ok) {
-    const err = new Error((data && (data.detail || data.title || (data.errors && data.errors.join('; ')))) || `HTTP ${res.status}`);
+    // A proxy in front of the router answers in HTML or plain text: show what it said rather than only the status.
+    const raw = data && data.raw ? data.raw.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+    const err = new Error((data && (data.detail || data.title || (data.errors && data.errors.join('; ')))) || (raw ? `${raw} (HTTP ${res.status})` : `HTTP ${res.status}`));
     err.data = data; err.status = res.status;
     throw err;
   }
   return data;
 }
 
-export let toastTimer = null;
-export function toast(message, kind) {
-  const el = $('#toast');
-  el.textContent = message;
+/* ---------------------------------------------------------------------------------------------
+   Toasts: a stack, so a new message never replaces one still being read. Each is spoken once through a live region
+   (errors through role="alert"); one with an action (Undo) or marked sticky stays until it is used or dismissed.
+   --------------------------------------------------------------------------------------------- */
+function announce(message, kind) {
+  const el = $(kind === 'danger' ? '#announce-alert' : '#announce-status');
+  if (!el) return;
+  el.textContent = '';
+  // Cleared first and written on the next frame, so the same words twice are still a change a screen reader hears.
+  requestAnimationFrame(() => { el.textContent = message; });
+}
+export function toast(message, kind, options) {
+  const opts = options || {};
+  const box = $('#toast');
+  if (!box) return { dismiss() {} };
+  const same = Array.from(box.children).find((t) => t.dataset.text === message && !t.querySelector('.toast-action'));
+  if (same) same.remove();
+  const el = document.createElement('div');
+  const error = kind === 'danger';
   el.className = 'toast ' + (kind || '');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.add('hidden'), 4500);
+  el.dataset.text = message;
+  el.innerHTML = `${error ? '<span class="toast-icon" aria-hidden="true">!</span>' : ''}<span class="toast-text"></span>`;
+  el.querySelector('.toast-text').textContent = message;
+  let timer = null;
+  const dismiss = () => { clearTimeout(timer); el.remove(); box.classList.toggle('hidden', !box.children.length); };
+  if (opts.action) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'btn small toast-action'; b.textContent = opts.action.label;
+    b.addEventListener('click', () => { dismiss(); opts.action.run(); });
+    el.appendChild(b);
+  }
+  if (opts.sticky || opts.action || error) {
+    const x = document.createElement('button');
+    x.type = 'button'; x.className = 'btn ghost small toast-close'; x.setAttribute('aria-label', 'Dismiss'); x.textContent = '×';
+    x.addEventListener('click', dismiss);
+    el.appendChild(x);
+  }
+  box.appendChild(el);
+  box.classList.remove('hidden');
+  // At most four at a time: the oldest that is not waiting for a decision goes first.
+  while (box.children.length > 4) (Array.from(box.children).find((t) => !t.querySelector('.toast-action')) || box.firstElementChild).remove();
+  announce(error && !/^(couldn.t|not |no |error)/i.test(message) ? 'Error: ' + message : message, kind);
+  const ms = opts.sticky ? 0 : opts.action ? 10000 : error ? 9000 : 4500;
+  const start = () => { clearTimeout(timer); if (ms) timer = setTimeout(dismiss, ms); };
+  // Kept while the pointer or the keyboard is on it, so an Undo can still be reached.
+  el.addEventListener('mouseenter', () => clearTimeout(timer));
+  el.addEventListener('mouseleave', start);
+  el.addEventListener('focusin', () => clearTimeout(timer));
+  el.addEventListener('focusout', start);
+  start();
+  return { dismiss };
 }
 
+/* The chrome's banner: rewritten only when what it says changes, so a screen reader does not hear it again every refresh. */
 export function banner(message, kind) {
   const el = $('#banner');
-  if (!message) { el.classList.add('hidden'); return; }
+  const key = message ? (kind || '') + '|' + message : '';
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
+  if (!message) { el.classList.add('hidden'); el.innerHTML = ''; return; }
   el.innerHTML = message;
   el.className = 'banner ' + (kind || '');
 }
+
+/*
+ * An in-page question instead of the browser's confirm(): a modal <dialog> with the given buttons. Resolves to the
+ * chosen button's value, or null when it is closed (Escape). The focus goes back where it was.
+ */
+export function ask({ title, body, actions, wide }) {
+  return new Promise((resolve) => {
+    let d = $('#ask');
+    if (!d) { d = document.createElement('dialog'); d.id = 'ask'; d.className = 'ask'; d.setAttribute('aria-labelledby', 'ask-title'); document.body.appendChild(d); }
+    const back = document.activeElement;
+    d.classList.toggle('wide', !!wide);
+    d.innerHTML = `<form method="dialog"><h2 id="ask-title">${h(title)}</h2><div class="ask-body">${body || ''}</div>
+      <div class="ask-actions">${actions.map((a, i) => `<button class="btn ${a.kind || ''}" value="${i}">${h(a.label)}</button>`).join('')}</div></form>`;
+    d.returnValue = '';
+    d.onclose = () => {
+      const v = d.returnValue;
+      resolve(v === '' || actions[+v].value === undefined ? null : actions[+v].value);
+      // After the action that asked has finished (its button is no longer disabled as busy).
+      setTimeout(() => { if (back && back.isConnected && back.focus && !$('#ask').open) back.focus({ preventScroll: true }); });
+    };
+    d.showModal();
+    const first = d.querySelectorAll('.ask-actions button')[Math.max(0, actions.findIndex((a) => a.focus))];
+    if (first) first.focus();
+  });
+}
+
+/* A key per action button, so a second click while the first is still running is ignored (and the button shown busy). */
+export const actionKey = (el) => [el.dataset.action, el.dataset.id, el.dataset.index, el.dataset.name, el.dataset.connector, el.dataset.model].map((x) => x || '').join('|');
 
 /* Path-based binding: data-bind="Routes.0.Utterances" with data-kind="lines|csv|kv|number|float|bool|text|timespan". */
 export function getPath(obj, path) {
@@ -179,10 +281,16 @@ export function showSignIn(message) {
     </div>`;
   $('#signin-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
+    // The draft and the JSON editor's text survive signing in again: loading would replace them.
+    const draft = isDirty() ? { config: state.config, original: state.original, version: state.meta.version } : null;
+    const jsonText = state.jsonText;
     try {
       state.session = await api('POST', '/session', { token: $('#signin-token').value });
-      const { loadAll, route } = await import('./shell.js'); // dynamic: core imports nothing statically
-      await loadAll(); route();
+      const { keepDraft, loadAll, route } = await import('./shell.js'); // dynamic: core imports nothing statically
+      await loadAll();
+      if (draft) keepDraft(draft);
+      state.jsonText = jsonText;
+      route();
     } catch (e) { showSignIn(e.message); }
   });
   const input = $('#signin-token'); if (input) input.focus();

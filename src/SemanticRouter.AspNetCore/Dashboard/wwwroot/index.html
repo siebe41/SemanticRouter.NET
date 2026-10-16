@@ -24,7 +24,7 @@
         <a href="#/json" data-section="admin"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg><span>Admin</span></a>
       </nav>
       <div class="sidebar-footer">
-        <a href="#/feedback" data-view="feedback"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Feedback</span></a>
+        <a href="#/feedback" data-view="feedback"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Report an issue</span></a>
         <button type="button" id="more-toggle" class="rail-button" aria-expanded="false" aria-controls="more"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg><span>More</span></button>
         <div id="more" class="more hidden" role="group" aria-label="Router, theme and session">
           <div>
@@ -46,10 +46,11 @@
           <button id="nav-toggle" class="btn ghost nav-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Show navigation"><span aria-hidden="true">☰</span></button>
           <div id="status-pill" class="pill" role="status">…</div>
           <div class="spacer"></div>
-          <div id="save-bar" class="save-bar hidden">
-            <span class="dirty-note">Unapplied changes</span>
+          <div id="unsaved-bar" class="unsaved-bar hidden" role="status"></div>
+          <div id="save-bar" class="save-bar hidden" role="group" aria-label="Unapplied changes">
+            <span class="dirty-note"><span id="change-count">Unapplied changes</span> · <button type="button" class="link-button" data-action="draft-review" title="What the draft changes, next to the running configuration">Review</button></span>
             <button class="btn" data-action="validate">Validate</button>
-            <button class="btn" data-action="apply" title="Apply to the running router without saving">Apply</button>
+            <button class="btn" data-action="apply" title="Apply to the running router without saving; a restart undoes it">Apply only</button>
             <button class="btn primary" data-action="apply-save" title="Apply and write to the configuration store">Apply &amp; save</button>
             <button class="btn ghost" data-action="discard">Discard</button>
           </div>
@@ -57,10 +58,13 @@
         <nav id="tabs" class="tabs hidden" aria-label="Pages"></nav>
       </header>
       <div id="banner" class="banner hidden" role="alert"></div>
+      <div id="draft-notice" class="banner danger draft-notice hidden" role="alert"></div>
       <main id="view" class="view" tabindex="-1"></main>
     </div>
   </div>
-  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+  <div id="toast" class="toasts hidden"></div>
+  <div id="announce-status" class="visually-hidden" role="status"></div>
+  <div id="announce-alert" class="visually-hidden" role="alert"></div>
   <script src="__ROUTER_PREFIX__/graph.js"></script>
   <script type="module" src="__ROUTER_PREFIX__/js/app.js"></script>
 </body>

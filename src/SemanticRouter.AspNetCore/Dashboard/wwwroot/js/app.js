@@ -9,14 +9,28 @@ import './learned.js';
 import './audit.js';
 import { reportActions } from './feedback.js';
 import { actions } from './actions.js';
-import { $, api, h, isDirty, metricsOnly, readInput, setPath, showSignIn, state, toast } from './core.js';
+import { $, $$, actionKey, api, evaluationEdited, h, isDirty, jsonEdited, metricsOnly, readInput, readOnly, setPath, showSignIn, state, toast } from './core.js';
+import { aliasRows, limitRows, writeAliases, writeLimits } from './draft.js';
 import { connectStream } from './live.js';
 import { graph } from './memory.js';
-import { initTheme, loadAll, refreshStatus, render, renderChrome, route } from './shell.js';
+import { initTheme, loadAll, refreshChrome, refreshStatus, render, route, setBusy, updateSaveBar } from './shell.js';
 
 /* ---------------------------------------------------------------------------------------------
    Event wiring
    --------------------------------------------------------------------------------------------- */
+
+/* "Couldn't apply: …": what failed, in the button's own words when they are short. */
+function failed(el, e) {
+  const label = (el.getAttribute('aria-label') || el.textContent || '').trim().replace(/…$/, '');
+  const what = /^[A-Za-z][\w &'-]{0,28}$/.test(label) ? label.toLowerCase() : 'do that';
+  const message = (e && e.message) || String(e);
+  return /^(couldn.t|not )/i.test(message) ? message : `Couldn't ${what}: ${message}`;
+}
+
+/*
+ * One handler for every data-action. While an action's promise is pending its button is disabled and marked busy
+ * (and stays so across renders, by its key), so Apply, Save set, Discover and the like are not sent twice.
+ */
 document.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-action]');
   if (!el) return;
@@ -27,40 +41,68 @@ document.addEventListener('click', (ev) => {
   if (!action) return;
   if (el.tagName === 'INPUT' && el.type === 'checkbox') return;
   ev.preventDefault();
-  Promise.resolve(action(el)).catch((e) => toast(e.message, 'danger'));
+  const key = actionKey(el);
+  if (state.busy.has(key)) return;
+  let result;
+  try { result = action(el); } catch (e) { toast(failed(el, e), 'danger'); return; }
+  if (!result || typeof result.then !== 'function') return;
+  state.busy.add(key);
+  setBusy(el, true);
+  result.catch((e) => { if (e.status !== 401) toast(failed(el, e), 'danger'); }).finally(() => {
+    state.busy.delete(key);
+    setBusy(el, false);
+    $$('[aria-busy="true"][data-action]').forEach((x) => { if (actionKey(x) === key) setBusy(x, false); });
+  });
 });
 
 const bindState = (el) => { setPath(state, el.dataset.state, readInput(el)); };
+
+/* Typing in a field the last Validate or Apply flagged: the flag goes, the problem stays listed until the next check. */
+function clearIssue(el) {
+  if (el.getAttribute('aria-invalid') !== 'true' || !el.dataset.issue) return;
+  el.removeAttribute('aria-invalid');
+  const id = (el.getAttribute('aria-describedby') || '').split(' ').find((x) => x.startsWith('issue-'));
+  if (id) { const msg = document.getElementById(id); if (msg) msg.remove(); }
+  state.issues = (state.issues || []).filter((x) => (x.path || x.selector) !== el.dataset.issue);
+  delete el.dataset.issue;
+}
+
 document.addEventListener('input', (ev) => {
   const el = ev.target;
+  clearIssue(el);
   if (el.dataset.state && el.tagName !== 'SELECT' && el.type !== 'checkbox') { bindState(el); return; }
   if (el.dataset.bind) {
     setPath(state.config, el.dataset.bind, readInput(el));
     if (el.dataset.kind === 'lines' && el.dataset.nullable && !el.value.trim()) setPath(state.config, el.dataset.bind, null);
-    $('#save-bar').classList.toggle('hidden', !isDirty());
+    updateSaveBar();
     return;
   }
+  // The alias and rate-limit tables edit rows; the configuration's map follows (draft.js).
   if (el.dataset.actionInput === 'alias-key' || el.dataset.actionInput === 'alias-value') {
-    const entries = Object.entries(state.config.Middleware.ModelAliases || {});
-    const i = +el.dataset.index;
-    if (el.dataset.actionInput === 'alias-key') entries[i][0] = el.value; else entries[i][1] = el.value;
-    state.config.Middleware.ModelAliases = Object.fromEntries(entries);
-    $('#save-bar').classList.toggle('hidden', !isDirty());
+    const row = aliasRows()[+el.dataset.index];
+    if (el.dataset.actionInput === 'alias-key') row.key = el.value; else row.value = el.value;
+    writeAliases();
+    updateSaveBar();
   }
   if (el.dataset.actionInput && el.dataset.actionInput.startsWith('ratelimit-')) {
-    const entries = Object.entries(state.config.Middleware.RateLimits || {});
-    const i = +el.dataset.index;
+    const row = limitRows()[+el.dataset.index];
     const value = el.value.trim() === '' ? null : Math.max(1, Math.round(+el.value));
-    if (el.dataset.actionInput === 'ratelimit-key') entries[i][0] = el.value.trim();
-    else if (el.dataset.actionInput === 'ratelimit-rpm') entries[i][1] = { ...entries[i][1], RequestsPerMinute: value };
-    else entries[i][1] = { ...entries[i][1], TokensPerMinute: value };
-    state.config.Middleware.RateLimits = Object.fromEntries(entries);
-    $('#save-bar').classList.toggle('hidden', !isDirty());
+    if (el.dataset.actionInput === 'ratelimit-key') row.key = el.value;
+    else if (el.dataset.actionInput === 'ratelimit-rpm') row.value = { ...row.value, RequestsPerMinute: value };
+    else row.value = { ...row.value, TokensPerMinute: value };
+    writeLimits();
+    updateSaveBar();
   }
   if (el.id === 'tester-prompt') state.tester.prompt = el.value;
   if (el.id === 'tester-model') state.tester.model = el.value; // kept, so a refresh before Classify does not reset it
   if (el.id === 'memory-search') { state.memoryUi.search = el.value; if (graph) graph.redraw(); }
 });
+
+/* A rename the page refuses: the name goes back, and a toast says why. */
+function refuse(el, from, why) {
+  el.value = from;
+  toast(why, 'danger');
+}
 
 document.addEventListener('change', (ev) => {
   const el = ev.target;
@@ -69,10 +111,13 @@ document.addEventListener('change', (ev) => {
     setPath(state.config, el.dataset.bind, readInput(el));
     // Structural selects (connector type, preset, embeddings provider, enabled) change what is shown.
     if (/\.(Type|Preset|Provider|Enabled)$/.test(el.dataset.bind) || el.dataset.bind === 'Embeddings.Provider') render();
-    else $('#save-bar').classList.toggle('hidden', !isDirty());
+    else updateSaveBar();
+  } else if (el.dataset.actionInput === 'alias-key' || el.dataset.actionInput === 'ratelimit-key') {
+    render(); // a duplicate or empty name is flagged on the row
   } else if (el.dataset.actionInput === 'connector-rename') {
     const from = el.dataset.name; const to = el.value.trim();
-    if (!to || to === from || state.config.Connectors[to]) { el.value = from; return; }
+    if (!to || to === from) { el.value = from; return; }
+    if (state.config.Connectors[to]) { refuse(el, from, `There is already a connector named ${to}.`); return; }
     const entries = Object.entries(state.config.Connectors).map(([k, v]) => [k === from ? to : k, v]);
     state.config.Connectors = Object.fromEntries(entries);
     (state.config.Models || []).forEach((m) => { if ((m.Connector || '').toLowerCase() === from.toLowerCase()) m.Connector = to; });
@@ -80,7 +125,9 @@ document.addEventListener('change', (ev) => {
     render();
   } else if (el.dataset.actionInput === 'profile-rename') {
     const from = el.dataset.name; const to = el.value.trim();
-    if (!to || to === from || state.config.Profiles[to] || /[@.]/.test(to)) { el.value = from; return; }
+    if (!to || to === from) { el.value = from; return; }
+    if (state.config.Profiles[to]) { refuse(el, from, `There is already a profile named ${to}.`); return; }
+    if (/[@.]/.test(to)) { refuse(el, from, 'A profile name cannot contain @ or a dot: clients ask for auto@profile.'); return; }
     state.config.Profiles = Object.fromEntries(Object.entries(state.config.Profiles).map(([k, v]) => [k === from ? to : k, v]));
     const m = state.config.Middleware;
     Object.keys(m.ClientProfiles || {}).forEach((k) => { if (m.ClientProfiles[k] === from) m.ClientProfiles[k] = to; });
@@ -91,11 +138,13 @@ document.addEventListener('change', (ev) => {
     render();
   } else if (el.dataset.actionInput === 'virtual-rename') {
     const from = el.dataset.name; const to = el.value.trim(); const v = state.config.Middleware.VirtualModels;
-    if (!to || to === from || v[to] || /[@.]/.test(to)) { el.value = from; return; }
+    if (!to || to === from) { el.value = from; return; }
+    if (v[to]) { refuse(el, from, `There is already a virtual model named ${to}.`); return; }
+    if (/[@.]/.test(to)) { refuse(el, from, 'A virtual model name cannot contain @ or a dot.'); return; }
     state.config.Middleware.VirtualModels = Object.fromEntries(Object.entries(v).map(([k, x]) => [k === from ? to : k, x]));
     render();
   } else if (el.id === 'activity-filter') { state.activityFilter = el.value; render(); }
-  else if (el.id === 'auto-refresh') { state.autoRefresh = el.checked; }
+  else if (el.id === 'auto-refresh') { state.autoRefresh = el.checked; if (el.checked && state.activityNew) render(); }
   else if (el.id === 'audit-limit') { state.audit.limit = +el.value; state.audit.entries = null; render(); }
   else if (el.id === 'tester-model') { state.tester.model = el.value; }
   else if (el.id === 'memory-filter') { state.memoryUi.filter = el.value; if (graph) graph.redraw(); }
@@ -138,7 +187,9 @@ window.addEventListener('hashchange', () => {
   route();
   setMoreOpen(false);
   if (document.body.classList.contains('nav-open')) setNavOpen(false);
-  $('#view').focus({ preventScroll: true });
+  // Unless the page put the focus on something itself (a problem's field), it goes to the page's content.
+  const view = $('#view');
+  if (!view.contains(document.activeElement) || document.activeElement === view) view.focus({ preventScroll: true });
 });
 // Keyboard: Enter or Space operates the expandable item headers (role="button"); Escape closes More, then the drawer.
 document.addEventListener('keydown', (ev) => {
@@ -150,7 +201,8 @@ document.addEventListener('keydown', (ev) => {
     el.click();
   }
 });
-window.addEventListener('beforeunload', (ev) => { if (isDirty()) { ev.preventDefault(); ev.returnValue = ''; } });
+// Leaving with unapplied edits, or typed text the router does not have yet, asks first (not for the read-only role).
+window.addEventListener('beforeunload', (ev) => { if (!readOnly() && (isDirty() || jsonEdited() || evaluationEdited())) { ev.preventDefault(); ev.returnValue = ''; } });
 
 initTheme();
 const signOutBtn = $('#sign-out');
@@ -158,4 +210,8 @@ if (signOutBtn) signOutBtn.addEventListener('click', async () => { await api('DE
 loadAll().then(() => { route(); if (!metricsOnly()) connectStream(); }).catch((e) => {
   if (e.status === 401) { showSignIn(); return; }
   $('#view').innerHTML = `<div class="card"><h3>Could not reach the router API</h3><pre>${h(e.message)}</pre><p class="muted small">Is the dashboard mapped (<code>app.MapRouterDashboard()</code>) and are you browsing from the same machine?</p></div>`; });
-setInterval(() => { if (state.autoRefresh && document.visibilityState === 'visible' && !isDirty()) refreshStatus(); else if (state.autoRefresh && document.visibilityState === 'visible') { api('GET', '/status').then((s) => { state.status = s; renderChrome(); }).catch(() => {}); } }, 5000);
+// Every 5 s: with unapplied edits only the top bar (and the check that nobody changed the configuration meanwhile).
+setInterval(() => {
+  if (!state.autoRefresh || document.visibilityState !== 'visible' || $('#signin-form')) return;
+  if (isDirty()) refreshChrome(); else refreshStatus();
+}, 5000);
