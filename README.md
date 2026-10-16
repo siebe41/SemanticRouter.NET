@@ -40,7 +40,7 @@ Three front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/mode
 - [How it works](#how-it-works)
 - [Providers](#providers)
 - [Install the tool](#install-the-tool)
-- [Quick start](#quick-start)
+- [Quick start from source](#quick-start-from-source)
 - [Personal setup: LM Studio + your Claude subscription](#personal-setup-lm-studio--your-claude-subscription)
 - [Using Claude Code and other tools through the router](#using-claude-code-and-other-tools-through-the-router)
 - [The dashboard](#the-dashboard)
@@ -52,13 +52,13 @@ Three front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/mode
 - [Roadmap](#roadmap)
 - [Changes, contributing and governance](#changes-contributing-and-governance)
 
-Also see the [documentation index](docs/README.md): [clients.md](docs/clients.md) (pointing Claude Code, Codex and SDKs at the router), [dashboard.md](docs/dashboard.md) (the UI and admin API), [memory.md](docs/memory.md) (the memory map and what you share with which model), [routing-quality.md](docs/routing-quality.md) (evaluation sets, threshold calibration, automatic tuning, model reliability, route health and retry escalation), [routing-profiles.md](docs/routing-profiles.md) (policy per project, client or content), [providers.md](docs/providers.md) (connector setup per provider), [enterprise.md](docs/enterprise.md) (a machine-wide policy for administrators), [architecture.md](docs/architecture.md) (how a request flows, hot reload, extension points), [roadmap.md](docs/roadmap.md) (where the project is going) and [TERMS.md](docs/TERMS.md) (why the subscription CLI connectors are designed the way they are, and where the lines are).
+The [documentation index](docs/README.md) says which guide covers what: pointing Claude Code, Codex and SDKs at the router, the tool, its background service and the desktop app, the dashboard, each provider, routing quality and routing profiles, the memory map, usage and telemetry, network traffic, a machine-wide policy for administrators, verifying a release, the architecture, the roadmap, and why the subscription CLI connectors are built the way they are ([TERMS.md](docs/TERMS.md)).
 
 ---
 
 ## Features
 
-- **Two protocols in, every backend out.** OpenAI chat completions and the Anthropic Messages API are both accepted; requests and replies are translated between them, including streaming, images and tool calls, and passed through untouched when client and backend speak the same protocol.
+- **Three protocols in, every backend out.** OpenAI chat completions, the OpenAI Responses API and the Anthropic Messages API are accepted; requests and replies are translated between them, including streaming, images and tool calls, and passed through untouched when client and backend speak the same protocol.
 - **Built for agentic clients.** Point Claude Code or Codex at the router: their model names map through aliases, their tool-bearing turns go to tool-capable backends, the follow-up requests of a tool-calling turn stay on the model that started it, injected `<system-reminder>` blocks are ignored when classifying, and `count_tokens` is served locally. A CLI connector can even carry tools for them (*prompted tool calling*), so your Claude subscription can answer agentic turns.
 - **See what you share.** Point the router at an Obsidian vault, Claude Code's own memory (`~/.claude`) or the MCP memory server's graph. The dashboard draws them as a graph and, for every request, shows which notes were in it and which model received them, local or cloud, live. Note text never leaves the router. See [docs/memory.md](docs/memory.md).
 - **A dashboard with hot reload.** Live status, cooldowns, an activity log with every decision, a prompt tester, and an editor for routes, models, connectors, tiers, routing rules, embeddings and gateway settings. Apply changes to the running router, save them to a file, or revert. Themeable (Machine Dark by default).
@@ -180,10 +180,10 @@ With `AllowBelowRequiredTier` (the default), the remaining eligible models follo
 | **GitHub Copilot (SDK)** | `Copilot` | your Copilot plan (AI credits) | personal, local use; native tools and streaming; [providers.md](docs/providers.md#github-copilot-sdk) |
 | **GitHub Copilot CLI** | `Cli`, preset `GitHubCopilot` | your Copilot plan (AI credits) | personal, local use |
 | **OpenAI Codex CLI** | `Cli`, preset `Codex` | your ChatGPT plan | personal, local use |
-
-The subscription connectors (the CLIs and Copilot) answer with whatever account the CLI is signed in to, which may be a personal plan. On a work machine, read [Using it at work](docs/TERMS.md#using-it-at-work) first.
 | Anything else with a CLI | `Cli`, preset `Custom` | – | argument template with `{model}`, `{prompt}` |
 | Anything else | your own `IChatConnector` | – | |
+
+The subscription connectors (the CLIs and Copilot) answer with whatever account the CLI is signed in to, which may be a personal plan. On a work machine, read [Using it at work](docs/TERMS.md#using-it-at-work) first.
 
 Not included, on purpose:
 - **GitHub Models API:** retired on 30 July 2026.
@@ -193,7 +193,7 @@ Not included, on purpose:
 
 ## Install the tool
 
-The fastest way to use the router is the `semantic-router` .NET tool. It needs nothing cloned:
+The fastest way to use the router is the `semantic-router` .NET tool. It needs the [.NET 10 runtime or SDK](https://dotnet.microsoft.com/download/dotnet/10.0) and nothing cloned:
 
 ```bash
 dotnet tool install -g SemanticRouter.Host
@@ -204,9 +204,9 @@ semantic-router           # http://localhost:5080, dashboard at /router
 semantic-router service install   # or keep it running in the background, started whenever you sign in
 ```
 
-`init` writes `~/.config/semantic-router/semantic-router.json` (or `%APPDATA%\semantic-router` on Windows). It asks before enabling each subscription CLI it finds, because that CLI answers on whatever account it is signed in to ([Using it at work](docs/TERMS.md#using-it-at-work)); `--yes` enables them without asking and `--no-cli` leaves them out. Everything else is done on the dashboard. `service install` sets the router up as a per-user background service (systemd on Linux, launchd on macOS, a sign-in entry on Windows), so no terminal has to stay open. Prefer an icon? The [desktop app](docs/desktop.md) (an installer for Windows, macOS and Linux, with updates) runs the router from the tray and shows the dashboard in its own window or your browser. A container image covers API-key and local-model setups. See [docs/host.md](docs/host.md).
+`init` writes `~/.config/semantic-router/semantic-router.json` (`~/Library/Application Support/semantic-router` on macOS, `%APPDATA%\semantic-router` on Windows). When the router starts, it prints the lines to paste into your shell for Claude Code and OpenAI clients; [Using Claude Code and other tools through the router](#using-claude-code-and-other-tools-through-the-router) explains them. `init` asks before enabling each subscription CLI it finds, because that CLI answers on whatever account it is signed in to ([Using it at work](docs/TERMS.md#using-it-at-work)); `--yes` enables them without asking and `--no-cli` leaves them out. Everything else is done on the dashboard. `service install` sets the router up as a per-user background service (systemd on Linux, launchd on macOS, a sign-in entry on Windows), so no terminal has to stay open. Prefer an icon? The [desktop app](docs/desktop.md) (an installer for Windows, macOS and Linux, with updates) runs the router from the tray and shows the dashboard in its own window or your browser. A container image covers API-key and local-model setups. See [docs/host.md](docs/host.md).
 
-## Quick start
+## Quick start from source
 
 To work on the library or try the samples, you need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), feature band 10.0.4xx ([`global.json`](global.json)).
 
@@ -260,14 +260,14 @@ This is the "use local models for the easy stuff, my subscription for the hard s
 
 5. **Or point Claude Code at it** and keep using Claude Code as before:
    ```bash
-   ANTHROPIC_BASE_URL=http://localhost:5080 ANTHROPIC_AUTH_TOKEN=semantic-router claude
+   ANTHROPIC_BASE_URL=http://localhost:5080 ANTHROPIC_AUTH_TOKEN=semantic-router claude --model semantic-router
    ```
    See [Using Claude Code and other tools through the router](#using-claude-code-and-other-tools-through-the-router).
 
 Enable `copilot`, `codex` or the paid API models in `appsettings.json` or the dashboard as you need them. With `CheapestCapable`:
 - free local models answer whatever they are good enough for;
 - flat-rate subscriptions take the hard prompts;
-- paid APIs are used only when nothing cheaper qualifies (for example, a request with `tools` or images, which CLI connectors cannot handle) or when everything cheaper is cooling down.
+- paid APIs are used only when nothing cheaper qualifies (for example, a request with images, which CLI connectors cannot handle, or with `tools` when no local model or `ToolCalling: Prompted` CLI connector carries them) or when everything cheaper is cooling down.
 
 ## Using Claude Code and other tools through the router
 
@@ -297,7 +297,7 @@ app.MapRouterDashboard("/router");   // UI at /router, admin API under /router/a
 builder.Services.AddSemanticPromptRouting(config).UseConfigurationFile("semantic-router.json");   // optional: persist changes
 ```
 
-Overview (models and cooldowns, served-by and required-tier charts, a prompt tester), Live (a streaming view of clients, the router and models, with every decision as it happens), Activity (every routed request with its decision and outcome), Memory (your notes as a graph, coloured by which models they reached; see [docs/memory.md](docs/memory.md)), and editors for Tiers, Routes, Models, Connectors, Routing rules, Embeddings and Gateway. **Validate** → **Apply** swaps a new runtime in atomically; **Apply & save** also writes the configuration file, which replaces the `SemanticRouter` section on the next start (secrets left empty are inherited from it). The admin API behind it takes the same JSON document, so a tested configuration can be promoted with one `PUT`. Themes are CSS token blocks; drop a token file into `themes/` next to the configuration and it appears in the picker after a reload. It works with a keyboard and a screen reader, and on a phone. See [docs/dashboard.md](docs/dashboard.md).
+Overview (models and cooldowns, connector health, the weekly digest, served-by and required-tier charts, a prompt tester), Live (a streaming view of clients, the router and models, with every decision as it happens), Activity (every routed request with its decision and outcome), Memory (your notes as a graph, coloured by which models they reached; see [docs/memory.md](docs/memory.md)), Usage, Router learned (what automatic tuning changed, each change undoable), Evaluate, the Audit log, and editors for Tiers, Routes, Models, Connectors, Routing rules, Profiles, Embeddings and Gateway ([every page](docs/dashboard.md#pages)). **Validate** → **Apply** swaps a new runtime in atomically; **Apply & save** also writes the configuration file, which replaces the `SemanticRouter` section on the next start (secrets left empty are inherited from it). The admin API behind it takes the same JSON document, so a tested configuration can be promoted with one `PUT`. Themes are CSS token blocks; drop a token file into `themes/` next to the configuration and it appears in the picker after a reload. It works with a keyboard and a screen reader, and on a phone. See [docs/dashboard.md](docs/dashboard.md).
 
 ## Using it in your application
 
@@ -410,7 +410,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `SimilarityThreshold` | `null` | Per-route override. |
 | `LocalOnly` | `false` | Only `IsLocal` models may answer, even on failover. |
 | `PreferredModel` | none | A catalog model that serves the route's plain matches first, even below `Tier`. Automatic tuning sets it when a trial of a cheaper model goes well ([docs](docs/routing-quality.md#cheaper-models-per-route)); escalated, explicit and conversation-held turns are routed by the tier. |
-| `FollowsConversation` | `false` | Prompts that say nothing about difficulty ("go ahead", "continue"): in a conversation they take its tier, down as well as up; `Tier` applies only on a first turn. The sample's `continuation` route has it. |
+| `FollowsConversation` | `false` | Prompts that say nothing about difficulty ("go ahead", "continue"): in a conversation they take its tier, down as well as up; `Tier` applies only on a first turn. The `init` template's `continuation` route has it. |
 
 ### `Models[]`
 
@@ -420,7 +420,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Connector` | – | Name of a configured connector. |
 | `Model` | `null` | Provider model ID sent to the connector (e.g. `qwen/qwen3-8b`, `sonnet`, `gpt-6.1-sol`). |
 | `Tier` | `1` | Capability tier. |
-| `Capabilities[]` | `[]` | e.g. `chat`, `code`, `tools`, `vision`, `reasoning`. CLI-backed models should not declare `tools`. |
+| `Capabilities[]` | `[]` | e.g. `chat`, `code`, `tools`, `vision`, `reasoning`. CLI-backed models declare `tools` only when their connector has `ToolCalling: Prompted`, and never `vision`. |
 | `IsLocal` | `false` | Data stays on your machine. |
 | `ContextWindow` | `0` (unknown) | Tokens. Models too small for a request are skipped. |
 | `InputCostPerMillionTokens` / `OutputCostPerMillionTokens` | `0` | Marginal USD cost. Use 0 for local models and flat-rate subscriptions. |
@@ -457,7 +457,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `AllowRemoteClients` | CLI, Copilot | `false` | See [TERMS.md](docs/TERMS.md) before changing this. |
 | `Timeout` | all | HTTP 100 s · CLI 5 min | Time to first output. Streams are not cut off. |
 
-### `Embeddings` and `Middleware`
+### `Embeddings`, `Middleware` and the other sections
 
 | Key | Default | Description |
 |---|---|---|
@@ -524,6 +524,8 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Dashboard:SessionLifetime` | `12:00:00` | How long a dashboard sign-in lasts before the token must be entered again; signing out ends the session on the server. Five wrong tokens from one address in 15 minutes make it wait (`429`) until the first is 15 minutes old. |
 | `Dashboard:AllowProcessSettings` | `false` | Let the admin API change what a CLI connector runs and which paths memory sources read; otherwise those change only in the configuration file. See [docs/dashboard.md](docs/dashboard.md#access-and-security). |
 | `Dashboard:RequireLocalClient` | `true` | Loopback only. Turn off together with a token to reach the dashboard from other machines. |
+| `Dashboard:PublicOrigins[]` | `[]` | Addresses the dashboard is reached at besides `localhost` (`https://router.home.lan`): changes are accepted from these origins. |
+| `Dashboard:RequireTokenForLocalClients` / `AllowUnauthenticatedRemoteClients` | `false` / `false` | Require a token from loopback clients too (a reverse proxy on this machine); serve remote clients without a token (only behind a proxy that authenticates them). See [docs/dashboard.md](docs/dashboard.md#access-and-security). |
 | `Dashboard:TrustedIdentityHeader` / `TrustedGroupsHeader` | none | Header in which an authenticating reverse proxy names the signed-in user (`X-Forwarded-User`, `X-Auth-Request-Email`) and, optionally, their groups. Believed only from `ForwardedHeaders:KnownProxies`/`KnownNetworks`. See [docs/dashboard.md](docs/dashboard.md#signed-in-users-from-a-reverse-proxy). |
 | `Dashboard:TrustedIdentityRoles` | `{}` | Role per user or group the proxy names, `*` for everyone else: `{ "alice@corp.example": "Admin", "finance": "Metrics", "*": "ReadOnly" }`. A user with no role gets `403`. |
 | `Dashboard:ThemesDirectory` | `themes/` next to the configuration file | Drop-in theme files. See [docs/dashboard.md](docs/dashboard.md#adding-a-theme-without-rebuilding). |
@@ -535,22 +537,22 @@ Similarity scales differ between embedding models. These are starting points. Ca
 
 | Embedding model | Starting `DefaultSimilarityThreshold` |
 |---|---|
-| `HashingEmbeddingProvider` (lexical, dev only) | 0.25–0.35 (sample: 0.30) |
-| ONNX `all-MiniLM-L6-v2` (in-process) | 0.40 (best on the sample set: 0.22–0.45) |
-| ONNX `bge-small-en-v1.5` (in-process) | 0.60 (best on the sample set: 0.54–0.65) |
+| `HashingEmbeddingProvider` (lexical, dev only) | 0.25–0.35 (the template and samples: 0.30) |
+| ONNX `all-MiniLM-L6-v2` (in-process) | 0.40, what `init` sets (best on the sample set: 0.29) |
+| ONNX `bge-small-en-v1.5` (in-process) | 0.60, what `init` sets (best on the sample set: 0.60–0.63) |
 | `nomic-embed-text` | 0.60–0.70 |
 | `mxbai-embed-large` | 0.65–0.75 |
 | OpenAI `text-embedding-3-*` | 0.40–0.55 |
 
 ### Classification latency
 
-Classifying a prompt is one embedding plus a dot product per utterance. Measured on the starting routes (47 utterances) and the 30-prompt sample set, with the classification cache off so every prompt is embedded. The machine had 4 logical CPUs and ran Linux. Reproduce with `dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks`; add `-- --remote http://localhost:11434 nomic-embed-text` to measure an embedding server.
+Classifying a prompt is one embedding plus a dot product per utterance. Measured on the starting routes (119 utterances) and the 116-prompt sample set that `init` writes, with the classification cache off so every prompt is embedded. The machine had 4 logical CPUs and ran Linux. Reproduce with `dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks`; add `-- --remote http://localhost:11434 nomic-embed-text` to measure an embedding server.
 
 | Embeddings | Index warm-up | Classify p50 | Classify p95 | Right on the sample set |
 |---|---|---|---|---|
-| Hashing (lexical) | 9 ms | 0.04 ms | 0.10 ms | 28/30 at 0.30 |
-| ONNX `all-MiniLM-L6-v2` | 107 ms | 1.6 ms | 2.1 ms | 29/30 at 0.40 |
-| ONNX `bge-small-en-v1.5` | 167 ms | 3.0 ms | 4.0 ms | 29/30 at 0.60 |
+| Hashing (lexical) | 9 ms | 0.08 ms | 0.11 ms | 100/116 at 0.30 |
+| ONNX `all-MiniLM-L6-v2` | 226 ms | 1.9 ms | 2.5 ms | 111/116 at 0.40 |
+| ONNX `bge-small-en-v1.5` | 389 ms | 3.2 ms | 3.9 ms | 112/116 at 0.60 |
 
 An embedding server adds a network round trip and its own inference time to every prompt. A prompt the cache has seen recently costs no embedding at all.
 
@@ -592,7 +594,7 @@ Registrations use `TryAdd`, so anything you register before `AddSemanticPromptRo
 
 ```bash
 dotnet build      # warnings are errors; .NET analyzers at latest-recommended
-dotnet test       # 327 tests
+dotnet test       # over 1,000 tests
 dotnet pack -c Release -o artifacts
 ```
 
@@ -625,7 +627,7 @@ A leaked key must be revoked at the provider; removing it from the code does not
 
 ## Roadmap
 
-Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label, tracked in [#19](https://github.com/siebe41/SemanticRouter.NET/issues/19). The headline items: in-process embeddings and a classification cache, and routing profiles.
+Planned work, in order and with the reasoning, is in [docs/roadmap.md](docs/roadmap.md); each goal is an issue under the `roadmap` label. The phase in progress is [safe to install at work](https://github.com/siebe41/SemanticRouter.NET/issues/98): signed releases, repository protections, a second maintainer and dashboard roles.
 
 ## Changes, contributing and governance
 

@@ -17,12 +17,15 @@ semantic-router           # start: http://localhost:5080, dashboard at /router
 On start it prints the lines to paste into your shell:
 
 ```text
-SemanticRouter 0.2.0 is listening on http://localhost:5080
+SemanticRouter 0.2.1 is listening on http://localhost:5080
   Configuration  /home/ada/.config/semantic-router/semantic-router.json
   Dashboard      http://localhost:5080/router
   Claude Code    export ANTHROPIC_BASE_URL=http://localhost:5080; export ANTHROPIC_AUTH_TOKEN=semantic-router
+                 export CLAUDE_CODE_MAX_CONTEXT_TOKENS=131072; claude --model semantic-router
   OpenAI clients export OPENAI_BASE_URL=http://localhost:5080/v1; model "auto"
 ```
+
+`CLAUDE_CODE_MAX_CONTEXT_TOKENS` is the smallest context window among your enabled tool-capable models; the line leaves it out when one of them has no `ContextWindow`. On Windows the lines use PowerShell's `$env:` syntax. [clients.md](clients.md#claude-code) explains each variable, and the Codex and SDK setups.
 
 ## Commands
 
