@@ -4,6 +4,8 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-16
+
 ### Security
 
 - Machine-wide policy that the user's configuration cannot override, read from `HKLM\Software\Policies\SemanticRouter`, macOS managed preferences or `/etc/semantic-router/policy.json`: turn off connector types and CLI presets, limit endpoints and the hosts that count as local, require local-only, cap prompt storage and retention, make the dashboard read-only or turn it off, control desktop updates and turn features off. A policy that cannot be read stops the router. See [docs/enterprise.md](docs/enterprise.md). (#142)
@@ -73,5 +75,6 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 See [GitHub Releases](https://github.com/siebe41/SemanticRouter.NET/releases).
 
-[Unreleased]: https://github.com/siebe41/SemanticRouter.NET/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/siebe41/SemanticRouter.NET/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/siebe41/SemanticRouter.NET/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/siebe41/SemanticRouter.NET/releases/tag/v0.2.1
