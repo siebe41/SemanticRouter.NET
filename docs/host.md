@@ -4,7 +4,7 @@
 
 ## Install and start
 
-Prerequisite: the [.NET 10 runtime or SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
+Prerequisite: the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0): `dotnet tool install` is an SDK command, so the runtime alone is not enough to install it. No .NET at all? The [desktop app](desktop.md) brings its own.
 
 ```bash
 dotnet tool install -g SemanticRouter.Host
@@ -14,26 +14,36 @@ semantic-router models    # what each connector offers: loaded or not, suggested
 semantic-router           # start: http://localhost:5080, dashboard at /router
 ```
 
-On start it prints the lines to paste into your shell:
+On start it says where it listens and how to try it:
 
 ```text
-SemanticRouter 0.2.1 is listening on http://localhost:5080
+SemanticRouter 0.3.0 is listening on http://localhost:5080
   Configuration  /home/ada/.config/semantic-router/semantic-router.json
   Dashboard      http://localhost:5080/router
-  Claude Code    export ANTHROPIC_BASE_URL=http://localhost:5080; export ANTHROPIC_AUTH_TOKEN=semantic-router
-                 export CLAUDE_CODE_MAX_CONTEXT_TOKENS=131072; claude --model semantic-router
-  OpenAI clients export OPENAI_BASE_URL=http://localhost:5080/v1; model "auto"
+
+  Try it
+    curl http://localhost:5080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"auto","messages":[{"role":"user","content":"Say hello in five words"}]}'
+    Watch it: http://localhost:5080/router#/live
+  Claude Code
+    ANTHROPIC_BASE_URL=http://localhost:5080 ANTHROPIC_AUTH_TOKEN=semantic-router CLAUDE_CODE_MAX_CONTEXT_TOKENS=131072 CLAUDE_CODE_AUTO_MODE_SERVER=0 claude --model semantic-router
+  OpenAI clients: base URL http://localhost:5080/v1, model "auto"
 ```
 
-`CLAUDE_CODE_MAX_CONTEXT_TOKENS` is the smallest context window among your enabled tool-capable models; the line leaves it out when one of them has no `ContextWindow`. On Windows the lines use PowerShell's `$env:` syntax. [clients.md](clients.md#claude-code) explains each variable, and the Codex and SDK setups.
+The Claude Code line sets its variables for that one command, so it changes nothing else in your shell. `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is the smallest context window among your enabled tool-capable models; the line leaves it out when one of them has no `ContextWindow`. On Windows the lines use PowerShell (`Invoke-RestMethod`, and `$env:` variables for the session). [clients.md](clients.md#claude-code) explains each variable, and the Codex and SDK setups.
+
+While no model is enabled, the banner says so instead, with a link to the setup on the dashboard's Overview (`http://localhost:5080/router#/overview`): it lists the CLIs and local servers it finds and the providers you can add, and adds them for you.
+
+The console shows the router's own lines: one per request (the tier it needed, the route and the model it chose) and its warnings. ASP.NET Core's lines per request and its start-up notes are left out (`Microsoft.AspNetCore` and `Microsoft.Hosting.Lifetime` log from `Warning`, data protection from `Error`); set `Logging:LogLevel` in `appsettings.json`, or `--Logging:LogLevel:Microsoft.AspNetCore=Information`, to see them again.
+
+**When the address is taken**, the router says so and stops (exit code 3). If the router listening there is the one for this configuration directory, it says that, with its process id and dashboard address; otherwise another program holds the port, and `--urls http://localhost:5081` picks another.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `semantic-router` (or `run`) | Starts the router and the dashboard. Creates the configuration file from the built-in template on first run. |
-| `semantic-router init [--force] [--no-detect] [--yes \| --no-cli]` | Writes a starting configuration. It probes LM Studio (`localhost:1234`) and Ollama (`localhost:11434`) for chat and embedding models and looks for `claude`, `codex` and `copilot` on `PATH`, asking before it enables a subscription CLI (see [What `init` adds](#what-init-adds)). `--yes` enables them without asking; `--no-cli` adds no subscription CLI connector. It refuses to overwrite an existing file without `--force`. |
-| `semantic-router doctor` | Loads the configuration exactly as `run` would and checks it without calling a model. It prints the [machine-wide policy](enterprise.md), if an administrator set one, flags unresolved `${env:…}` references, tests the embeddings, and checks each HTTP connector (reachable, credentials accepted, configured model ids offered) and each CLI connector (installed, starts and, for Claude Code, signed in). Every failure names the setting to change. It also lists every host the router will contact with this configuration, for a firewall allowlist ([network.md](network.md#allowing-it-through-a-firewall)). Exit code 1 when anything failed. |
+| `semantic-router` (or `run`) | Starts the router and the dashboard. Creates the configuration file from the built-in template on first run (no models yet). |
+| `semantic-router init [--force] [--no-detect] [--yes \| --no-cli]` | Writes a starting configuration. It probes LM Studio (`localhost:1234`) and Ollama (`localhost:11434`) for chat and embedding models and looks for `claude`, `codex` and `copilot` on `PATH`, asking before it enables a subscription CLI (see [What `init` adds](#what-init-adds)). `--yes` enables them without asking; `--no-cli` adds no subscription CLI connector. A file that still holds the built-in template (as the router writes it on its first start, or an `init` that found nothing left it) is replaced; any other file only with `--force`. |
+| `semantic-router doctor` | Loads the configuration exactly as `run` would and checks it without calling a model. It prints the [machine-wide policy](enterprise.md), if an administrator set one, flags unresolved `${env:…}` references, tests the embeddings, and checks each HTTP connector (reachable, credentials accepted, configured model ids offered) and each CLI connector (installed, starts and, for Claude Code and Codex, signed in). No enabled model is a failure. Every failure says what to do: start LM Studio's server, the setting to change and where it is on the dashboard (for example *Providers → Connectors → openai → API key*), how to sign in. It also lists every host the router will contact with this configuration, for a firewall allowlist ([network.md](network.md#allowing-it-through-a-firewall)). Exit code 1 when anything failed. |
 | `semantic-router models [connector]` | Asks every connector (or the one named) which models it offers, and prints them with their load state, context length and size, the catalog model that already uses each, and a suggested name, tier (and where it came from: the family table, the size or the name) and capabilities for the rest (see [Model lineups](providers.md#model-lineups-several-models-per-provider)). A `model-families.json` in the configuration directory adds or changes families. LM Studio and Ollama also say whether they load models on demand. Changes nothing; add models on the dashboard. |
 | `semantic-router service install\|uninstall\|start\|stop\|restart\|status` | Runs the router in the background whenever you sign in. See [Run it in the background](#run-it-in-the-background). |
 | `semantic-router --version`, `--help` | |
@@ -80,7 +90,7 @@ While it runs, the router records its process id and addresses in `semantic-rout
 | Found | Added |
 |---|---|
 | LM Studio or Ollama with chat models | A connector and **every chat model it serves**, each on the tier its family suggests ([model-family table](providers.md#the-model-family-table)) or else its size (≤ 9B: 1, ≤ 35B: 2, larger: 3), with `code`, `tools`, `vision` and `reasoning` from the server's report or the family table, and the context it is loaded with. Models that are not loaded get `Priority` 1, so loaded ones are preferred. The notes say whether the server loads models on demand. |
-| An embedding model on either server | `Embeddings` switched to it, with a starting similarity threshold for that model family. |
+| An embedding model on either server | `Embeddings` switched to it, with a starting similarity threshold for that model family (calibrate it later on the **Evaluate** page). |
 | No embedding server | `Embeddings` set to `Onnx` with `all-MiniLM-L6-v2`: a 23 MB model that runs inside the router. It is downloaded on first start and checksum-verified. Threshold 0.40. |
 | A server that answers `401` | The connector, plus a note to set its `ApiKey` (for example `"${env:LM_API_TOKEN}"`). |
 | `claude` on PATH | `claude-cli` with prompted tool calling and Claude's lineup, one tier per family: `claude-haiku` (tier 2), `claude-sonnet` (3), `claude-opus` (4) and `claude-fable-5-1` (5, **disabled** until you enable it, because not every plan includes it). |
@@ -93,12 +103,14 @@ On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not
 
 | How `init` runs | `claude-cli` and `codex-cli` |
 |---|---|
-| At a terminal | Asked about one by one. Yes: added enabled, as in the table above. No: added with every model disabled, so you can turn them on later on the dashboard's **Models** page. |
+| At a terminal | Asked about one by one. Yes: added enabled, as in the table above. No: added with every model disabled, so you can turn them on later on the dashboard's **Models** page. When nothing else was found (no LM Studio or Ollama with a model), the question says that without a yes the router has no model to use. |
 | Without a terminal (input or output redirected: a script, CI, an installer) | Added with every model disabled, with a note saying how to enable them. |
 | `--yes` | Added enabled without asking. |
 | `--no-cli` | Not added. Neither is `copilot-cli`. |
 
 `copilot-cli` is never asked about: it is always added disabled, as above.
+
+After writing the file, `init` prints what it added, with a one-line legend of the tiers, and the next step: with a model enabled, `doctor` and the one-line Claude Code command (as in the banner); with none, the dashboard's setup (`http://localhost:5080/router#/overview`), or starting LM Studio's server or Ollama and running `init` again.
 
 A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnectorTypes` or `DisabledPresets`) is not added or asked about, even with `--yes`; the notes say which.
 
@@ -160,7 +172,7 @@ Precedence, lowest first: the built-in template, `appsettings.json` in the confi
 | Container | `/data/keys` (`SEMANTIC_ROUTER_KEYS_DIR`), on the same volume as the secrets | File permissions only |
 | Any of these, with `SemanticRouter:DataProtection:Certificate` | As above | Encryption to the certificate |
 
-Where only file permissions protect the keys, anyone who can read both the key ring and the secrets file can decrypt the keys you typed into the dashboard: a backup of your whole home directory, or a copy of the container's volume. `semantic-router doctor` says which case applies (the `key ring` line, a `[WARN]` for file permissions only), and the router logs a warning at start-up.
+Where only file permissions protect the keys, anyone who can read both the key ring and the secrets file can decrypt the keys you typed into the dashboard: a backup of your whole home directory, or a copy of the container's volume. `semantic-router doctor` says which case applies (the `key ring` line). With file permissions only it is a `[WARN]`, and the router logs a warning at start-up, once the secrets file holds a key; while it holds none there is nothing to give away, and the line is an `[ OK ]` that says to encrypt the key ring before you type a key into the dashboard (or to keep keys in the environment as `${env:…}` references).
 
 **Encrypting the key ring with a certificate.** Set `SemanticRouter:DataProtection:Certificate` to an RSA certificate with its private key:
 
@@ -230,6 +242,10 @@ The image runs the same host for API-key connectors and local model servers.
 ROUTER_ADMIN_TOKEN=$(openssl rand -hex 24) ROUTER_GATEWAY_KEY=$(openssl rand -hex 24) OPENAI_API_KEY=sk-... \
   docker compose -f deploy/compose.yaml up
 ```
+
+[deploy/compose.yaml](../deploy/compose.yaml) runs the published image, `ghcr.io/siebe41/semantic-router:<version>` (`SEMANTIC_ROUTER_VERSION` picks the version); a commented-out `build:` block builds it from your checkout instead.
+
+**API keys become connectors.** On the first start, while the configuration is still the built-in template, an `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the container's environment gets a connector (`openai`, `anthropic`) that refers to it as `${env:OPENAI_API_KEY}`: the key stays in the environment, never in the file. Then open the dashboard's Overview (or **Providers → Connectors → Discover models**) to choose which of its models to use. The image turns this on with `SEMANTIC_ROUTER_SEED_API_KEYS=true`; the tool leaves it off, since a key in your shell is no reason to spend it. A key added after the configuration has changed is not picked up: add the connector on the dashboard.
 
 - It listens on port `8080` and keeps the configuration, the encrypted secrets, the data-protection keys and the state database on the `/data` volume. The keys are not encrypted unless you mount a certificate and set `SemanticRouter__DataProtection__Certificate` (see [The key ring](#the-key-ring)); otherwise protect the volume as you would the secrets themselves.
 - The compose example publishes the port on `127.0.0.1` only.

@@ -5,6 +5,13 @@ internal sealed record HostSettings
 {
     public const string HomeVariable = "SEMANTIC_ROUTER_HOME";
     public const string KeysVariable = "SEMANTIC_ROUTER_KEYS_DIR";
+
+    /// <summary>
+    /// <c>SEMANTIC_ROUTER_SEED_API_KEYS</c>: while the configuration is the untouched template, add a connector for
+    /// <c>OPENAI_API_KEY</c> and <c>ANTHROPIC_API_KEY</c> when they are set (<see cref="FirstRun"/>). The container image
+    /// turns it on; the tool leaves it off, since a key in someone's shell is no reason to spend it.
+    /// </summary>
+    public const string SeedVariable = "SEMANTIC_ROUTER_SEED_API_KEYS";
     public const string ConfigurationFileName = "semantic-router.json";
     public const string StateFileName = "semantic-router.db";
     public const string DefaultUrl = "http://localhost:5080";

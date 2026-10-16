@@ -1,18 +1,26 @@
-# The router with API-key and local-model connectors, in a container.
+# The router with API-key and local-model connectors, in a container, from the published image.
 #   ROUTER_ADMIN_TOKEN=$(openssl rand -hex 24) ROUTER_GATEWAY_KEY=$(openssl rand -hex 24) OPENAI_API_KEY=sk-... \
 #     docker compose -f deploy/compose.yaml up
 # Then open http://localhost:5080/router and sign in with ROUTER_ADMIN_TOKEN. Clients send ROUTER_GATEWAY_KEY as
 # their API key (ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY): requests reach the container from its network, not loopback.
 #
+# On the first start, with OPENAI_API_KEY or ANTHROPIC_API_KEY set, the router adds an openai or anthropic connector
+# that refers to the key (${env:OPENAI_API_KEY}); the key itself stays in the environment. Pick its models on the
+# dashboard's Overview (Set up SemanticRouter) or under Providers → Connectors → Discover models.
+#
 # Subscription CLI connectors (claude, codex, copilot) do not work here: the container has neither the CLIs nor your
-# login, and must not be given your login files. Run `dotnet tool install -g SemanticRouter.Host` on the machine
-# itself for those (docs/TERMS.md).
+# login, and must not be given your login files. Install the tool on the machine itself for those
+# (https://siebe41.github.io/SemanticRouter.NET/terms).
 services:
   router:
-    build:
-      context: ..
-      dockerfile: src/SemanticRouter.Host/Dockerfile
-    image: semantic-router:local
+    # A released version (https://github.com/siebe41/SemanticRouter.NET/releases); SEMANTIC_ROUTER_VERSION picks another.
+    # How to verify the image: https://siebe41.github.io/SemanticRouter.NET/releases#check-the-container-image
+    image: ghcr.io/siebe41/semantic-router:${SEMANTIC_ROUTER_VERSION:-0.3.0}
+    # Or build it from this checkout instead: comment out the image line above and uncomment these.
+    # build:
+    #   context: ..
+    #   dockerfile: src/SemanticRouter.Host/Dockerfile
+    # image: semantic-router:local
     ports:
       - "127.0.0.1:5080:8080"           # keep it on this machine; widen only with gateway keys set
     volumes:

@@ -11,7 +11,8 @@ export async function loadEvaluationSet() {
     state.evaluation.judge = judge;
     state.evaluation.location = r.location; state.evaluation.count = r.count;
     state.evaluation.text = r.cases.map((c) => JSON.stringify(Object.fromEntries(Object.entries({ prompt: c.prompt, tier: c.tier, route: c.route, localOnly: c.localOnly || undefined, note: c.note }).filter(([, v]) => v != null)))).join('\n');
-  } catch (e) { state.evaluation.text = ''; toast(e.message, 'danger'); }
+    state.evaluation.savedText = state.evaluation.text; // what the router holds: typed changes beyond it are unsaved
+  } catch (e) { state.evaluation.text = ''; state.evaluation.savedText = null; toast(e.message, 'danger'); }
   if (state.view === 'evaluate') render();
 }
 

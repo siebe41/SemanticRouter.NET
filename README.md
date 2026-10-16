@@ -15,27 +15,29 @@ It speaks **the OpenAI chat-completions, OpenAI Responses and Anthropic protocol
 
 ![The dashboard](docs/images/dashboard.png)
 
-It decides in two steps:
+## Quick start
 
-1. **What does this prompt need?** Embedding similarity against your intent clusters, plus cheap structural complexity heuristics, produce a required **capability tier**, required **capabilities** (`code`, `tools`, `vision`, …) and an optional **local-only** constraint.
-2. **Which model should answer?** Your model catalog is ranked by a strategy: cheapest capable, most capable or your own priority. The router then tries the models in order through their connectors, failing over when a model is down or out of quota.
+For anyone who uses Claude Code, Codex or another OpenAI or Anthropic client and wants the easy prompts answered by a local model or a flat-rate subscription instead of the most expensive model. The command-line tool needs the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0); the [desktop app](docs/desktop.md) (Windows, macOS, Linux) needs nothing else and runs the router from the tray.
 
-```text
-prompt                                              needs                 → served by (LM Studio + Claude Code catalog)
-"hello, how are you today?"                         tier 1                → lmstudio-small   (free, local)
-"write a unit test for this function: …"            tier 2 + code         → lmstudio-coder   (free, local)
-"compare event sourcing and CRUD trade-offs"        tier 4                → claude-code      (your subscription)
-"summarize this, then analyze step by step…"        tier 1 → 3 by complexity → claude-code
-"look up the customer record for account 4471"      tier 1, local only    → lmstudio-small   (never leaves the machine)
-  … Claude session limit reached …                  tier 4                → lmstudio-coder   (best available; Claude cools down)
+```bash
+dotnet tool install -g SemanticRouter.Host
+semantic-router init    # finds LM Studio, Ollama and the claude, codex and copilot CLIs on this machine
+semantic-router         # starts the router; the dashboard is at http://localhost:5080/router
 ```
 
-Three front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/models`) for any tool with a configurable base URL, the Anthropic Messages API (`POST /v1/messages`) for Claude Code and the Anthropic SDKs, and the OpenAI Responses API (`POST /v1/responses`) for Codex CLI and the Agents SDK. Send `"model": "auto"` and let the router choose, or keep the tool's own model names and map them with aliases.
+Then run Claude Code through it, with the line the router prints (your context window included):
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:5080 ANTHROPIC_AUTH_TOKEN=semantic-router CLAUDE_CODE_AUTO_MODE_SERVER=0 claude --model semantic-router
+```
+
+Nothing found to answer with? The dashboard's Overview sets up a model. Next: [Connect your tools](docs/clients.md) (Codex, the SDKs, curl), [Install and run](docs/host.md) (the background service, the container) and [Providers](docs/providers.md).
 
 ---
 
 ## Contents
 
+- [Quick start](#quick-start)
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Providers](#providers)
@@ -74,6 +76,23 @@ The guides are also a website with search and the demo videos: <https://siebe41.
 - **Two middleware modes.** **Dispatch** serves requests through the connectors and streams the reply back. **Annotate** only attaches the routing plan, so your own endpoint makes the call.
 
 ## How it works
+
+It decides in two steps:
+
+1. **What does this prompt need?** Embedding similarity against your intent clusters, plus cheap structural complexity heuristics, produce a required **capability tier**, required **capabilities** (`code`, `tools`, `vision`, …) and an optional **local-only** constraint.
+2. **Which model should answer?** Your model catalog is ranked by a strategy: cheapest capable, most capable or your own priority. The router then tries the models in order through their connectors, failing over when a model is down or out of quota.
+
+```text
+prompt                                              needs                 → served by (LM Studio + Claude Code catalog)
+"hello, how are you today?"                         tier 1                → lmstudio-small   (free, local)
+"write a unit test for this function: …"            tier 2 + code         → lmstudio-coder   (free, local)
+"compare event sourcing and CRUD trade-offs"        tier 4                → claude-code      (your subscription)
+"summarize this, then analyze step by step…"        tier 1 → 3 by complexity → claude-code
+"look up the customer record for account 4471"      tier 1, local only    → lmstudio-small   (never leaves the machine)
+  … Claude session limit reached …                  tier 4                → lmstudio-coder   (best available; Claude cools down)
+```
+
+Three front doors: OpenAI-compatible (`POST /v1/chat/completions`, `GET /v1/models`) for any tool with a configurable base URL, the Anthropic Messages API (`POST /v1/messages`) for Claude Code and the Anthropic SDKs, and the OpenAI Responses API (`POST /v1/responses`) for Codex CLI and the Agents SDK. Send `"model": "auto"` and let the router choose, or keep the tool's own model names and map them with aliases.
 
 ```mermaid
 flowchart LR
@@ -193,7 +212,7 @@ Not included, on purpose:
 
 ## Install the tool
 
-The fastest way to use the router is the `semantic-router` .NET tool. It needs the [.NET 10 runtime or SDK](https://dotnet.microsoft.com/download/dotnet/10.0) and nothing cloned:
+The fastest way to use the router is the `semantic-router` .NET tool. It needs the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (installing a .NET tool is an SDK command) and nothing cloned:
 
 ```bash
 dotnet tool install -g SemanticRouter.Host
@@ -204,7 +223,7 @@ semantic-router           # http://localhost:5080, dashboard at /router
 semantic-router service install   # or keep it running in the background, started whenever you sign in
 ```
 
-`init` writes `~/.config/semantic-router/semantic-router.json` (`~/Library/Application Support/semantic-router` on macOS, `%APPDATA%\semantic-router` on Windows). When the router starts, it prints the lines to paste into your shell for Claude Code and OpenAI clients; [Using Claude Code and other tools through the router](#using-claude-code-and-other-tools-through-the-router) explains them. `init` asks before enabling each subscription CLI it finds, because that CLI answers on whatever account it is signed in to ([Using it at work](docs/TERMS.md#using-it-at-work)); `--yes` enables them without asking and `--no-cli` leaves them out. Everything else is done on the dashboard. `service install` sets the router up as a per-user background service (systemd on Linux, launchd on macOS, a sign-in entry on Windows), so no terminal has to stay open. Prefer an icon? The [desktop app](docs/desktop.md) (an installer for Windows, macOS and Linux, with updates) runs the router from the tray and shows the dashboard in its own window or your browser. A container image covers API-key and local-model setups. See [docs/host.md](docs/host.md).
+`init` writes `~/.config/semantic-router/semantic-router.json` (`~/Library/Application Support/semantic-router` on macOS, `%APPDATA%\semantic-router` on Windows). When the router starts, it prints a request to try it with, where to watch it on the dashboard, and the one-line Claude Code command; while no model is enabled it points to the setup on the dashboard's Overview instead. [Using Claude Code and other tools through the router](#using-claude-code-and-other-tools-through-the-router) explains the variables. `init` asks before enabling each subscription CLI it finds, because that CLI answers on whatever account it is signed in to ([Using it at work](docs/TERMS.md#using-it-at-work)); `--yes` enables them without asking and `--no-cli` leaves them out. Everything else is done on the dashboard. `service install` sets the router up as a per-user background service (systemd on Linux, launchd on macOS, a sign-in entry on Windows), so no terminal has to stay open. Prefer an icon? The [desktop app](docs/desktop.md) (an installer for Windows, macOS and Linux, with updates) runs the router from the tray and shows the dashboard in its own window or your browser. A container image covers API-key and local-model setups. See [docs/host.md](docs/host.md).
 
 ## Quick start from source
 
@@ -279,7 +298,7 @@ export ANTHROPIC_AUTH_TOKEN=semantic-router   # any value; the router never read
 claude --model semantic-router
 ```
 
-`--model semantic-router` makes Claude Code show that the router picks the model. The router's start-up banner also prints `CLAUDE_CODE_MAX_CONTEXT_TOKENS` for your models ([docs/clients.md](docs/clients.md#claude-code)). Nothing else about your workflow changes. Claude Code keeps its system prompt, its tools and its model names; the router decides per turn:
+`--model semantic-router` makes Claude Code show that the router picks the model. The router's start-up banner prints the same as one line, with `CLAUDE_CODE_MAX_CONTEXT_TOKENS` for your models and `CLAUDE_CODE_AUTO_MODE_SERVER=0` ([docs/clients.md](docs/clients.md#claude-code)). Nothing else about your workflow changes. Claude Code keeps its system prompt, its tools and its model names; the router decides per turn:
 
 | Claude Code sends… | The router… |
 |---|---|
@@ -297,7 +316,7 @@ app.MapRouterDashboard("/router");   // UI at /router, admin API under /router/a
 builder.Services.AddSemanticPromptRouting(config).UseConfigurationFile("semantic-router.json");   // optional: persist changes
 ```
 
-A rail of five sections, each with its pages as tabs. **Monitor**: Overview (models and cooldowns, connector health, the weekly digest, served-by and required-tier charts, a prompt tester), Live (a streaming view of clients, the router and models, with every decision as it happens), Activity (every routed request with its decision and outcome), Usage, and Memory (your notes as a graph, coloured by which models they reached; see [docs/memory.md](docs/memory.md)). **Routing**: editors for Tiers, Routes, Rules and Profiles, Evaluate, and Router learned (what automatic tuning changed, each change undoable). **Providers**: Models, Connectors and Embeddings. **Gateway**: its settings and Connect clients. **Admin**: the JSON editor and the Audit log. Feedback (a pre-filled GitHub issue for a misroute, a bug or an idea) sits at the foot of the rail ([every page](docs/dashboard.md#pages)). **Validate** → **Apply** swaps a new runtime in atomically; **Apply & save** also writes the configuration file, which replaces the `SemanticRouter` section on the next start (secrets left empty are inherited from it). The admin API behind it takes the same JSON document, so a tested configuration can be promoted with one `PUT`. Themes are CSS token blocks; drop a token file into `themes/` next to the configuration and it appears in the picker after a reload. It works with a keyboard and a screen reader, and on a phone. See [docs/dashboard.md](docs/dashboard.md).
+A rail of five sections, each with its pages as tabs. **Monitor**: Overview (models and cooldowns, connector health, the weekly digest, served-by and required-tier charts, a prompt tester), Live (a streaming view of clients, the router and models, with every decision as it happens), Activity (every routed request with its decision and outcome), Usage, and Memory (your notes as a graph, coloured by which models they reached; see [docs/memory.md](docs/memory.md)). **Routing**: editors for Tiers, Routes, Rules and Profiles, Evaluate, and Router learned (what automatic tuning changed, each change undoable). **Providers**: Models, Connectors and Embeddings. **Gateway**: its settings and Connect clients. **Admin**: the JSON editor and the Audit log. **Report an issue** (a pre-filled GitHub issue for a misroute, a bug or an idea) sits at the foot of the rail ([every page](docs/dashboard.md#pages)). **Validate** → **Apply & save** swaps a new runtime in atomically and writes the configuration file (**Apply only** leaves the file as it is, and the top bar says the running configuration is not saved), which replaces the `SemanticRouter` section on the next start (secrets left empty are inherited from it). The admin API behind it takes the same JSON document, so a tested configuration can be promoted with one `PUT`. Themes are CSS token blocks; drop a token file into `themes/` next to the configuration and it appears in the picker after a reload. It works with a keyboard and a screen reader, and on a phone. See [docs/dashboard.md](docs/dashboard.md).
 
 ## Using it in your application
 

@@ -353,10 +353,10 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
     /// <summary>What to fix when a server rejects the connector's credentials (names the setting, never the value).</summary>
     internal static string CredentialAdvice(string connector, int status, bool hasKey) => hasKey
-        ? $"the server rejected the credentials; check SemanticRouter:Connectors:{connector}:ApiKey"
+        ? $"the server rejected the credentials; check SemanticRouter:Connectors:{connector}:ApiKey (dashboard: Providers → Connectors → {connector} → API key)"
         : status == 401
-            ? $"the server requires authentication; set SemanticRouter:Connectors:{connector}:ApiKey"
-            : $"the server refused the request; check SemanticRouter:Connectors:{connector}:ApiKey and the server's permissions";
+            ? $"the server requires authentication; set SemanticRouter:Connectors:{connector}:ApiKey (dashboard: Providers → Connectors → {connector} → API key)"
+            : $"the server refused the request; check SemanticRouter:Connectors:{connector}:ApiKey (dashboard: Providers → Connectors → {connector} → API key) and the server's permissions";
 
     private static string? ExtractErrorMessage(string body)
     {

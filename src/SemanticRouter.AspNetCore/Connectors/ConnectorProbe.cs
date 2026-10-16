@@ -113,12 +113,42 @@ public static partial class ConnectorProbe
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
             return new(ConnectorProbeFailure.Unreachable, [], null,
-                $"{shown} is not reachable ({(ex is OperationCanceledException ? "timed out" : ex.Message)}).");
+                $"{shown} is not reachable ({(ex is OperationCanceledException ? "timed out" : ex.Message.TrimEnd('.'))}). {StartHint(name, baseAddress)}");
         }
         catch (JsonException)
         {
             return new(ConnectorProbeFailure.InvalidResponse, [], null, $"{shown} did not return JSON.");
         }
+    }
+
+    /// <summary>
+    /// What to do about a server that does not answer: for LM Studio and Ollama on this machine (by their default port
+    /// or the connector's name), how to start them; otherwise the address to check, in the configuration and on the
+    /// dashboard.
+    /// </summary>
+    internal static string StartHint(string name, Uri address)
+    {
+        string setting = $"SemanticRouter:Connectors:{name}:BaseAddress (dashboard: Providers → Connectors → {name} → Base address)";
+        if (!IsLocalAddress(address))
+        {
+            return $"Check the address, {setting}, and this machine's network or proxy.";
+        }
+
+        if (address.Port == InitDefaults.LmStudioPort || name.Contains("lmstudio", StringComparison.OrdinalIgnoreCase) || name.Contains("lm-studio", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Start LM Studio's local server (in LM Studio: Developer → Start server, or run `lms server start`) with a model loaded.";
+        }
+
+        return address.Port == InitDefaults.OllamaPort || name.Contains("ollama", StringComparison.OrdinalIgnoreCase)
+            ? "Start Ollama (open the Ollama app, or run `ollama serve`)."
+            : $"Start the server, or correct the address: {setting}.";
+    }
+
+    /// <summary>The ports LM Studio and Ollama listen on unless told otherwise.</summary>
+    private static class InitDefaults
+    {
+        public const int LmStudioPort = 1234;
+        public const int OllamaPort = 11434;
     }
 
     /// <summary>The headers every request to the connector's server carries: its credentials and extra headers.</summary>

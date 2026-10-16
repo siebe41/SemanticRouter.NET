@@ -853,7 +853,16 @@ internal sealed partial class PromptRoutingMiddleware
         catch (Exception ex) when (failOpen && !cancellationToken.IsCancellationRequested)
         {
             int fallbackTier = runtime.Configuration.FallbackTier;
-            LogClassificationFailed(_logger, fallbackTier, ex);
+            if (ex is HttpRequestException or InvalidOperationException)
+            {
+                // An embedding model that could not be downloaded or a server that does not answer: the message says
+                // what to do, on every request until it is fixed, so without a stack trace each time.
+                LogClassificationProblem(_logger, fallbackTier, ex.Message);
+            }
+            else
+            {
+                LogClassificationFailed(_logger, fallbackTier, ex);
+            }
 
             // Unclassified, the prompt may be one a local-only route would have kept on this machine, so while any
             // route is local-only the fallback is too: it goes to a local model or fails, never to the cloud.
@@ -953,6 +962,9 @@ internal sealed partial class PromptRoutingMiddleware
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Prompt classification failed; failing open to tier {Tier}.")]
     private static partial void LogClassificationFailed(ILogger logger, int tier, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "Prompt classification failed; failing open to tier {Tier}: {Problem}")]
+    private static partial void LogClassificationProblem(ILogger logger, int tier, string problem);
 
     [LoggerMessage(
         Level = LogLevel.Information,
