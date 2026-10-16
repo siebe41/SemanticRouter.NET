@@ -1,5 +1,7 @@
 # Documentation
 
+These guides are also on the [documentation site](https://siebe41.github.io/SemanticRouter.NET/), with search and the demo videos ([site/README.md](../site/README.md) says how it is built).
+
 | Read this | When you want to |
 |---|---|
 | [../README.md](../README.md) | Understand what the router does, run it, and look up every configuration key. |
