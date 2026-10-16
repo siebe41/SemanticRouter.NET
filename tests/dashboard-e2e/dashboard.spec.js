@@ -238,9 +238,17 @@ test('adding a model puts it in the catalog', async ({ page, request }) => {
 });
 
 test('discovering a connector\'s models adds the chosen ones on the chosen tier', async ({ page, request }) => {
+  // Discovery asks with the draft's settings (POST api/connectors/discover). A router without that endpoint is asked
+  // by connector name instead, as the dashboard does after a 404, without the 404 the browser would log as an error.
+  await page.route('**/router/api/connectors/discover', async (r) => {
+    const draft = await r.fetch();
+    if (draft.status() !== 404 && draft.status() !== 405) return r.fulfill({ response: draft });
+    const { name } = r.request().postDataJSON();
+    return r.fulfill({ response: await r.fetch({ url: r.request().url().replace('/connectors/discover', `/connectors/${encodeURIComponent(name)}/discover`), postData: '' }) });
+  });
   await open(page, 'models');
   const group = page.locator('section.model-group', { has: page.locator('h2', { hasText: /^local$/ }) });
-  await group.locator('[data-action="lineup-discover"]').click();
+  await group.locator('[data-action="lineup-discover-draft"]').click();
   const lineup = group.locator('.lineup');
   await expect(lineup).toContainText('in the catalog as local-small');
   // The stub is neither LM Studio nor Ollama, so nothing is ticked for you: it could be a proxy to a cloud API.
@@ -303,7 +311,9 @@ test('the prompt tester classifies and sends a prompt through the gateway', asyn
   await page.locator('#tester-prompt').fill('@tier3 hello there, how are you?');
   await page.locator('[data-action="tester-classify"]').click();
   await expect(page.locator('.tester .result-line .badge.accent')).toHaveText('@tier3');
-  await expect(page.locator('.tester')).toContainText('ExplicitCallout');
+  // The reason in words, with the enum value in its tooltip.
+  await expect(page.locator('.tester')).toContainText('asked for with a callout');
+  await expect(page.locator('.tester [title="Reason: ExplicitCallout"]')).toBeVisible();
   await page.locator('#tester-prompt').fill('hello there, how are you?');
   await page.locator('[data-action="tester-send"]').click();
   await expect(page.locator('.tester')).toContainText('Hello from the stub backend.');
@@ -365,8 +375,12 @@ test('the service card shows where the router runs, the base URLs for clients an
   await expect(card).toContainText(`${base}/v1`);
   await expect(card.locator('[data-action="copy-text"]').first()).toHaveAttribute('data-text', `${base}/v1`);
   await expect(card).toContainText('this machine only');
-  await expect(card).toContainText('pid');
-  await expect(card).toContainText('127.0.0.1');
+  // Where it runs is folded into "About this router", further down.
+  const about = page.locator('details.about');
+  await expect(about).not.toHaveAttribute('open', '');
+  await about.locator('summary').click();
+  await expect(about).toContainText('pid');
+  await expect(about).toContainText('127.0.0.1');
 });
 
 test('router learned runs tuning, pauses and resumes learning', async ({ page }) => {
