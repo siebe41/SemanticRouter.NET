@@ -142,6 +142,21 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void Warm_prompt_caches_survive_a_restart_until_they_expire()
+    {
+        var opus = new WarmCache("opus", 80_000, _time.GetUtcNow().AddMinutes(5));
+        var before = new SqliteWarmCaches(Open());
+        before.Remember("conversation", opus);
+        before.Remember("conversation", new WarmCache("sonnet", 20_000, _time.GetUtcNow().AddMinutes(5)));
+        before.Forget("conversation", "SONNET");
+
+        new SqliteWarmCaches(Open()).Lookup("conversation").Should().Equal(opus);
+        new SqliteWarmCaches(Open()).Lookup("another").Should().BeEmpty();
+        _time.Advance(TimeSpan.FromMinutes(6));
+        new SqliteWarmCaches(Open()).Lookup("conversation").Should().BeEmpty("expired");
+    }
+
+    [Fact]
     public void The_activity_log_is_seeded_from_disk_and_continues_its_ids()
     {
         var store = new SqliteActivityStore(Open());
@@ -341,20 +356,235 @@ public sealed class DurableStateHostTests : RouterHostTest
 {
     private readonly string _directory = Directory.CreateTempSubdirectory("router-durable").FullName;
 
-    private Task<HttpClient> StartDurableAsync() =>
+    private Task<HttpClient> StartDurableAsync(
+        Action<StateOptions>? state = null,
+        Action<PromptRouterMiddlewareOptions>? middleware = null,
+        Action<SemanticRouterOptions>? routing = null,
+        bool withCli = false,
+        Action<IServiceCollection>? services = null) =>
         StartAsync(
             o =>
             {
                 o.Mode = PromptRouterMode.Dispatch;
                 o.PathPrefixes.Add("/v1/chat/completions");
+                middleware?.Invoke(o);
             },
+            routing: routing,
+            withCli: withCli,
             services: s =>
             {
                 s.AddSingleton<IRouterConfigurationStore>(new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")));
                 new SemanticRouterBuilder(s).UseSqliteState(Path.Combine(_directory, "state.db"));
+                if (state is not null)
+                {
+                    s.Configure(state);
+                }
+
+                services?.Invoke(s);
             });
 
     private static StringContent JsonBody(JsonNode node) => new(node.ToJsonString(), Encoding.UTF8, "application/json");
+
+    private static StringContent Chat(string prompt) =>
+        JsonBody(new JsonObject { ["model"] = "auto", ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = prompt }) });
+
+    /// <summary>Everything the state database's files hold, as text, read while the router still has them open.</summary>
+    private string DatabaseFiles()
+    {
+        var text = new StringBuilder();
+        foreach (string file in Directory.GetFiles(_directory, "state.db*"))
+        {
+            text.Append(ReadWhileOpen(file));
+        }
+
+        return text.ToString();
+    }
+
+    /// <summary>
+    /// Reads a file the router may be writing. On macOS the shared lock .NET takes when opening a file conflicts with
+    /// the lock SQLite holds while it writes, so a read that lands during a write is tried again.
+    /// </summary>
+    private static string ReadWhileOpen(string file)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream, Encoding.Latin1);
+                return reader.ReadToEnd();
+            }
+            catch (IOException) when (attempt < 50 && File.Exists(file))
+            {
+                Thread.Sleep(20);
+            }
+        }
+    }
+
+    /// <summary>Waits until <paramref name="count"/> entries are in the store: an entry is stored once its request finishes, which can be just after the client has the reply.</summary>
+    private async Task WaitForStoredActivityAsync(int count)
+    {
+        IRoutingActivityStore store = Services.GetRequiredService<IRoutingActivityStore>();
+        for (int i = 0; i < 200 && store.Recent(count).Count < count; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        store.Recent(count).Should().HaveCount(count);
+    }
+
+    private static async Task<string> LastPreviewAsync(HttpClient client) =>
+        JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray()[0]!["promptPreview"]!.GetValue<string>();
+
+    [Fact]
+    public async Task Prompt_previews_mask_credentials_by_default_and_can_be_turned_off()
+    {
+        const string key = "sk-ant-api03-q1w2e3r4t5y6u7i8o9p0a1s2d3f4";
+        HttpClient client = await StartDurableAsync();
+        await client.PostAsync("/v1/chat/completions", Chat($"why does {key} get a 401?"));
+        await WaitForStoredActivityAsync(1);
+
+        (await LastPreviewAsync(client)).Should().Be("why does *** get a 401?");
+        DatabaseFiles().Should().NotContain(key);
+        await DisposeAsync();
+
+        // Off: no prompt text, and none of what models wrote about it either: a failed CLI run's reply and errors, and
+        // the judge's reason for its grade.
+        LocalHttp = new StubHttpMessageHandler((_, body) => OpenAIReply(
+            body.Contains("\"model\":\"judge-32b\"", StringComparison.Ordinal)
+                ? """{"grade": 2, "reason": "the nightingale figures are wrong"}"""
+                : "Revenue rose."));
+        Cli = FakeCliProcessRunner.Failing(1, stdout: ClaudeStream.Error("I cannot share the nightingale numbers"), stderr: "error: nightingale run aborted");
+        HttpClient off = await StartDurableAsync(
+            o => o.StorePrompts = PromptStorage.Off,
+            middleware: o => (o.Judge.Enabled, o.Judge.Model, o.Judge.SampleRate) = (true, "judge", 1),
+            routing: o =>
+            {
+                ModelDefinition judge = Model("judge", 3, local: true, connector: "lmstudio");
+                judge.Model = "judge-32b";
+                o.Models.Add(judge);
+            },
+            withCli: true,
+            // The 32B judge is not loaded, so the small model answers and the judge loads only to grade.
+            services: s => s.AddSingleton<IModelResidency>(new NotLoaded("judge-32b")));
+        var events = new StringBuilder();
+        using var listening = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        using HttpResponseMessage stream = await off.GetAsync("/router/api/events", HttpCompletionOption.ResponseHeadersRead, listening.Token);
+        Task listener = ListenAsync(stream, events, listening.Token);
+
+        await off.PostAsync("/v1/chat/completions", Chat("the quarterly numbers for project nightingale"));
+        await Services.GetRequiredService<AnswerJudge>().WhenIdleAsync(TimeSpan.FromSeconds(10));
+        HttpResponseMessage failed = await off.PostAsync("/v1/chat/completions", JsonBody(new JsonObject
+        {
+            ["model"] = "claude-cli",
+            ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = "the nightingale numbers again" }),
+        }));
+        await WaitForStoredActivityAsync(3);
+
+        failed.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        IReadOnlyList<RoutingActivityEntry> entries = Services.GetRequiredService<IRoutingActivityStore>().Recent(2);
+        entries.Should().Contain(e => e.Grade == 2 && e.GradeNote == "judge", "the grade is kept, the reason is not");
+        entries.Should().Contain(e => e.Detail != null && e.Detail.Contains("claude-cli: exit code 1: output omitted (StorePrompts: Off)", StringComparison.Ordinal));
+        (await LastPreviewAsync(off)).Should().BeEmpty();
+        string export = await off.GetStringAsync("/router/api/activity/export?format=jsonl&prompts=true");
+        export.Should().Contain("exit code 1").And.NotContain("nightingale");
+        DatabaseFiles().Should().NotContain("nightingale");
+        Services.GetRequiredService<RoutingFeedbackLog>().Recent().Should().ContainSingle().Which.Detail.Should().Be("graded 2/5 by judge");
+        string Events()
+        {
+            lock (events)
+            {
+                return events.ToString();
+            }
+        }
+
+        for (int i = 0; i < 200 && !Events().Contains("exit code 1", StringComparison.Ordinal); i++)
+        {
+            await Task.Delay(10);
+        }
+
+        await listening.CancelAsync();
+        await listener;
+        Events().Should().Contain("\"grade\":2").And.Contain("exit code 1").And.NotContain("nightingale");
+    }
+
+    private sealed class NotLoaded(string model) : IModelResidency
+    {
+        public bool? IsLoaded(ModelDefinition candidate) => candidate.IsLocal ? candidate.Model != model : null;
+    }
+
+    private static HttpResponseMessage OpenAIReply(string content) => new(HttpStatusCode.OK)
+    {
+        Content = JsonBody(new JsonObject
+        {
+            ["id"] = "x",
+            ["object"] = "chat.completion",
+            ["choices"] = new JsonArray(new JsonObject
+            {
+                ["index"] = 0,
+                ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = content },
+                ["finish_reason"] = "stop",
+            }),
+        }),
+    };
+
+    /// <summary>Appends what the event stream sends to <paramref name="events"/> until <paramref name="cancellationToken"/> stops it.</summary>
+    private static async Task ListenAsync(HttpResponseMessage stream, StringBuilder events, CancellationToken cancellationToken)
+    {
+        using var reader = new StreamReader(await stream.Content.ReadAsStreamAsync(cancellationToken));
+        try
+        {
+            while (await reader.ReadLineAsync(cancellationToken) is { } line)
+            {
+                lock (events)
+                {
+                    events.AppendLine(line);
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopped listening.
+        }
+    }
+
+    [Fact]
+    public async Task Retention_comes_from_the_configuration_document()
+    {
+        await StartDurableAsync(o =>
+        {
+            o.Retention.ActivityDays = 7;
+            o.Retention.ConfigurationVersions = 3;
+        });
+        _ = Services.GetRequiredService<RouterRuntimeProvider>().Current;
+        SqliteRouterDatabase database = Services.GetRequiredService<SqliteRouterDatabase>();
+
+        database.ActivityMaxAge.Should().Be(TimeSpan.FromDays(7));
+        database.HistoryMaxEntries.Should().Be(3);
+        database.UsageRetention.Should().Be(TimeSpan.FromDays(400), "unset values keep the store's default");
+
+        RouterConfiguration document = RouterConfiguration.FromJson("""{ "State": { "StorePrompts": "Off", "Retention": { "UsageDays": 90, "ActivityEntries": 0 } } }""");
+        document.State.StorePrompts.Should().Be(PromptStorage.Off);
+        document.State.Retention.UsageDays.Should().Be(90);
+        document.GetDocumentValidationErrors().Should().Contain(e => e.StartsWith("State:Retention", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Purged_activity_cannot_be_recovered_from_the_database_files()
+    {
+        HttpClient client = await StartDurableAsync(o => o.StorePrompts = PromptStorage.On);
+        await client.PostAsync("/v1/chat/completions", Chat("purge-me 7a1c: the draft of the merger memo"));
+        await client.PostAsync("/v1/chat/completions", Chat("purge-me 7a1c: and the second draft"));
+        await WaitForStoredActivityAsync(2);
+        DatabaseFiles().Should().Contain("purge-me 7a1c", "the previews were stored");
+
+        HttpResponseMessage purge = await client.DeleteAsync("/router/api/activity");
+
+        purge.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode.Parse(await purge.Content.ReadAsStringAsync())!["removed"]!.GetValue<int>().Should().Be(2);
+        JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray().Should().BeEmpty();
+        DatabaseFiles().Should().NotContain("purge-me 7a1c");
+    }
 
     [Fact]
     public async Task Activity_from_before_a_restart_is_still_on_the_dashboard()

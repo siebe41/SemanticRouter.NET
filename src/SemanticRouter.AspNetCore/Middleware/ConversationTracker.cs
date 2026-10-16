@@ -12,8 +12,8 @@ internal readonly record struct ConversationContext(int? Floor, string? Preferre
 
 /// <summary>
 /// Remembers, per conversation, the highest tier recent turns needed and the model that answered last
-/// (<see cref="ConversationRoutingOptions"/>). Keys are a hash of the client, the system prompt and the first user
-/// message: no prompt text is kept. In memory only, and pruned.
+/// (<see cref="ConversationRoutingOptions"/>). Keys are a hash of the client, the system prompt (or the client's session
+/// id) and the first user message: no prompt text is kept. In memory only, and pruned.
 /// </summary>
 internal sealed class ConversationTracker
 {
@@ -30,9 +30,13 @@ internal sealed class ConversationTracker
 
     /// <summary>
     /// The conversation a request belongs to. Chat clients resend the whole history, so the system prompt and the first
-    /// user message are the same on every turn. <see langword="null"/> when the request has no user message.
+    /// user message are the same on every turn. Only system and developer messages before the first user message count:
+    /// Claude Code adds system messages later in the conversation, and they must not make every turn a new one. With a
+    /// client session id (<see cref="ConversationRoutingOptions.SessionHeader"/>), the session and the first user message
+    /// identify it instead, so a system prompt that changes during the session does not split it either.
+    /// <see langword="null"/> when the request has no user message.
     /// </summary>
-    public static string? Identify(string client, ChatCompletionRequest chat)
+    public static string? Identify(string client, ChatCompletionRequest chat, string? session = null)
     {
         ChatMessage? first = chat.Messages.FirstOrDefault(m => m.Role == "user");
         if (first is null)
@@ -40,8 +44,11 @@ internal sealed class ConversationTracker
             return null;
         }
 
-        string system = string.Join("\n", chat.Messages.Where(m => m.Role is "system" or "developer").Select(m => m.Content));
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(client + "\n" + system + "\n" + first.Content)));
+        // The first user message stays in the key: a session can hold several conversations (Claude Code's subagents).
+        string scope = string.IsNullOrWhiteSpace(session)
+            ? string.Join("\n", chat.Messages.TakeWhile(m => m.Role != "user").Where(m => m.Role is "system" or "developer").Select(m => m.Content))
+            : "session\n" + session.Trim();
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(client + "\n" + scope + "\n" + first.Content)));
     }
 
     /// <summary>

@@ -21,7 +21,20 @@ switch (settings.Command)
     case "init":
     {
         using var http = new HttpClient();
-        return await InitCommand.RunAsync(settings, InitProbes.ForThisMachine(http), Console.Out);
+        // It asks before enabling a subscription CLI only at a terminal; scripted, it leaves them disabled.
+        TextReader? terminal = Console.IsInputRedirected || Console.IsOutputRedirected ? null : Console.In;
+        InitProbes probes;
+        try
+        {
+            probes = InitProbes.ForThisMachine(http);
+        }
+        catch (InvalidDataException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+
+        return await InitCommand.RunAsync(settings, probes, Console.Out, terminal);
     }
 
     case "doctor":
@@ -51,9 +64,14 @@ static string Help() => $"""
 
     Usage:
       semantic-router [run] [options]   Start the router and the dashboard (default http://localhost:5080).
-      semantic-router init [--force]    Write a starting configuration with the models found on this machine
+      semantic-router init [--force] [--yes | --no-cli]
+                                        Write a starting configuration with the models found on this machine
                                         (LM Studio, Ollama, and the claude / codex / copilot CLIs on PATH).
-      semantic-router doctor            Check every connector, model and the embeddings. Exit code 1 on failure.
+                                        It asks before enabling each subscription CLI, since that CLI answers
+                                        on whatever account it is signed in to (see "Using it at work" in
+                                        docs/TERMS.md); without a terminal they are added disabled.
+      semantic-router doctor            Check every connector, model and the embeddings, and list every host the
+                                        router will contact. Exit code 1 on failure.
       semantic-router models [name]     List the models each connector (or the one named) offers: loaded or not,
                                         context, size, which are in the catalog, and a suggested tier for the rest.
       semantic-router service <action> [options]
@@ -74,6 +92,8 @@ static string Help() => $"""
       --urls <urls>        Where to listen, e.g. http://localhost:5080 (the default). Binding beyond this machine
                            needs a dashboard token for remote dashboard use; see docs/dashboard.md.
       --no-detect          init: write the template without probing this machine.
+      --yes, -y            init: enable the claude and codex CLIs it finds without asking.
+      --no-cli             init: add no subscription CLI connectors (claude, codex, copilot).
       --SemanticRouter:<key>=<value>
                            Override any setting, like the SemanticRouter__<key> environment variables.
 

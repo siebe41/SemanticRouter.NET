@@ -14,6 +14,23 @@ public sealed class SemanticRouterBuilder
     /// <summary>The application's service collection.</summary>
     public IServiceCollection Services { get; }
 
+    /// <summary>
+    /// Holds every configuration to <paramref name="policy"/>, which the user's configuration cannot override: what breaks
+    /// it is turned off at start-up, and a change that would break it is refused (<see cref="MachinePolicy"/>).
+    /// </summary>
+    public SemanticRouterBuilder UseMachinePolicy(MachinePolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        Services.Replace(ServiceDescriptor.Singleton(policy));
+        return this;
+    }
+
+    /// <summary>
+    /// Reads this machine's policy (<see cref="MachinePolicyLoader.Load"/>) and holds every configuration to it. Throws
+    /// <see cref="InvalidDataException"/> when a policy is set but cannot be read, so the router never runs without it.
+    /// </summary>
+    public SemanticRouterBuilder UseMachinePolicy() => UseMachinePolicy(MachinePolicyLoader.Load());
+
     /// <summary>Uses a custom <see cref="IEmbeddingProvider"/> (registered as a singleton).</summary>
     public SemanticRouterBuilder UseEmbeddingProvider<TProvider>()
         where TProvider : class, IEmbeddingProvider

@@ -139,6 +139,26 @@ public sealed class ModelDefinition
     public decimal EstimateCost(int inputTokens, int outputTokens) =>
         ((InputCostPerMillionTokens * inputTokens) + (OutputCostPerMillionTokens * outputTokens)) / 1_000_000m;
 
+    /// <summary>
+    /// Estimated marginal cost in USD for a request of the given size when <paramref name="cache"/> says how much of
+    /// the input is read from and written to the prompt cache: that part is priced at the cache prices, the rest at the
+    /// input price. Without a share, the same as <see cref="EstimateCost(int, int)"/>.
+    /// </summary>
+    public decimal EstimateCost(int inputTokens, int outputTokens, PromptCacheShare? cache)
+    {
+        if (cache is null)
+        {
+            return EstimateCost(inputTokens, outputTokens);
+        }
+
+        double readShare = Math.Clamp(cache.Read, 0, 1), writeShare = Math.Clamp(cache.Write, 0, 1 - readShare);
+        decimal read = (decimal)readShare, write = (decimal)writeShare;
+        decimal input = ((1 - read - write) * InputCostPerMillionTokens)
+            + (read * (CacheReadCostPerMillionTokens ?? InputCostPerMillionTokens))
+            + (write * (CacheWriteCostPerMillionTokens ?? InputCostPerMillionTokens));
+        return ((input * inputTokens) + (OutputCostPerMillionTokens * outputTokens)) / 1_000_000m;
+    }
+
     /// <inheritdoc />
     public override string ToString() => $"{Name} via {Connector} (tier {Tier})";
 }

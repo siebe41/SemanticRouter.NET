@@ -50,19 +50,23 @@ internal sealed partial class PromptDispatcher
         var budgetsHit = new List<string>();
         var cooledDuringRequest = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int tried = 0;
-        long started = Stopwatch.GetTimestamp();
+        long started = _time.GetTimestamp();
 
-        // The first byte decides time-to-first-byte for whichever attempt is serving at that moment.
+        // The first byte decides time-to-first-byte for whichever attempt is serving at that moment: the request's figure
+        // counts from dispatch (failed attempts included, as the client waited through them), the serving model's own
+        // from the start of its attempt, so a model that rescues a request is not charged for the ones that failed first.
         var current = new CurrentAttempt();
         context.Response.OnStarting(() =>
         {
             if (current.Model is { } model)
             {
-                TimeSpan elapsed = Stopwatch.GetElapsedTime(started);
-                _metrics.RecordTimeToFirstByte(model.Name, current.Connector!, elapsed);
+                TimeSpan elapsed = _time.GetElapsedTime(started);
+                TimeSpan ownElapsed = _time.GetElapsedTime(current.Started);
+                _metrics.RecordTimeToFirstByte(model.Name, current.Connector!, elapsed, ownElapsed);
                 if (activity is not null)
                 {
                     activity.TimeToFirstByteMilliseconds = Math.Round(elapsed.TotalMilliseconds, 1);
+                    activity.AttemptTimeToFirstByteMilliseconds = Math.Round(ownElapsed.TotalMilliseconds, 1);
                 }
 
                 if (middleware.EmitResponseHeaders && context.Features.Get<DroppedFeatures>() is { Names.Count: > 0 } dropped)
@@ -133,6 +137,7 @@ internal sealed partial class PromptDispatcher
             context.Features.Set(notes);
             current.Model = model;
             current.Connector = connector.Name;
+            current.Started = _time.GetTimestamp();
 
             ConnectorResult result;
             using (Activity? span = RouterTelemetry.Source.StartActivity("semantic_router.attempt"))
@@ -150,6 +155,11 @@ internal sealed partial class PromptDispatcher
                 if (notes.Notes.Count > 0)
                 {
                     span?.SetTag("semantic_router.notes", string.Join("; ", notes.Notes));
+                }
+
+                if (notes.PromptedToolCalls is { } promptedCalls)
+                {
+                    span?.SetTag("semantic_router.prompted_tool_calls", promptedCalls);
                 }
 
                 if (result.Outcome == ConnectorOutcome.Failed)
@@ -177,9 +187,10 @@ internal sealed partial class PromptDispatcher
                     _incidents?.Served(connector.Name);
                     LogServed(_logger, model.Name, connector.Name, tried);
                     RecordUsage(runtime, model, connector.Name, capture.Usage, activity, plan.Requirements.Profile);
-                    _metrics.RecordRequest(model.Name, connector.Name, "served", Stopwatch.GetElapsedTime(started));
+                    _metrics.RecordRequest(model.Name, connector.Name, "served", _time.GetElapsedTime(started));
                     if (activity is not null)
                     {
+                        activity.AttemptMilliseconds = Math.Round(_time.GetElapsedTime(current.Started).TotalMilliseconds, 1);
                         activity.ServedBy = model.Name;
                         activity.Connector = connector.Name;
                         activity.Attempt = tried;
@@ -189,6 +200,7 @@ internal sealed partial class PromptDispatcher
                         activity.Budget = budgetsHit.Count > 0 ? string.Join(", ", budgetsHit.Distinct(StringComparer.OrdinalIgnoreCase)) : null;
                         activity.Dropped = dropped.Names.Count > 0 ? string.Join(", ", dropped.Names) : null;
                         activity.Notes = notes.Notes.Count > 0 ? string.Join("; ", notes.Notes) : null;
+                        activity.PromptedToolCalls = notes.PromptedToolCalls;
                     }
 
                     return;
@@ -227,7 +239,7 @@ internal sealed partial class PromptDispatcher
               (plan.Requirements.LocalOnly ? ", local only" : string.Empty) + ")."
             : "Every candidate model failed: " + string.Join("; ", attempts);
 
-        _metrics.RecordRequest(null, null, "failed", Stopwatch.GetElapsedTime(started));
+        _metrics.RecordRequest(null, null, "failed", _time.GetElapsedTime(started));
         if (activity is not null)
         {
             activity.Outcome = "failed";
@@ -282,6 +294,9 @@ internal sealed partial class PromptDispatcher
         public ModelDefinition? Model { get; set; }
 
         public string? Connector { get; set; }
+
+        /// <summary>When this attempt started (a <see cref="TimeProvider"/> timestamp), for the model's own timings.</summary>
+        public long Started { get; set; }
     }
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Served by {Model} via {Connector} (attempt {Attempt}).")]

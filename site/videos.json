@@ -1,0 +1,48 @@
+{
+  "release": "media",
+  "videos": [
+    {
+      "id": "intro",
+      "file": "semantic-router-demo",
+      "title": "SemanticRouter.NET in two minutes",
+      "length": "1:50",
+      "description": "Install the tool, let init find LM Studio and Claude Code, point Claude Code at the router, and watch each turn go to the right model, including what happens when Claude's session limit runs out."
+    },
+    {
+      "id": "deep-dive",
+      "file": "semantic-router-deep-dive",
+      "title": "Deep dive: how a prompt gets routed",
+      "length": "3:05",
+      "description": "Routes, the prompt tester, complexity, tiers and strategies; a tool round trip, callouts and secret detection; failover; and the Activity and Evaluate pages that explain every decision."
+    },
+    {
+      "id": "settings",
+      "file": "semantic-router-settings",
+      "title": "How-to: the settings",
+      "length": "2:10",
+      "description": "Where the settings live, adding a model LM Studio just downloaded and a paid API with its prices, fixing a misroute with Evaluate, a local-only profile, a budget, and doctor."
+    },
+    {
+      "id": "savings",
+      "file": "semantic-router-savings",
+      "title": "What it saves you",
+      "length": "0:45",
+      "description": "A day of traffic across a local model, a Claude subscription and a paid API, then the Usage page and the weekly digest. Every figure is the router's own."
+    },
+    {
+      "id": "privacy",
+      "file": "semantic-router-privacy",
+      "title": "Privacy: what reaches the cloud",
+      "length": "1:00",
+      "description": "The memory map of a notes vault, a note read by a local model and then sent to Opus, a credential keeping a conversation local, and Activity as the record."
+    },
+    {
+      "id": "short",
+      "file": "semantic-router-short",
+      "title": "The short version",
+      "length": "0:45",
+      "vertical": true,
+      "description": "Claude Code routed turn by turn, with a failover, in one vertical take."
+    }
+  ]
+}

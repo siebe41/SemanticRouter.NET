@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -14,8 +15,14 @@ internal static class DigestApi
     private static readonly RoutingReason[] Escalations = [RoutingReason.ComplexityEscalation, RoutingReason.AmbiguousMatchEscalation, RoutingReason.RetryEscalation];
 
     public static void Map(RouteGroupBuilder api, JsonSerializerOptions json) =>
-        api.MapGet("/digest", (RouterRuntimeProvider provider, IUsageLedger ledger, RoutingActivityLog activity, RoutingFeedbackLog feedback, RouterTuner tuner, RouterNotices notices, string? window) =>
-            Results.Json(Build(provider.Current.Configuration, ledger, activity, feedback, tuner, notices, window, DateTimeOffset.UtcNow), json));
+        api.MapGet("/digest", (HttpContext context, RouterRuntimeProvider provider, IUsageLedger ledger, RoutingActivityLog activity, RoutingFeedbackLog feedback, RouterTuner tuner, RouterNotices notices, string? window) =>
+            {
+                DigestResponse digest = Build(provider.Current.Configuration, ledger, activity, feedback, tuner, notices, window, DateTimeOffset.UtcNow);
+
+                // The metrics role gets what webhooks get without IncludeDetails: no learned utterance, no connector's error.
+                return Results.Json(DashboardAccess.RoleOf(context) == RouterDashboardRole.Metrics ? WebhookNotifier.WithoutDetails(digest) : digest, json);
+            })
+            .WithMetadata(DashboardMetricsMetadata.Instance);
 
     /// <summary>The digest for <paramref name="window"/> (as on the Usage page) at <paramref name="now"/>.</summary>
     internal static DigestResponse Build(
@@ -30,7 +37,7 @@ internal static class DigestApi
         IReadOnlyList<RoutingFeedback> signals = feedback.Between(since, until);
         DigestChange[] learned = [.. tuner.Changes()
             .Where(c => c.Timestamp >= since && c.Timestamp < until && c.State is TuningChangeState.Applied or TuningChangeState.Undone)
-            .Select(c => new DigestChange(c.Id, c.Timestamp, c.Summary, c.State, c.Version))];
+            .Select(c => new DigestChange(c.Id, c.Timestamp, c.Summary, c.State, c.Version) { PlainSummary = c.PlainSummary })];
 
         return new DigestResponse(
             since,
@@ -103,4 +110,9 @@ internal sealed record DigestResponse(
     decimal SubscriptionValueUsd = 0m);
 
 /// <summary>A change automatic tuning made: its id (for undo), when, what, and the configuration version it became.</summary>
-internal sealed record DigestChange(long Id, DateTimeOffset Timestamp, string Summary, TuningChangeState State, long? Version);
+internal sealed record DigestChange(long Id, DateTimeOffset Timestamp, string Summary, TuningChangeState State, long? Version)
+{
+    /// <summary>The summary without a learned utterance's text (<see cref="TuningChange.PlainSummary"/>), for webhooks.</summary>
+    [JsonIgnore]
+    public string? PlainSummary { get; init; }
+}

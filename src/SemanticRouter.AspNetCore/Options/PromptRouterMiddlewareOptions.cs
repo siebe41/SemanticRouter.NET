@@ -84,8 +84,9 @@ public sealed class PromptRouterMiddlewareOptions
     /// <summary>
     /// Maps the model names clients send to routing aliases or catalog models, so tools keep their own model
     /// settings and the router still decides. Keys are case-insensitive globs (<c>*</c> matches anything), e.g.
-    /// <c>"*haiku*": "auto:cheapest"</c>, <c>"*opus*": "family:opus"</c> (the catalog's Opus model, else the most capable), <c>"gpt-*": "auto"</c>. Names that match no
-    /// pattern and no catalog model are routed as <c>auto</c>.
+    /// <c>"*haiku*": "auto:cheapest"</c>, <c>"claude-*": "auto"</c>, <c>"opus-pinned": "family:opus"</c> (the catalog's Opus
+    /// model, else the most capable). A key without <c>*</c> names one model exactly and is tried before the globs; among
+    /// the globs the first match wins. Names that match no pattern and no catalog model are routed as <c>auto</c>.
     /// </summary>
     public IDictionary<string, string> ModelAliases { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -145,7 +146,9 @@ public sealed class PromptRouterMiddlewareOptions
 
     /// <summary>
     /// The request header that carries a project label for <see cref="ProfileRules"/> and the activity log. Default
-    /// <c>X-Router-Project</c>. Without it, the Anthropic <c>metadata.user_id</c> or OpenAI <c>user</c> field is used.
+    /// <c>X-Router-Project</c>. Without it, a hash of the Anthropic <c>metadata.user_id</c> or OpenAI <c>user</c> field is
+    /// used (<c>user:</c> and 12 hex digits), never the id itself; a user id that is a JSON object (Claude Code's) gives no
+    /// project.
     /// </summary>
     public string ProjectHeader { get; set; } = "X-Router-Project";
 
@@ -206,9 +209,18 @@ public sealed class PromptRouterMiddlewareOptions
     /// When any are configured, requests from other machines must send one as <c>Authorization: Bearer {key}</c> or
     /// <c>x-api-key: {key}</c> (what <c>ANTHROPIC_AUTH_TOKEN</c>, <c>ANTHROPIC_API_KEY</c> and <c>OPENAI_API_KEY</c> send),
     /// and the client name is recorded in the activity log. Keys are compared, never forwarded: credentials for the
-    /// backends always come from the connector configuration. Empty by default (no gateway authentication).
+    /// backends always come from the connector configuration. Empty by default: clients on this machine need no key, and
+    /// other machines are refused (see <see cref="AllowUnauthenticatedRemoteClients"/>).
     /// </summary>
     public IDictionary<string, string> GatewayKeys { get; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Serve requests from other machines without a gateway key while <see cref="GatewayKeys"/> is empty. Default
+    /// <see langword="false"/>: with no keys configured, remote clients get a 401, because anyone who can reach the port
+    /// could otherwise spend the connectors' keys and subscriptions. Turn this on only behind a reverse proxy that
+    /// authenticates every request. Ignored once any gateway key is configured.
+    /// </summary>
+    public bool AllowUnauthenticatedRemoteClients { get; set; }
 
     /// <summary>
     /// Require a gateway key from clients on this machine too. Default <see langword="false"/>: loopback clients may
@@ -225,6 +237,14 @@ public sealed class PromptRouterMiddlewareOptions
     /// spending it in minutes, or crowding out the others.
     /// </summary>
     public IDictionary<string, RateLimitOptions> RateLimits { get; } = new Dictionary<string, RateLimitOptions>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Requests per minute for each client on another machine (by gateway client, or by address without a key) that no
+    /// <see cref="RateLimits"/> entry covers. Default 120, so a remote client stuck in a loop cannot spend the
+    /// connectors' keys at full speed even before limits are configured. 0 turns it off. Clients on this machine are not
+    /// limited by it.
+    /// </summary>
+    public int RemoteRequestsPerMinute { get; set; } = 120;
 }
 
 /// <summary>One client's rate limit (<see cref="PromptRouterMiddlewareOptions.RateLimits"/>), over a sliding minute.</summary>
@@ -284,6 +304,24 @@ public sealed class ConversationRoutingOptions
     /// coherent and prompt caches keep working. Default <see langword="true"/>.
     /// </summary>
     public bool StickToModel { get; set; } = true;
+
+    /// <summary>
+    /// How long a model's prompt cache stays warm after a turn that read or wrote it, when the router cannot tell. While
+    /// it does, the conversation stays on that model when moving would cost more (re-sending and re-writing the cached
+    /// context), above the required tier too, and returns to it after a failover. On an Anthropic connector the router
+    /// knows the entries' lifetime and uses that instead: the <c>ttl</c> of the client's own cache markers, or the
+    /// connector's <see cref="ConnectorOptions.CacheTtl"/> for the markers it adds. 5 minutes matches OpenAI's caching;
+    /// set more for a backend you know keeps entries longer. Default 5 minutes.
+    /// </summary>
+    public TimeSpan CacheLifetime { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// A request header that carries the client's session id. When a request has it, the client, the session and the
+    /// first user message identify the conversation, instead of the client, the system prompt and the first user
+    /// message. Claude Code sends <c>x-claude-code-session-id</c> on every request. Empty turns it off. Default
+    /// <c>x-claude-code-session-id</c>.
+    /// </summary>
+    public string SessionHeader { get; set; } = "x-claude-code-session-id";
 }
 
 /// <summary>

@@ -8,19 +8,21 @@ namespace SemanticRouter.AspNetCore;
 /// <param name="WorkingDirectory">The scratch directory the process runs in.</param>
 /// <param name="Options">The connector's options.</param>
 /// <param name="Request">The full request, when tools or tool traffic must be rendered into the prompt.</param>
+/// <param name="ToolFormat">The fence label this request's tool calls use.</param>
 internal sealed record CliRequest(
     string? Model,
     IReadOnlyList<ChatMessage> Messages,
     string WorkingDirectory,
     ConnectorOptions Options,
-    ChatCompletionRequest? Request = null)
+    ChatCompletionRequest? Request = null,
+    PromptedToolFormat? ToolFormat = null)
 {
     /// <summary>The system prompt and the conversation prompt.</summary>
     public (string? System, string Prompt) RenderTranscript() =>
-        Request is null ? ChatTranscript.Render(Messages) : ChatTranscript.Render(Request);
+        Request is null ? ChatTranscript.Render(Messages) : ChatTranscript.Render(Request, format: ToolFormat);
 
     /// <summary>The whole prompt with the system prompt inlined.</summary>
-    public string RenderInline() => Request is null ? ChatTranscript.RenderInline(Messages) : ChatTranscript.RenderInline(Request);
+    public string RenderInline() => Request is null ? ChatTranscript.RenderInline(Messages) : ChatTranscript.RenderInline(Request, ToolFormat);
 }
 
 internal enum CliOutputMode
@@ -71,6 +73,24 @@ internal abstract class CliAdapter
 
     /// <summary>Environment variables removed by default (e.g. API keys that would switch billing).</summary>
     public virtual IReadOnlyList<string> DefaultRemovedEnvironment => [];
+
+    /// <summary>
+    /// Environment variables set by default, under the connector's own <see cref="ConnectorOptions.EnvironmentVariables"/>
+    /// (which win). The presets use them to keep the CLI from contacting anything but its model API.
+    /// </summary>
+    public virtual IReadOnlyDictionary<string, string> DefaultEnvironment => new Dictionary<string, string>();
+
+    /// <summary>The environment to set for a run: <see cref="DefaultEnvironment"/> overlaid with the connector's own variables.</summary>
+    public Dictionary<string, string> EnvironmentFor(ConnectorOptions options)
+    {
+        var environment = new Dictionary<string, string>(DefaultEnvironment, StringComparer.Ordinal);
+        foreach ((string name, string value) in options.EnvironmentVariables)
+        {
+            environment[name] = value;
+        }
+
+        return environment;
+    }
 
     /// <summary>Builds the argument list and optional standard input.</summary>
     public abstract (List<string> Arguments, string? StandardInput) Build(CliRequest request);
@@ -129,6 +149,14 @@ internal sealed class ClaudeCodeCliAdapter : CliAdapter
     // subscription; ANTHROPIC_BASE_URL could point back at this router and loop.
     public override IReadOnlyList<string> DefaultRemovedEnvironment =>
         ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL"];
+
+    // A run answers one prompt: no auto-update in the middle of it, and no telemetry, error reporting or other traffic
+    // beyond the model API (https://code.claude.com/docs/en/settings#environment-variables).
+    public override IReadOnlyDictionary<string, string> DefaultEnvironment => new Dictionary<string, string>
+    {
+        ["DISABLE_AUTOUPDATER"] = "1",
+        ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1",
+    };
 
     public override (List<string> Arguments, string? StandardInput) Build(CliRequest request)
     {
@@ -278,7 +306,8 @@ internal sealed class CopilotCliAdapter : CliAdapter
 /// <summary>
 /// OpenAI Codex CLI non-interactive mode (https://learn.chatgpt.com/docs/non-interactive-mode):
 /// <c>codex exec --json --sandbox read-only --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules
-/// --color never -c features.shell_tool=false -c web_search="disabled" -</c>, prompt on standard input. The final
+/// --color never -c features.shell_tool=false -c web_search="disabled" -c check_for_update_on_startup=false
+/// -c analytics.enabled=false -c otel.metrics_exporter="none" -</c>, prompt on standard input. The final
 /// <c>agent_message</c> item is the reply.
 /// </summary>
 internal sealed class CodexCliAdapter : CliAdapter
@@ -301,6 +330,10 @@ internal sealed class CodexCliAdapter : CliAdapter
             "exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral",
             "--ignore-user-config", "--ignore-rules", "--color", "never",
             "-c", "features.shell_tool=false", "-c", "web_search=\"disabled\"",
+
+            // A run answers one prompt: no update check, and no analytics or metrics sent to OpenAI beyond the model API
+            // (config keys in codex-rs/config/src/config_toml.rs and types.rs).
+            "-c", "check_for_update_on_startup=false", "-c", "analytics.enabled=false", "-c", "otel.metrics_exporter=\"none\"",
         };
 
         if (!string.IsNullOrEmpty(request.Model))

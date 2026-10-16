@@ -1,0 +1,82 @@
+name: Image freshness
+
+# Published images keep the base image they were built with. Each week this checks whether main's base images (moved
+# by Dependabot) differ from the latest release's, and scans the published image for high or critical vulnerabilities
+# that have a fix. If either is the case it opens an issue (or comments on the open one) asking for a patch release, so
+# every fixed image ships under its own version. It changes nothing itself: a tag pushed by this workflow's token would
+# not start the release, and a release should be a person's decision.
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Compare base images with the latest release
+        id: base
+        run: |
+          tag="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+          if [ -z "$tag" ]; then
+            echo "No release yet."
+            exit 0
+          fi
+          released="$(git show "$tag:src/SemanticRouter.Host/Dockerfile" | grep '^FROM' || true)"
+          current="$(grep '^FROM' src/SemanticRouter.Host/Dockerfile)"
+          {
+            echo "tag=$tag"
+            echo "image=ghcr.io/$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/semantic-router:${tag#v}"
+            if [ "$released" != "$current" ]; then
+              echo "changed=true"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Scan the published image
+        id: scan
+        if: steps.base.outputs.tag != ''
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.base.outputs.image }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Ask for a patch release
+        if: steps.base.outputs.changed == 'true' || steps.scan.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.base.outputs.tag }}
+          IMAGE: ${{ steps.base.outputs.image }}
+          CHANGED: ${{ steps.base.outputs.changed }}
+          SCAN: ${{ steps.scan.outcome }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Container image: patch release needed"
+          body="The published image \`$IMAGE\` is out of date:"$'\n'
+          if [ "$CHANGED" = "true" ]; then
+            body+=$'\n'"- The base images on main differ from those in $TAG (Dependabot moved a digest)."
+          fi
+          if [ "$SCAN" = "failure" ]; then
+            body+=$'\n'"- Trivy found a high or critical vulnerability with a fix in it, or could not pull it: see $RUN."
+          fi
+          body+=$'\n\n'"Tag a patch release from main to publish a rebuilt image under its own version."
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label security
+          fi

@@ -161,6 +161,7 @@ public sealed class DigestTests : RouterHostTest
         (notice.Key, notice.Kind, notice.Link).Should().Be(("down:lmstudio", NoticeKind.ConnectorDown, "#/connectors"));
         notice.Title.Should().Be("lmstudio has been down for 61 minutes");
         notice.Detail.Should().Contain("Connection refused");
+        notice.PlainDetail.Should().StartWith("Every request to it has failed since").And.NotContain("Connection refused", "webhooks leave out what the connector said");
 
         _localDown = false;
         (await client.PostAsync("/router/api/health/reset", null)).StatusCode.Should().Be(HttpStatusCode.OK, "clear the cooldown so the local model is tried");
@@ -185,6 +186,7 @@ public sealed class DigestTests : RouterHostTest
         RouterNotice notice = Notices.Current().Should().ContainSingle().Subject;
         (notice.Key, notice.Kind, notice.Title).Should().Be(("limit:anthropic", NoticeKind.LimitReached, "anthropic keeps hitting its usage limit"));
         notice.Detail.Should().Contain("3 of the last 7 days").And.Contain("resets 5pm");
+        notice.PlainDetail.Should().Contain("3 of the last 7 days").And.NotContain("resets 5pm");
         Notices.Current().Should().NotContain(n => n.Kind == NoticeKind.ConnectorDown, "a usage limit does not make a connector down");
 
         _time.Advance(TimeSpan.FromDays(6));
@@ -206,6 +208,7 @@ public sealed class DigestTests : RouterHostTest
         RouterNotice notice = Notices.Current().Should().ContainSingle().Subject;
         (notice.Key, notice.Kind, notice.Link).Should().Be(("budget:cloud-daily", NoticeKind.LimitReached, "#/usage"));
         notice.Detail.Should().StartWith("It was spent in 2 of the last 4 days (model cloud;");
+        notice.PlainDetail.Should().Be(notice.Detail, "a budget notice quotes no prompt or reply");
     }
 
     [Fact]
@@ -227,6 +230,7 @@ public sealed class DigestTests : RouterHostTest
         RouterNotice notice = Notices.Current().Should().ContainSingle().Subject;
         (notice.Key, notice.Kind).Should().Be(("unreliable:local", NoticeKind.ModelUnreliable));
         notice.Detail.Should().StartWith("It is left out of 1 of the 1 kinds of work it does (route agentic)");
+        notice.PlainDetail.Should().Be(notice.Detail, "the reliability detail is counts");
     }
 
     [Fact]
@@ -267,6 +271,7 @@ public sealed class DigestTests : RouterHostTest
         RouterNotice notice = Notices.Current().Should().ContainSingle().Subject;
         (notice.Key, notice.Kind, notice.Title, notice.Link).Should().Be(("tuning:suggestions", NoticeKind.TuningSuggestion, "Automatic tuning has a suggestion", "#/learned"));
         notice.Detail.Should().Contain("Tuning:Mode is Suggest").And.Contain("0.75 → 0.73");
+        notice.PlainDetail.Should().Be(notice.Detail, "a threshold change quotes no prompt");
     }
 
     [Fact]

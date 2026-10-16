@@ -26,6 +26,12 @@
       "pattern": "write an? \\d+\\s*[-–]\\s*\\d+[ -]word title"
     },
     {
+      "id": "claude-code/session-title",
+      "client": "Claude Code",
+      "kind": "Title",
+      "pattern": "</session>\\s*write the title in the predominant language of the session"
+    },
+    {
       "id": "claude-code/short-title",
       "client": "Claude Code",
       "kind": "Title",

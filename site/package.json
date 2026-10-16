@@ -1,0 +1,15 @@
+{
+  "name": "semantic-router-site",
+  "private": true,
+  "description": "The documentation site on GitHub Pages: docs/, the README and the project's other Markdown files, built with VitePress.",
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "mermaid": "11.17.2",
+    "vitepress": "1.6.4"
+  }
+}

@@ -30,8 +30,17 @@ public static class SemanticRouterDiagnostics
     /// <summary>Histogram of routed request duration in seconds, tagged with <c>model</c>, <c>connector</c> and <c>outcome</c> (served, failed).</summary>
     public const string RequestDurationInstrument = "semantic_router.request.duration";
 
-    /// <summary>Histogram of time to the first byte of the reply in seconds, tagged with <c>model</c> and <c>connector</c>.</summary>
+    /// <summary>
+    /// Histogram of the request's time to the first byte of the reply in seconds, from routing, so including any failed
+    /// attempts before the serving one; tagged with the serving <c>model</c> and <c>connector</c>.
+    /// </summary>
     public const string TimeToFirstByteInstrument = "semantic_router.time_to_first_byte";
+
+    /// <summary>
+    /// Histogram of the serving model's own time to the first byte in seconds, from the start of its attempt (failed attempts
+    /// before it are not counted), tagged with <c>model</c> and <c>connector</c>.
+    /// </summary>
+    public const string AttemptTimeToFirstByteInstrument = "semantic_router.attempt.time_to_first_byte";
 
     /// <summary>Counter of tokens the backends reported, tagged with <c>model</c>, <c>connector</c> and <c>type</c> (input, output, cache_read, cache_write).</summary>
     public const string TokensInstrument = "semantic_router.tokens";
@@ -63,6 +72,7 @@ internal sealed class PromptRouterMetrics
     private readonly Counter<long> _attempts;
     private readonly Histogram<double> _requestDuration;
     private readonly Histogram<double> _timeToFirstByte;
+    private readonly Histogram<double> _attemptTimeToFirstByte;
     private readonly Counter<long> _tokens;
     private readonly Counter<double> _cost;
     private readonly Counter<long> _cooldowns;
@@ -85,7 +95,9 @@ internal sealed class PromptRouterMetrics
         _requestDuration = meter.CreateHistogram<double>(
             SemanticRouterDiagnostics.RequestDurationInstrument, "s", "Routed request duration, from routing to the end of the reply.");
         _timeToFirstByte = meter.CreateHistogram<double>(
-            SemanticRouterDiagnostics.TimeToFirstByteInstrument, "s", "Time from routing to the first byte of the reply.");
+            SemanticRouterDiagnostics.TimeToFirstByteInstrument, "s", "Time from routing to the first byte of the reply, failed attempts included.");
+        _attemptTimeToFirstByte = meter.CreateHistogram<double>(
+            SemanticRouterDiagnostics.AttemptTimeToFirstByteInstrument, "s", "Time from the start of the serving attempt to the first byte of the reply.");
         _tokens = meter.CreateCounter<long>(SemanticRouterDiagnostics.TokensInstrument, "{token}", "Tokens reported by the backends.");
         _cost = meter.CreateCounter<double>(SemanticRouterDiagnostics.CostInstrument, "USD", "Cost at the configured model prices.");
         _cooldowns = meter.CreateCounter<long>(SemanticRouterDiagnostics.CooldownsInstrument, "{cooldown}", "Model cooldowns started.");
@@ -117,8 +129,11 @@ internal sealed class PromptRouterMetrics
     public void RecordRequest(string? model, string? connector, string outcome, TimeSpan duration) =>
         _requestDuration.Record(duration.TotalSeconds, Tag("model", model ?? "none"), Tag("connector", connector ?? "none"), Tag("outcome", outcome));
 
-    public void RecordTimeToFirstByte(string model, string connector, TimeSpan elapsed) =>
+    public void RecordTimeToFirstByte(string model, string connector, TimeSpan elapsed, TimeSpan attemptElapsed)
+    {
         _timeToFirstByte.Record(elapsed.TotalSeconds, Tag("model", model), Tag("connector", connector));
+        _attemptTimeToFirstByte.Record(attemptElapsed.TotalSeconds, Tag("model", model), Tag("connector", connector));
+    }
 
     public void RecordUsage(string model, string connector, ChatUsage usage, decimal cost)
     {

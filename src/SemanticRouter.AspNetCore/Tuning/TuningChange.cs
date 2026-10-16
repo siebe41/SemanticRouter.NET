@@ -134,6 +134,10 @@ public sealed record TuningChange
         _ => $"utterance for {Route}: \"{Preview(Utterance, 60)}\"",
     };
 
+    /// <summary><see cref="Summary"/> without the utterance's text, which comes from a prompt: "utterance for code".</summary>
+    [JsonIgnore]
+    public string PlainSummary => Kind == TuningChangeKind.Utterance ? $"utterance for {Route}" : Summary;
+
     internal static string Format(float? threshold) =>
         threshold is { } value ? value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) : "default";
 

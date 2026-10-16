@@ -21,7 +21,7 @@ public sealed class RoutingActivityEntry
     /// <summary>The model the client asked for, before alias mapping.</summary>
     public string? RequestedModel { get; init; }
 
-    /// <summary>The first 160 characters of the classified prompt.</summary>
+    /// <summary>The first 160 characters of the classified prompt, as <see cref="StateOptions.StorePrompts"/> allows (empty when off).</summary>
     public string PromptPreview { get; init; } = string.Empty;
 
     /// <summary>The required tier.</summary>
@@ -90,14 +90,35 @@ public sealed class RoutingActivityEntry
     /// <summary>What happened: <c>planned</c> (Annotate mode), <c>served</c> or <c>failed</c>.</summary>
     public string Outcome { get; set; } = "planned";
 
-    /// <summary>Failover notes, when models were skipped.</summary>
+    /// <summary>
+    /// Failover notes, when models were skipped. A failed CLI run's output is in them only as
+    /// <see cref="StateOptions.StorePrompts"/> allows.
+    /// </summary>
     public string? Detail { get; set; }
 
-    /// <summary>Total time from routing to the end of the response, in milliseconds.</summary>
+    /// <summary>Total time from routing to the end of the response, in milliseconds: what the client waited, failed attempts included.</summary>
     public double? TotalMilliseconds { get; set; }
 
-    /// <summary>Time from routing until the first byte of the reply was sent, in milliseconds.</summary>
+    /// <summary>Time from routing until the first byte of the reply was sent, in milliseconds, failed attempts included.</summary>
     public double? TimeToFirstByteMilliseconds { get; set; }
+
+    /// <summary>
+    /// Time from the start of the serving attempt until the first byte of the reply was sent, in milliseconds: the serving
+    /// model's own time to first byte, without the attempts that failed before it (Dispatch mode).
+    /// </summary>
+    public double? AttemptTimeToFirstByteMilliseconds { get; set; }
+
+    /// <summary>Time from the start of the serving attempt to the end of its response, in milliseconds (Dispatch mode).</summary>
+    public double? AttemptMilliseconds { get; set; }
+
+    /// <summary>
+    /// The serving model's own time to first byte and total time, for per-model and per-connector latency: the attempt's
+    /// figures, or the request's for an entry recorded before they were kept. Never one of each, so total − first stays
+    /// the time spent generating.
+    /// </summary>
+    internal (double? FirstByte, double? Total) ServingTimes() => AttemptMilliseconds is not null
+        ? (AttemptTimeToFirstByteMilliseconds, AttemptMilliseconds)
+        : (TimeToFirstByteMilliseconds, TotalMilliseconds);
 
     /// <summary>Input tokens the backend reported (excluding cached ones).</summary>
     public int? InputTokens { get; set; }
@@ -135,13 +156,22 @@ public sealed class RoutingActivityEntry
     /// <summary>What the serving connector put on the record, e.g. <c>tool call repaired</c>, if anything.</summary>
     public string? Notes { get; set; }
 
+    /// <summary>
+    /// How many of the reply's tool calls were read out of the model's text (prompted tool calling, a CLI connector),
+    /// rather than returned by a native tool API; null when there were none.
+    /// </summary>
+    public int? PromptedToolCalls { get; set; }
+
     /// <summary>The W3C trace id of the request, for finding it in a tracing backend.</summary>
     public string? TraceId { get; set; }
 
     /// <summary>The judge's grade of the answer, 1 (wrong) to 5 (excellent), when it was graded (<see cref="JudgeOptions"/>).</summary>
     public int? Grade { get; set; }
 
-    /// <summary>The model that graded the answer and its reason, e.g. <c>qwen3-32b: misses the second question</c>.</summary>
+    /// <summary>
+    /// The model that graded the answer and its reason, e.g. <c>qwen3-32b: misses the second question</c>; the reason only
+    /// as <see cref="StateOptions.StorePrompts"/> allows (none with <c>Off</c>).
+    /// </summary>
     public string? GradeNote { get; set; }
 
     /// <summary>
@@ -184,6 +214,12 @@ public interface IRoutingActivityStore
 
     /// <summary>Entries with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/>, oldest first, at most <paramref name="limit"/>.</summary>
     IReadOnlyList<RoutingActivityEntry> Between(DateTimeOffset since, DateTimeOffset until, int limit);
+
+    /// <summary>
+    /// Deletes the entries with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/> so they cannot be
+    /// recovered from the store's files, and returns how many there were.
+    /// </summary>
+    int Purge(DateTimeOffset since, DateTimeOffset until) => 0;
 }
 
 /// <summary>
@@ -285,6 +321,28 @@ public sealed class RoutingActivityLog
         Updated?.Invoke(entry);
     }
 
+    /// <summary>
+    /// Deletes the entries with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/>, in memory and in the
+    /// store, and returns how many the store held (or memory, without a store).
+    /// </summary>
+    public int Purge(DateTimeOffset since, DateTimeOffset until)
+    {
+        int removed = 0;
+        lock (_gate)
+        {
+            for (int i = 0; i < _entries.Length; i++)
+            {
+                if (_entries[i] is { } entry && entry.Timestamp >= since && entry.Timestamp < until)
+                {
+                    _entries[i] = null;
+                    removed++;
+                }
+            }
+        }
+
+        return _store?.Purge(since, until) ?? removed;
+    }
+
     /// <summary>Reserves the next id.</summary>
     public long Reserve()
     {
@@ -303,7 +361,12 @@ public sealed class RoutingActivityLog
             for (long i = _next - 1; i >= 0 && i >= _next - _entries.Length && result.Count < limit; i--)
             {
                 RoutingActivityEntry? entry = _entries[i % _entries.Length];
-                if (entry is null || (after is { } a && entry.Id <= a))
+                if (entry is null)
+                {
+                    continue; // never filled, or purged
+                }
+
+                if (after is { } a && entry.Id <= a)
                 {
                     break;
                 }

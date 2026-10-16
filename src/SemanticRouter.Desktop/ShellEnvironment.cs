@@ -19,7 +19,7 @@ internal static class ShellEnvironment
             return;
         }
 
-        string? shellPath = ReadLoginShellPath(Environment.GetEnvironmentVariable("SHELL") is { Length: > 0 } shell ? shell : "/bin/sh");
+        string? shellPath = ReadLoginShellPath(Environment.GetEnvironmentVariable("SHELL") is { Length: > 0 } shell && Path.IsPathFullyQualified(shell) ? shell : "/bin/sh");
         string merged = Merge(Environment.GetEnvironmentVariable("PATH"), shellPath, CommonDirectories(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)));
         Environment.SetEnvironmentVariable("PATH", merged);
     }

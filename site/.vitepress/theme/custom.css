@@ -1,0 +1,52 @@
+.mermaid-diagram {
+  margin: 16px 0;
+  overflow-x: auto;
+}
+
+/* Mermaid sizes its labels outside the page; the docs' paragraph spacing would make the text overflow them. */
+.vp-doc .mermaid-diagram p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.mermaid-diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.video video {
+  width: 100%;
+  border-radius: 8px;
+  background: #000;
+}
+
+.video video.vertical {
+  max-width: 360px;
+  display: block;
+  margin: 0 auto;
+}
+
+.video .length {
+  font-size: 0.8em;
+  font-weight: 400;
+  color: var(--vp-c-text-2);
+}
+
+.video .download {
+  font-size: 0.9em;
+}
+
+/* The logo's teal. */
+:root {
+  --vp-c-brand-1: #1d7d91;
+  --vp-c-brand-2: #2390a6;
+  --vp-c-brand-3: #2390a6;
+  --vp-c-brand-soft: rgba(35, 144, 166, 0.14);
+}
+
+.dark {
+  --vp-c-brand-1: #4cc0d6;
+  --vp-c-brand-2: #34a9bf;
+  --vp-c-brand-3: #2390a6;
+  --vp-c-brand-soft: rgba(35, 144, 166, 0.2);
+}

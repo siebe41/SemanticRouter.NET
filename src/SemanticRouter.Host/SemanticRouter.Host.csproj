@@ -21,6 +21,14 @@
     <ProjectReference Include="..\SemanticRouter.Hosting\SemanticRouter.Hosting.csproj" />
   </ItemGroup>
 
+  <!--
+    The notices for the packages the tool ships, at the package root. The release (and CI) generates the file with
+    deploy/third-party-notices.cs from this project's deps.json and passes it as -p:ThirdPartyNoticesFile=<path>.
+  -->
+  <ItemGroup Condition="'$(ThirdPartyNoticesFile)' != ''">
+    <None Include="$(ThirdPartyNoticesFile)" Pack="true" PackagePath="THIRD-PARTY-NOTICES.txt" Visible="false" />
+  </ItemGroup>
+
   <!-- ONNX Runtime ships Android and iOS archives (110 MB) that a desktop or server tool never loads. -->
   <Target Name="DropMobileOnnxRuntimeAssets" AfterTargets="ResolvePackageAssets">
     <ItemGroup>

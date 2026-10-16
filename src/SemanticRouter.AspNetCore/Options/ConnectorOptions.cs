@@ -49,6 +49,38 @@ public enum CliToolCalling
     Prompted = 1,
 }
 
+/// <summary>How strictly a prompted-tool-calling reply is read for tool calls.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<PromptedToolParsing>))]
+public enum PromptedToolParsing
+{
+    /// <summary>
+    /// Also accept the near-misses models write: another tool-ish fence label, a <c>json</c> or unlabelled fence or bare
+    /// JSON that names a tool, and calls in the middle of the reply. Default.
+    /// </summary>
+    Lenient = 0,
+
+    /// <summary>
+    /// Only a fence with the request's own label, which carries a random token the conversation has never shown, naming
+    /// a tool of the request, at the end of the reply. Anything else stays text. Harder for text a tool returned to pass
+    /// for a call; models that cannot follow the format answer in text instead.
+    /// </summary>
+    Strict = 1,
+}
+
+/// <summary>Whether the router marks the requests it builds for an Anthropic backend for prompt caching.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<PromptCaching>))]
+public enum PromptCaching
+{
+    /// <summary>
+    /// Mark translated requests whose prompt is long enough to cache: one breakpoint on the system prompt (tools and
+    /// system) and Anthropic's automatic caching for the conversation. Default.
+    /// </summary>
+    Auto = 0,
+
+    /// <summary>Send no cache markers of the router's own. For servers that reject them.</summary>
+    Off = 1,
+}
+
 /// <summary>Ready-made settings for well-known CLIs. See <c>docs/providers.md</c>.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter<CliPreset>))]
 public enum CliPreset
@@ -113,6 +145,23 @@ public sealed class ConnectorOptions
     /// <summary>Anthropic: the <c>anthropic-version</c> header. Default <c>2023-06-01</c>.</summary>
     public string AnthropicVersion { get; set; } = "2023-06-01";
 
+    /// <summary>
+    /// Anthropic: cache markers on the requests the router translates (from OpenAI and Responses clients). Default
+    /// <see cref="PromptCaching.Auto"/>. Requests from Anthropic clients pass through with their own markers.
+    /// </summary>
+    public PromptCaching PromptCaching { get; set; } = PromptCaching.Auto;
+
+    /// <summary>
+    /// Anthropic, with <see cref="PromptCaching.Auto"/>: how long a cache entry lives, <c>5m</c> (default) or <c>1h</c>.
+    /// A one-hour entry costs twice the input price to write instead of 1.25 times, so it only pays off when turns are
+    /// often more than five minutes apart. Conversation routing counts the cache warm for as long
+    /// (<see cref="ConversationRoutingOptions.CacheLifetime"/>).
+    /// </summary>
+    public string CacheTtl { get; set; } = DefaultCacheTtl;
+
+    /// <summary>The <see cref="CacheTtl"/> used when it is not set.</summary>
+    public const string DefaultCacheTtl = "5m";
+
     // ---- Cli --------------------------------------------------------------------------------------------------
 
     /// <summary>CLI: preset for a well-known tool. Default <see cref="CliPreset.Custom"/>.</summary>
@@ -153,6 +202,13 @@ public sealed class ConnectorOptions
     public bool RepairToolCalls { get; set; } = true;
 
     /// <summary>
+    /// CLI, prompted tool calling: how strictly the reply is read for tool calls. Default <see cref="PromptedToolParsing.Lenient"/>,
+    /// until <see cref="PromptedToolParsing.Strict"/> has been measured on smaller models (see <c>docs/providers.md</c>).
+    /// The run's random fence label, defused tool results and refusing calls copied from a tool result apply in both.
+    /// </summary>
+    public PromptedToolParsing PromptedToolParsing { get; set; } = PromptedToolParsing.Lenient;
+
+    /// <summary>
     /// CLI: output fragments (case-insensitive) that mean "quota or rate limit exhausted". They put the model in the
     /// longer quota cooldown. Presets supply sensible defaults; entries here are added to them.
     /// </summary>
@@ -181,11 +237,19 @@ public sealed class ConnectorOptions
     public int MaxConcurrency { get; set; } = 2;
 
     /// <summary>
-    /// CLI only: when this many requests are already waiting for a free process, the next one goes to another model
-    /// instead of queueing (a long queue on a subscription CLI is slower than a different model). <see langword="null"/>:
-    /// always wait.
+    /// CLI and Copilot: when this many requests are already waiting for a free process, the next one goes to another
+    /// model instead of queueing (a long queue on a subscription CLI is slower than a different model, and an unbounded
+    /// one lets a burst of requests hold the router's memory and connections). <see langword="null"/>:
+    /// <see cref="DefaultMaxQueue"/>; 0: never wait.
     /// </summary>
     public int? MaxQueue { get; set; }
+
+    /// <summary>The queue length used when <see cref="MaxQueue"/> is not set.</summary>
+    public const int DefaultMaxQueue = 16;
+
+    /// <summary><see cref="MaxQueue"/>, or <see cref="DefaultMaxQueue"/> when it is not set.</summary>
+    [JsonIgnore]
+    public int EffectiveMaxQueue => MaxQueue ?? DefaultMaxQueue;
 
     /// <summary>
     /// Copilot only: the Copilot runtime's home directory (<c>COPILOT_HOME</c>): where its own sign-in lives when it is not

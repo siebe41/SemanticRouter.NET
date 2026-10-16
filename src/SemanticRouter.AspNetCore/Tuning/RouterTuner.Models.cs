@@ -116,10 +116,16 @@ internal sealed partial class RouterTuner
             return null;
         }
 
-        // The next cheaper model that can do the route's work: one step down, not straight to the cheapest.
+        // The next cheaper model that can do the route's work: one step down, not straight to the cheapest. Cost counts
+        // what each model reads from its prompt cache on this route, so a model with cheap cache reads is not undercut
+        // by one that only lists a lower input price.
+        decimal incumbentCost = Cost(incumbent, route.Name);
         ModelDefinition? challenger = configuration.Models
-            .Where(m => m.Enabled && m != incumbent && m.HasCapabilities(route.RequiredCapabilities) && (!route.LocalOnly || m.IsLocal) && Cost(m) < Cost(incumbent))
-            .OrderByDescending(Cost).ThenByDescending(m => m.Tier).ThenBy(m => m.Priority)
+            .Where(m => m.Enabled && m != incumbent && m.HasCapabilities(route.RequiredCapabilities) && (!route.LocalOnly || m.IsLocal))
+            .Select(m => (Model: m, Cost: Cost(m, route.Name)))
+            .Where(m => m.Cost < incumbentCost)
+            .OrderByDescending(m => m.Cost).ThenByDescending(m => m.Model.Tier).ThenBy(m => m.Model.Priority)
+            .Select(m => m.Model)
             .FirstOrDefault();
         if (challenger is null
             || history.Any(c => c.Kind == TuningChangeKind.RouteModel && Same(c.Route, route.Name) && Same(c.NewModel, challenger.Name)
@@ -172,7 +178,8 @@ internal sealed partial class RouterTuner
         return new Outcome(count, failed, kinds);
     }
 
-    private static decimal Cost(ModelDefinition model) => model.EstimateCost(1000, 500);
+    /// <summary>A typical turn's cost on <paramref name="route"/>, cached input at the cache prices when the model's cache share is known.</summary>
+    private decimal Cost(ModelDefinition model, string route) => model.EstimateCost(1000, 500, _cache?.Typical(model, route));
 
     private static bool Same(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 

@@ -1,7 +1,7 @@
 /* Semantic Router dashboard: Configuration pages: tiers, routes, models, connectors, routing rules, embeddings, gateway, clients, history. */
 import { connectorStateBadge } from './endpoints.js';
 import { reliabilityBadges, reliabilityCard } from './reliability.js';
-import { CAPABILITY_HINTS, CONNECTOR_TYPES, MESSAGE_SELECTION, PRESETS, SCORING, STRATEGIES, connectorNames, csv, h, isReference, kv, lineupFor, lines, readOnly, state, tiers, views } from './core.js';
+import { CAPABILITY_HINTS, CONNECTOR_TYPES, MESSAGE_SELECTION, PRESETS, SCORING, STRATEGIES, adminOnly, connectorNames, csv, h, isReference, kv, lineupFor, lines, readOnly, state, tiers, views } from './core.js';
 
 views.tiers = () => {
   const c = state.config;
@@ -65,6 +65,14 @@ views.routes = () => {
     }).join('') || '<div class="card muted">No routes. Without routes every prompt gets the fallback tier (plus complexity escalation).</div>'}`;
 };
 
+/* The input price with recent prompt-cache reads and writes at the cache prices, next to the list price, when the router knows it and it differs. */
+const effectiveCostBadge = (m) => {
+  const s = state.status && (state.status.models || []).find((x) => x.name.toLowerCase() === String(m.Name || '').toLowerCase());
+  if (!s || s.effectiveInputCostPerMillionTokens == null || !s.cacheShare || s.effectiveInputCostPerMillionTokens === s.inputCostPerMillionTokens) return '';
+  const pct = (v) => Math.round(v * 100) + '%';
+  return `<span class="badge info" title="Recent turns read ${pct(s.cacheShare.read)} of their input from the prompt cache and wrote ${pct(s.cacheShare.write)}; cost estimates and trials use this price">$${+s.effectiveInputCostPerMillionTokens.toPrecision(3)} input per M with cache (${pct(s.cacheShare.read)} cached)</span>`;
+};
+
 const modelItem = (m, i) => {
   const key = 'model:' + i;
   const names = connectorNames();
@@ -74,15 +82,15 @@ const modelItem = (m, i) => {
     <div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
       <span class="chev">▶</span><span class="title">${h(m.Name || '(unnamed)')}</span>
       <span class="meta"><span class="tier">T${m.Tier}</span><span class="mono">${h(m.Model || '')}</span><span>via ${h(m.Connector)}${conn ? ` <span class="faint">(${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? '/' + h(conn.Preset || 'Custom') : ''})</span>` : ' <span class="badge danger">unknown connector</span>'}</span>
-      ${m.IsLocal ? '<span class="badge info">local</span>' : ''}${reliabilityBadges(m.Name)}${!free ? `<span class="badge">$${m.InputCostPerMillionTokens}/$${m.OutputCostPerMillionTokens} per M</span>` : m.IsLocal ? '<span class="badge ok">free</span>'
+      ${m.IsLocal ? '<span class="badge info">local</span>' : ''}${reliabilityBadges(m.Name)}${!free ? `<span class="badge">$${m.InputCostPerMillionTokens}/$${m.OutputCostPerMillionTokens} per M</span>${effectiveCostBadge(m)}` : m.IsLocal ? '<span class="badge ok">free</span>'
         : !conn || conn.Type === 'Cli' || conn.Type === 'Copilot' ? `<span class="badge" title="Free per request, but it uses up the plan's quota${m.ApiInputCostPerMillionTokens != null ? '; its use is valued at the API price on Usage' : ''}">subscription${m.ApiInputCostPerMillionTokens != null ? ` · API $${m.ApiInputCostPerMillionTokens}/$${m.ApiOutputCostPerMillionTokens ?? 0}` : ''}</span>`
         : '<span class="badge warn" title="Costs nothing as far as the router knows, so it ranks like a subscription: set its prices">no price set</span>'}${(m.Capabilities || []).map((c) => `<span class="badge">${h(c)}</span>`).join('')}</span>
-      <span class="spacer"></span><label class="check" onclick="event.stopPropagation()"><input type="checkbox" data-bind="Models.${i}.Enabled" data-kind="bool" ${m.Enabled !== false ? 'checked' : ''}> enabled</label>
+      <span class="spacer"></span><label class="check" data-no-action><input type="checkbox" data-bind="Models.${i}.Enabled" data-kind="bool" ${m.Enabled !== false ? 'checked' : ''}> enabled</label>
     </div>
     <div class="item-body"><div class="form-grid">
       <label class="field"><span class="name">Name</span><input type="text" data-bind="Models.${i}.Name" value="${h(m.Name)}"><span class="hint">Clients can request it directly as <code>model</code>.</span></label>
       <label class="field"><span class="name">Connector</span><select data-bind="Models.${i}.Connector">${names.map((n) => `<option ${n === m.Connector ? 'selected' : ''}>${h(n)}</option>`).join('')}${names.includes(m.Connector) ? '' : `<option selected>${h(m.Connector)}</option>`}</select></label>
-      <label class="field"><span class="name">Provider model id</span><div class="inline"><input type="text" data-bind="Models.${i}.Model" data-kind="nulltext" value="${h(m.Model || '')}" placeholder="connector default" list="models-${i}"><button class="btn small" data-action="discover" data-connector="${h(m.Connector)}" data-index="${i}" title="Ask the connector which models it has">Discover</button></div><datalist id="models-${i}"></datalist></label>
+      <label class="field"><span class="name">Provider model id</span><div class="inline"><input type="text" data-bind="Models.${i}.Model" data-kind="nulltext" value="${h(m.Model || '')}" placeholder="connector default" list="models-${i}">${readOnly() ? '' : `<button class="btn small" data-action="discover" data-connector="${h(m.Connector)}" data-index="${i}" title="Ask the connector which models it has">Discover</button>`}</div><datalist id="models-${i}"></datalist></label>
       <label class="field"><span class="name">Tier</span><select data-bind="Models.${i}.Tier" data-kind="number">${tierOptions(m.Tier)}</select></label>
       <label class="field"><span class="name">Capabilities</span><input type="text" data-bind="Models.${i}.Capabilities" data-kind="csv" value="${h(csv(m.Capabilities))}" placeholder="chat, code, tools, vision, reasoning"><span class="hint">Declare <code>tools</code> only when the connector can carry them (HTTP, or a CLI with prompted tool calling).</span></label>
       <label class="field"><span class="name">Context window (tokens)</span><input type="number" min="0" data-bind="Models.${i}.ContextWindow" data-kind="number" value="${m.ContextWindow || 0}"><span class="hint">0 = unknown (never skipped).</span></label>
@@ -194,9 +202,10 @@ views.connectors = () => {
             <label class="field"><span class="name">Executable</span><input type="text" data-bind="${p}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="preset default (claude / copilot / codex)"><span class="hint">Started directly, never through a shell. On Windows use the .exe.</span></label>
             <label class="field"><span class="name">Tool calling</span><select data-bind="${p}.ToolCalling">${['None', 'Prompted'].map((x) => `<option ${x === (c.ToolCalling || 'None') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Prompted lets agentic clients (Claude Code) use this CLI: tools are described in the prompt and tool calls parsed from the reply.</span></label>
             ${c.ToolCalling === 'Prompted' ? `<label class="check"><input type="checkbox" data-bind="${p}.StreamPromptedReplies" data-kind="bool" ${c.StreamPromptedReplies !== false ? 'checked' : ''}> Stream text before tool calls <span class="muted">— off: buffer the reply, so a failed run can still fail over</span></label>
-            <label class="check"><input type="checkbox" data-bind="${p}.RepairToolCalls" data-kind="bool" ${c.RepairToolCalls !== false ? 'checked' : ''}> Repair broken tool calls <span class="muted">— one short extra run</span></label>` : ''}
+            <label class="check"><input type="checkbox" data-bind="${p}.RepairToolCalls" data-kind="bool" ${c.RepairToolCalls !== false ? 'checked' : ''}> Repair broken tool calls <span class="muted">— one short extra run</span></label>
+            <label class="field"><span class="name">Tool call parsing</span><select data-bind="${p}.PromptedToolParsing">${['Lenient', 'Strict'].map((x) => `<option ${x === (c.PromptedToolParsing || 'Lenient') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Strict: only this run's own labelled block at the end of the reply is a call. Harder for text a tool returned to pass for a call.</span></label>` : ''}
             <label class="field"><span class="name">Max concurrency</span><input type="number" min="1" data-bind="${p}.MaxConcurrency" data-kind="number" value="${c.MaxConcurrency || 2}"></label>
-            <label class="field"><span class="name">Max queue</span><input type="number" min="0" data-bind="${p}.MaxQueue" data-kind="number" data-nullable="1" value="${c.MaxQueue ?? ''}" placeholder="always wait"><span class="hint">When this many requests are already waiting, the next one goes to another model.</span></label>
+            <label class="field"><span class="name">Max queue</span><input type="number" min="0" data-bind="${p}.MaxQueue" data-kind="number" data-nullable="1" value="${c.MaxQueue ?? ''}" placeholder="16"><span class="hint">When this many requests are already waiting, the next one goes to another model.</span></label>
             <label class="field"><span class="name">Max argument length</span><input type="number" min="100" data-bind="${p}.MaxArgumentLength" data-kind="number" value="${c.MaxArgumentLength || 24000}"><span class="hint">With Prompt input Argument, longer prompts go on stdin.</span></label>
             <label class="field"><span class="name">Timeout (hh:mm:ss)</span><input type="text" data-bind="${p}.Timeout" value="${h(c.Timeout || '00:00:00')}" placeholder="00:05:00"><span class="hint">Time to first output; 00:00:00 = default (5 min).</span></label>
             ${(c.Preset || 'Custom') !== 'Codex' ? `<label class="field"><span class="name">Prompt input</span><select data-bind="${p}.PromptInput">${['Stdin', 'Argument'].map((x) => `<option ${x === (c.PromptInput || 'Stdin') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Argument puts the prompt on the command line, where other users of this machine can read it.</span></label>` : ''}
@@ -209,7 +218,7 @@ views.connectors = () => {
             <label class="field"><span class="name">Copilot CLI</span><input type="text" data-bind="${p}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="copilot (from PATH)"><span class="hint">The SDK runs it as its runtime: <code>npm install -g @github/copilot</code>, then sign in once with <code>copilot</code> (/login) or <code>gh auth login</code>.</span></label>
             <label class="field"><span class="name">Copilot home</span><input type="text" data-bind="${p}.HomeDirectory" data-kind="nulltext" value="${h(c.HomeDirectory || '')}" placeholder="~/.copilot"><span class="hint">COPILOT_HOME for the runtime; the default reuses the CLI's login.</span></label>
             <label class="field"><span class="name">Max concurrency</span><input type="number" min="1" data-bind="${p}.MaxConcurrency" data-kind="number" value="${c.MaxConcurrency || 2}"></label>
-            <label class="field"><span class="name">Max queue</span><input type="number" min="0" data-bind="${p}.MaxQueue" data-kind="number" data-nullable="1" value="${c.MaxQueue ?? ''}" placeholder="always wait"></label>
+            <label class="field"><span class="name">Max queue</span><input type="number" min="0" data-bind="${p}.MaxQueue" data-kind="number" data-nullable="1" value="${c.MaxQueue ?? ''}" placeholder="16"></label>
             <label class="field"><span class="name">Timeout (hh:mm:ss)</span><input type="text" data-bind="${p}.Timeout" value="${h(c.Timeout || '00:00:00')}" placeholder="00:05:00"><span class="hint">Time to first output; 00:00:00 = default (5 min).</span></label>
             <label class="check wide"><input type="checkbox" data-bind="${p}.AllowRemoteClients" data-kind="bool" ${c.AllowRemoteClients ? 'checked' : ''}> Allow remote clients <span class="muted">— read docs/TERMS.md first; a personal subscription must not serve other people</span></label>`
           : `
@@ -217,11 +226,13 @@ views.connectors = () => {
             <label class="field"><span class="name">Request path</span><input type="text" data-bind="${p}.RequestPath" value="${h(c.RequestPath || '/v1/chat/completions')}"><span class="hint">${type === 'Anthropic' ? 'Leave the default; /v1/messages is used.' : 'Gemini: /v1beta/openai/chat/completions · OpenRouter: /api/v1/chat/completions'}</span></label>
             ${secretField(p + '.ApiKey', c.ApiKey, 'API key')}
             <label class="field"><span class="name">Timeout (hh:mm:ss)</span><input type="text" data-bind="${p}.Timeout" value="${h(c.Timeout || '00:00:00')}" placeholder="00:01:40"><span class="hint">Time to response headers; 00:00:00 = default (100 s).</span></label>
-            ${type === 'Anthropic' ? `<label class="field"><span class="name">anthropic-version</span><input type="text" data-bind="${p}.AnthropicVersion" value="${h(c.AnthropicVersion || '2023-06-01')}"></label>` : ''}
+            ${type === 'Anthropic' ? `<label class="field"><span class="name">anthropic-version</span><input type="text" data-bind="${p}.AnthropicVersion" value="${h(c.AnthropicVersion || '2023-06-01')}"></label>
+            <label class="field"><span class="name">Prompt caching</span><select data-bind="${p}.PromptCaching">${['Auto', 'Off'].map((x) => `<option ${x === (c.PromptCaching || 'Auto') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Auto: cache markers on requests translated from OpenAI and Codex clients, once the prompt is long enough to cache. Off: for servers that reject them.</span></label>
+            <label class="field"><span class="name">Cache lifetime</span><select data-bind="${p}.CacheTtl">${['5m', '1h'].map((x) => `<option ${x === (c.CacheTtl || '5m') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">1h costs 2× the input price to write instead of 1.25×; worth it when turns are often more than 5 minutes apart.</span></label>` : ''}
             <label class="field"><span class="name">Extra headers (Name=value)</span><textarea data-bind="${p}.Headers" data-kind="kv" rows="3">${h(kv(c.Headers))}</textarea><span class="hint">Azure: <code>api-key=…</code> · OpenAI org: <code>OpenAI-Organization=org_…</code></span></label>
             <label class="field"><span class="name">Forward client headers</span><textarea data-bind="${p}.ForwardHeaders" data-kind="lines" rows="3">${h(lines(c.ForwardHeaders))}</textarea><span class="hint">Copied from the client request (e.g. <code>anthropic-beta</code>). Authorization headers are never forwarded.</span></label>`}
         </div>
-        <div class="row-actions" style="margin-top:10px"><button class="btn small" data-action="lineup-discover" data-connector="${h(name)}">Discover models</button><button class="btn danger small" data-action="connector-remove" data-name="${h(name)}">Remove</button></div>
+        <div class="row-actions" style="margin-top:10px">${readOnly() ? '' : `<button class="btn small" data-action="lineup-discover" data-connector="${h(name)}">Discover models</button>`}<button class="btn danger small" data-action="connector-remove" data-name="${h(name)}">Remove</button></div>
         ${lineupPanel(name)}</div>
       </div>`;
     }).join('') || '<div class="card muted">No connectors yet.</div>'}`;
@@ -294,7 +305,7 @@ views.embeddings = () => {
         <label class="field"><span class="name">Timeout</span><input type="text" data-bind="Embeddings.Timeout" value="${h(e.Timeout || '00:00:10')}"><span class="hint">On the hot path of every request: keep it short.</span></label>`}
       <label class="check wide"><input type="checkbox" data-bind="Embeddings.WarmUpOnStartup" data-kind="bool" ${e.WarmUpOnStartup !== false ? 'checked' : ''}> Warm up on start-up (embed utterances in the background)</label>
     </div>
-    <div class="inline" style="margin-top:12px"><button class="btn" data-action="embeddings-test">Test current provider</button><span id="embeddings-result" class="small muted"></span></div>
+    <div class="inline" style="margin-top:12px"><button class="btn" data-action="embeddings-test" ${adminOnly()}>Test current provider</button><span id="embeddings-result" class="small muted"></span></div>
     <p class="muted small" style="margin-top:8px">The test uses the <b>applied</b> configuration. Apply your changes first.</p></div>`;
 };
 
@@ -317,17 +328,32 @@ views.gateway = () => {
       <label class="field"><span class="name">More injected tags (one per line)</span><textarea data-bind="Middleware.InjectedTags" data-kind="lines" rows="2" placeholder="environment_details">${h(lines(m.InjectedTags))}</textarea><span class="hint">Blocks a client adds to your messages, ignored when classifying. Built in: <code>system-reminder</code>, <code>system_reminder</code>, <code>current_datetime</code>, <code>copilot_tauri_workspace</code>.</span></label>
       <label class="check"><input type="checkbox" data-bind="Middleware.StripSystemReminders" data-kind="bool" ${m.StripSystemReminders !== false ? 'checked' : ''}> Ignore injected context blocks (&lt;system-reminder&gt; and the like) when classifying</label>
     </div></div>
-    <div class="card section"><div class="card-head"><h2>Gateway keys</h2><span class="muted small">Optional. When set, clients on other machines must send one (<code>Authorization: Bearer</code> or <code>x-api-key</code>); the client name is shown in Activity.</span></div><div class="form-grid">
+    <div class="card section"><div class="card-head"><h2>Gateway keys</h2><span class="muted small">Clients on other machines must send one (<code>Authorization: Bearer</code> or <code>x-api-key</code>); without keys they are refused. The client name is shown in Activity.</span></div><div class="form-grid">
       <label class="field wide"><span class="name">Keys (client=key, one per line)</span><textarea data-bind="Middleware.GatewayKeys" data-kind="kv" rows="3" placeholder="laptop=\${env:ROUTER_KEY_LAPTOP}">${h(kv(m.GatewayKeys))}</textarea><span class="hint">Stored keys show as <code>***</code> and are kept when left as is. Use <code>\${env:…}</code> references to keep keys out of the file.</span></label>
       <label class="check"><input type="checkbox" data-bind="Middleware.RequireGatewayKeyForLocalClients" data-kind="bool" ${m.RequireGatewayKeyForLocalClients ? 'checked' : ''}> Require a key from this machine too (for a local reverse proxy)</label>
+      <label class="check"><input type="checkbox" data-bind="Middleware.AllowUnauthenticatedRemoteClients" data-kind="bool" ${m.AllowUnauthenticatedRemoteClients ? 'checked' : ''}> Serve other machines without a key while none is set (only behind a proxy that authenticates callers)</label>
     </div></div>
     ${rateLimitsCard(m)}
-    <div class="card section"><div class="card-head"><h2>Model aliases</h2><span class="muted small">Map the names clients send to routing aliases or catalog models. Globs, first match wins.</span><span class="spacer"></span><button class="btn small" data-action="alias-add">Add alias</button><button class="btn ghost small" data-action="alias-claude">Add Claude Code defaults</button></div>
+    ${storedPromptsCard(state.config.State || {})}
+    <div class="card section"><div class="card-head"><h2>Model aliases</h2><span class="muted small">Map the names clients send to routing aliases or catalog models. A name without <code>*</code> is matched exactly, before the globs; among the globs the first match wins. Claude Code sends its default Opus name whether or not you chose Opus, so route Claude names as <code>auto</code>.</span><span class="spacer"></span><button class="btn small" data-action="alias-add">Add alias</button><button class="btn ghost small" data-action="alias-claude">Add Claude Code defaults</button></div>
       <table><tr><th>Client model (glob)</th><th>Routes as</th><th></th></tr>
         ${aliases.map(([k, v], i) => `<tr><td><input type="text" data-action-input="alias-key" data-index="${i}" value="${h(k)}"></td><td><input type="text" data-action-input="alias-value" data-index="${i}" value="${h(v)}" list="alias-targets"></td><td><button class="btn ghost small" data-action="alias-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="3" class="muted small">No aliases. Unknown names route as <code>auto</code>.</td></tr>'}
       </table>
       <datalist id="alias-targets">${['auto', 'auto:cheapest', 'auto:best', 'auto:fastest', 'auto:balanced', 'auto:priority'].concat((state.config.Models || []).map((x) => x.Name)).map((x) => `<option value="${h(x)}">`).join('')}</datalist>
     </div>`;
+};
+
+/* What the activity log keeps of each prompt, for how long, and deleting it. */
+const storedPromptsCard = (st) => {
+  const r = st.Retention || {};
+  const days = (key, label, hint) => `<label class="field"><span class="name">${label}</span><input type="number" min="1" data-bind="State.Retention.${key}" data-kind="number" data-nullable="1" value="${r[key] ?? ''}" placeholder="${hint}"></label>`;
+  return `<div class="card section"><div class="card-head"><h2>Stored prompts</h2><span class="muted small">What the activity log keeps of each prompt, and how long the state database keeps records. Retention applies at the next prune.</span><span class="spacer"></span><button class="btn danger small" data-action="activity-purge">Delete all activity</button></div><div class="form-grid">
+      <label class="field"><span class="name">Prompt previews</span><select data-bind="State.StorePrompts">${['Redacted', 'On', 'Off'].map((x) => `<option ${x === (st.StorePrompts || 'Redacted') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Redacted: the first 160 characters with API keys and tokens masked. Off: no prompt text in activity, exports or the live view.</span></label>
+      ${days('ActivityDays', 'Activity (days)', '30')}
+      ${days('ActivityEntries', 'Activity (entries)', '10000')}
+      ${days('UsageDays', 'Usage (days)', '400')}
+      ${days('ConfigurationVersions', 'Configuration versions', '200')}
+    </div></div>`;
 };
 
 /* Rate limits per gateway client ("*" for every other client), with what each client used in the last minute. */
@@ -340,6 +366,7 @@ const rateLimitsCard = (m) => {
       <table><tr><th>Client</th><th>Requests per minute</th><th>Tokens per minute</th><th></th></tr>
         ${limits.map(([k, v], i) => `<tr><td><input type="text" aria-label="Client" data-action-input="ratelimit-key" data-index="${i}" value="${h(k)}" list="ratelimit-clients"></td><td><input type="number" min="1" aria-label="Requests per minute for ${h(k)}" data-action-input="ratelimit-rpm" data-index="${i}" value="${num(v.RequestsPerMinute)}" placeholder="no limit"></td><td><input type="number" min="1" aria-label="Tokens per minute for ${h(k)}" data-action-input="ratelimit-tpm" data-index="${i}" value="${num(v.TokensPerMinute)}" placeholder="no limit"></td><td><button class="btn ghost small" data-action="ratelimit-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted small">No rate limits.</td></tr>'}
       </table>
+      <div class="form-grid"><label class="field"><span class="name">Default for other machines (requests per minute)</span><input type="number" min="0" data-bind="Middleware.RemoteRequestsPerMinute" data-kind="number" value="${m.RemoteRequestsPerMinute ?? 120}"><span class="hint">Each client on another machine that no entry above covers. 0 turns it off.</span></label></div>
       <datalist id="ratelimit-clients">${['*'].concat(Object.keys(m.GatewayKeys || {})).map((x) => `<option value="${h(x)}">`).join('')}</datalist>
       ${seen.length ? `<table><tr><th>Client</th><th>Limit</th><th>Requests, last minute</th><th>Tokens, last minute</th><th>Turned away</th></tr>
         ${seen.map((r) => `<tr><td>${h(r.client)}</td><td><code>${h(r.limit)}</code></td><td>${used(r.requests, r.requestsPerMinute)}</td><td>${used(r.tokens, r.tokensPerMinute)}</td><td>${r.limited ? `<span class="badge warn">${Number(r.limited).toLocaleString()}</span> <span class="faint small">last ${h(new Date(r.lastLimited).toLocaleTimeString())}</span>` : '<span class="muted">none</span>'}</td></tr>`).join('')}
@@ -351,6 +378,9 @@ views.clients = () => {
   const origin = location.origin;
   const s = state.status;
   const anth = (s.gateway.anthropicPathPrefixes[0] || '/v1/messages');
+  // Claude Code compacts before the conversation outgrows the smallest model that can carry its tools, when every such model declares its context window.
+  const agentic = (state.config.Models || []).filter((m) => m.Enabled !== false && (m.Capabilities || []).some((c) => String(c).toLowerCase() === 'tools'));
+  const context = agentic.length && agentic.every((m) => m.ContextWindow > 0) ? Math.min(...agentic.map((m) => m.ContextWindow)) : null;
   const snippet = (title, code, note) => `<div class="card section"><div class="card-head"><h2>${title}</h2></div>${note ? `<p class="muted small">${note}</p>` : ''}<div class="snippet"><pre><code>${h(code)}</code><button class="btn small copy" data-action="copy">Copy</button></pre></div></div>`;
   return `
     <div class="section-head"><h1>Connect clients</h1><span class="muted">Point your tools at <code>${h(origin)}</code>; keep their workflow, let the router pick the model.</span></div>
@@ -358,11 +388,13 @@ views.clients = () => {
     ${snippet('Claude Code', `# Anthropic Messages API on ${origin}${anth}
 export ANTHROPIC_BASE_URL=${origin}
 export ANTHROPIC_AUTH_TOKEN=semantic-router   # any value: the router ignores it and never forwards it
-claude
+${context ? `export CLAUDE_CODE_MAX_CONTEXT_TOKENS=${context}   # the smallest context window among your tool-capable models
+` : ''}export CLAUDE_CODE_AUTO_MODE_SERVER=0
+claude --model semantic-router
 
 # One-off:
-ANTHROPIC_BASE_URL=${origin} ANTHROPIC_AUTH_TOKEN=semantic-router claude -p "explain this repo"`,
-      `Claude Code keeps its own model names (<code>/model opus</code>, <code>haiku</code> for side tasks); the <a href="#/gateway">model aliases</a> decide what they mean here. Tool-bearing turns go to models whose connector can carry tools: HTTP models declaring <code>tools</code>, or a CLI connector with <b>prompted</b> tool calling. ${(s.connectors.some((c) => c.type === 'Cli' && c.toolCalling === 'Prompted')) ? '' : 'None of your CLI connectors has prompted tool calling on, so agentic turns will only use HTTP models.'}`)}
+ANTHROPIC_BASE_URL=${origin} ANTHROPIC_AUTH_TOKEN=semantic-router claude --model semantic-router -p "explain this repo"`,
+      `<code>semantic-router</code> is the router's own model name: Claude Code shows that the router picks the model. Other names Claude Code sends (its default Opus name, <code>haiku</code> for side tasks) go through the <a href="#/gateway">model aliases</a>; <code>@opus</code> at the start of a message asks for Opus. Tool-bearing turns go to models whose connector can carry tools: HTTP models declaring <code>tools</code>, or a CLI connector with <b>prompted</b> tool calling. ${(s.connectors.some((c) => c.type === 'Cli' && c.toolCalling === 'Prompted')) ? '' : 'None of your CLI connectors has prompted tool calling on, so agentic turns will only use HTTP models.'}`)}
     ${snippet('OpenAI SDKs and most tools', `# Base URL ${origin}/v1 · any API key · model "auto"
 export OPENAI_BASE_URL=${origin}/v1
 export OPENAI_API_KEY=semantic-router

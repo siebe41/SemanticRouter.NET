@@ -1,6 +1,7 @@
 /* Semantic Router dashboard: Actions behind data-action buttons, and applying configuration. */
 import { lineDiff } from './config.js';
 import { $, api, connectorNames, h, isDirty, lineupFor, setPath, state, tiers, toast } from './core.js';
+import { loadAudit } from './audit.js';
 import { loadTuning } from './learned.js';
 import { loadReliability } from './reliability.js';
 import { graph, loadMemory, updateMemorySide } from './memory.js';
@@ -33,6 +34,13 @@ export const actions = {
     await refreshStatus();
     render();
     toast('Reset to baseline.', 'ok');
+  },
+  async 'activity-purge'() {
+    if (!confirm('Delete every activity entry, with its prompt previews? This cannot be undone; usage, budgets and the configuration history are kept.')) return;
+    const result = await api('DELETE', '/activity');
+    state.activity = [];
+    render();
+    toast(`Deleted ${result.removed} activity entries.`, 'ok');
   },
   async 'memory-refresh'() { await loadMemory(true); },
   async 'memory-reset'() {
@@ -71,6 +79,12 @@ export const actions = {
   'usage-set'(el) { state.usage[el.dataset.key] = el.dataset.value; render(); loadUsage(); },
   'budget-add'() { state.config.Usage = state.config.Usage || {}; (state.config.Usage.Budgets = state.config.Usage.Budgets || []).push({ Name: 'budget-' + (state.config.Usage.Budgets.length + 1), Model: null, Connector: null, Period: 'Day', MaxTokens: null, MaxCostUsd: 5 }); render(); },
   'budget-remove'(el) { state.config.Usage.Budgets.splice(+el.dataset.index, 1); render(); },
+  async 'audit-load'() { state.audit.entries = null; await loadAudit(); },
+  async 'sessions-revoke-all'() {
+    if (!confirm('Sign out every dashboard session signed in with a token, yours included? Tokens keep working; everyone signs in again.')) return;
+    await api('POST', '/session/revoke-all');
+    location.reload();
+  },
   async 'history-load'() { state.history.versions = (await api('GET', '/config/history?limit=100')).versions; render(); },
   async 'history-diff'(el) {
     const v = await api('GET', '/config/history/' + el.dataset.id);
@@ -133,7 +147,7 @@ export const actions = {
   'connector-add'() {
     let name = 'new-connector'; let n = 1;
     while (state.config.Connectors[name]) name = 'new-connector-' + (++n);
-    state.config.Connectors[name] = { Type: 'OpenAICompatible', BaseAddress: 'http://localhost:1234', RequestPath: '/v1/chat/completions', ApiKey: null, Headers: {}, ForwardHeaders: [], AnthropicVersion: '2023-06-01', Preset: 'Custom', Executable: null, Arguments: null, PromptInput: 'Stdin', ToolCalling: 'None', QuotaErrorPatterns: [], EnvironmentVariables: {}, RemoveEnvironmentVariables: null, MaxArgumentLength: 24000, MaxConcurrency: 2, AllowRemoteClients: false, Timeout: '00:00:00' };
+    state.config.Connectors[name] = { Type: 'OpenAICompatible', BaseAddress: 'http://localhost:1234', RequestPath: '/v1/chat/completions', ApiKey: null, Headers: {}, ForwardHeaders: [], AnthropicVersion: '2023-06-01', PromptCaching: 'Auto', CacheTtl: '5m', Preset: 'Custom', Executable: null, Arguments: null, PromptInput: 'Stdin', ToolCalling: 'None', QuotaErrorPatterns: [], EnvironmentVariables: {}, RemoveEnvironmentVariables: null, MaxArgumentLength: 24000, MaxConcurrency: 2, AllowRemoteClients: false, Timeout: '00:00:00' };
     state.open.add('conn:' + name); render();
   },
   'connector-remove'(el) { delete state.config.Connectors[el.dataset.name]; render(); },
@@ -196,7 +210,7 @@ export const actions = {
   'rules-defaults'() { state.config.ComplexityTiers = null; render(); },
   'rules-customize'() { state.config.ComplexityTiers = [{ MinScore: 0.45, Tier: 2 }, { MinScore: 0.65, Tier: 3 }, { MinScore: 0.85, Tier: 4 }]; render(); },
   'alias-add'() { state.config.Middleware.ModelAliases = state.config.Middleware.ModelAliases || {}; let k = '*pattern*'; let n = 1; while (k in state.config.Middleware.ModelAliases) k = `*pattern${++n}*`; state.config.Middleware.ModelAliases[k] = 'auto'; render(); },
-  'alias-claude'() { const a = state.config.Middleware.ModelAliases = state.config.Middleware.ModelAliases || {}; Object.assign(a, { '*haiku*': 'auto:cheapest', '*sonnet*': 'auto', '*opus*': 'auto:best', 'claude-*': 'auto', 'gpt-*': 'auto', 'o*-mini': 'auto:cheapest' }); render(); },
+  'alias-claude'() { const a = state.config.Middleware.ModelAliases = state.config.Middleware.ModelAliases || {}; Object.assign(a, { 'opus-pinned': 'family:opus', '*haiku*': 'auto:cheapest', '*sonnet*': 'auto', '*opus*': 'auto', 'claude-*': 'auto', 'gpt-*': 'auto', 'o*-mini': 'auto:cheapest' }); render(); },
   'ratelimit-add'() { const limits = state.config.Middleware.RateLimits = state.config.Middleware.RateLimits || {}; const k = '*' in limits ? (Object.keys(state.config.Middleware.GatewayKeys || {}).find((c) => !(c in limits)) || 'client') : '*'; limits[k] = { RequestsPerMinute: 60, TokensPerMinute: null }; render(); },
   'ratelimit-remove'(el) { const entries = Object.entries(state.config.Middleware.RateLimits || {}); entries.splice(+el.dataset.index, 1); state.config.Middleware.RateLimits = Object.fromEntries(entries); render(); },
   'alias-remove'(el) { const entries = Object.entries(state.config.Middleware.ModelAliases); entries.splice(+el.dataset.index, 1); state.config.Middleware.ModelAliases = Object.fromEntries(entries); render(); },
@@ -211,6 +225,7 @@ export const actions = {
   'json-download'() { const blob = new Blob([JSON.stringify(state.config, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'semantic-router.json'; a.click(); },
   async 'json-baseline'() { const b = await api('GET', '/config/baseline'); $('#json-editor').value = JSON.stringify(b.config, null, 2); toast('Showing the application baseline (not the draft).'); },
   copy(el) { const code = el.parentElement.querySelector('code').textContent; navigator.clipboard.writeText(code).then(() => toast('Copied.', 'ok')); },
+  'copy-text'(el) { navigator.clipboard.writeText(el.dataset.text).then(() => toast('Copied.', 'ok')); },
 
   async 'eval-run'(el) {
     const ev = state.evaluation; ev.busy = true; ev.addFor = null; render();

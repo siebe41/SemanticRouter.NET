@@ -5,6 +5,8 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
@@ -39,8 +41,14 @@ public sealed class RouterDashboardOptions
     /// </summary>
     public string? AdminToken { get; set; }
 
-    /// <summary>Token for view-only access: status, activity, the masked configuration and the prompt tester.</summary>
+    /// <summary>Token for view-only access: status, activity and the masked configuration, but nothing that spends embedding or API calls.</summary>
     public string? ReadOnlyToken { get; set; }
+
+    /// <summary>
+    /// Token for figures only (<see cref="RouterDashboardRole.Metrics"/>): status and health, usage and cost totals,
+    /// activity counts and the digest's counts, never prompt or reply text, utterances, the configuration or memory.
+    /// </summary>
+    public string? MetricsToken { get; set; }
 
     /// <summary>
     /// Serve remote clients without a token. Only for a reverse proxy that authenticates every request itself; ignored
@@ -55,10 +63,11 @@ public sealed class RouterDashboardOptions
     public bool RequireTokenForLocalClients { get; set; }
 
     /// <summary>
-    /// Let the admin API change what a CLI or Copilot connector runs: its program, arguments, environment variables and
-    /// home directory, beyond a preset started from PATH. Off by default, because loopback clients are admin without a
-    /// token, and with this any program on the machine (or any user, on a shared one) could run whatever it liked as
-    /// you. Those settings are then changed in the configuration file. Default <see langword="false"/>.
+    /// Let the admin API change what a CLI or Copilot connector runs (its program, arguments, environment variables and
+    /// home directory, beyond a preset started from PATH) and which folders and files memory sources read. Off by
+    /// default, because loopback clients are admin without a token, and with this any program on the machine (or any
+    /// user, on a shared one) could run whatever it liked as you, or have the router read any file you can. Those
+    /// settings are then changed in the configuration file. Default <see langword="false"/>.
     /// </summary>
     public bool AllowProcessSettings { get; set; }
 
@@ -67,6 +76,36 @@ public sealed class RouterDashboardOptions
     /// are accepted from these origins, and loopback requests may name them in the Host header.
     /// </summary>
     public IList<string> PublicOrigins { get; } = new List<string>();
+
+    /// <summary>
+    /// How long a dashboard sign-in lasts: the session cookie then lapses and the token must be entered again. Changing
+    /// a token ends every session signed in with it, and signing out ends that session on the server. Default 12 hours.
+    /// </summary>
+    public TimeSpan SessionLifetime { get; set; } = TimeSpan.FromHours(12);
+
+    /// <summary>
+    /// Header an authenticating reverse proxy sets to the signed-in user, e.g. <c>X-Forwarded-User</c> or
+    /// <c>X-Auth-Request-Email</c> (oauth2-proxy), <c>Cf-Access-Authenticated-User-Email</c> (Cloudflare Access). Believed
+    /// only on requests that come straight from a proxy named in <c>SemanticRouter:ForwardedHeaders:KnownProxies</c> or
+    /// <c>KnownNetworks</c> (<see cref="RouterForwardedHeadersExtensions.UseRouterForwardedHeaders"/>); from anyone else
+    /// it is ignored. The user gets the role <see cref="TrustedIdentityRoles"/> gives them (none: <c>403</c>), tokens are
+    /// not consulted, and the user is named in the configuration history and the audit log. The proxy must replace the
+    /// header, not add to one the client sent.
+    /// </summary>
+    public string? TrustedIdentityHeader { get; set; }
+
+    /// <summary>
+    /// Header with the signed-in user's groups, comma separated (e.g. <c>X-Forwarded-Groups</c>), for
+    /// <see cref="TrustedIdentityRoles"/> entries that name a group. Optional; believed only with <see cref="TrustedIdentityHeader"/>.
+    /// </summary>
+    public string? TrustedGroupsHeader { get; set; }
+
+    /// <summary>
+    /// The role of each user or group a trusted proxy names, e.g. <c>{ "alice@corp.example": "Admin", "router-admins":
+    /// "Admin", "finance": "Metrics", "*": "ReadOnly" }</c>. The user's own entry wins, then the highest role among their
+    /// groups (<c>Admin</c>, then <c>ReadOnly</c>, then <c>Metrics</c>), then <c>*</c>. Names are compared ignoring case.
+    /// </summary>
+    public IDictionary<string, RouterDashboardRole> TrustedIdentityRoles { get; } = new Dictionary<string, RouterDashboardRole>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Entries shown by the activity endpoint when the client gives no limit. Default 100.</summary>
     public int DefaultActivityLimit { get; set; } = 100;
@@ -100,20 +139,29 @@ public static partial class RouterDashboardEndpoints
 
         prefix = "/" + prefix.Trim('/');
         DashboardAccess access = CreateAccess(endpoints.ServiceProvider, options, prefix);
+        IAuditLog auditLog = endpoints.ServiceProvider.GetService<IAuditLog>() ?? new InMemoryAuditLog();
+        var audit = new DashboardAudit(
+            auditLog,
+            endpoints.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System,
+            endpoints.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SemanticRouter.Audit"));
         RouteGroupBuilder group = endpoints.MapGroup(prefix);
         var themes = new ThemeCatalog(options.ThemesDirectory ?? (endpoints.ServiceProvider.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store
             ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Location))!, "themes")
             : null));
         // No other site may frame the dashboard: inside a frame, clicks a page tricks the user into are same-origin writes.
+        // The page loads nothing from other hosts and runs no inline script, so text an attacker gets into the page (a
+        // prompt preview, a model name) cannot run as script or send what it reads anywhere else.
         group.AddEndpointFilter((invocation, next) =>
         {
             IHeaderDictionary headers = invocation.HttpContext.Response.Headers;
-            headers.ContentSecurityPolicy = "frame-ancestors 'none'";
+            headers.ContentSecurityPolicy = ContentSecurityPolicy;
             headers.XFrameOptions = "DENY";
             headers.XContentTypeOptions = "nosniff";
             headers["Referrer-Policy"] = "no-referrer";
             return next(invocation);
         });
+        // Outside the access check, so the audit log also records what the access check refused a signed-in caller.
+        group.AddEndpointFilter(audit.FilterAsync);
         group.AddEndpointFilter(access.FilterAsync);
 
         group.MapGet("/", (HttpContext context) => Asset(context, "index.html", "text/html; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
@@ -135,41 +183,88 @@ public static partial class RouterDashboardEndpoints
                 ? Asset(context, "js/" + file, "text/javascript; charset=utf-8", prefix)
                 : Results.NotFound())
             .WithMetadata(DashboardAnonymousMetadata.Instance);
+        group.MapGet("/fonts/{file}", (HttpContext context, string file) => FontName().IsMatch(file)
+                ? Asset(context, "fonts/" + file, file.EndsWith(".woff2", StringComparison.Ordinal) ? "font/woff2" : "text/plain; charset=utf-8", prefix)
+                : Results.NotFound())
+            .WithMetadata(DashboardAnonymousMetadata.Instance);
         group.MapGet("/graph.js", (HttpContext context) => Asset(context, "graph.js", "text/javascript; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
 
         RouteGroupBuilder api = group.MapGroup("/api");
-        api.MapGet("/themes", () => Results.Json(new ThemesResponse(themes.Directory, ThemeCatalog.RequiredTokens, themes.List()), ApiJson));
+        api.MapGet("/themes", () => Results.Json(new ThemesResponse(themes.Directory, ThemeCatalog.RequiredTokens, themes.List()), ApiJson))
+            .WithMetadata(DashboardMetricsMetadata.Instance);
         api.MapGet("/session", (HttpContext context) =>
-                Results.Json(new SessionResponse(DashboardAccess.RoleOf(context)?.ToString(), access.TokenRequired(context), access.TokensConfigured), ApiJson))
+                Results.Json(new SessionResponse(
+                    DashboardAccess.RoleOf(context)?.ToString(), access.TokenRequired(context), access.TokensConfigured,
+                    DashboardAccess.RoleOf(context) is null ? null : DashboardAccess.ActorOf(context)), ApiJson))
             .WithMetadata(DashboardAnonymousMetadata.Instance);
 
         api.MapPost("/session", (HttpContext context, SignInRequest request) =>
             {
+                if (access.Throttle.RetryAfter(context) is { } wait)
+                {
+                    return DashboardAccess.TooManyAttempts(context, wait);
+                }
+
                 if (access.RoleForToken(request.Token) is not { } role)
                 {
+                    access.WrongToken(context);
+                    DashboardAudit.Summary(context, "sign-in failed: wrong token");
                     return Results.Problem("That token is not valid for this router.", statusCode: StatusCodes.Status401Unauthorized, title: "Sign-in failed");
                 }
 
                 access.SignIn(context, role, prefix);
-                return Results.Json(new SessionResponse(role.ToString(), access.TokenRequired(context), access.TokensConfigured), ApiJson);
+                DashboardAccess.SetActor(context, DashboardAccess.TokenActor(role));
+                return Results.Json(new SessionResponse(role.ToString(), access.TokenRequired(context), access.TokensConfigured, DashboardAccess.TokenActor(role)), ApiJson);
             })
-            .WithMetadata(DashboardAnonymousMetadata.Instance);
+            .WithMetadata(DashboardAnonymousMetadata.Instance)
+            .Audited("signed in");
 
+        // Ends the caller's session on the server too: the cookie is refused from now on, even if someone kept a copy.
         api.MapDelete("/session", (HttpContext context) =>
             {
-                DashboardAccess.SignOut(context, prefix);
+                if (access.SignOut(context, prefix))
+                {
+                    DashboardAudit.Detail(context, "session revoked");
+                }
+
                 return Results.NoContent();
             })
-            .WithMetadata(DashboardAnonymousMetadata.Instance);
+            .WithMetadata(DashboardAnonymousMetadata.Instance)
+            .Audited("signed out");
 
-        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories, ClientRateLimiter rateLimits, IServiceProvider services) =>
-            Results.Json(BuildStatus(provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>()), ApiJson));
+        // Ends every session signed in until now, everyone's (tokens and loopback access keep working).
+        api.MapPost("/session/revoke-all", (HttpContext context) =>
+            {
+                access.Sessions.RevokeAll();
+                access.SignOut(context, prefix);
+                return Results.NoContent();
+            })
+            .WithMetadata(DashboardWriteMetadata.Instance)
+            .Audited("signed out every session");
+
+        api.MapGet("/status", (HttpContext context, RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories, ClientRateLimiter rateLimits, IServiceProvider services) =>
+            {
+                StatusResponse status = BuildStatus(
+                    provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>(),
+                    services.GetService<IModelCacheShare>(), Listening(services), options.PublicOrigins);
+
+                // A connector's last error comes from the activity log's details, which can quote a reply.
+                return Results.Json(
+                    DashboardAccess.RoleOf(context) == RouterDashboardRole.Metrics ? status with { Endpoints = [.. status.Endpoints.Select(e => e with { LastError = null })] } : status,
+                    ApiJson);
+            })
+            .WithMetadata(DashboardMetricsMetadata.Instance);
 
         api.MapGet("/config", (RouterRuntimeProvider provider) =>
         {
             RouterRuntime runtime = provider.Current;
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), null);
         });
+
+        // The machine policy an administrator set, which the configuration cannot override (empty when there is none).
+        api.MapGet("/policy", (RouterRuntimeProvider provider) => Results.Text(
+            $$"""{"source":{{System.Text.Json.JsonSerializer.Serialize(provider.Policy.Source)}},"policy":{{provider.Policy.ToJson()}}}""",
+            "application/json"));
 
         api.MapGet("/config/baseline", (RouterRuntimeProvider provider) =>
             ConfigEnvelope(provider.Current, provider, provider.Baseline.Masked(), null));
@@ -182,8 +277,8 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem("Expected a configuration document.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            return Results.Json(new ValidationResult([.. RouterRuntimeProvider.Validate(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)]), ApiJson);
-        });
+            return Results.Json(new ValidationResult([.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)]), ApiJson);
+        }).Audited("validated a configuration");
 
         api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist, string? note) =>
         {
@@ -193,7 +288,7 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem("Expected a configuration document.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            IReadOnlyList<string> errors = [.. RouterRuntimeProvider.Validate(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)];
+            IReadOnlyList<string> errors = [.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)];
             if (errors.Count > 0)
             {
                 return Results.Json(new ValidationResult(errors), ApiJson, statusCode: StatusCodes.Status400BadRequest);
@@ -201,6 +296,7 @@ public static partial class RouterDashboardEndpoints
 
             bool shouldPersist = persist ?? true;
             RouterRuntime runtime = provider.Apply(candidate, shouldPersist, "admin API", Actor(context), note);
+            DashboardAudit.Detail(context, $"version {runtime.Version}{(shouldPersist ? ", saved" : ", not saved")}");
             var warnings = new List<string>(runtime.ApplyNotes);
             if (shouldPersist && provider.Store is null)
             {
@@ -208,13 +304,14 @@ public static partial class RouterDashboardEndpoints
             }
 
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), warnings.Count > 0 ? string.Join(" ", warnings) : null);
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("applied the configuration");
 
         api.MapPost("/config/reset", (HttpContext context, RouterRuntimeProvider provider) =>
         {
             RouterRuntime runtime = provider.ResetToBaseline(Actor(context));
+            DashboardAudit.Detail(context, $"version {runtime.Version}");
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), "Reverted to the application's configuration (the stored document was left in place).");
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("reset the configuration to the application's");
 
         api.MapGet("/config/history", (RouterRuntimeProvider provider, int? limit) =>
             provider.History is { } history
@@ -243,15 +340,16 @@ public static partial class RouterDashboardEndpoints
 
             // The history keeps no secrets: they come from the running configuration.
             document.UnmaskFrom(provider.Current.Configuration);
-            IReadOnlyList<string> errors = RouterRuntimeProvider.Validate(document);
+            IReadOnlyList<string> errors = provider.ValidateChange(document);
             if (errors.Count > 0)
             {
                 return Results.Json(new ValidationResult(errors), ApiJson, statusCode: StatusCodes.Status400BadRequest);
             }
 
             RouterRuntime runtime = provider.Apply(document, persist: true, "rollback", Actor(context), $"to version {id}");
+            DashboardAudit.Detail(context, $"to version {id}, now version {runtime.Version}");
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), $"Rolled back to version {id}.");
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("rolled back the configuration");
 
         api.MapGet("/activity", (RoutingActivityLog activity, RoutingFeedbackLog feedback, int? limit, long? after) =>
         {
@@ -264,6 +362,17 @@ public static partial class RouterDashboardEndpoints
             return Results.Json(new ActivityResponse(entries, activity.NextId - 1, kinds), ApiJson);
         });
 
+        // Deletes activity (and its prompt previews) for good: everything, or since/until. The state database zeroes and
+        // compacts what it deleted, so the rows cannot be recovered from its files.
+        api.MapDelete("/activity", (HttpContext context, RoutingActivityLog activity, DateTimeOffset? since, DateTimeOffset? until) =>
+            {
+                int removed = activity.Purge(since ?? DateTimeOffset.MinValue, until ?? DateTimeOffset.MaxValue);
+                DashboardAudit.Detail(context, $"{removed} {(removed == 1 ? "entry" : "entries")}" + (since is null && until is null ? ", everything" : $" from {since?.ToString("u") ?? "the start"} to {until?.ToString("u") ?? "now"}"));
+                return Results.Json(new { removed }, ApiJson);
+            })
+            .WithMetadata(DashboardWriteMetadata.Instance)
+            .Audited("deleted activity");
+
         api.MapGet("/feedback", (RoutingFeedbackLog feedback, int? limit) =>
             Results.Json(feedback.Recent(Math.Clamp(limit ?? 200, 1, 5000)), ApiJson));
 
@@ -271,7 +380,7 @@ public static partial class RouterDashboardEndpoints
         {
             DateTimeOffset until = DateTimeOffset.UtcNow, since = until.AddDays(-Math.Clamp(days ?? 7, 1, 90));
             return Results.Json(FeedbackSummary.Build(activity.Between(since, until), feedback.Between(since, until), since, until), ApiJson);
-        });
+        }).WithMetadata(DashboardMetricsMetadata.Instance);
 
         api.MapGet("/events", StreamEventsAsync);
 
@@ -291,13 +400,15 @@ public static partial class RouterDashboardEndpoints
         });
 
         api.MapPost("/memory/refresh", async (RouterRuntimeProvider provider, MemoryIndex memory, MemoryExposureLog exposure, CancellationToken cancellationToken) =>
-            Results.Json(BuildMemoryMap(provider.Current, await memory.RefreshAsync(cancellationToken).ConfigureAwait(false), exposure), ApiJson));
+            Results.Json(BuildMemoryMap(provider.Current, await memory.RefreshAsync(cancellationToken).ConfigureAwait(false), exposure), ApiJson))
+            .WithMetadata(DashboardWriteMetadata.Instance)
+            .Audited("rescanned the memory sources");
 
         api.MapPost("/memory/exposure/reset", (MemoryExposureLog exposure) =>
         {
             exposure.Clear();
             return Results.Ok(new { cleared = true });
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("forgot where notes were sent");
 
         api.MapGet("/activity/series", (RoutingActivityLog activity, string? window) =>
         {
@@ -305,18 +416,19 @@ public static partial class RouterDashboardEndpoints
             DateTimeOffset until = Align(DateTimeOffset.UtcNow, bucket) + bucket;
             DateTimeOffset since = until - span;
             return Results.Json(ActivityReports.Series(activity.Between(since, until), since, until, bucket), ApiJson);
-        });
+        }).WithMetadata(DashboardMetricsMetadata.Instance);
 
-        api.MapGet("/activity/export", (RoutingActivityLog activity, string? format, bool? prompts, DateTimeOffset? since, DateTimeOffset? until) =>
+        api.MapGet("/activity/export", (HttpContext context, RoutingActivityLog activity, string? format, bool? prompts, DateTimeOffset? since, DateTimeOffset? until) =>
         {
             DateTimeOffset end = until ?? DateTimeOffset.UtcNow.AddMinutes(1);
             IReadOnlyList<RoutingActivityEntry> entries = activity.Between(since ?? end.AddDays(-7), end);
             bool includePrompts = prompts ?? false;
+            DashboardAudit.Detail(context, $"{entries.Count} {(entries.Count == 1 ? "entry" : "entries")}, {(includePrompts ? "with" : "without")} prompt previews");
             string stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
             return string.Equals(format, "jsonl", StringComparison.OrdinalIgnoreCase)
                 ? Results.File(System.Text.Encoding.UTF8.GetBytes(ActivityReports.ToJsonLines(entries, includePrompts)), "application/jsonl", $"semantic-router-activity-{stamp}.jsonl")
                 : Results.File(System.Text.Encoding.UTF8.GetBytes(ActivityReports.ToCsv(entries, includePrompts)), "text/csv", $"semantic-router-activity-{stamp}.csv");
-        });
+        }).Audited("exported activity");
 
         api.MapGet("/usage", (RouterRuntimeProvider provider, IUsageLedger ledger, BudgetGate budgets, string? window, string? by) =>
         {
@@ -326,7 +438,7 @@ public static partial class RouterDashboardEndpoints
             UsageGrouping grouping = Enum.TryParse(by, ignoreCase: true, out UsageGrouping parsed) ? parsed : UsageGrouping.Model;
             return Results.Json(new UsageResponse(
                 since, until, grouping, usage.ReferenceModel, ledger.Total(since, until), ledger.Summarize(since, until, grouping, zone), budgets.Status(usage)), ApiJson);
-        });
+        }).WithMetadata(DashboardMetricsMetadata.Instance);
 
         api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, IServiceProvider services, CancellationToken cancellationToken) =>
         {
@@ -343,11 +455,13 @@ public static partial class RouterDashboardEndpoints
                 return Results.Problem($"Unknown routing profile '{profile}'.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            RoutingPlan plan = await runtime.Router.RouteAsync(
+            // As the gateway routes a first turn: a leading callout ("@opus …") applies and is not classified.
+            (RoutingPlan plan, string? callout) = await Callouts.RouteAsync(
+                runtime, runtime.Router,
                 new PromptRoutingRequest { Prompt = request.Prompt, Strategy = choice.Strategy, RequestedModel = choice.RequestedModel, Profile = profile },
                 cancellationToken).ConfigureAwait(false);
-            return Results.Ok(PromptClassificationResponse.From(plan, services.GetService<IModelResidency>()));
-        });
+            return Results.Ok(PromptClassificationResponse.From(plan, services.GetService<IModelResidency>()) with { Callout = callout });
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("classified a prompt"); // classifying embeds the prompt, which can cost an embedding call
 
         api.MapPost("/health/reset", (IModelHealth health) =>
         {
@@ -358,7 +472,7 @@ public static partial class RouterDashboardEndpoints
             }
 
             return Results.Problem("The registered IModelHealth does not support clearing cooldowns.", statusCode: StatusCodes.Status501NotImplemented);
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("cleared every cooldown");
 
         api.MapPost("/embeddings/test", async (EmbeddingTestRequest request, RouterRuntimeProvider provider, CancellationToken cancellationToken) =>
         {
@@ -374,7 +488,7 @@ public static partial class RouterDashboardEndpoints
             {
                 return Results.Json(new EmbeddingTestResponse(false, 0, Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1), ex.Message), ApiJson);
             }
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("tested the embeddings");
 
         api.MapPost("/connectors/{name}/discover", async (string name, IServiceProvider services, CancellationToken cancellationToken) =>
         {
@@ -389,7 +503,7 @@ public static partial class RouterDashboardEndpoints
             }
 
             return Results.Json(DiscoverResponse.From(report), ApiJson);
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("discovered a connector's models");
 
         api.MapPost("/connectors/{name}/check", async (string name, IServiceProvider services, RouterRuntimeProvider provider) =>
         {
@@ -403,7 +517,17 @@ public static partial class RouterDashboardEndpoints
             string target = EndpointHealth.TargetKey(provider.Current.Configuration, name);
             EndpointCheck result = await checks.RunAsync(name, target, () => RouterDoctor.CheckConnectorAsync(services, name)).ConfigureAwait(false);
             return Results.Json(result, ApiJson);
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("checked a connector");
+
+        // The audit log: admin only, since it names who did what from where.
+        api.MapGet("/audit", (DateTimeOffset? since, DateTimeOffset? until, int? limit, string? format) =>
+        {
+            IReadOnlyList<AuditEntry> entries = auditLog.Query(since, until, Math.Clamp(limit ?? 200, 1, 10_000));
+            string stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
+            return string.Equals(format, "jsonl", StringComparison.OrdinalIgnoreCase)
+                ? Results.File(System.Text.Encoding.UTF8.GetBytes(DashboardAudit.ToJsonLines(entries, ApiJson)), "application/jsonl", $"semantic-router-audit-{stamp}.jsonl")
+                : Results.Json(new AuditResponse(entries), ApiJson);
+        }).WithMetadata(DashboardAdminReadMetadata.Instance);
 
         EvaluationApi.Map(api, ApiJson, Actor);
         TuningApi.Map(api, ApiJson, Actor);
@@ -492,22 +616,33 @@ public static partial class RouterDashboardEndpoints
     private static DateTimeOffset Align(DateTimeOffset time, TimeSpan bucket) =>
         new(time.UtcTicks - (time.UtcTicks % bucket.Ticks), TimeSpan.Zero);
 
-    /// <summary>Who is making a change, for the configuration history. Never contains a token.</summary>
-    private static string Actor(HttpContext context)
-    {
-        string role = DashboardAccess.RoleOf(context) == RouterDashboardRole.ReadOnly ? "read-only" : "admin";
-        return DashboardAccess.IsLocal(context)
-            ? "this machine"
-            : $"{role} from {context.Connection.RemoteIpAddress}";
-    }
+    /// <summary>
+    /// Who is making a change, for the configuration history, learned changes and the audit log: the user a trusted proxy
+    /// named, <c>admin token</c>, <c>read-only token</c>, <c>metrics token</c> or <c>this machine</c>. Never contains a token.
+    /// </summary>
+    private static string Actor(HttpContext context) =>
+        DashboardAccess.ActorOf(context) ?? (DashboardAccess.IsLocal(context) ? "this machine" : "unknown");
 
-    /// <summary>Errors for CLI and Copilot connectors whose program, arguments or environment the request would change.</summary>
-    private static IEnumerable<string> ProcessSettingErrors(RouterConfiguration candidate, RouterRuntimeProvider provider, RouterDashboardOptions options) =>
-        options.AllowProcessSettings ? [] : candidate.ProcessSettingChanges(provider.Current.Configuration).Select(name =>
-            $"Connectors:{name}: what a CLI runs (its program, arguments, environment variables and home directory) is changed in the " +
-            $"configuration file{(provider.Store is { } store ? $" ({store.Location})" : string.Empty)}, not over the admin API, which " +
-            "any program on this machine can reach. Presets started from PATH can be added here. To allow it, set " +
-            "SemanticRouter:Dashboard:AllowProcessSettings.");
+    /// <summary>
+    /// Errors for CLI and Copilot connectors whose program, arguments or environment the request would change, and for
+    /// memory sources it would point at another folder or file.
+    /// </summary>
+    private static IEnumerable<string> ProcessSettingErrors(RouterConfiguration candidate, RouterRuntimeProvider provider, RouterDashboardOptions options)
+    {
+        if (options.AllowProcessSettings)
+        {
+            return [];
+        }
+
+        string file = $"configuration file{(provider.Store is { } store ? $" ({store.Location})" : string.Empty)}";
+        return candidate.ProcessSettingChanges(provider.Current.Configuration).Select(name =>
+                $"Connectors:{name}: what a CLI runs (its program, arguments, environment variables and home directory) is changed in the " +
+                $"{file}, not over the admin API, which any program on this machine can reach. Presets started from PATH can be added here. " +
+                "To allow it, set SemanticRouter:Dashboard:AllowProcessSettings.")
+            .Concat(candidate.MemoryPathChanges(provider.Current.Configuration).Select(name =>
+                $"Memory:Sources:{name}:Path: which folders and files the router reads is changed in the {file}, not over the admin API, " +
+                "which any program on this machine can reach. To allow it, set SemanticRouter:Dashboard:AllowProcessSettings."));
+    }
 
     private static RouterDashboardOptions CopyOf(RouterDashboardOptions? source)
     {
@@ -517,9 +652,18 @@ public static partial class RouterDashboardEndpoints
             copy.RequireLocalClient = source.RequireLocalClient;
             copy.AdminToken = source.AdminToken;
             copy.ReadOnlyToken = source.ReadOnlyToken;
+            copy.MetricsToken = source.MetricsToken;
             copy.AllowUnauthenticatedRemoteClients = source.AllowUnauthenticatedRemoteClients;
             copy.RequireTokenForLocalClients = source.RequireTokenForLocalClients;
             copy.AllowProcessSettings = source.AllowProcessSettings;
+            copy.SessionLifetime = source.SessionLifetime;
+            copy.TrustedIdentityHeader = source.TrustedIdentityHeader;
+            copy.TrustedGroupsHeader = source.TrustedGroupsHeader;
+            foreach ((string name, RouterDashboardRole role) in source.TrustedIdentityRoles)
+            {
+                copy.TrustedIdentityRoles[name] = role;
+            }
+
             copy.DefaultActivityLimit = source.DefaultActivityLimit;
             copy.ThemesDirectory = source.ThemesDirectory;
             foreach (string origin in source.PublicOrigins)
@@ -537,7 +681,9 @@ public static partial class RouterDashboardEndpoints
         var problems = new List<string>();
         string? admin = SecretReference.Resolve(options.AdminToken, secrets, "Dashboard:AdminToken", problems);
         string? readOnly = SecretReference.Resolve(options.ReadOnlyToken, secrets, "Dashboard:ReadOnlyToken", problems);
-        foreach ((string setting, string? token) in new[] { ("AdminToken", admin), ("ReadOnlyToken", readOnly) })
+        string? metrics = SecretReference.Resolve(options.MetricsToken, secrets, "Dashboard:MetricsToken", problems);
+        (string Setting, string? Token)[] tokens = [("AdminToken", admin), ("ReadOnlyToken", readOnly), ("MetricsToken", metrics)];
+        foreach ((string setting, string? token) in tokens)
         {
             if (!string.IsNullOrEmpty(token) && token.Length < RouterDashboardOptions.MinimumTokenLength)
             {
@@ -546,12 +692,31 @@ public static partial class RouterDashboardEndpoints
             }
         }
 
-        if (!string.IsNullOrEmpty(admin) && admin == readOnly)
+        // One token, one role: a token shared by two roles would get the higher one.
+        for (int i = 0; i < tokens.Length; i++)
         {
-            throw new InvalidOperationException("SemanticRouter:Dashboard:AdminToken and ReadOnlyToken must differ.");
+            for (int j = i + 1; j < tokens.Length; j++)
+            {
+                if (!string.IsNullOrEmpty(tokens[i].Token) && tokens[i].Token == tokens[j].Token)
+                {
+                    throw new InvalidOperationException($"SemanticRouter:Dashboard:{tokens[i].Setting} and {tokens[j].Setting} must differ.");
+                }
+            }
         }
 
-        var access = new DashboardAccess(options, admin, readOnly);
+        if (options.SessionLifetime <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("SemanticRouter:Dashboard:SessionLifetime must be positive, e.g. 12:00:00.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.TrustedIdentityHeader) && options.TrustedIdentityRoles.Count == 0)
+        {
+            problems.Add($"TrustedIdentityHeader is {options.TrustedIdentityHeader} but TrustedIdentityRoles is empty, so every user the proxy names is refused.");
+        }
+
+        var access = new DashboardAccess(
+            options, admin, readOnly, services.GetService<MachinePolicy>()?.Dashboard ?? DashboardPolicy.Default, services.GetService<TimeProvider>(),
+            metrics, services.GetService<IStateValueStore>());
         ILogger logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("SemanticRouter.Dashboard");
         foreach (string problem in problems)
         {
@@ -575,6 +740,17 @@ public static partial class RouterDashboardEndpoints
 
     [System.Text.RegularExpressions.GeneratedRegex("^[a-z0-9-]+\\.js$")]
     private static partial System.Text.RegularExpressions.Regex ModuleName();
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z0-9-]+\\.(woff2|txt)$")]
+    private static partial System.Text.RegularExpressions.Regex FontName();
+
+    /// <summary>
+    /// What dashboard pages may load: their own scripts, styles, fonts and API, and nothing from another host. Inline
+    /// style attributes are allowed (the views set widths and colours with them); inline script is not.
+    /// </summary>
+    internal const string ContentSecurityPolicy =
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; " +
+        "connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 
     /// <summary>
     /// The period a usage window names (<c>day</c>, <c>week</c>, <c>month</c> in the budget time zone; <c>30d</c>; the last
@@ -653,12 +829,14 @@ public static partial class RouterDashboardEndpoints
 
     private static StatusResponse BuildStatus(
         RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories,
-        ClientRateLimiter rateLimits, ConnectorIncidents? incidents, EndpointChecks? checks)
+        ClientRateLimiter rateLimits, ConnectorIncidents? incidents, EndpointChecks? checks, IModelCacheShare? cache, IEnumerable<string> listening,
+        IEnumerable<string> publicOrigins)
     {
         RouterRuntime runtime = provider.Current;
         RouterConfiguration config = runtime.Configuration;
         IReadOnlyDictionary<string, DateTimeOffset> cooldowns = health.GetCooldowns();
         IReadOnlyList<RoutingActivityEntry> recent = activity.Recent(500);
+        IReadOnlyList<EndpointStatus> endpoints = EndpointHealth.Build(config, cooldowns, recent, incidents, checks);
 
         return new StatusResponse(
             runtime.Version,
@@ -683,7 +861,11 @@ public static partial class RouterDashboardEndpoints
                 m.Name, m.Connector, m.Model, m.Tier, m.Capabilities.ToArray(), m.IsLocal, m.Enabled, m.Priority, m.ContextWindow,
                 m.InputCostPerMillionTokens, m.OutputCostPerMillionTokens,
                 cooldowns.TryGetValue(m.Name, out DateTimeOffset until) ? until : null,
-                config.Connectors.TryGetValue(m.Connector, out ConnectorOptions? c) ? c.Type.ToString() : null)).ToArray(),
+                config.Connectors.TryGetValue(m.Connector, out ConnectorOptions? c) ? c.Type.ToString() : null)
+            {
+                CacheShare = cache?.Typical(m, route: null),
+                EffectiveInputCostPerMillionTokens = cache?.Typical(m, route: null) is { } share ? m.EstimateCost(1_000_000, 0, share) : null,
+            }).ToArray(),
             config.Connectors.Select(kv => new ConnectorStatus(
                 kv.Key, kv.Value.Type.ToString(), kv.Value.Type == ConnectorType.Cli ? kv.Value.Preset.ToString() : null,
                 kv.Value.Type is ConnectorType.Cli or ConnectorType.Copilot ? kv.Value.Executable : AddressDisplay.Show(kv.Value.BaseAddress),
@@ -698,7 +880,7 @@ public static partial class RouterDashboardEndpoints
                 config.Middleware.EffectiveResponsesPathPrefixes.ToArray(),
                 config.Middleware.ModelAliases.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase),
                 config.Selection.Strategy.ToString(),
-                rateLimits.Status(config.Middleware.RateLimits)),
+                rateLimits.Status(config.Middleware)),
             new ActivitySummary(
                 recent.Count,
                 recent.Count(e => e.Outcome == "served"),
@@ -707,22 +889,27 @@ public static partial class RouterDashboardEndpoints
                 recent.Where(e => e.ServedBy is not null).GroupBy(e => e.ServedBy!).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase),
                 recent.GroupBy(e => e.Tier).OrderBy(g => g.Key).ToDictionary(g => g.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), g => g.Count()),
                 recent.GroupBy(e => e.Reason.ToString()).ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal),
-                recent.Where(e => e.Outcome == "served" && e.Connector is not null && e.TotalMilliseconds is not null)
+                recent.Where(e => e.Outcome == "served" && e.Connector is not null && e.ServingTimes().Total is not null)
                     .GroupBy(e => e.Connector!, StringComparer.OrdinalIgnoreCase)
                     .Select(g => new ConnectorLatency(
                         g.Key,
                         config.Connectors.TryGetValue(g.Key, out ConnectorOptions? kind) ? (kind.Type == ConnectorType.Cli ? $"Cli/{kind.Preset}" : kind.Type.ToString()) : null,
                         g.Count(),
                         g.Count(e => e.HasTools),
-                        Percentile(g.Select(e => e.TimeToFirstByteMilliseconds), 0.5),
-                        Percentile(g.Select(e => e.TimeToFirstByteMilliseconds), 0.95),
-                        Percentile(g.Select(e => e.TotalMilliseconds), 0.5)))
+                        Percentile(g.Select(e => e.ServingTimes().FirstByte), 0.5),
+                        Percentile(g.Select(e => e.ServingTimes().FirstByte), 0.95),
+                        Percentile(g.Select(e => e.ServingTimes().Total), 0.5)))
                     .OrderBy(l => l.Connector, StringComparer.OrdinalIgnoreCase)
                     .ToArray()),
             budgets.Status(config.Usage),
-            EndpointHealth.Build(config, cooldowns, recent, incidents, checks),
-            Environment.MachineName);
+            endpoints,
+            Environment.MachineName,
+            ServiceHealth.Build(runtime, endpoints, recent, listening, publicOrigins));
     }
+
+    /// <summary>The addresses the server listens on, when it is a real server (not the test host).</summary>
+    private static IEnumerable<string> Listening(IServiceProvider services) =>
+        services.GetService<IServer>()?.Features.Get<IServerAddressesFeature>()?.Addresses ?? (IEnumerable<string>)[];
 
     private static double? Percentile(IEnumerable<double?> values, double quantile)
     {
@@ -731,10 +918,11 @@ public static partial class RouterDashboardEndpoints
     }
 
     /// <summary>Who the caller is signed in as.</summary>
-    /// <param name="Role"><c>Admin</c>, <c>ReadOnly</c>, or <see langword="null"/> when not signed in.</param>
+    /// <param name="Role"><c>Admin</c>, <c>ReadOnly</c>, <c>Metrics</c>, or <see langword="null"/> when not signed in.</param>
     /// <param name="TokenRequired">Whether this caller needs a token (it is remote, or tokens are required locally).</param>
     /// <param name="TokensConfigured">Whether the router has a token to sign in with.</param>
-    public sealed record SessionResponse(string? Role, bool TokenRequired, bool TokensConfigured);
+    /// <param name="Identity">Who the caller acts as (the user a trusted proxy named, <c>admin token</c>, …), when signed in.</param>
+    public sealed record SessionResponse(string? Role, bool TokenRequired, bool TokensConfigured, string? Identity = null);
 
     /// <summary>Sign-in request.</summary>
     public sealed record SignInRequest(string? Token);
@@ -867,7 +1055,8 @@ public static partial class RouterDashboardEndpoints
         ActivitySummary Activity,
         IReadOnlyList<BudgetStatus> Budgets,
         IReadOnlyList<EndpointStatus> Endpoints,
-        string Machine);
+        string Machine,
+        ServiceStatus Service);
 
     /// <summary>Embedding provider in use.</summary>
     public sealed record EmbeddingsStatus(
@@ -886,7 +1075,14 @@ public static partial class RouterDashboardEndpoints
     /// <summary>A catalog model and its health.</summary>
     public sealed record ModelStatus(
         string Name, string Connector, string? Model, int Tier, IReadOnlyList<string> Capabilities, bool IsLocal, bool Enabled, int Priority,
-        int ContextWindow, decimal InputCostPerMillionTokens, decimal OutputCostPerMillionTokens, DateTimeOffset? CoolingDownUntil, string? ConnectorType);
+        int ContextWindow, decimal InputCostPerMillionTokens, decimal OutputCostPerMillionTokens, DateTimeOffset? CoolingDownUntil, string? ConnectorType)
+    {
+        /// <summary>The share of its input the model read from and wrote to its prompt cache lately, when there were enough turns.</summary>
+        public PromptCacheShare? CacheShare { get; init; }
+
+        /// <summary>The input price per million tokens with <see cref="CacheShare"/> at the cache prices: what cost estimates use.</summary>
+        public decimal? EffectiveInputCostPerMillionTokens { get; init; }
+    }
 
     /// <summary>A connector.</summary>
     public sealed record ConnectorStatus(string Name, string Type, string? Preset, string? Target, string ToolCalling, bool HasApiKey, int ModelCount);
@@ -910,7 +1106,7 @@ public static partial class RouterDashboardEndpoints
     /// <param name="Kind">Its type (<c>OpenAICompatible</c>, <c>Cli/ClaudeCode</c>, …).</param>
     /// <param name="Requests">Served requests.</param>
     /// <param name="WithTools">How many of them offered tools.</param>
-    /// <param name="FirstByteP50">Median time to the first byte of the reply, in milliseconds.</param>
+    /// <param name="FirstByteP50">Median time to the first byte of the reply, in milliseconds, from the start of the attempt that served it.</param>
     /// <param name="FirstByteP95">95th percentile time to the first byte.</param>
     /// <param name="TotalP50">Median time to the end of the reply.</param>
     public sealed record ConnectorLatency(string Connector, string? Kind, int Requests, int WithTools, double? FirstByteP50, double? FirstByteP95, double? TotalP50);

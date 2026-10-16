@@ -66,7 +66,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', 'global.json') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', '**/packages.lock.json', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
 
       # The ONNX embedding tests download two small models (57 MB) once and reuse them.
@@ -75,8 +75,10 @@ jobs:
           path: ${{ github.workspace }}/.models
           key: onnx-models-${{ hashFiles('src/SemanticRouter.Embeddings.Onnx/OnnxEmbeddingModels.cs') }}
 
+      # Locked: fails if a package (direct or transitive) differs from the projects' packages.lock.json files. After
+      # changing a package version, run `dotnet restore` and commit the updated lock files.
       - name: Restore
-        run: dotnet restore
+        run: dotnet restore --locked-mode
 
       # NuGet advisories for direct and transitive packages. The scheduled run catches advisories
       # published after a dependency was added.
@@ -103,9 +105,14 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release --logger "trx" --collect:"XPlat Code Coverage"
 
+      # As in a release, the tool package carries the licences and notices of the packages it ships.
+      - name: Third-party notices
+        if: runner.os == 'Linux'
+        run: dotnet run --file deploy/third-party-notices.cs -- notices/THIRD-PARTY-NOTICES.txt src/SemanticRouter.Host/bin/Release/net10.0
+
       - name: Pack
         if: runner.os == 'Linux'
-        run: dotnet pack --no-build --configuration Release --output artifacts
+        run: dotnet pack --no-build --configuration Release --output artifacts -p:ThirdPartyNoticesFile="$PWD/notices/THIRD-PARTY-NOTICES.txt"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: runner.os == 'Linux'
@@ -133,7 +140,7 @@ jobs:
           cache-dependency-path: tests/dashboard-e2e/package-lock.json
 
       - name: Build the host
-        run: dotnet build src/SemanticRouter.Host --configuration Release
+        run: dotnet build src/SemanticRouter.Host --configuration Release -p:RestoreLockedMode=true
 
       - name: Install Playwright and the screenshot fonts
         working-directory: tests/dashboard-e2e
@@ -176,7 +183,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', 'global.json') }}
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', '**/packages.lock.json', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
 
       - name: Install vpk
@@ -275,14 +282,39 @@ jobs:
 
       - name: Smoke test
         run: |
+          status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          ready() { for i in $(seq 1 30); do [ "$(status http://localhost:5080/v1/models)" != "000" ] && return; sleep 1; done; }
+
+          # Only the admin token: port-mapped requests are remote, so the gateway refuses them without a key.
           docker run -d --name router -p 5080:8080 -e ROUTER_ADMIN_TOKEN=ci-admin-token-0123456789 semantic-router:ci
-          for i in $(seq 1 30); do curl -sf http://localhost:5080/v1/models > /dev/null && break; sleep 1; done
-          curl -sf http://localhost:5080/v1/models | grep -q '"auto"'
-          # Port-mapped requests are remote: the admin API wants the token.
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:5080/router/api/status)" = "401"
+          ready
+          test "$(status http://localhost:5080/v1/models)" = "401"
+          test "$(status http://localhost:5080/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"auto","messages":[{"role":"user","content":"hi"}]}')" = "401"
+          # The admin API wants the token.
+          test "$(status http://localhost:5080/router/api/status)" = "401"
           curl -sf -H 'Authorization: Bearer ci-admin-token-0123456789' http://localhost:5080/router/api/status | grep -q '"version"'
-          docker exec router test -f /data/semantic-router.json
+          # The chiseled image has no shell or coreutils to exec; copy the file out instead.
+          docker cp router:/data/semantic-router.json "$RUNNER_TEMP/semantic-router.json"
           docker logs router
+          docker rm -f router
+
+          # With a gateway key, clients that send it are served.
+          docker run -d --name router -p 5080:8080 -e ROUTER_ADMIN_TOKEN=ci-admin-token-0123456789 -e ROUTER_GATEWAY_KEY=ci-gateway-key-0123456789 semantic-router:ci
+          ready
+          test "$(status http://localhost:5080/v1/models)" = "401"
+          curl -sf -H 'Authorization: Bearer ci-gateway-key-0123456789' http://localhost:5080/v1/models | grep -q '"auto"'
+          docker logs router
+
+      # Fails on a high or critical vulnerability that has a fix: in the base image (Dependabot moves its digest) or in a
+      # NuGet package. Unfixed ones are not actionable here and are left out.
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: semantic-router:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
 
       - name: Logs on failure
         if: failure()

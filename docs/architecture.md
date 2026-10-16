@@ -7,14 +7,16 @@ How a request moves through the router, how configuration reloads without droppi
 | Project | Depends on | What it holds |
 |---|---|---|
 | `SemanticRouter.Core` | nothing | Vector math, token estimator, complexity heuristics, the route index, `DefaultRouteSelector`, `DefaultModelSelector`, `ModelHealthTracker`, `PromptRouter`, and the option types (`SemanticRouterOptions`, `RouteDefinition`, `ModelDefinition`, `TierDefinition`). Zero package references, AOT-compatible. |
-| `SemanticRouter.AspNetCore` | Core, ASP.NET Core | Everything that touches HTTP and processes: the middleware and dispatcher, both wire protocols, connectors, the runtime and configuration store, the dashboard and its embedded assets. |
-| `SemanticRouter.Host` | AspNetCore | The `semantic-router` .NET tool and container: `run`, `init` (detects local servers and CLIs), `doctor` (`RouterDoctor`), the embedded neutral template and per-OS configuration directory. See [host.md](host.md). |
+| `SemanticRouter.AspNetCore` | Core, ASP.NET Core | Everything that touches HTTP and processes: the middleware and dispatcher, the three wire protocols, connectors, the runtime and configuration store, the dashboard and its embedded assets. |
+| `SemanticRouter.Hosting` | AspNetCore, Storage.Sqlite, Embeddings.Onnx, Connectors.Copilot | What the tool and the desktop app share: `run`, `init` (detects local servers and CLIs), `doctor` (`RouterDoctor`), `models`, `service`, the embedded starting template and evaluation set, the per-OS configuration directory and the key ring. |
+| `SemanticRouter.Host` | Hosting | The `semantic-router` .NET tool and container image: the command line over `SemanticRouter.Hosting`. See [host.md](host.md). |
+| `SemanticRouter.Desktop` | Hosting, Avalonia | The desktop app: tray icon, dashboard window, welcome window, start at sign-in and updates. See [desktop.md](desktop.md). |
 | `SemanticRouter.Storage.Sqlite` | AspNetCore, `Microsoft.Data.Sqlite` | Durable state in one SQLite file: cooldowns, tool-call affinity, activity, configuration history (`UseSqliteState`). |
 | `SemanticRouter.Embeddings.Onnx` | AspNetCore, `Microsoft.ML.OnnxRuntime`, `Microsoft.ML.Tokenizers` | In-process sentence embeddings (`Embeddings:Provider = Onnx`): pinned, checksum-verified model downloads, and one loaded model shared across configuration reloads (`AddOnnxEmbeddings`, `UseOnnxEmbeddings`). |
 | `SemanticRouter.Connectors.Copilot` | AspNetCore, `GitHub.Copilot.SDK` | The `Copilot` connector type on GitHub's Copilot SDK (`AddCopilotConnector`): one runtime process shared across configuration reloads, a fresh session per turn, native tool calls returned to the client. |
 | `samples/RoutingApiSample` | AspNetCore | A host with an annotated `appsettings.json`: Annotate and Dispatch modes, dashboard, Anthropic endpoints. |
 | `samples/LmStudioClaudePoc` | AspNetCore | The LM Studio plus Claude Code personal setup, with a preflight and a self-test. |
-| `tests/SemanticRouter.Tests` | all | 450+ tests; no network, model or vendor CLI needed. Run on Linux, Windows and macOS in CI. |
+| `tests/SemanticRouter.Tests` | all | Over 1,000 tests; no network, model or vendor CLI needed. Run on Linux, Windows and macOS in CI. |
 | `tests/SemanticRouter.FakeCli` | nothing | A stand-in CLI (`fake-cli`) the process tests start, so they run on every OS. |
 
 ## One request, end to end
@@ -22,7 +24,8 @@ How a request moves through the router, how configuration reloads without droppi
 ```mermaid
 flowchart TD
     C1[Claude Code · Anthropic SDKs<br/>POST /v1/messages] --> M
-    C2[OpenAI SDKs · Codex · chat UIs<br/>POST /v1/chat/completions] --> M
+    C2[OpenAI SDKs · chat UIs<br/>POST /v1/chat/completions] --> M
+    C3[Codex CLI · Agents SDK<br/>POST /v1/responses] --> M
     M[PromptRoutingMiddleware<br/>path prefix picks the protocol] --> P[Parse into ChatCompletionRequest<br/>turns · tools · images · limits]
     P --> A[Map model name through ModelAliases<br/>auto · auto:* · catalog name]
     A --> Q{Tool results from a<br/>known tool call?}
@@ -35,23 +38,23 @@ flowchart TD
     SEL --> MODE{Mode}
     MODE -- "Annotate" --> N[Next endpoint reads<br/>context.GetPromptRouting]
     MODE -- "Dispatch" --> D[PromptDispatcher<br/>try candidates in order]
-    D --> H[HTTP connector<br/>OpenAI-compatible or Anthropic]
+    D --> H[HTTP connector<br/>OpenAI-compatible, Anthropic or Responses]
     D --> L[CLI connector<br/>Claude Code · Copilot · Codex · custom]
     H --> W[Response written in the client's protocol<br/>JSON or SSE · tool calls · usage]
     L --> W
 ```
 
-1. **Intercept.** `PromptRoutingMiddleware` handles `POST` requests with a JSON body on the configured path prefixes. `Middleware:PathPrefixes` carries OpenAI bodies, `Middleware:AnthropicPathPrefixes` (default `/v1/messages`) carries Anthropic bodies; `/v1/messages/count_tokens` is excluded and served by its own endpoint. The body is read once (up to `MaxRequestBodyBytes`) and handed on as a fresh stream.
+1. **Intercept.** `PromptRoutingMiddleware` handles `POST` requests with a JSON body on the configured path prefixes. `Middleware:PathPrefixes` carries OpenAI chat-completions bodies, `Middleware:AnthropicPathPrefixes` (default `/v1/messages`) Anthropic bodies and `Middleware:ResponsesPathPrefixes` (default `/v1/responses`) OpenAI Responses bodies; `/v1/messages/count_tokens` is excluded and served by its own endpoint. The body is read once (up to `MaxRequestBodyBytes`) and handed on as a fresh stream.
 2. **Parse.** `IPromptExtractor` finds the text to classify: the latest `user` message that is not only tool results, with injected context blocks (`<system-reminder>`, `<current_datetime>` and the like, see `Middleware:InjectedTags`) removed. `ChatCompletionRequest` parses the same body into a protocol-neutral model: structured turns (text, image, tool call, tool result), tools, tool choice, sampling parameters, an input-size estimate, and whether the request continues a tool-calling turn.
-3. **Map the model name.** Aliases are globs (`*haiku*` to `auto:cheapest`). A catalog model name or any `auto…` value is never remapped; a name that matches nothing routes as `auto`.
+3. **Map the model name.** Aliases are globs (`*haiku*` to `auto:cheapest`); a key without `*` matches one name exactly and is tried first. A catalog model name, any `auto…` value and the router's own names (`semantic-router`, `claude-semantic-router…`) are never remapped; a name that matches nothing routes as `auto`.
 4. **Pin tool turns.** A request that carries tool results asks `IToolCallAffinity` which model issued those calls. If that model is enabled and not cooling down, it goes first (`RoutingReason.ConversationAffinity`), with the normally ranked models behind it as fallbacks.
-5. **Classify.** `SemanticPromptClassifier`: complexity heuristics, then (unless the complexity short-circuit applies) one embedding call scored against the route index, then `DefaultRouteSelector` turns the scores into a required tier, capabilities and a local-only flag. Requirements only ever go up.
+5. **Classify.** `SemanticPromptClassifier`: complexity heuristics, then (unless the complexity short-circuit applies) one embedding call for the prompt's prose (`PromptProse` leaves pasted code and logs out) scored against the route index, then `DefaultRouteSelector` turns the scores into a required tier, capabilities and a local-only flag. Requirements only ever go up.
 6. **Rank.** `DefaultModelSelector` filters by enabled, available, local (if required), capabilities (the request adds `tools` and `vision` itself), and context window, then orders by strategy. Models below the required tier follow when `AllowBelowRequiredTier` is on.
 7. **Dispatch or annotate.** In Annotate mode the plan is attached to the request and the next endpoint decides. In Dispatch mode `PromptDispatcher` tries up to `MaxAttempts` candidates. A failure before any output cools the model down and moves on; once output has started the connector owns the response. An account-wide limit cools down every model on that connector.
 8. **Write the reply in the client's protocol.** See the next section.
 9. **Record.** A `RoutingActivityEntry` (decision, then outcome, timing, tokens and cost) goes into the activity log behind the dashboard's Activity page; the reported usage goes into the `IUsageLedger` that budgets read; spans, metrics and routing headers (including `X-Prompt-Route-Id`) are emitted. The finished entry is also pushed to the Live page over `api/events`. When memory sources are configured, the body was checked against the `MemoryIndex` while parsing, and the notes it carried are counted against every model in `SentTo` by the `MemoryExposureLog` ([memory.md](memory.md)). See [observability.md](observability.md).
 
-## Two protocols, any backend
+## Three protocols, any backend
 
 A connector either passes the client's body through or translates it.
 
@@ -61,11 +64,13 @@ A connector either passes the client's body through or translates it.
 | Anthropic | Anthropic connector | Same, plus `x-api-key`, `anthropic-version` and the configured `ForwardHeaders`. |
 | Anthropic | OpenAI-compatible | `OpenAIRequestBuilder` re-expresses the request (system prompt, `tool_use` to `tool_calls`, tool results to `tool` messages, images, stop sequences); `OpenAIResponseReader` reads the JSON or SSE reply and drives an `IChatResponseWriter` that writes Anthropic JSON or events. |
 | OpenAI | Anthropic connector | The mirror image through `AnthropicRequestBuilder` and `AnthropicResponseReader`; consecutive same-role turns are merged because the Messages API requires alternation, and `max_tokens` gets a default. |
+| OpenAI Responses | Responses connector | Body forwarded with only `model` rewritten, so hosted tools and `previous_response_id` keep working. |
+| OpenAI Responses | OpenAI-compatible or Anthropic, or the reverse | `ChatCompletionRequest` parses Responses bodies (`ChatCompletionRequest.Responses.cs`); `ResponsesRequestBuilder` and `ResponsesResponseReader` talk to a Responses backend, and `ResponsesResponseWriter` writes Responses JSON or events. |
 | either | CLI | `ChatTranscript` renders the conversation to text; the adapter builds the command line; the connector parses the CLI's output and drives the writer. With `ToolCalling: Prompted` the tools are described in the system prompt and `PromptedToolCalls` turns fenced `tool_call` blocks in the reply into structured calls. |
 
-`IChatResponseWriter` is the single seam for output: `WriteTextAsync`, `StartToolCallAsync` / `WriteToolCallArgumentsAsync` / `EndToolCallAsync`, `CompleteAsync`. `OpenAIResponseWriter` and `AnthropicResponseWriter` implement the documented JSON and SSE shapes, so a new front door is a parser, a request builder and a writer.
+`IChatResponseWriter` is the single seam for output: `WriteTextAsync`, `StartToolCallAsync` / `WriteToolCallArgumentsAsync` / `EndToolCallAsync`, `CompleteAsync`. `OpenAIResponseWriter`, `AnthropicResponseWriter` and `ResponsesResponseWriter` implement the documented JSON and SSE shapes, so a new front door is a parser, a request builder and a writer.
 
-What does not cross protocols is listed under *Known limitations* in the README (extended thinking, cache hints, structured-output parameters).
+What crosses protocols and what is dropped (reported in `X-Prompt-Route-Dropped`) is in [providers.md](providers.md#what-survives-translation).
 
 ## Configuration and hot reload
 
@@ -106,9 +111,13 @@ builder.Services.AddSemanticPromptRouting(builder.Configuration.GetSection("Sema
 |---|---|---|
 | Model cooldowns | model name plus absolute expiry, through `ICooldownStore` | Until they expire. A restart during a weekly limit keeps the model cooling down until the original time. |
 | Tool-call affinity | tool-use id → model, with an in-memory cache in front | `AffinityWindow` (24 h), so a tool turn that spans a restart still goes back to the model that issued the call. |
+| Warm prompt caches | conversation hash and model → cached tokens and expiry, with an in-memory cache in front | Until they expire (the expiry is stored with each entry: the Anthropic connector's cache `ttl`, or else `Middleware:Conversation:CacheLifetime`), so a conversation that spans a restart still weighs its warm cache. |
 | Activity | each entry once its request has finished; the log seeds itself on start | `ActivityMaxEntries` (10,000) and `ActivityMaxAge` (30 days). |
 | Configuration history | every applied document, with source, actor and note | `HistoryMaxEntries` (200). The dashboard's JSON page diffs and rolls back; see `api/config/history`. |
 | Usage | one row per served request: model, connector, route, client, tokens, cost, reference cost | `UsageRetention` (400 days), so monthly budgets survive restarts. |
+| Audit log | each change through the dashboard or admin API, sign-ins and sign-outs | `AuditRetention` (365 days). Rows are only inserted. |
+
+The same file also keeps feedback, learned routing changes, revoked dashboard sessions and the judge's and incident counts. In the `semantic-router` tool these limits are `State:Retention`; [host.md](host.md#what-the-router-stores) lists every table and how to delete it.
 
 History documents are stored as applied. They keep `${…}` references where the configuration uses them, and literal keys where the configuration file holds them too. With a secret store registered, typed keys never reach either.
 
@@ -132,6 +141,7 @@ Do not put the file on a network share: SQLite's locking is unreliable there. Fo
 | Change how models are ranked | `IModelSelector` |
 | Persist or share cooldowns | `ICooldownStore` (Core; `ModelHealthTracker` writes through to it), or replace `IModelHealth` |
 | Persist or share tool-call affinity | `IToolCallAffinity` |
+| Persist or share conversations' warm prompt caches | `IWarmCacheStore` |
 | Keep activity beyond the in-memory window | `IRoutingActivityStore` |
 | Keep configuration history somewhere else | `IRouterConfigurationHistory` |
 | Keep usage somewhere else (budgets read it) | `IUsageLedger` |

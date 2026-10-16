@@ -7,15 +7,19 @@ const { test: base, expect } = require('@playwright/test');
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'semantic-router.json'), 'utf8')
   .replace(/__STUB__/g, `http://127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`));
 
-const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'json'];
+const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'json', 'audit', 'feedback'];
 const THEMES = ['machine-dark', 'machine-light', 'terminal'];
 
-// Every test fails if the page throws or logs an error. The web fonts are left out so that runs do not depend on a
-// third-party CDN, and screenshots use fonts every Linux runner has.
+// Every test fails if the page throws or logs an error (a Content-Security-Policy violation is one), or asks any host
+// but the router for anything: the dashboard bundles its fonts and must work offline.
 const test = base.extend({
-  page: async ({ page }, use) => {
+  page: async ({ page, baseURL }, use) => {
     const errors = [];
-    await page.route(/fonts\.bunny\.net/, (route) => route.fulfill({ status: 200, contentType: 'text/css', body: '' }));
+    const own = new URL(baseURL).origin;
+    page.on('request', (r) => {
+      const url = r.url();
+      if (!url.startsWith('data:') && !url.startsWith('blob:') && new URL(url).origin !== own) errors.push(`request to another host: ${url}`);
+    });
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
     await use(page);
@@ -67,6 +71,33 @@ test('every page renders, has a heading and labels every control', async ({ page
     if (found.length) unlabelled[view] = found;
   }
   expect(unlabelled, 'controls without an accessible name, by page').toEqual({});
+});
+
+test('the audit log lists changes with who made them and from where', async ({ page }) => {
+  // beforeEach applied the fixture through the admin API from this machine.
+  await open(page, 'audit');
+  const table = page.locator('#view table[aria-label="Audit log"]');
+  await expect(table.locator('tbody tr').first()).toContainText('this machine');
+  await expect(table).toContainText('applied the configuration');
+  await expect(table).toContainText('PUT /router/api/config');
+});
+
+test('a metrics user sees only the figures and never asks for prompts or the configuration', async ({ page }) => {
+  // The router here admits this machine as admin; the page is told it signed in with the metrics token.
+  await page.route('**/router/api/session', (route) => route.request().method() === 'GET'
+    ? route.fulfill({ json: { role: 'Metrics', tokenRequired: true, tokensConfigured: true, identity: 'metrics token' } })
+    : route.continue());
+  const asked = [];
+  page.on('request', (r) => { const u = new URL(r.url()); if (u.pathname.startsWith('/router/api/')) asked.push(u.pathname); });
+  await open(page, 'routes');
+  await expect(page.locator('#view h1')).toHaveText('Overview');
+  await expect(page.locator('#nav a:visible')).toHaveText(['Overview', 'Usage']);
+  await expect(page.locator('#banner')).toContainText('metrics');
+  await expect(page.locator('#view')).not.toContainText('Try a prompt');
+  await page.locator('#nav a', { hasText: 'Usage' }).click();
+  await expect(page.locator('#view h1')).toHaveText('Usage');
+  await expect(page.locator('#view')).not.toContainText('Reference model');
+  expect(asked.filter((p) => /\/(config|activity|events|tuning|memory|audit)$/.test(p))).toEqual([]);
 });
 
 test('the page has landmarks, a skip link and marks the current page', async ({ page }) => {
@@ -160,6 +191,18 @@ test('renaming a connector renames it in the models that use it', async ({ page,
   expect(config.Models.find((m) => m.Name === 'local-small').Connector).toBe('lmstudio');
 });
 
+test('an Anthropic connector\'s prompt caching settings are saved', async ({ page, request }) => {
+  await open(page, 'connectors');
+  await page.locator('.item-head', { hasText: 'local' }).first().click();
+  await page.locator('.item.open select[data-bind="Connectors.local.Type"]').selectOption('Anthropic');
+  await page.locator('.item.open select[data-bind="Connectors.local.PromptCaching"]').selectOption('Off');
+  await page.locator('.item.open select[data-bind="Connectors.local.CacheTtl"]').selectOption('1h');
+  await page.locator('#save-bar [data-action="apply"]').click();
+  await expect(page.locator('#toast')).toContainText('Applied');
+  const config = (await (await request.get('/router/api/config')).json()).config;
+  expect(config.Connectors.local).toMatchObject({ Type: 'Anthropic', PromptCaching: 'Off', CacheTtl: '1h' });
+});
+
 test('validation lists problems and discard restores the configuration', async ({ page }) => {
   await open(page, 'routes');
   await page.locator('.item-head', { hasText: 'architecture' }).click();
@@ -177,6 +220,11 @@ test('the prompt tester classifies and sends a prompt through the gateway', asyn
   await page.locator('[data-action="tester-classify"]').click();
   await expect(page.locator('.tester')).toContainText('smalltalk');
   await expect(page.locator('.tester')).toContainText('local-small');
+  await page.locator('#tester-prompt').fill('@tier3 hello there, how are you?');
+  await page.locator('[data-action="tester-classify"]').click();
+  await expect(page.locator('.tester .result-line .badge.accent')).toHaveText('@tier3');
+  await expect(page.locator('.tester')).toContainText('ExplicitCallout');
+  await page.locator('#tester-prompt').fill('hello there, how are you?');
   await page.locator('[data-action="tester-send"]').click();
   await expect(page.locator('.tester')).toContainText('Hello from the stub backend.');
 });
@@ -226,6 +274,19 @@ test('changing the usage window or grouping keeps the figures until the new ones
   await byRoute;
   await expect(page.locator('#view h2', { hasText: 'By route' })).toBeVisible();
   await expect(page.locator('[data-action="usage-set"][data-key="window"][data-value="day"]')).toHaveClass(/\bon\b/);
+});
+
+test('the service card shows where the router runs, the base URLs for clients and its health', async ({ page }) => {
+  const base = `http://localhost:${Number(process.env.E2E_PORT || 5190)}`;
+  await open(page, 'overview');
+
+  const card = page.locator('#service');
+  await expect(card.locator('.card-head .badge')).toHaveText('running');
+  await expect(card).toContainText(`${base}/v1`);
+  await expect(card.locator('[data-action="copy-text"]').first()).toHaveAttribute('data-text', `${base}/v1`);
+  await expect(card).toContainText('this machine only');
+  await expect(card).toContainText('pid');
+  await expect(card).toContainText('127.0.0.1');
 });
 
 test('router learned runs tuning, pauses and resumes learning', async ({ page }) => {
@@ -280,6 +341,95 @@ test('every built-in theme meets WCAG AA contrast', async ({ request }) => {
   for (const theme of listing.themes.filter((t) => t.builtIn)) {
     expect(theme.contrastIssues, theme.id).toEqual([]);
   }
+});
+
+/** Sends a prompt through the gateway, so the Live feed and the Activity table have a row for it. */
+async function route(request, prompt, headers = {}) {
+  const res = await request.post('/v1/chat/completions', { headers, data: { model: 'auto', messages: [{ role: 'user', content: prompt }] } });
+  expect(res.ok(), await res.text()).toBeTruthy();
+}
+
+/** How far the page scrolls sideways: 0 when everything fits the window. */
+const sideways = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+
+// A pasted build URL (not a credential, so it is not masked) and the kind of JSON user id Claude Code sends.
+const LONG_TOKEN = 'https://example.com/builds/' + 'a1b2c3d4e5f6'.repeat(8);
+const LONG_PROJECT = JSON.stringify({ device_id: 'f'.repeat(64), account_uuid: '12345678-1234-1234-1234-123456789abc' });
+
+// At 1680 px a short decision used to fit on one line and a long one wrapped its reason under the header: now every row
+// has the same lines at every width.
+for (const width of [1360, 1680]) {
+  test(`every decision on Live has the same lines, with the latency on the reason line (${width} px)`, async ({ page, request }) => {
+    await route(request, 'hello there, how are you?');
+    await route(request, 'please design a scalable distributed architecture for an event sourcing system with CQRS, snapshots and replay across regions');
+    await page.setViewportSize({ width, height: 900 });
+    await open(page, 'live');
+    const rows = page.locator('#live-feed .feed-row');
+    await expect(rows.nth(1)).toBeVisible();
+    for (const row of await rows.all()) {
+      const box = async (sel) => (await row.locator(sel).first().boundingBox());
+      const [t, tier, why, ms, prompt, self] = [await box('.t'), await box('.tier'), await box('.why'), await box('.ms'), await box('.prompt'), await row.boundingBox()];
+      expect(Math.abs((tier.y + tier.height / 2) - (t.y + t.height / 2)), 'the tier is on the header line').toBeLessThan(6);
+      expect(why.y, 'the reason is below the header line').toBeGreaterThanOrEqual(t.y + t.height - 1);
+      expect(Math.abs(ms.y - why.y), 'the latency is on the reason line').toBeLessThan(4);
+      expect(self.x + self.width - (ms.x + ms.width), 'the latency is right-aligned').toBeLessThan(12);
+      expect(prompt.y, 'the prompt is below the reason line').toBeGreaterThanOrEqual(why.y + why.height - 1);
+    }
+  });
+}
+
+for (const width of [1000, 1100, 1200]) {
+  test(`Live fits a ${width} px window without scrolling sideways`, async ({ page, request }) => {
+    await route(request, 'summarize this text: ' + 'the ledger replays events twice and the customer account number is wrong on every invoice '.repeat(3));
+    await page.setViewportSize({ width, height: 900 });
+    await open(page, 'live');
+    await expect(page.locator('#live-feed .feed-row').first()).toBeVisible();
+    await expect(page.locator('#live-graph svg')).toBeVisible();
+    expect(await sideways(page), 'horizontal overflow').toBeLessThanOrEqual(0);
+    const card = await page.locator('#live-graph').boundingBox();
+    const graph = await page.locator('#live-graph svg').boundingBox();
+    expect(graph.x + graph.width, 'the graph fits its panel').toBeLessThanOrEqual(card.x + card.width + 1);
+  });
+}
+
+test('a long unbroken token in a prompt or project keeps the Activity table on screen', async ({ page, request }) => {
+  await route(request, 'hello there ' + LONG_TOKEN, { 'X-Router-Project': LONG_PROJECT });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const view of ['activity', 'overview']) {
+    await open(page, view);
+    const row = page.locator('#view table.activity-table tr', { hasText: 'example.com/builds' }).first();
+    await expect(row).toBeVisible();
+    expect(await sideways(page), `horizontal overflow on ${view}`).toBeLessThanOrEqual(0);
+    const wrap = row.locator('xpath=ancestor::div[contains(@class, "table-wrap")]');
+    expect(await wrap.evaluate((el) => el.scrollWidth - el.clientWidth), `the ${view} table scrolls sideways`).toBeLessThanOrEqual(0);
+    const box = await wrap.boundingBox();
+    const served = await row.locator('td.served').boundingBox();
+    const ms = await row.locator('td.num').boundingBox();
+    expect(served.width, 'Served by has room').toBeGreaterThanOrEqual(100);
+    expect(ms.x + ms.width, 'the ms column is inside the table').toBeLessThanOrEqual(box.x + box.width + 1);
+    await expect(row.locator('td.served')).toContainText(/local-small|cloud-large/);
+  }
+});
+
+test('Report on an Activity entry opens a pre-filled misroute issue without the prompt', async ({ page, request }) => {
+  await route(request, 'hello there, my-private-words-123');
+  await page.addInitScript(() => { window.__opened = []; window.open = (url) => { window.__opened.push(url); return null; }; });
+  await open(page, 'activity');
+  await page.locator('#view table.activity-table tr', { hasText: 'my-private-words-123' }).first().getByRole('button', { name: 'Report' }).click();
+  await expect(page.locator('#view h1')).toHaveText('Feedback');
+  await expect(page.locator('#feedback-form')).toContainText('Route: smalltalk');
+  await page.getByLabel('What the prompt really needed, and why').fill('Small talk; tier 1 was right.');
+  await page.getByRole('button', { name: 'Open the issue on GitHub' }).click();
+  const [url] = await page.evaluate(() => window.__opened);
+  const issue = new URL(url);
+  expect(issue.origin + issue.pathname).toBe('https://github.com/siebe41/SemanticRouter.NET/issues/new');
+  expect(issue.searchParams.get('template')).toBe('misroute.yml');
+  expect(issue.searchParams.get('decision')).toContain('Route: smalltalk');
+  expect(issue.searchParams.get('answered-by')).toBe('local-small');
+  expect(issue.searchParams.get('expected')).toContain('tier 1 was right');
+  expect(issue.searchParams.get('version')).toBeTruthy();
+  expect(url).not.toContain('my-private-words-123');
+  expect(issue.searchParams.has('prompt')).toBeFalsy();
 });
 
 test.describe('on a phone', () => {

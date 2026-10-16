@@ -167,13 +167,29 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                         _services.GetService<IOptions<UsageOptions>>()?.Value ?? new UsageOptions(),
                         _services.GetService<IOptions<MemoryOptions>>()?.Value,
                         _services.GetService<IOptions<TuningOptions>>()?.Value,
-                        _services.GetService<IOptions<NotificationOptions>>()?.Value);
+                        _services.GetService<IOptions<NotificationOptions>>()?.Value,
+                        _services.GetService<IOptions<StateOptions>>()?.Value);
                 }
             }
 
             return _baseline;
         }
     }
+
+    /// <summary>
+    /// The rules every configuration is held to: the machine policy, with the user's offline mode
+    /// (<see cref="NetworkOptions.Offline"/>); <see cref="MachinePolicy.None"/> without either.
+    /// </summary>
+    public MachinePolicy Policy => _policy ??= MachinePolicy.Effective(_services.GetService<MachinePolicy>(), NetworkOptions.Of(_services));
+
+    private MachinePolicy? _policy;
+
+    /// <summary>
+    /// Validation errors for a document that would replace the running one: <see cref="Validate"/>, and what it would
+    /// have to give up to keep within the machine policy. Empty when it could be applied.
+    /// </summary>
+    public IReadOnlyList<string> ValidateChange(RouterConfiguration configuration) =>
+        [.. Validate(configuration), .. Policy.Violations(configuration).Select(v => "Not allowed: " + v)];
 
     /// <summary>Validation errors for a document; empty when it could be applied.</summary>
     public static IReadOnlyList<string> Validate(RouterConfiguration configuration)
@@ -189,7 +205,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     public RouterRuntime Apply(RouterConfiguration configuration, bool persist, string source = "admin API", string? actor = null, string? note = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        IReadOnlyList<string> errors = Validate(configuration);
+        IReadOnlyList<string> errors = ValidateChange(configuration);
         if (errors.Count > 0)
         {
             throw new InvalidOperationException("Invalid router configuration: " + string.Join("; ", errors));
@@ -331,6 +347,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
     private RouterRuntime Build(RouterConfiguration configuration, RouterConfigurationSource source, IReadOnlyList<string>? notes = null)
     {
+        // The machine policy wins over the configuration: what breaks it is turned off, and said so.
+        IReadOnlyList<string> enforced = Policy.Enforce(configuration);
         IReadOnlyList<string> errors = configuration.GetDocumentValidationErrors();
         if (errors.Count > 0)
         {
@@ -345,8 +363,11 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
         IModelLatency? latency = _services.GetService<IModelLatency>();
         (latency as ModelLatencyTracker)?.Configure(configuration.Selection);
+        IModelCacheShare? cache = _services.GetService<IModelCacheShare>();
+        (cache as ModelCacheTracker)?.Configure(configuration.Selection);
+        _services.GetService<IStateRetention>()?.Apply(configuration.State.Retention);
 
-        var warnings = new List<string>();
+        var warnings = new List<string>(enforced);
         if (configuration.Middleware.Mode == PromptRouterMode.Dispatch && !configuration.Models.Any(m => m.Enabled))
         {
             // Allowed so a fresh install can start and be configured from the dashboard, but every request gets 503.
@@ -362,6 +383,13 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                 "first. Use Onnx or a local embedding server, or set Embeddings:IsLocal if the server is yours.");
         }
 
+        if (configuration.Middleware.AllowUnauthenticatedRemoteClients && configuration.Middleware.GatewayKeys.Count == 0)
+        {
+            warnings.Add(
+                "The gateway serves other machines without a key (Middleware:AllowUnauthenticatedRemoteClients), so anyone who can reach it " +
+                "can use the connectors' keys. Make sure a reverse proxy authenticates every request, or set Middleware:GatewayKeys.");
+        }
+
         foreach (RouteDefinition route in configuration.Routes.Where(r => r.PreferredModel is { Length: > 0 }))
         {
             if (!configuration.Models.Any(m => m.Enabled && string.Equals(m.Name, route.PreferredModel, StringComparison.OrdinalIgnoreCase)))
@@ -371,6 +399,13 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         }
 
         RouterConfiguration resolved = configuration.ResolveSecrets(_secrets, warnings);
+        foreach ((string name, string reason) in Policy.BlockedWebhooks(resolved.Notifications).ToArray())
+        {
+            // A webhook address held as a secret is only known once resolved.
+            resolved.Notifications.Webhooks.Remove(name);
+            warnings.Add($"Webhook '{name}' is not used: {reason}.");
+        }
+
         foreach (string warning in warnings)
         {
             LogConfigurationWarning(_logger, warning);
@@ -382,9 +417,9 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         IPromptClassifier classifier = ResolveCustom<IPromptClassifier>() ?? new SemanticPromptClassifier(embeddings, configuration, complexity, routeSelector);
         IModelResidency? residency = _services.GetService<IModelResidency>();
         (residency as ModelResidencyTracker)?.Configure(resolved);
-        IModelSelector modelSelector = ResolveCustom<IModelSelector>() ?? new DefaultModelSelector(configuration.Selection, latency, residency);
+        IModelSelector modelSelector = ResolveCustom<IModelSelector>() ?? new DefaultModelSelector(configuration.Selection, latency, cache, residency);
         IModelHealth health = _services.GetRequiredService<IModelHealth>();
-        IPromptRouter router = ResolveCustom<IPromptRouter>() ?? new PromptRouter(classifier, configuration, modelSelector, health, reliability: _services.GetService<IModelReliability>(), latency: latency);
+        IPromptRouter router = ResolveCustom<IPromptRouter>() ?? new PromptRouter(classifier, configuration, modelSelector, health, _services.GetService<TimeProvider>(), _services.GetService<IModelReliability>(), latency);
         IPromptExtractor extractor = ResolveCustom<IPromptExtractor>() ?? new JsonPromptExtractor(
             configuration.Middleware.MessageSelection, configuration.Middleware.StripSystemReminders, configuration.Middleware.InjectedTags);
 
@@ -398,7 +433,9 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             _services.GetRequiredService<ILoggerFactory>(),
             redactor,
             _services.GetService<PromptRouterMetrics>(),
-            _services.GetServices<IChatConnectorFactory>());
+            _services.GetServices<IChatConnectorFactory>(),
+            Policy,
+            configuration.State.StorePrompts);
 
         return new RouterRuntime
         {

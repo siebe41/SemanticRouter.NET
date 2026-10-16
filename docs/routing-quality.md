@@ -2,6 +2,26 @@
 
 Routing quality depends on route utterances and on a similarity threshold whose right value changes with the embedding model. This guide shows how to measure how well your configuration routes your own prompts, and how to improve it. Everything runs on the dashboard's **Evaluate** page or through the admin API. No model is called; only the embedding provider is.
 
+## The starting routes
+
+`semantic-router init` and the built-in template start with these routes. A prompt that matches none of them gets `FallbackTier` (3).
+
+| Route | Tier | For |
+|---|---|---|
+| `smalltalk` | 1 | Greetings, thanks, questions about what the assistant can do. |
+| `rewrite-summarize` | 1 | Summaries, rewrites, translation, spelling. |
+| `agent-housekeeping` | 1 | An agent's own side requests: titles, transcript summaries, command descriptions. |
+| `simple-code` | 2 | Small, self-contained code tasks: a regex, a unit test, a docstring, null checks, extract a method, a loop to LINQ, a class to a record, a method to async. Needs `code`. |
+| `quick-answers` | 2 | Short factual and explain questions: what a status code, error code, flag, option or pattern means, defaults and ports, date formats. |
+| `continuation` | 3 | "go ahead", "continue": in a conversation they keep its tier (`FollowsConversation`). |
+| `deep-reasoning` | 4 | Design, trade-offs, risk analysis, proofs. |
+| `complex-code` | 4 | Debugging, leaks, deadlocks, performance, reviews. Needs `code`. |
+| `agentic-coding` | 4 | Multi-step work across files: implement, migrate, fix the build. Needs `code`. |
+
+`quick-answers` is tier 2, not 1, because in an agentic client a question about your own system ("what time zone does the server use?") is answered with a tool call. The request then carries tools, which adds the `tools` capability, and tier 2 is where `init` puts the small models that call tools well (Claude Haiku, a local coder model). General-knowledge questions ("what is the capital of Australia?", "how does compound interest work?") are not in it and stay on the fallback tier.
+
+The sample evaluation set that `init` writes (116 prompts) routes 111 to their tier with all-MiniLM-L6-v2 and 112 with bge-small-en-v1.5, each at the threshold `init` sets for it; CI fails below 90%. It includes guard prompts for hard work that looks like a small request ("add retry with backoff to every service client and make the tests pass", "explain why this deadlock happens under load"), so new utterances that pull such work down a tier show up as misses.
+
 ## Evaluation sets
 
 An evaluation set is a list of prompts with the tier each should get. A case can also name the route it should match and mark the prompt as local-only. The format is JSON Lines, one case per line:
@@ -30,7 +50,7 @@ A JSON array of the same objects works too, as does `{"cases": [...]}`. Use the 
 - **Route accuracy**, for cases that name a route.
 - **Misrouted prompts**, each with the reason (`NoMatchFallback`, `AmbiguousMatchEscalation`, …) and the best route scores behind the decision. **Add to route…** adds the prompt as an utterance and runs the set again.
 
-The evaluator decides exactly as the router does, with `DefaultRouteSelector`, the complexity rules and the short-circuit. A custom `IRouteSelector` or `IPromptClassifier` is not used here.
+The evaluator decides exactly as the router does, with `DefaultRouteSelector`, the complexity rules and the short-circuit, and embeds the same text: the prose of each prompt, without pasted code (`EmbedProseOnly`). A custom `IRouteSelector` or `IPromptClassifier` is not used here.
 
 ## Calibrating thresholds
 
@@ -67,6 +87,7 @@ The classifier looks at the latest message, but a conversation is more than that
 - **Short follow-ups keep the full floor.** A message of up to `ShortFollowUpLength` characters (default 60, without code blocks), such as "yes", "try again" or "looks good, commit it", is not classified on its own.
 - **It decays.** Every `DecayTurns` turns (default 3) that need less than the conversation's peak lower the floor by one tier, so a conversation that moved on to simpler work gets cheaper models again. A harder turn raises the peak at once. After `IdleTimeout` (default 30 minutes) without a turn, the conversation is forgotten.
 - **It sticks to a model.** While the model that answered the last turn is available and exactly on the required tier, it is tried first (`X-Prompt-Route-Sticky: true`, and **sticky** on the Activity page): answers stay coherent and the provider's prompt cache keeps working.
+- **It weighs the warm prompt cache.** Caches are per model, so moving a conversation sends its whole context again and writes it to the new model's cache. After each turn the router notes how much of the context the serving model reported reading or writing from its cache, and keeps it warm for as long as the provider keeps the entries, refreshed by every turn that uses it. On an Anthropic connector (`Type: Anthropic`) the router knows that from the cache markers: the connector's `CacheTtl` (`5m` or `1h`) for the markers it adds, or the longest `ttl` among an Anthropic client's own markers. For other backends it is `CacheLifetime` (default 5 minutes). On the next turn it compares two costs, at the models' configured prices: staying, which reads the cached part at the warm model's cache-read price and sends the rest at its input price, and moving to the ranking's first choice, which sends the whole context at its cache-write price. It stays when that is cheaper, also on a model above the required tier, and moves when it is not, for example down to a much cheaper, local or flat-rate model. A model below the required tier is never kept. After a failover it goes back to the warm model when that comes out of its cooldown before the cache expires. The reason shows on the Activity page and in `X-Prompt-Route-Selection`, e.g. `cache: stayed on opus (80k cached); moving to sonnet would cost $0.252 more`. Without a warm cache (expired, or a backend that reports no cache use) the rule above applies.
 
 What it leaves alone:
 
@@ -74,10 +95,10 @@ What it leaves alone:
 - **Requests for a specific catalog model** and **tool-result turns** (which stay on the model that issued the calls).
 - **A client's own cheap side tasks.** Claude Code sends titles, summaries and other housekeeping under a Haiku model name, which `ModelAliases` maps to `auto:cheapest`; those are not raised.
 
-A conversation is recognised by a hash of the client, the system prompt and the first user message, which chat clients resend on every turn. No prompt text is kept, the state is in memory, and the activity log shows only a short prefix of the hash. Clients that send only the newest message (relying on a server-side history) start a new conversation on each turn, so they are routed per message as before.
+A conversation is recognised by a hash of the client, the system prompt and the first user message, which chat clients resend on every turn. Only the system and developer messages before the first user message count as the system prompt: Claude Code adds system messages later in the conversation, on every turn and around tool calls, and those must not start a new conversation each time. A client that names its session in a header is recognised by the client, the session id and the first user message instead (`SessionHeader`, default `x-claude-code-session-id`, which Claude Code sends on every request), so a system prompt that changes during the session does not split it either. The first user message stays in that key because a session can hold more than one conversation (Claude Code's subagents open with their own task): each is a conversation of its own, and its first turn does not reset the main one. No prompt text is kept, the state is in memory (warm caches are also kept in the SQLite state, so they survive a restart), and the activity log shows only a short prefix of the hash. Clients that send only the newest message (relying on a server-side history) start a new conversation on each turn, so they are routed per message as before.
 
 ```jsonc
-"Middleware": { "Conversation": { "Enabled": true, "DecayTurns": 3, "IdleTimeout": "00:30:00", "ShortFollowUpLength": 60, "StickToModel": true } }
+"Middleware": { "Conversation": { "Enabled": true, "DecayTurns": 3, "IdleTimeout": "00:30:00", "ShortFollowUpLength": 60, "StickToModel": true, "CacheLifetime": "00:05:00", "SessionHeader": "x-claude-code-session-id" } }
 ```
 
 ## Feedback
@@ -117,7 +138,7 @@ Retries and corrections only show the answers people pushed back on. An optional
 - **What a low grade does:** a grade of `FailingGrade` (2) or lower is **graded low** feedback: the decision needed one tier more. [Automatic tuning](#automatic-tuning) counts such a prompt at `Tuning:JudgeWeight` (0.75), between implicit feedback (0.5) and your own labels (1), and [model reliability](#model-reliability) counts it as a failed turn.
 - **Privacy:** a local-only request is never sent to a judge that is not local. With a local judge, nothing leaves the machine. A cloud judge does see the sampled requests and answers that are not local-only.
 - **Cost:** the judge's calls are served like any other: budgets apply, and they show on the Usage page under route and client `(judge)`. A local judge costs nothing.
-- **Where you see it:** a **graded 4/5** badge on the Activity entry, with the judge's reason in its tooltip; the API has it as `grade` and `gradeNote`. The Activity page says when the judge is on.
+- **Where you see it:** a **graded 4/5** badge on the Activity entry, with the judge's reason in its tooltip; the API has it as `grade` and `gradeNote`. The reason is kept as `State:StorePrompts` allows: masked with `Redacted`, not at all with `Off` ([host.md](host.md#what-the-router-stores)). The Activity page says when the judge is on.
 - **Whether to trust it:** when a graded answer's prompt is also in the evaluation set, the two are compared. A low grade agrees when your label is above the tier of the model that answered; a good grade agrees when your label is at or below it. Label graded prompts from the Activity page (or add them to the set with the same wording). The **Judge agreement** card on the Evaluate page, and `GET api/judge/agreement`, show how many agree, split by low and good grades, with the latest pairs. Once `Tuning:JudgeAgreementPairs` (10) answers have a label, [automatic tuning](#automatic-tuning) counts the judge's labels at `JudgeWeight` times the agreement: a judge that agrees with half your labels counts half as much, and one that agrees with none is ignored. The judge keeps a hash of each prompt it grades to find its label (no more of the prompt than the Activity preview is kept).
 
 Pick a judge stronger than the models it grades; grading its own answers is skipped.
@@ -143,7 +164,7 @@ Calibration finds better thresholds, but someone has to run it and apply the res
 
 A route's tier picks its model, but the work some routes see is easier than their tier: a cheaper model may do it as well. Tuning finds out from real turns, not labels:
 
-1. **A trial starts** on a route with at least `Middleware:Reliability:MinimumTurns` (10) plain matches from one model in the last `FeedbackDays`, when a cheaper enabled model can do the route's work (its capabilities, and local when the route is local-only). It tries the next cheaper one, one step down, not straight to the cheapest. Router learned lists it as **on trial**, with why: "mid (tier 3) costs less than cloud (tier 4), which served agentic: 2 of 40 turns drew feedback (2 retried). 5% of the route's plain matches try it, up to 20 turns".
+1. **A trial starts** on a route with at least `Middleware:Reliability:MinimumTurns` (10) plain matches from one model in the last `FeedbackDays`, when a cheaper enabled model can do the route's work (its capabilities, and local when the route is local-only). It tries the next cheaper one, one step down, not straight to the cheapest. Cheaper means a typical turn (1,000 input and 500 output tokens) costs less with the prompt cache counted: input each model read from its cache on the route's recent turns is priced at its cache price (see [choosing a model](../README.md#step-2-choosing-a-model)). A model with cheap cache reads is not traded for one that only lists a lower input price; a model without enough turns is compared at its list prices. Router learned lists it as **on trial**, with why: "mid (tier 3) costs less than cloud (tier 4), which served agentic: 2 of 40 turns drew feedback (2 retried). 5% of the route's plain matches try it, up to 20 turns".
 2. **During the trial**, `ModelTrialRate` (5%) of the route's plain matches go to the cheaper model first, with the usual models behind it, until it has `ModelTrialTurns` (20). Only the first turn of a conversation the router decided itself: never an explicit choice, a callout, a retry or other escalation, a follow-up, a tool result or a client's own request. A local-only request never goes to a cloud model on trial. Activity marks these turns **trial**.
 3. **The trial is judged** at the next run after it has its turns. Feedback that says a turn was not good enough (retried, corrected, tool errors, empty reply, graded low) is counted on both models' turns. The cheaper model takes the route over when its share is at most `ModelTrialMargin` (5 points) above the current model's: the route gets `PreferredModel` in a new configuration version, and its plain matches go to that model first from then on, even below the route's tier. Otherwise it is **dropped**. Either way the evidence is in the reason: "mid: 1 of 20 trial turns drew feedback (1 corrected); cloud: 2 of 40 turns drew feedback".
 
@@ -224,7 +245,7 @@ It is off by default: a client that legitimately repeats a prompt (a "regenerate
 | `GET api/routes/health` | Findings and route pairs. |
 | `POST api/routes/{name}/utterances` | `{"utterance": "…", "tier": n}`: add an utterance (creating the route when `tier` is given) and apply. Returns how the utterance now classifies. |
 | `GET api/tuning` | Automatic tuning: `mode`, `paused`, `lastRun`, `nextRun`, `lastResult`, `thisWeek`, `suggestions`, and the `changes` newest first (each with `summary`, `why`, `examples`, `state`, `version` and `effect`). |
-| `GET api/tuning/changes?limit=100` | Just the changes. |
+| `GET api/tuning/changes?limit=100` | The changes only. |
 | `POST api/tuning/run` | Run tuning now; returns what it did. |
 | `POST api/tuning/changes/{id}/undo` | Undo one change (409 when it is not applied, or its setting changed since). |
 | `POST api/tuning/changes/{id}/apply`, `…/dismiss` | Apply or turn down a suggestion. |
@@ -233,7 +254,7 @@ It is off by default: a client that legitimately repeats a prompt (a "regenerate
 | `GET api/reliability` | Each model's turns and share with feedback per route and with tools, the share of the other models on the same work, and the models left out (`excludedSince`, `excludedUntil`, `detail`). |
 | `POST api/reliability/reset` | `{"model": "…", "route": "…"}` (or `"capability": "tools"`, or neither for everything): offer the model again with a fresh count. |
 
-Changing the set, adding utterances, comparing providers and every tuning action (run, undo, apply, dismiss, pause) need the admin role. Evaluating, route health and reading what tuning learned are open to the read-only role.
+Changing the set, adding utterances, evaluating and comparing providers (which embed every prompt in the set) and every tuning action (run, undo, apply, dismiss, pause) need the admin role. Route health and reading what tuning learned are open to the read-only role.
 
 From code, the same pieces are in `SemanticRouter.Core`: `EvaluationSet.Parse`, `RoutingEvaluator` (`PrepareAsync`, `Evaluate`, `Calibrate`), `ThresholdTuner` (the bounded, guarded steps automatic tuning takes) and `RouteHealthAnalyzer`.
 

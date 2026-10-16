@@ -29,6 +29,9 @@ public sealed class SqliteStateOptions
     /// <summary>Most configuration versions kept. Default 200.</summary>
     public int HistoryMaxEntries { get; set; } = 200;
 
+    /// <summary>Oldest audit log entries kept. Default 365 days.</summary>
+    public TimeSpan AuditRetention { get; set; } = TimeSpan.FromDays(365);
+
     /// <summary>How long a write waits for another writer (another router instance) before giving up. Default 5 s.</summary>
     public TimeSpan BusyTimeout { get; set; } = TimeSpan.FromSeconds(5);
 }
@@ -37,8 +40,8 @@ public sealed class SqliteStateOptions
 public static class SqliteStateBuilderExtensions
 {
     /// <summary>
-    /// Keeps model cooldowns, tool-call affinity, the activity log, feedback, usage, learned changes, connector incidents
-    /// and the configuration history in one SQLite file, so they survive restarts. Several router instances on one machine may share the file (cooldowns and affinity
+    /// Keeps model cooldowns, tool-call affinity, conversations' warm prompt caches, the activity log, feedback, usage,
+    /// learned changes, connector incidents, the configuration history and the audit log in one SQLite file, so they survive restarts. Several router instances on one machine may share the file (cooldowns and affinity
     /// are then shared); a database that cannot be opened or written falls back to memory with a warning.
     /// </summary>
     public static SemanticRouterBuilder UseSqliteState(this SemanticRouterBuilder builder, string path, Action<SqliteStateOptions>? configure = null)
@@ -52,14 +55,17 @@ public static class SqliteStateBuilderExtensions
             configure?.Invoke(o);
         });
         services.TryAddSingleton<SqliteRouterDatabase>();
+        services.TryAddSingleton<IStateRetention>(provider => provider.GetRequiredService<SqliteRouterDatabase>());
         services.Replace(ServiceDescriptor.Singleton<ICooldownStore, SqliteCooldownStore>());
         services.Replace(ServiceDescriptor.Singleton<IToolCallAffinity, SqliteToolCallAffinity>());
+        services.Replace(ServiceDescriptor.Singleton<IWarmCacheStore, SqliteWarmCaches>());
         services.Replace(ServiceDescriptor.Singleton<IRoutingActivityStore, SqliteActivityStore>());
         services.Replace(ServiceDescriptor.Singleton<IRoutingFeedbackStore, SqliteFeedbackStore>());
         services.Replace(ServiceDescriptor.Singleton<IRouterConfigurationHistory, SqliteConfigurationHistory>());
         services.Replace(ServiceDescriptor.Singleton<ITuningStore, SqliteTuningStore>());
         services.Replace(ServiceDescriptor.Singleton<IUsageLedger, SqliteUsageLedger>());
         services.Replace(ServiceDescriptor.Singleton<IStateValueStore, SqliteStateValues>());
+        services.Replace(ServiceDescriptor.Singleton<IAuditLog, SqliteAuditLog>());
         return builder;
     }
 }
@@ -68,7 +74,7 @@ public static class SqliteStateBuilderExtensions
 /// The shared database: schema, connections and failure handling. Every operation degrades to a fallback value when
 /// the database is unavailable, so routing never fails because of state storage.
 /// </summary>
-internal sealed partial class SqliteRouterDatabase
+internal sealed partial class SqliteRouterDatabase : IStateRetention
 {
     // 2: usage.profile (routing profiles). 3: usage.subscription_value (subscriptions at API prices). Older files are
     // migrated in place.
@@ -115,6 +121,26 @@ internal sealed partial class SqliteRouterDatabase
 
     public SqliteStateOptions Options { get; }
 
+    private volatile StateRetentionOptions _retention = new();
+
+    /// <summary>Oldest activity and feedback kept: <c>State:Retention:ActivityDays</c>, or <see cref="SqliteStateOptions.ActivityMaxAge"/>.</summary>
+    public TimeSpan ActivityMaxAge => _retention.ActivityDays is int days ? TimeSpan.FromDays(days) : Options.ActivityMaxAge;
+
+    /// <summary>Most activity entries kept: <c>State:Retention:ActivityEntries</c>, or <see cref="SqliteStateOptions.ActivityMaxEntries"/>.</summary>
+    public int ActivityMaxEntries => _retention.ActivityEntries ?? Options.ActivityMaxEntries;
+
+    /// <summary>Oldest usage kept: <c>State:Retention:UsageDays</c>, or <see cref="SqliteStateOptions.UsageRetention"/>.</summary>
+    public TimeSpan UsageRetention => _retention.UsageDays is int days ? TimeSpan.FromDays(days) : Options.UsageRetention;
+
+    /// <summary>Most configuration versions kept: <c>State:Retention:ConfigurationVersions</c>, or <see cref="SqliteStateOptions.HistoryMaxEntries"/>.</summary>
+    public int HistoryMaxEntries => _retention.ConfigurationVersions ?? Options.HistoryMaxEntries;
+
+    /// <summary>Oldest audit log entries kept: <c>State:Retention:AuditDays</c>, or <see cref="SqliteStateOptions.AuditRetention"/>.</summary>
+    public TimeSpan AuditRetention => _retention.AuditDays is int days ? TimeSpan.FromDays(days) : Options.AuditRetention;
+
+    /// <summary>Takes the retention of the configuration just applied; records past it go at the next prune.</summary>
+    public void Apply(StateRetentionOptions retention) => _retention = retention ?? new StateRetentionOptions();
+
     public TimeProvider Time { get; }
 
     public string Location { get; }
@@ -156,6 +182,13 @@ internal sealed partial class SqliteRouterDatabase
             return true;
         });
 
+    /// <summary>Checkpoints the write-ahead log into the database and truncates it. Skipped quietly while another connection reads.</summary>
+    public static void TruncateLog(SqliteConnection connection)
+    {
+        using SqliteCommand checkpoint = Command(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
+        checkpoint.ExecuteNonQuery();
+    }
+
     public static SqliteCommand Command(SqliteConnection connection, string sql, params (string Name, object? Value)[] parameters)
     {
         SqliteCommand command = connection.CreateCommand();
@@ -179,9 +212,11 @@ internal sealed partial class SqliteRouterDatabase
             // not flush to disk on every commit. FULL did, holding the write lock for each flush: on Windows, where
             // flushes are slow, a burst of writes (two routers sharing the file) queued past the busy timeout and was
             // dropped.
-            using (SqliteCommand synchronous = Command(connection, "PRAGMA synchronous=NORMAL;"))
+            // secure_delete: a deleted row (a pruned or purged prompt preview) is overwritten with zeros, not left in a
+            // free page where a copy of the file would still hold it.
+            using (SqliteCommand pragmas = Command(connection, "PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;"))
             {
-                synchronous.ExecuteNonQuery();
+                pragmas.ExecuteNonQuery();
             }
 
             return connection;
@@ -208,6 +243,10 @@ internal sealed partial class SqliteRouterDatabase
             CREATE TABLE IF NOT EXISTS cooldowns (model TEXT PRIMARY KEY COLLATE NOCASE, until_ticks INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS affinity (tool_use_id TEXT PRIMARY KEY, model TEXT NOT NULL, created_ticks INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS affinity_created ON affinity (created_ticks);
+            CREATE TABLE IF NOT EXISTS warm_caches (
+                conversation TEXT NOT NULL, model TEXT NOT NULL COLLATE NOCASE, tokens INTEGER NOT NULL, expires_ticks INTEGER NOT NULL,
+                PRIMARY KEY (conversation, model));
+            CREATE INDEX IF NOT EXISTS warm_caches_expires ON warm_caches (expires_ticks);
             CREATE TABLE IF NOT EXISTS activity (id INTEGER PRIMARY KEY, timestamp_ticks INTEGER NOT NULL, entry TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS activity_timestamp ON activity (timestamp_ticks);
             CREATE TABLE IF NOT EXISTS feedback (id INTEGER PRIMARY KEY, timestamp_ticks INTEGER NOT NULL, entry_id INTEGER NOT NULL, item TEXT NOT NULL);
@@ -222,6 +261,10 @@ internal sealed partial class SqliteRouterDatabase
             CREATE TABLE IF NOT EXISTS config_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp_ticks INTEGER NOT NULL,
                 source TEXT NOT NULL, actor TEXT, note TEXT, document TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp_ticks INTEGER NOT NULL, actor TEXT NOT NULL, client TEXT,
+                method TEXT NOT NULL, path TEXT NOT NULL, route TEXT, status INTEGER NOT NULL, summary TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS audit_timestamp ON audit (timestamp_ticks);
             INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', $version);
             """, ("$version", SchemaVersion.ToString(CultureInfo.InvariantCulture))))
         {
@@ -235,10 +278,10 @@ internal sealed partial class SqliteRouterDatabase
             string? version = check.ExecuteScalar() as string;
             if (version is "1" or "2")
             {
-                using SqliteCommand migrate = Command(connection, (version == "1" ? "ALTER TABLE usage ADD COLUMN profile TEXT;" : string.Empty) + """
-                    ALTER TABLE usage ADD COLUMN subscription_value TEXT NOT NULL DEFAULT '0';
-                    UPDATE meta SET value = '3' WHERE key = 'schema_version';
-                    """);
+                // Only the columns the file lacks: a file with no usage table yet just got the current one above.
+                string add = (HasColumn(connection, transaction, "usage", "profile") ? string.Empty : "ALTER TABLE usage ADD COLUMN profile TEXT;")
+                    + (HasColumn(connection, transaction, "usage", "subscription_value") ? string.Empty : "ALTER TABLE usage ADD COLUMN subscription_value TEXT NOT NULL DEFAULT '0';");
+                using SqliteCommand migrate = Command(connection, add + "UPDATE meta SET value = '3' WHERE key = 'schema_version';");
                 migrate.Transaction = transaction;
                 migrate.ExecuteNonQuery();
             }
@@ -263,6 +306,13 @@ internal sealed partial class SqliteRouterDatabase
     /// Masks the secrets in configuration history written before the history was masked: those documents kept keys
     /// inherited from environment variables and user-secrets in plain text. Runs once; returns whether anything changed.
     /// </summary>
+    private static bool HasColumn(SqliteConnection connection, SqliteTransaction transaction, string table, string column)
+    {
+        using SqliteCommand command = Command(connection, "SELECT COUNT(*) FROM pragma_table_info($table) WHERE name = $column;", ("$table", table), ("$column", column));
+        command.Transaction = transaction;
+        return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
+    }
+
     private static bool MaskHistory(SqliteConnection connection, SqliteTransaction transaction)
     {
         const string Done = "history_masked";
@@ -436,6 +486,80 @@ internal sealed class SqliteToolCallAffinity(SqliteRouterDatabase database) : IT
     }
 }
 
+/// <summary>
+/// Conversations' warm prompt caches that survive restarts: an in-memory copy in front of the database, so a
+/// conversation that spans a restart (or moves to another instance sharing the file) still weighs its warm cache.
+/// Expired entries are pruned as new ones are written.
+/// </summary>
+internal sealed class SqliteWarmCaches(SqliteRouterDatabase database) : IWarmCacheStore
+{
+    private readonly WarmCacheStore _cache = new(database.Time);
+    private int _writes;
+
+    public IReadOnlyList<WarmCache> Lookup(string conversation)
+    {
+        IReadOnlyList<WarmCache> cached = _cache.Lookup(conversation);
+        if (cached.Count > 0)
+        {
+            return cached;
+        }
+
+        IReadOnlyList<WarmCache> stored = database.Run<IReadOnlyList<WarmCache>>("reading warm prompt caches", [], connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "SELECT model, tokens, expires_ticks FROM warm_caches WHERE conversation = $conversation AND expires_ticks > $now;",
+                ("$conversation", conversation), ("$now", database.Time.GetUtcNow().UtcTicks));
+            using SqliteDataReader reader = command.ExecuteReader();
+            var caches = new List<WarmCache>();
+            while (reader.Read())
+            {
+                caches.Add(new WarmCache(reader.GetString(0), reader.GetInt32(1), new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero)));
+            }
+
+            return caches;
+        });
+
+        foreach (WarmCache cache in stored)
+        {
+            _cache.Remember(conversation, cache);
+        }
+
+        return stored;
+    }
+
+    public void Remember(string conversation, WarmCache cache)
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        _cache.Remember(conversation, cache);
+        bool prune = Interlocked.Increment(ref _writes) % 200 == 0;
+        database.Run("saving a warm prompt cache", connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "INSERT INTO warm_caches (conversation, model, tokens, expires_ticks) VALUES ($conversation, $model, $tokens, $expires) " +
+                "ON CONFLICT(conversation, model) DO UPDATE SET model = excluded.model, tokens = excluded.tokens, expires_ticks = excluded.expires_ticks;" +
+                (prune ? "DELETE FROM warm_caches WHERE expires_ticks <= $now;" : string.Empty),
+                ("$conversation", conversation), ("$model", cache.Model), ("$tokens", cache.CachedTokens),
+                ("$expires", cache.ExpiresAt.UtcTicks), ("$now", database.Time.GetUtcNow().UtcTicks));
+            command.ExecuteNonQuery();
+        });
+    }
+
+    public void Forget(string conversation, string? model = null)
+    {
+        _cache.Forget(conversation, model);
+        database.Run("forgetting a warm prompt cache", connection =>
+        {
+            using SqliteCommand command = model is null
+                ? SqliteRouterDatabase.Command(connection, "DELETE FROM warm_caches WHERE conversation = $conversation;", ("$conversation", conversation))
+                : SqliteRouterDatabase.Command(
+                    connection, "DELETE FROM warm_caches WHERE conversation = $conversation AND model = $model;", ("$conversation", conversation), ("$model", model));
+            command.ExecuteNonQuery();
+        });
+    }
+}
+
 /// <summary>Feedback about routing decisions on disk, kept as long as the activity it is about.</summary>
 internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRoutingFeedbackStore
 {
@@ -457,7 +581,7 @@ internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRout
             {
                 using SqliteCommand old = SqliteRouterDatabase.Command(
                     connection, "DELETE FROM feedback WHERE timestamp_ticks < $oldest;",
-                    ("$oldest", (database.Time.GetUtcNow() - database.Options.ActivityMaxAge).UtcTicks));
+                    ("$oldest", (database.Time.GetUtcNow() - database.ActivityMaxAge).UtcTicks));
                 old.ExecuteNonQuery();
             }
         });
@@ -611,7 +735,7 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
             var entries = new List<RoutingActivityEntry>();
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection, "SELECT entry FROM activity WHERE timestamp_ticks >= $oldest ORDER BY id DESC LIMIT $limit;",
-                ("$oldest", (database.Time.GetUtcNow() - database.Options.ActivityMaxAge).UtcTicks), ("$limit", Math.Max(0, limit)));
+                ("$oldest", (database.Time.GetUtcNow() - database.ActivityMaxAge).UtcTicks), ("$limit", Math.Max(0, limit)));
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
             {
@@ -645,13 +769,40 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
 
     internal void Prune(SqliteConnection connection)
     {
-        using SqliteCommand command = SqliteRouterDatabase.Command(
+        using (SqliteCommand command = SqliteRouterDatabase.Command(
             connection,
             "DELETE FROM activity WHERE timestamp_ticks < $oldest;" +
             "DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY id DESC LIMIT $max);",
-            ("$oldest", (database.Time.GetUtcNow() - database.Options.ActivityMaxAge).UtcTicks), ("$max", database.Options.ActivityMaxEntries));
-        command.ExecuteNonQuery();
+            ("$oldest", (database.Time.GetUtcNow() - database.ActivityMaxAge).UtcTicks), ("$max", database.ActivityMaxEntries)))
+        {
+            command.ExecuteNonQuery();
+        }
+
+        // The write-ahead log still holds the pages as they were before; move them into the file and empty it.
+        SqliteRouterDatabase.TruncateLog(connection);
     }
+
+    public int Purge(DateTimeOffset since, DateTimeOffset until) =>
+        database.Run("purging activity", 0, connection =>
+        {
+            int removed;
+            using (SqliteCommand command = SqliteRouterDatabase.Command(
+                connection, "DELETE FROM activity WHERE timestamp_ticks >= $since AND timestamp_ticks < $until;",
+                ("$since", since.UtcTicks), ("$until", until.UtcTicks)))
+            {
+                removed = command.ExecuteNonQuery();
+            }
+
+            // secure_delete zeroes what this delete freed; VACUUM rewrites the file without free pages left by deletes
+            // from before it was on, and the log is emptied last.
+            using (SqliteCommand vacuum = SqliteRouterDatabase.Command(connection, "VACUUM;"))
+            {
+                vacuum.ExecuteNonQuery();
+            }
+
+            SqliteRouterDatabase.TruncateLog(connection);
+            return removed;
+        });
 }
 
 /// <summary>Every applied configuration document, for the dashboard's history, diff and rollback.</summary>
@@ -670,7 +821,7 @@ internal sealed class SqliteConfigurationHistory(SqliteRouterDatabase database) 
                 "DELETE FROM config_history WHERE id NOT IN (SELECT id FROM config_history ORDER BY id DESC LIMIT $max);" +
                 "SELECT last_insert_rowid();",
                 ("$ts", database.Time.GetUtcNow().UtcTicks), ("$source", source), ("$actor", actor), ("$note", note),
-                ("$document", document.ToJson()), ("$max", database.Options.HistoryMaxEntries));
+                ("$document", document.ToJson()), ("$max", database.HistoryMaxEntries));
             return (long)command.ExecuteScalar()!;
         });
 
@@ -738,7 +889,7 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
                 ("$client", record.Client), ("$local", record.IsLocal ? 1 : 0), ("$input", record.InputTokens), ("$output", record.OutputTokens),
                 ("$cacheRead", record.CacheReadTokens), ("$cacheWrite", record.CacheWriteTokens),
                 ("$cost", record.CostUsd.ToString(CultureInfo.InvariantCulture)), ("$reference", record.ReferenceCostUsd.ToString(CultureInfo.InvariantCulture)),
-                ("$oldest", (record.Timestamp - database.Options.UsageRetention).UtcTicks), ("$profile", record.Profile),
+                ("$oldest", (record.Timestamp - database.UsageRetention).UtcTicks), ("$profile", record.Profile),
                 ("$value", record.SubscriptionValueUsd.ToString(CultureInfo.InvariantCulture)));
             command.ExecuteNonQuery();
             return true;
@@ -787,4 +938,61 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
 
             return records;
         });
+}
+
+/// <summary>
+/// The audit log on disk. Rows are only ever inserted; the only delete is of rows older than <c>State:Retention:AuditDays</c>
+/// (365 days by default), as each new one is written. A database that fails keeps entries in memory for this run.
+/// </summary>
+internal sealed class SqliteAuditLog(SqliteRouterDatabase database) : IAuditLog
+{
+    private readonly InMemoryAuditLog _fallback = new();
+
+    public AuditEntry Append(AuditEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        long id = database.Run<long>("recording the audit log", -1, connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "INSERT INTO audit (timestamp_ticks, actor, client, method, path, route, status, summary) " +
+                "VALUES ($ts, $actor, $client, $method, $path, $route, $status, $summary);" +
+                "DELETE FROM audit WHERE timestamp_ticks < $oldest;" +
+                "SELECT last_insert_rowid();",
+                ("$ts", entry.Timestamp.UtcTicks), ("$actor", entry.Actor), ("$client", entry.Client), ("$method", entry.Method),
+                ("$path", entry.Path), ("$route", entry.Route), ("$status", entry.Status), ("$summary", entry.Summary),
+                ("$oldest", (database.Time.GetUtcNow() - database.AuditRetention).UtcTicks));
+            return (long)command.ExecuteScalar()!;
+        });
+
+        return id >= 0 ? entry with { Id = id } : _fallback.Append(entry);
+    }
+
+    public IReadOnlyList<AuditEntry> Query(DateTimeOffset? since, DateTimeOffset? until, int limit)
+    {
+        if (!database.Available)
+        {
+            return _fallback.Query(since, until, limit);
+        }
+
+        return database.Run<IReadOnlyList<AuditEntry>>("reading the audit log", _fallback.Query(since, until, limit), connection =>
+        {
+            var entries = new List<AuditEntry>();
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "SELECT id, timestamp_ticks, actor, client, method, path, route, status, summary FROM audit " +
+                "WHERE timestamp_ticks >= $since AND timestamp_ticks < $until ORDER BY id DESC LIMIT $limit;",
+                ("$since", since?.UtcTicks ?? 0L), ("$until", until?.UtcTicks ?? long.MaxValue), ("$limit", Math.Max(0, limit)));
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                entries.Add(new AuditEntry(
+                    reader.GetInt64(0), new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero), reader.GetString(2),
+                    reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4), reader.GetString(5),
+                    reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetInt32(7), reader.GetString(8)));
+            }
+
+            return entries;
+        });
+    }
 }

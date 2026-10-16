@@ -9,3 +9,6 @@ c30150a37c639a4d642b661b5c8ca8e2d4455f1d:tests/SemanticRouter.Tests/AspNetCore/R
 
 # Made-up gateway key for a client in the rate-limit tests; it only exists inside the test host.
 9688376bcbe5c340b96e818198bf518320383241:tests/SemanticRouter.Tests/AspNetCore/RateLimitTests.cs:generic-api-key:18
+
+# Throwaway gateway key for the CI container smoke test; it only exists inside that container.
+343ec29bd411c85a4f7be37be5424bc6eee4e0ea:.github/workflows/ci.yml:curl-auth-header:297

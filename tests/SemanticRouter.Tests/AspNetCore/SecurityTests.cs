@@ -33,6 +33,49 @@ public sealed class SecretHandlingTests : RouterHostTest
 
     private static StringContent JsonBody(JsonNode node) => new(node.ToJsonString(), Encoding.UTF8, "application/json");
 
+    [Theory]
+    [InlineData(PromptStorage.Off)]
+    [InlineData(PromptStorage.Redacted)]
+    [InlineData(PromptStorage.On)]
+    public async Task A_failed_cli_runs_output_is_kept_and_logged_as_StorePrompts_allows(PromptStorage storage)
+    {
+        const string key = "sk-ant-api03-q1w2e3r4t5y6u7i8o9p0a1s2d3f4";
+        Cli = FakeCliProcessRunner.Failing(1, stdout: ClaudeStream.Error($"the merger memo needs {key}"), stderr: "aborted in memo.txt");
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+            },
+            services: s =>
+            {
+                s.AddSingleton<ILoggerProvider>(_logs);
+                s.Configure<StateOptions>(o => o.StorePrompts = storage);
+            },
+            withCli: true);
+
+        await client.PostAsync("/v1/chat/completions", Json("""{"model":"claude-cli","messages":[{"role":"user","content":"hello there"}]}"""));
+
+        string detail = Services.GetRequiredService<RoutingActivityLog>().Recent(1).Single().Detail!;
+        string logged = string.Join('\n', _logs.Messages.Where(m => m.Contains("exited with", StringComparison.Ordinal)));
+        logged.Should().NotBeEmpty();
+        switch (storage)
+        {
+            case PromptStorage.Off:
+                detail.Should().Contain("claude-cli: exit code 1: output omitted (StorePrompts: Off)").And.NotContain("memo");
+                logged.Should().Contain("output omitted (StorePrompts: Off)").And.NotContain("memo");
+                break;
+            case PromptStorage.Redacted:
+                detail.Should().Contain("the merger memo needs *** | aborted in memo.txt").And.NotContain(key);
+                logged.Should().Contain("the merger memo needs ***").And.NotContain(key);
+                break;
+            default:
+                detail.Should().Contain($"the merger memo needs {key}", "On keeps the output as it was");
+                logged.Should().Contain(key);
+                break;
+        }
+    }
+
     [Fact]
     public async Task Connector_keys_can_be_environment_references()
     {
@@ -81,6 +124,38 @@ public sealed class SecretHandlingTests : RouterHostTest
             .Should().Be("api.anthropic.example");
         JsonNode.Parse(check)!["messages"]!.AsArray().Should().NotBeEmpty();
     }
+
+    [Fact]
+    public async Task A_key_in_a_connector_address_is_masked_in_the_admin_api_and_kept_when_sent_back()
+    {
+        var address = new Uri("https://user:sk-in-userinfo@api.anthropic.example/v1?api-version=2024-10-21&api-key=sk-in-query");
+        HttpClient client = await StartDispatchAsync(s =>
+            s.PostConfigure<SemanticRouterConnectorsOptions>(o => o.Connectors["anthropic"].BaseAddress = address));
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+
+        JsonNode config = (await ReadNodeAsync(await client.GetAsync("/router/api/config")))["config"]!;
+        string shown = config["Connectors"]!["anthropic"]!["BaseAddress"]!.GetValue<string>();
+
+        shown.Should().NotContain("sk-in-userinfo").And.NotContain("sk-in-query").And.Contain("api-version=2024-10-21").And.Contain("***");
+        provider.History!.GetVersion(provider.History.List(1).Single().Id)!.ToJson().Should().NotContain("sk-in-");
+
+        (await client.PutAsync("/router/api/config?persist=false", JsonBody(config))).StatusCode.Should().Be(HttpStatusCode.OK);
+        provider.Current.Configuration.Connectors["anthropic"].BaseAddress.Should().Be(address);
+        provider.Current.Configuration.Connectors["anthropic"].BaseAddress!.UserInfo.Should().Be("user:sk-in-userinfo");
+
+        config["Connectors"]!["anthropic"]!["BaseAddress"] = shown.Replace("api.anthropic.example", "collector.example", StringComparison.Ordinal);
+        HttpResponseMessage moved = await client.PutAsync("/router/api/config?persist=false", JsonBody(config));
+        moved.StatusCode.Should().Be(HttpStatusCode.BadRequest, "the credentials are not carried to another address");
+        (await moved.Content.ReadAsStringAsync()).Should().Contain("Connectors:anthropic:BaseAddress");
+    }
+
+    [Theory]
+    [InlineData("https://api.example/v1", "https://api.example/v1")]
+    [InlineData("https://api.example/v1?api-version=1", "https://api.example/v1?api-version=1")]
+    [InlineData("https://u:p@api.example/v1", "https://***@api.example/v1")]
+    [InlineData("https://api.example/v1?key=abc&x=1&sig=def", "https://api.example/v1?key=***&x=1&sig=***")]
+    public void Addresses_show_their_credentials_as_stars(string address, string masked) =>
+        Uri.UnescapeDataString(AddressDisplay.Mask(new Uri(address))!.AbsoluteUri).Should().Be(masked);
 
     [Fact]
     public async Task An_unset_reference_is_reported_in_status_and_the_log()
@@ -197,11 +272,13 @@ public sealed class DashboardAccessTests : RouterHostTest
     private static readonly IPAddress Remote = IPAddress.Parse("203.0.113.7");
 
     private readonly CapturingLoggerProvider _logs = new();
+    private readonly ManualTimeProvider _time = new();
 
     private Task<HttpClient> StartAsync(
         Action<RouterDashboardOptions>? dashboard = null,
         bool remote = true,
-        Action<PromptRouterMiddlewareOptions>? middleware = null) =>
+        Action<PromptRouterMiddlewareOptions>? middleware = null,
+        bool manualTime = false) =>
         StartAsync(
             o =>
             {
@@ -215,6 +292,11 @@ public sealed class DashboardAccessTests : RouterHostTest
                 if (dashboard is not null)
                 {
                     s.Configure(dashboard);
+                }
+
+                if (manualTime)
+                {
+                    s.AddSingleton<TimeProvider>(_time);
                 }
             },
             beforeRouter: remote
@@ -271,7 +353,7 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
-    public async Task The_read_only_token_can_look_but_not_change()
+    public async Task The_read_only_token_can_look_but_not_change_or_spend()
     {
         HttpClient client = await StartAsync(WithTokens);
         string config = JsonNode.Parse(await (await client.SendAsync(Get("/router/api/config", ReadOnlyToken))).Content.ReadAsStringAsync())!["config"]!.ToJsonString();
@@ -285,8 +367,30 @@ public sealed class DashboardAccessTests : RouterHostTest
 
         (await client.SendAsync(put)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await client.SendAsync(reset)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await client.SendAsync(classify)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.SendAsync(classify)).StatusCode.Should().Be(HttpStatusCode.Forbidden, "classifying embeds the prompt");
         (await client.SendAsync(Get("/router/api/activity", ReadOnlyToken))).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData("/router/api/classify", """{"prompt":"hello"}""")]
+    [InlineData("/router/api/evaluate", """{"text":""}""")]
+    [InlineData("/router/api/evaluate/compare", """{"embeddings":{"Provider":"Hashing"}}""")]
+    [InlineData("/router/api/embeddings/test", """{"text":"hello"}""")]
+    [InlineData("/router/api/connectors/local/discover", "")]
+    [InlineData("/router/api/connectors/local/check", "")]
+    [InlineData("/router/api/memory/refresh", "")]
+    public async Task The_read_only_token_cannot_spend_embedding_or_api_calls_or_scan_the_disk(string path, string body)
+    {
+        HttpClient client = await StartAsync(WithTokens);
+        HttpRequestMessage Post(string token)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            return request;
+        }
+
+        (await client.SendAsync(Post(ReadOnlyToken))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.SendAsync(Post(AdminToken))).StatusCode.Should().NotBe(HttpStatusCode.Forbidden).And.NotBe(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -307,6 +411,63 @@ public sealed class DashboardAccessTests : RouterHostTest
         request.Headers.Add("Cookie", cookie.Split(';')[0]);
         JsonNode session = JsonNode.Parse(await (await client.SendAsync(request)).Content.ReadAsStringAsync())!;
         session["role"]!.GetValue<string>().Should().Be("Admin");
+    }
+
+    [Fact]
+    public async Task A_session_lapses_after_its_lifetime_and_its_issue_time_cannot_be_moved()
+    {
+        HttpClient client = await StartAsync(o => { WithTokens(o); o.SessionLifetime = TimeSpan.FromHours(1); }, manualTime: true);
+        HttpResponseMessage signIn = await client.PostAsJsonAsync("/router/api/session", new { token = ReadOnlyToken });
+        string setCookie = signIn.Headers.GetValues("Set-Cookie").Single();
+        setCookie.Should().StartWith("semantic-router-session=r.").And.Contain("max-age=3600");
+        string cookie = setCookie.Split(';')[0];
+
+        async Task<HttpStatusCode> StatusWithAsync(string value)
+        {
+            HttpRequestMessage request = Get("/router/api/status");
+            request.Headers.Add("Cookie", value);
+            return (await client.SendAsync(request)).StatusCode;
+        }
+
+        (await StatusWithAsync(cookie)).Should().Be(HttpStatusCode.OK);
+        _time.Advance(TimeSpan.FromMinutes(59));
+        (await StatusWithAsync(cookie)).Should().Be(HttpStatusCode.OK);
+
+        string[] parts = cookie.Split('.');
+        string moved = $"{parts[0]}.{_time.GetUtcNow().ToUnixTimeMilliseconds()}.{parts[2]}.{parts[3]}";
+        (await StatusWithAsync(moved)).Should().Be(HttpStatusCode.Unauthorized, "the issue time is signed");
+        (await StatusWithAsync(cookie.Replace("session=r.", "session=a.", StringComparison.Ordinal))).Should().Be(HttpStatusCode.Unauthorized, "so is the role");
+
+        _time.Advance(TimeSpan.FromMinutes(2));
+        (await StatusWithAsync(cookie)).Should().Be(HttpStatusCode.Unauthorized, "the session lapsed");
+    }
+
+    [Fact]
+    public async Task Wrong_tokens_are_throttled_per_address_until_the_window_passes()
+    {
+        HttpClient client = await StartAsync(WithTokens, manualTime: true);
+        for (int i = 0; i < 3; i++)
+        {
+            (await client.PostAsJsonAsync("/router/api/session", new { token = AdminToken })).StatusCode.Should().Be(HttpStatusCode.OK, "a good token never counts");
+        }
+
+        for (int i = 0; i < 4; i++)
+        {
+            (await client.PostAsJsonAsync("/router/api/session", new { token = "guess-guess-guess-" + i })).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+
+        _time.Advance(TimeSpan.FromMinutes(5));
+        (await client.SendAsync(Get("/router/api/status", "guess-guess-guess-bearer"))).StatusCode.Should().Be(HttpStatusCode.Unauthorized, "a wrong bearer token counts too");
+
+        HttpResponseMessage throttled = await client.PostAsJsonAsync("/router/api/session", new { token = AdminToken });
+        throttled.StatusCode.Should().Be(HttpStatusCode.TooManyRequests, "even the right token waits, or guessing would still tell");
+        throttled.Headers.RetryAfter!.Delta.Should().Be(TimeSpan.FromMinutes(10), "until the first failure is 15 minutes old");
+        (await throttled.Content.ReadAsStringAsync()).Should().Contain("Try again in 10 minute(s)");
+        (await client.SendAsync(Get("/router/api/status", AdminToken))).StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+
+        _time.Advance(TimeSpan.FromMinutes(10));
+        (await client.PostAsJsonAsync("/router/api/session", new { token = AdminToken })).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.SendAsync(Get("/router/api/status", AdminToken))).StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]
@@ -461,6 +622,43 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Which_files_memory_sources_read_cannot_be_changed_over_the_admin_api_unless_allowed()
+    {
+        HttpClient client = await StartAsync(remote: false);
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        RouterConfiguration fromFile = provider.Current.Configuration.Clone();
+        fromFile.Memory.Sources.Add(new MemorySourceOptions { Name = "vault", Path = "/srv/notes" });
+        provider.Apply(fromFile, persist: false, "configuration file");
+
+        async Task<HttpResponseMessage> SendWithAsync(HttpClient http, string sources, string path = "/router/api/config?persist=false")
+        {
+            JsonNode config = JsonNode.Parse(await http.GetStringAsync("/router/api/config"))!["config"]!;
+            config["Memory"]!["Sources"] = JsonNode.Parse(sources);
+            var content = new StringContent(config.ToJsonString(), Encoding.UTF8, "application/json");
+            return path.Contains("validate", StringComparison.Ordinal) ? await http.PostAsync(path, content) : await http.PutAsync(path, content);
+        }
+
+        HttpResponseMessage added = await SendWithAsync(client, """[{"Name":"vault","Path":"/srv/notes"},{"Name":"keys","Path":"/home/me/.ssh"}]""");
+        HttpResponseMessage moved = await SendWithAsync(client, """[{"Name":"vault","Path":"/etc"}]""");
+        HttpResponseMessage retyped = await SendWithAsync(client, """[{"Name":"vault","Type":"KnowledgeGraph","Path":"/srv/notes"}]""");
+        HttpResponseMessage validated = await SendWithAsync(client, """[{"Name":"root","Path":"/"}]""", "/router/api/config/validate");
+
+        added.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await added.Content.ReadAsStringAsync()).Should().Contain("Memory:Sources:keys:Path").And.Contain("AllowProcessSettings").And.NotContain("Memory:Sources:vault");
+        moved.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await moved.Content.ReadAsStringAsync()).Should().Contain("Memory:Sources:vault:Path");
+        retyped.StatusCode.Should().Be(HttpStatusCode.BadRequest, "another type reads the same path differently");
+        (await validated.Content.ReadAsStringAsync()).Should().Contain("Memory:Sources:root:Path", "validation says so before applying");
+        (await SendWithAsync(client, """[{"Name":"notes","Path":"/srv/notes","Enabled":false}]""")).StatusCode
+            .Should().Be(HttpStatusCode.OK, "renaming or turning off a source reads nothing new");
+        (await SendWithAsync(client, """[{"Name":"claude","Type":"ClaudeCode"}]""")).StatusCode.Should().Be(HttpStatusCode.OK, "a source in its default place can be added");
+        await DisposeAsync();
+
+        HttpClient allowed = await StartAsync(o => o.AllowProcessSettings = true, remote: false);
+        (await SendWithAsync(allowed, """[{"Name":"vault","Path":"/srv/other"}]""")).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task No_other_site_may_frame_the_dashboard()
     {
         HttpClient client = await StartAsync(remote: false);
@@ -469,7 +667,7 @@ public sealed class DashboardAccessTests : RouterHostTest
         {
             HttpResponseMessage response = await client.GetAsync(path);
             response.Headers.GetValues("X-Frame-Options").Should().Equal("DENY");
-            response.Headers.GetValues("Content-Security-Policy").Should().Equal("frame-ancestors 'none'");
+            response.Headers.GetValues("Content-Security-Policy").Single().Should().Contain("frame-ancestors 'none'").And.Contain("script-src 'self';");
             response.Headers.GetValues("X-Content-Type-Options").Should().Equal("nosniff");
         }
     }
@@ -520,6 +718,63 @@ public sealed class DashboardAccessTests : RouterHostTest
         RoutingActivityLog log = Services.GetRequiredService<RoutingActivityLog>();
         log.Recent().Single().Client.Should().Be("laptop");
         _logs.All.Should().NotContain("gw-laptop-key-123");
+    }
+
+    [Fact]
+    public async Task Remote_clients_are_refused_while_no_gateway_key_is_configured()
+    {
+        HttpClient client = await StartAsync();
+
+        HttpResponseMessage chat = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+        HttpResponseMessage anthropic = await client.PostAsync("/v1/messages", Json("""{"model":"x","max_tokens":5,"messages":[{"role":"user","content":"hi"}]}"""));
+
+        chat.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await chat.Content.ReadAsStringAsync()).Should().Contain("none is configured").And.Contain("GatewayKeys");
+        anthropic.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await anthropic.Content.ReadAsStringAsync()).Should().Contain("authentication_error");
+        (await client.GetAsync("/v1/models")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await client.PostAsJsonAsync("/semantic-router/classify", new { prompt = "hello" })).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        LocalHttp.Requests.Should().BeEmpty();
+        CloudHttp.Requests.Should().BeEmpty();
+        _logs.All.Should().Contain("no valid gateway key");
+        await DisposeAsync();
+
+        HttpClient local = await StartAsync(remote: false);
+        (await local.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode.Should().Be(HttpStatusCode.OK, "this machine needs no key");
+    }
+
+    [Fact]
+    public async Task Unauthenticated_remote_gateway_clients_must_be_asked_for_explicitly()
+    {
+        HttpClient client = await StartAsync(middleware: o => o.AllowUnauthenticatedRemoteClients = true);
+
+        (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode.Should().Be(HttpStatusCode.OK);
+        _logs.All.Should().Contain("serves other machines without a key");
+        await DisposeAsync();
+
+        HttpClient keyed = await StartAsync(middleware: o =>
+        {
+            o.AllowUnauthenticatedRemoteClients = true;
+            o.GatewayKeys["laptop"] = "gw-laptop-key-123";
+        });
+        (await keyed.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode
+            .Should().Be(HttpStatusCode.Unauthorized, "once a key is configured, every remote client needs one");
+    }
+
+    [Fact]
+    public async Task A_gateway_key_whose_variable_is_unset_does_not_open_the_gateway()
+    {
+        string variable = "SR_TEST_GATEWAY_" + Guid.NewGuid().ToString("N");
+        HttpClient client = await StartAsync(remote: false, middleware: o =>
+        {
+            o.GatewayKeys["laptop"] = "${env:" + variable + "}";
+            o.RequireGatewayKeyForLocalClients = true;
+        });
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("requires a gateway key");
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Tests.Support;
@@ -194,7 +195,8 @@ public sealed class RateLimitTests : RouterHostTest
         var time = new ManualTimeProvider();
         var limiter = new ClientRateLimiter(time);
         var limit = new RateLimitOptions { RequestsPerMinute = 1 };
-        var everyone = new Dictionary<string, RateLimitOptions> { ["*"] = limit };
+        var everyone = new PromptRouterMiddlewareOptions();
+        everyone.RateLimits["*"] = limit;
         for (int i = 0; i < 1000; i++)
         {
             limiter.TryAdmit($"10.0.{i / 256}.{i % 256}", limit, 1);
@@ -207,5 +209,55 @@ public sealed class RateLimitTests : RouterHostTest
         limiter.TryAdmit("10.9.9.10", limit, 1);
 
         limiter.Status(everyone).Select(s => s.Client).Should().BeEquivalentTo(["10.9.9.9", "10.9.9.10"], "the clients idle for over an hour are forgotten");
+    }
+
+    [Fact]
+    public async Task Remote_clients_are_limited_by_default_and_local_ones_are_not()
+    {
+        bool remote = true;
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+                o.GatewayKeys["laptop"] = LaptopKey;
+                o.RemoteRequestsPerMinute = 2;
+            },
+            services: s => s.AddSingleton<TimeProvider>(_time),
+            beforeRouter: app => app.Use((context, next) =>
+            {
+                context.Connection.RemoteIpAddress = remote ? IPAddress.Parse("203.0.113.7") : IPAddress.Loopback;
+                return next(context);
+            }));
+
+        (await client.SendAsync(Request("/v1/chat/completions", ChatJson, LaptopKey))).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.SendAsync(Request("/v1/chat/completions", ChatJson, LaptopKey))).StatusCode.Should().Be(HttpStatusCode.OK);
+        HttpResponseMessage third = await client.SendAsync(Request("/v1/chat/completions", ChatJson, LaptopKey));
+
+        third.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+        (await third.Content.ReadAsStringAsync()).Should().Contain("2 requests per minute");
+
+        remote = false;
+        for (int i = 0; i < 3; i++)
+        {
+            (await client.SendAsync(Request("/v1/chat/completions", ChatJson, null))).StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+    }
+
+    [Fact]
+    public void Remote_clients_get_a_default_limit_that_configured_limits_replace()
+    {
+        var options = new PromptRouterMiddlewareOptions();
+
+        ClientRateLimiter.LimitFor(options, null, remote: true)!.Value.Should()
+            .Match<(string Name, RateLimitOptions Limit)>(l => l.Name == ClientRateLimiter.RemoteDefault && l.Limit.RequestsPerMinute == 120);
+        ClientRateLimiter.LimitFor(options, null, remote: false).Should().BeNull("clients on this machine are not limited by default");
+
+        options.RateLimits["*"] = new RateLimitOptions { RequestsPerMinute = 600 };
+        ClientRateLimiter.LimitFor(options, null, remote: true)!.Value.Name.Should().Be("*");
+
+        options.RateLimits.Clear();
+        options.RemoteRequestsPerMinute = 0;
+        ClientRateLimiter.LimitFor(options, null, remote: true).Should().BeNull();
     }
 }

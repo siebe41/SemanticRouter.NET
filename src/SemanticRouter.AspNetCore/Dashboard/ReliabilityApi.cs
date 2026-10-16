@@ -15,9 +15,9 @@ internal static class ReliabilityApi
             ReliabilityOptions options = provider.Current.Configuration.Middleware.Reliability;
             IReadOnlyList<ModelReliability> models = tracker.Refresh();
             return Results.Json(new ReliabilityResponse(options.Enabled, options.Window, options.MinimumTurns, [.. models.OrderBy(m => m.Model).ThenBy(m => m.Route ?? m.Capability)]), json);
-        });
+        }).WithMetadata(DashboardMetricsMetadata.Instance);
 
-        api.MapPost("/reliability/reset", (ModelReliabilityTracker tracker, ResetRequest request) =>
+        api.MapPost("/reliability/reset", (HttpContext context, ModelReliabilityTracker tracker, ResetRequest request) =>
         {
             if (string.IsNullOrWhiteSpace(request.Model))
             {
@@ -25,8 +25,9 @@ internal static class ReliabilityApi
             }
 
             tracker.Reset(request.Model, request.Route, request.Capability);
+            DashboardAudit.Detail(context, request.Model + (request.Route is { } route ? $" for route {route}" : request.Capability is { } capability ? $" for {capability}" : string.Empty));
             return Results.Json(tracker.Current.Where(m => string.Equals(m.Model, request.Model, StringComparison.OrdinalIgnoreCase)).ToArray(), json);
-        }).WithMetadata(DashboardWriteMetadata.Instance);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("offered a model again");
     }
 }
 

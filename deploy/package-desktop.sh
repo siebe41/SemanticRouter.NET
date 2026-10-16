@@ -7,6 +7,8 @@
 # win-*   SemanticRouter-<version>-<rid>.zip with SemanticRouter.exe
 # linux-* SemanticRouter-<version>-<rid>.tar.gz with SemanticRouter and semantic-router.png
 # osx-*   SemanticRouter-<version>-<rid>.zip with SemanticRouter.app (unsigned: see docs/desktop.md)
+#
+# Each has THIRD-PARTY-NOTICES.txt next to the executable (publish-desktop.sh).
 set -euo pipefail
 
 rid="$1"
@@ -16,10 +18,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-dotnet publish "$root/src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj" \
-  --configuration Release --runtime "$rid" --self-contained \
-  -p:Version="$version" -p:DebugType=none \
-  --output "$work/publish"
+"$root/deploy/publish-desktop.sh" "$rid" "$version" "$work/publish"
 
 name="SemanticRouter-$version-$rid"
 case "$rid" in

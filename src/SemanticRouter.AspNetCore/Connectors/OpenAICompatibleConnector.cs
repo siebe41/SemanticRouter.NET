@@ -79,7 +79,8 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             ? RewriteModel(request.RawBody, request.Model.Model, stripRelayedThinking: Protocol == ChatProtocol.Anthropic)
             : Protocol switch
             {
-                ChatProtocol.Anthropic => AnthropicRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
+                ChatProtocol.Anthropic => AnthropicRequestBuilder.Build(
+                    request.Chat, request.Model.Model, reasoning: reasoning, caching: _options.PromptCaching, cacheTtl: _options.CacheTtl),
                 ChatProtocol.Responses => ResponsesRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
                 _ => OpenAIRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
             };

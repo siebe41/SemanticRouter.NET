@@ -73,6 +73,21 @@ public sealed partial class ChatCompletionRequest
     /// </summary>
     public string? PromptCacheKey { get; init; }
 
+    /// <summary>
+    /// Anthropic's top-level <c>cache_control</c> (automatic caching), as JSON, when the client set it. Markers on
+    /// single blocks and tools are on <see cref="ContentBlock.CacheControl"/> and <see cref="ToolDefinition.CacheControl"/>.
+    /// </summary>
+    public string? CacheControl { get; init; }
+
+    /// <summary>Whether the client placed any Anthropic <c>cache_control</c> marker (top-level, on a tool or on a block).</summary>
+    public bool HasCacheMarkers => CacheMarkerCount > 0;
+
+    /// <summary>How many cache breakpoints the client's own markers use (the top-level marker counts as one).</summary>
+    public int CacheMarkerCount =>
+        (CacheControl is null ? 0 : 1)
+        + Tools.Count(t => t.CacheControl is not null)
+        + Turns.Sum(t => t.Blocks.Count(b => b.CacheControl is not null));
+
     /// <summary>Extended thinking / reasoning effort the client asked for.</summary>
     public ReasoningRequest? Reasoning { get; init; }
 
@@ -89,8 +104,8 @@ public sealed partial class ChatCompletionRequest
     public IReadOnlyList<string> HostedTools { get; init; } = [];
 
     /// <summary>
-    /// Request features that no other protocol can carry (<c>cache_control</c>, documents, files, <c>logprobs</c>, …).
-    /// They survive pass-through and are reported as dropped when the request is translated.
+    /// Request features that no other protocol can carry (documents, files, <c>logprobs</c>, …). They survive
+    /// pass-through and are reported as dropped when the request is translated.
     /// </summary>
     public IReadOnlyList<string> ProtocolOnlyFeatures { get; init; } = [];
 
@@ -262,10 +277,10 @@ public sealed partial class ChatCompletionRequest
 
         if (root.TryGetProperty("system", out JsonElement system))
         {
-            string text = ReadAnthropicText(system);
-            if (text.Length > 0)
+            List<ContentBlock> systemBlocks = ReadAnthropicSystem(system);
+            if (systemBlocks.Count > 0)
             {
-                turns.Add(ChatTurn.FromText("system", text));
+                turns.Add(new ChatTurn("system", systemBlocks));
             }
         }
 
@@ -299,7 +314,10 @@ public sealed partial class ChatCompletionRequest
                     tools.Add(new ToolDefinition(
                         name,
                         tool.GetString("description"),
-                        tool.TryGetObject("input_schema", out JsonElement schema) ? schema.GetRawText() : """{"type":"object","properties":{}}"""));
+                        tool.TryGetObject("input_schema", out JsonElement schema) ? schema.GetRawText() : """{"type":"object","properties":{}}""")
+                    {
+                        CacheControl = ReadCacheControl(tool),
+                    });
                 }
             }
         }
@@ -327,11 +345,6 @@ public sealed partial class ChatCompletionRequest
         root.TryGetObject("metadata", out JsonElement metadata);
         var protocolOnly = new List<string>();
         string raw = root.GetRawText();
-        if (raw.Contains("\"cache_control\"", StringComparison.Ordinal))
-        {
-            protocolOnly.Add("cache_control");
-        }
-
         if (raw.Contains("\"type\":\"document\"", StringComparison.Ordinal) || raw.Contains("\"type\": \"document\"", StringComparison.Ordinal))
         {
             protocolOnly.Add("documents");
@@ -363,6 +376,7 @@ public sealed partial class ChatCompletionRequest
             TopP = root.GetDouble("top_p"),
             StopSequences = stops,
             UserId = metadata.GetString("user_id"),
+            CacheControl = ReadCacheControl(root),
         });
     }
 
@@ -394,10 +408,7 @@ public sealed partial class ChatCompletionRequest
             }
         }
 
-        foreach (ToolDefinition tool in request.Tools)
-        {
-            tokens += TokenEstimator.Estimate(tool.Name) + TokenEstimator.Estimate(tool.Description ?? string.Empty) + TokenEstimator.Estimate(tool.InputSchemaJson) + 8;
-        }
+        tokens += request.Tools.Sum(EstimateTokens);
 
         ChatTurn? lastUser = request.Turns.LastOrDefault(t => t.Role == "user");
         bool continuation = lastUser?.IsToolResultOnly == true;
@@ -421,6 +432,7 @@ public sealed partial class ChatCompletionRequest
             StopSequences = request.StopSequences,
             UserId = request.UserId,
             PromptCacheKey = request.PromptCacheKey,
+            CacheControl = request.CacheControl,
             Reasoning = request.Reasoning,
             ResponseFormat = request.ResponseFormat,
             ParallelToolCalls = request.ParallelToolCalls,
@@ -428,6 +440,10 @@ public sealed partial class ChatCompletionRequest
             ProtocolOnlyFeatures = request.ProtocolOnlyFeatures,
         };
     }
+
+    /// <summary>Estimated tokens of one tool definition.</summary>
+    internal static int EstimateTokens(ToolDefinition tool) =>
+        TokenEstimator.Estimate(tool.Name) + TokenEstimator.Estimate(tool.Description ?? string.Empty) + TokenEstimator.Estimate(tool.InputSchemaJson) + 8;
 
     /// <summary>Reads OpenAI <c>response_format</c> (<paramref name="nested"/>: schema under <c>json_schema</c>) or Responses <c>text.format</c>.</summary>
     private static ResponseFormat? ReadResponseFormat(JsonElement format, bool nested)
@@ -532,33 +548,38 @@ public sealed partial class ChatCompletionRequest
         return new ImageBlock(null, null, url);
     }
 
-    private static string ReadAnthropicText(JsonElement value)
+    /// <summary>Reads <c>system</c> (a string or text blocks), one block per part so markers keep their place.</summary>
+    private static List<ContentBlock> ReadAnthropicSystem(JsonElement value)
     {
+        var blocks = new List<ContentBlock>();
         if (value.ValueKind == JsonValueKind.String)
         {
-            return value.GetString()!;
-        }
-
-        if (value.ValueKind != JsonValueKind.Array)
-        {
-            return string.Empty;
-        }
-
-        var builder = new StringBuilder();
-        foreach (JsonElement part in value.EnumerateArray())
-        {
-            if (part.ValueKind == JsonValueKind.String)
+            if (value.GetString() is { Length: > 0 } text)
             {
-                Append(builder, part.GetString());
-            }
-            else if (part.GetString("type") == "text" && part.GetString("text") is { } text)
-            {
-                Append(builder, text);
+                blocks.Add(new TextBlock(text));
             }
         }
+        else if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement part in value.EnumerateArray())
+            {
+                if (part.ValueKind == JsonValueKind.String && part.GetString() is { Length: > 0 } plain)
+                {
+                    blocks.Add(new TextBlock(plain));
+                }
+                else if (part.GetString("type") == "text" && part.GetString("text") is { Length: > 0 } text)
+                {
+                    blocks.Add(new TextBlock(text) { CacheControl = ReadCacheControl(part) });
+                }
+            }
+        }
 
-        return builder.ToString();
+        return blocks;
     }
+
+    /// <summary>The <c>cache_control</c> object on <paramref name="element"/>, as JSON, or <see langword="null"/>.</summary>
+    private static string? ReadCacheControl(JsonElement element) =>
+        element.TryGetObject("cache_control", out JsonElement marker) ? marker.GetRawText() : null;
 
     private static void ReadAnthropicContent(JsonElement content, List<ContentBlock> blocks, ref bool hasImages)
     {
@@ -589,7 +610,7 @@ public sealed partial class ChatCompletionRequest
                 case "text":
                     if (part.GetString("text") is { } text)
                     {
-                        blocks.Add(new TextBlock(text));
+                        blocks.Add(new TextBlock(text) { CacheControl = ReadCacheControl(part) });
                     }
 
                     break;
@@ -597,16 +618,20 @@ public sealed partial class ChatCompletionRequest
                 case "image":
                     hasImages = true;
                     part.TryGetObject("source", out JsonElement source);
-                    blocks.Add(source.GetString("type") == "url"
+                    ImageBlock image = source.GetString("type") == "url"
                         ? new ImageBlock(null, null, source.GetString("url"))
-                        : new ImageBlock(source.GetString("media_type"), source.GetString("data"), null));
+                        : new ImageBlock(source.GetString("media_type"), source.GetString("data"), null);
+                    blocks.Add(image with { CacheControl = ReadCacheControl(part) });
                     break;
 
                 case "tool_use":
                     blocks.Add(new ToolUseBlock(
                         part.GetString("id") is { Length: > 0 } id ? id : JsonHelpers.NewToolUseId(),
                         part.GetString("name") ?? string.Empty,
-                        part.TryGetObject("input", out JsonElement input) ? input.GetRawText() : "{}"));
+                        part.TryGetObject("input", out JsonElement input) ? input.GetRawText() : "{}")
+                    {
+                        CacheControl = ReadCacheControl(part),
+                    });
                     break;
 
                 case "tool_result":
@@ -615,7 +640,10 @@ public sealed partial class ChatCompletionRequest
                         ? ReadToolResultContent(resultContent, ref nestedImages)
                         : string.Empty;
                     hasImages |= nestedImages;
-                    blocks.Add(new ToolResultBlock(part.GetString("tool_use_id") ?? string.Empty, result, part.GetBool("is_error")));
+                    blocks.Add(new ToolResultBlock(part.GetString("tool_use_id") ?? string.Empty, result, part.GetBool("is_error"))
+                    {
+                        CacheControl = ReadCacheControl(part),
+                    });
                     break;
 
                 case "thinking":

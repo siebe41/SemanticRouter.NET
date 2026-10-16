@@ -267,36 +267,102 @@ internal static class AnthropicRequestBuilder
     public static bool CarriesThinking(ChatCompletionRequest request) =>
         request.Reasoning is not null && !UsesStructuredOutputTool(request) && (request.MaxTokens ?? DefaultMaxTokens) > 1024;
 
+    /// <summary>
+    /// The shortest prefix, in estimated tokens, that <paramref name="model"/> caches: 4,096 on Opus 4.5 and 4.6 and
+    /// Haiku 4.5, 512 on the others. Below it a marker caches nothing.
+    /// </summary>
+    public static int CacheableMinimum(string model)
+    {
+        string id = model.Replace('.', '-');
+        foreach (string family in (ReadOnlySpan<string>)["claude-opus-4-5", "claude-opus-4-6", "claude-haiku-4-5"])
+        {
+            int at = id.IndexOf(family, StringComparison.OrdinalIgnoreCase);
+            if (at >= 0 && (at + family.Length == id.Length || !char.IsAsciiDigit(id[at + family.Length])))
+            {
+                return 4096;
+            }
+        }
+
+        return 512;
+    }
+
     /// <param name="request">The parsed request.</param>
     /// <param name="model">The backend model id.</param>
     /// <param name="stream">Overrides the request's streaming flag.</param>
     /// <param name="reasoning">The target model declares <c>reasoning</c>: send <c>thinking</c> with a budget.</param>
-    public static ReadOnlyMemory<byte> Build(ChatCompletionRequest request, string? model, bool? stream = null, bool reasoning = false)
+    /// <param name="caching">
+    /// <see cref="PromptCaching.Auto"/>: when the prompt is long enough to cache, mark the end of the system prompt and
+    /// turn on automatic caching for the conversation. Never added to a request that carries the client's own markers.
+    /// </param>
+    /// <param name="cacheTtl"><c>1h</c> for one-hour cache entries; otherwise the five-minute default.</param>
+    public static ReadOnlyMemory<byte> Build(
+        ChatCompletionRequest request, string? model, bool? stream = null, bool reasoning = false, PromptCaching caching = PromptCaching.Off, string? cacheTtl = null)
     {
         bool structured = UsesStructuredOutputTool(request);
         int maxTokens = request.MaxTokens ?? DefaultMaxTokens;
         int? thinkingBudget = reasoning && CarriesThinking(request) && request.Reasoning is { } wanted
             ? Math.Clamp(wanted.EffectiveBudget, 1024, maxTokens - 1)
             : null;
+        string modelId = model ?? request.Model ?? "auto";
+
+        string system = string.Join("\n\n", request.Turns.Where(t => t.Role == "system").Select(t => t.Text).Where(t => t.Length > 0));
+        string? jsonInstruction = null;
+        if (request.ResponseFormat is { Kind: ResponseFormatKind.JsonObject } || (request.ResponseFormat is not null && !structured))
+        {
+            // The Messages API has no JSON mode: ask for it in the system prompt (an approximation).
+            jsonInstruction = "Reply with a single JSON object and nothing else."
+                              + (request.ResponseFormat!.SchemaJson is { } schema ? " It must match this JSON schema: " + schema : string.Empty);
+        }
+
+        string fullSystem = jsonInstruction is null ? system : (system.Length > 0 ? system + "\n\n" : string.Empty) + jsonInstruction;
+
+        // The router's own markers: tools and system render first and stay the same every turn, so one breakpoint at
+        // their end is read by every later turn; automatic caching moves a second one along the growing conversation.
+        string marker = cacheTtl == "1h" ? """{"type":"ephemeral","ttl":"1h"}""" : """{"type":"ephemeral"}""";
+        bool markPrefix = false;
+        bool markConversation = false;
+        if (caching == PromptCaching.Auto && !request.HasCacheMarkers)
+        {
+            int minimum = CacheableMinimum(modelId);
+            int prefix = TokenEstimator.Estimate(fullSystem) + request.Tools.Sum(ChatCompletionRequest.EstimateTokens);
+            markPrefix = prefix >= minimum && (fullSystem.Length > 0 || request.Tools.Count > 0);
+            markConversation = markPrefix || request.EstimatedInputTokens >= minimum;
+        }
 
         var buffer = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(buffer, ChatJsonOptions.Writer))
         {
             writer.WriteStartObject();
-            writer.WriteString("model", model ?? request.Model ?? "auto");
+            writer.WriteString("model", modelId);
             writer.WriteNumber("max_tokens", maxTokens);
 
-            string system = string.Join("\n\n", request.Turns.Where(t => t.Role == "system").Select(t => t.Text).Where(t => t.Length > 0));
-            if (request.ResponseFormat is { Kind: ResponseFormatKind.JsonObject } || (request.ResponseFormat is not null && !structured))
+            var systemBlocks = request.Turns.Where(t => t.Role == "system").SelectMany(t => t.Blocks).OfType<TextBlock>().Where(b => b.Text.Length > 0).ToArray();
+            if (systemBlocks.Any(b => b.CacheControl is not null))
             {
-                // The Messages API has no JSON mode: ask for it in the system prompt (an approximation).
-                system = (system.Length > 0 ? system + "\n\n" : string.Empty) + "Reply with a single JSON object and nothing else."
-                         + (request.ResponseFormat!.SchemaJson is { } schema ? " It must match this JSON schema: " + schema : string.Empty);
-            }
+                // The client's own markers keep their place: one system block per part.
+                writer.WriteStartArray("system");
+                foreach (TextBlock block in systemBlocks)
+                {
+                    WriteTextBlock(writer, block.Text, block.CacheControl);
+                }
 
-            if (system.Length > 0)
+                if (jsonInstruction is not null)
+                {
+                    WriteTextBlock(writer, jsonInstruction, null);
+                }
+
+                writer.WriteEndArray();
+            }
+            else if (fullSystem.Length > 0 && markPrefix)
             {
-                writer.WriteString("system", system);
+                // The same text as the plain string, as one block that can carry the marker.
+                writer.WriteStartArray("system");
+                WriteTextBlock(writer, fullSystem, marker);
+                writer.WriteEndArray();
+            }
+            else if (fullSystem.Length > 0)
+            {
+                writer.WriteString("system", fullSystem);
             }
 
             if (thinkingBudget is { } budget)
@@ -343,8 +409,9 @@ internal static class AnthropicRequestBuilder
             if (request.Tools.Count > 0)
             {
                 writer.WriteStartArray("tools");
-                foreach (ToolDefinition tool in request.Tools)
+                for (int i = 0; i < request.Tools.Count; i++)
                 {
+                    ToolDefinition tool = request.Tools[i];
                     writer.WriteStartObject();
                     writer.WriteString("name", tool.Name);
                     if (tool.Description is not null)
@@ -354,6 +421,10 @@ internal static class AnthropicRequestBuilder
 
                     writer.WritePropertyName("input_schema");
                     OpenAIRequestBuilder.WriteRaw(writer, tool.InputSchemaJson);
+
+                    // Without a system prompt, the prefix breakpoint goes on the last tool.
+                    string? toolMarker = tool.CacheControl ?? (markPrefix && fullSystem.Length == 0 && i == request.Tools.Count - 1 ? marker : null);
+                    WriteCacheControl(writer, toolMarker);
                     writer.WriteEndObject();
                 }
 
@@ -427,10 +498,31 @@ internal static class AnthropicRequestBuilder
                 writer.WriteEndObject();
             }
 
+            // Automatic caching: Anthropic puts this breakpoint on the last cacheable block and moves it forward as
+            // the conversation grows.
+            WriteCacheControl(writer, request.CacheControl ?? (markConversation ? marker : null));
             writer.WriteEndObject();
         }
 
         return buffer.WrittenMemory;
+    }
+
+    private static void WriteTextBlock(Utf8JsonWriter writer, string text, string? cacheControl)
+    {
+        writer.WriteStartObject();
+        writer.WriteString("type", "text");
+        writer.WriteString("text", text);
+        WriteCacheControl(writer, cacheControl);
+        writer.WriteEndObject();
+    }
+
+    private static void WriteCacheControl(Utf8JsonWriter writer, string? cacheControl)
+    {
+        if (cacheControl is not null)
+        {
+            writer.WritePropertyName("cache_control");
+            OpenAIRequestBuilder.WriteRaw(writer, cacheControl);
+        }
     }
 
     private static void WriteToolChoice(Utf8JsonWriter writer, string type, string? name, bool disableParallel)
@@ -457,10 +549,7 @@ internal static class AnthropicRequestBuilder
             switch (block)
             {
                 case TextBlock { Text.Length: > 0 } text:
-                    writer.WriteStartObject();
-                    writer.WriteString("type", "text");
-                    writer.WriteString("text", text.Text);
-                    writer.WriteEndObject();
+                    WriteTextBlock(writer, text.Text, text.CacheControl);
                     break;
 
                 case ImageBlock image:
@@ -480,6 +569,7 @@ internal static class AnthropicRequestBuilder
                     }
 
                     writer.WriteEndObject();
+                    WriteCacheControl(writer, image.CacheControl);
                     writer.WriteEndObject();
                     break;
 
@@ -490,6 +580,7 @@ internal static class AnthropicRequestBuilder
                     writer.WriteString("name", call.Name);
                     writer.WritePropertyName("input");
                     OpenAIRequestBuilder.WriteRaw(writer, JsonHelpers.EnsureJsonObject(call.InputJson));
+                    WriteCacheControl(writer, call.CacheControl);
                     writer.WriteEndObject();
                     break;
 
@@ -503,6 +594,7 @@ internal static class AnthropicRequestBuilder
                         writer.WriteBoolean("is_error", true);
                     }
 
+                    WriteCacheControl(writer, result.CacheControl);
                     writer.WriteEndObject();
                     break;
             }

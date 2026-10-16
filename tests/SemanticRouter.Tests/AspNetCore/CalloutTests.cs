@@ -1,6 +1,8 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Moq;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Tests.Support;
 
@@ -133,6 +135,35 @@ public sealed class CalloutTests : RouterHostTest
     }
 
     [Fact]
+    public async Task With_the_init_templates_aliases_claude_codes_default_opus_name_is_routed_and_opus_is_a_choice()
+    {
+        HttpClient client = await StartDispatchAsync(o =>
+        {
+            // The globs first: an exact name is matched before them wherever it stands (a dashboard edit appends it).
+            o.ModelAliases.Clear();
+            foreach ((string pattern, string target) in RouterConfiguration.FromJson(SemanticRouter.Host.RouterHost.Template()).Middleware.ModelAliases
+                .OrderBy(a => !a.Key.Contains('*', StringComparison.Ordinal)))
+            {
+                o.ModelAliases[pattern] = target;
+            }
+        });
+
+        HttpResponseMessage byDefault = await client.PostAsync("/v1/chat/completions", Chat("claude-opus-5-5", "hello there"));
+        HttpResponseMessage callout = await client.PostAsync("/v1/chat/completions", Chat("claude-opus-5-5", "@opus why does this deadlock?"));
+        HttpResponseMessage pinned = await client.PostAsync("/v1/chat/completions", Chat("opus-pinned", "hello there"));
+        HttpResponseMessage router = await client.PostAsync("/v1/chat/completions", Chat("semantic-router", "hello there"));
+        HttpResponseMessage cheapest = await client.PostAsync("/v1/chat/completions", Chat("claude-semantic-router-cheapest", "hello there"));
+        HttpResponseMessage best = await client.PostAsync("/v1/chat/completions", Chat("claude-semantic-router-best", "hello there"));
+
+        (Header(byDefault, "Model"), Header(byDefault, "Reason")).Should().Be(("local", "SemanticMatch"), "Claude Code sends its default Opus name whether or not you chose Opus");
+        (Header(callout, "Model"), Header(callout, "Reason")).Should().Be(("claude-opus", "ExplicitCallout"));
+        (Header(pinned, "Model"), Header(pinned, "Reason")).Should().Be(("claude-opus", "ModelOverride"), "the exact key beats the *opus* glob");
+        Header(router, "Model").Should().Be("local");
+        Header(cheapest, "Model").Should().Be("local");
+        Header(best, "Model").Should().Be("cloud", "claude-* does not remap the router's own names: this is auto:best");
+    }
+
+    [Fact]
     public async Task Only_a_leading_known_tag_counts_and_unknown_tags_are_left_alone()
     {
         HttpClient client = await StartDispatchAsync();
@@ -204,5 +235,52 @@ public sealed class CalloutTests : RouterHostTest
         HttpResponseMessage off = await client.PostAsync("/v1/chat/completions", Chat("auto", "@opus think this through"));
         Header(off, "Model").Should().Be("local");
         _sentToLocal.Should().ContainSingle().Which.Should().Contain("@opus think this through");
+    }
+
+    [Theory]
+    [InlineData("/router/api/classify")]
+    [InlineData("/semantic-router/classify")]
+    public async Task Classifying_a_prompt_applies_its_callout_as_the_gateway_does(string endpoint)
+    {
+        HttpClient client = await StartDispatchAsync();
+        ClassifyAs(tier: 2, route: "simple-code");
+
+        JsonElement opus = await ClassifyAsync(client, endpoint, "@opus write a regex that matches email addresses");
+        JsonElement tier = await ClassifyAsync(client, endpoint, "@tier3 summarize the incident report");
+        JsonElement local = await ClassifyAsync(client, endpoint, "@local refactor the patient import");
+        JsonElement auto = await ClassifyAsync(client, endpoint, "@auto hello there");
+        JsonElement plain = await ClassifyAsync(client, endpoint, "write a regex that matches email addresses");
+
+        (opus.GetProperty("reason").GetString(), opus.GetProperty("callout").GetString(), opus.GetProperty("models")[0].GetProperty("model").GetString())
+            .Should().Be(("ExplicitCallout", "@opus", "claude-opus"), "the gateway sends this prompt to Opus, so the tester says so");
+        (tier.GetProperty("requiredTier").GetInt32(), tier.GetProperty("callout").GetString()).Should().Be((3, "@tier3"));
+        (local.GetProperty("localOnly").GetBoolean(), local.GetProperty("models")[0].GetProperty("model").GetString()).Should().Be((true, "local"));
+        (auto.GetProperty("callout").GetString(), auto.GetProperty("reason").GetString()).Should().Be(("@auto", "SemanticMatch"));
+        (plain.GetProperty("requiredTier").GetInt32(), plain.GetProperty("callout").ValueKind).Should().Be((2, JsonValueKind.Null));
+        Classifier.Verify(c => c.ClassifyAsync("summarize the incident report", It.IsAny<CancellationToken>()), Times.Once(), "the tag is not part of what is classified");
+        Classifier.Verify(c => c.ClassifyAsync(It.Is<string>(p => p.Contains('@')), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task Classifying_ignores_callouts_when_they_are_off_and_remembers_none()
+    {
+        HttpClient client = await StartDispatchAsync(o => o.Callouts.Enabled = false);
+
+        JsonElement off = await ClassifyAsync(client, "/router/api/classify", "@opus write a regex");
+
+        (off.GetProperty("reason").GetString(), off.GetProperty("callout").ValueKind).Should().Be(("SemanticMatch", JsonValueKind.Null));
+
+        await DisposeAsync();
+        client = await StartDispatchAsync();
+        await ClassifyAsync(client, "/router/api/classify", "@opus write a regex");
+        JsonElement next = await ClassifyAsync(client, "/router/api/classify", "write a regex");
+        next.GetProperty("reason").GetString().Should().Be("SemanticMatch", "each prompt is classified as a first turn: there is no conversation to remember a callout in");
+    }
+
+    private static async Task<JsonElement> ClassifyAsync(HttpClient client, string endpoint, string prompt)
+    {
+        HttpResponseMessage response = await client.PostAsJsonAsync(endpoint, new { prompt });
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        return JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.Clone();
     }
 }

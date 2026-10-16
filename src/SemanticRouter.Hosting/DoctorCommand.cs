@@ -5,8 +5,8 @@ namespace SemanticRouter.Host;
 
 /// <summary>
 /// <c>semantic-router doctor</c>: loads the configuration exactly as <c>semantic-router</c> would, then checks every
-/// connector, model and the embeddings against this machine (<see cref="RouterDoctor"/>) without calling a model.
-/// Exit code 1 when anything failed.
+/// connector, model and the embeddings against this machine (<see cref="RouterDoctor"/>) without calling a model, and
+/// lists every host the router will contact (<see cref="EgressList"/>). Exit code 1 when anything failed.
 /// </summary>
 internal static class DoctorCommand
 {
@@ -15,16 +15,30 @@ internal static class DoctorCommand
         await output.WriteLineAsync($"Configuration: {settings.ConfigurationFile}{(File.Exists(settings.ConfigurationFile) ? string.Empty : " (not created yet; the built-in template applies)")}").ConfigureAwait(false);
 
         IReadOnlyList<RouterCheck> checks;
-        await using (WebApplication app = RouterHost.Build(settings, builder =>
+        WebApplication built;
+        try
         {
-            // Keep the report readable: the checks report problems themselves.
-            builder.Logging.SetMinimumLevel(LogLevel.Error);
-            configure?.Invoke(builder);
-        }))
+            built = RouterHost.Build(settings, builder =>
+            {
+                // Keep the report readable: the checks report problems themselves.
+                builder.Logging.SetMinimumLevel(LogLevel.Error);
+                configure?.Invoke(builder);
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A host setting the router cannot start with, e.g. a data-protection certificate it cannot load.
+            await output.WriteLineAsync($"[FAIL] configuration: {ex.Message}").ConfigureAwait(false);
+            return 1;
+        }
+
+        await using (WebApplication app = built)
         {
             try
             {
-                checks = [.. HostChecks(app), .. await RouterDoctor.CheckAsync(app.Services).ConfigureAwait(false)];
+                // The egress list first: the embeddings check may download the ONNX model it reports.
+                IReadOnlyList<RouterCheck> egress = EgressList.For(app.Services, settings.ConfigurationDirectory);
+                checks = [.. HostChecks(app), .. egress, .. await RouterDoctor.CheckAsync(app.Services).ConfigureAwait(false)];
             }
             catch (InvalidOperationException ex)
             {
@@ -55,8 +69,28 @@ internal static class DoctorCommand
 
     private static IEnumerable<RouterCheck> HostChecks(WebApplication app)
     {
+        MachinePolicy policy = app.Services.GetRequiredService<RouterRuntimeProvider>().Policy;
+        yield return new RouterCheck("policy", RouterCheckStatus.Ok, policy.IsEmpty
+            ? "no machine-wide policy is set."
+            : $"set by your organization in {policy.Source}: {System.Text.Json.Nodes.JsonNode.Parse(policy.ToJson())!.ToJsonString()}");
+        foreach (RouterCheck check in app.Services.GetRequiredService<KeyRing>().Checks())
+        {
+            yield return check;
+        }
+
         string urls = app.Configuration[WebHostDefaults.ServerUrlsKey] ?? HostSettings.DefaultUrl;
         RouterDashboardOptions dashboard = app.Services.GetRequiredService<IOptions<RouterDashboardOptions>>().Value;
+        if (!string.IsNullOrWhiteSpace(dashboard.TrustedIdentityHeader))
+        {
+            IConfigurationSection forwarded = app.Configuration.GetSection(RouterHost.ForwardedHeadersSection);
+            bool proxies = forwarded.GetSection("KnownProxies").GetChildren().Any() || forwarded.GetSection("KnownNetworks").GetChildren().Any();
+            yield return proxies
+                ? new RouterCheck("identity", RouterCheckStatus.Ok,
+                    $"the dashboard takes the user from {dashboard.TrustedIdentityHeader} on requests from the known proxies; TrustedIdentityRoles names {dashboard.TrustedIdentityRoles.Count}.")
+                : new RouterCheck("identity", RouterCheckStatus.Warning,
+                    $"Dashboard:TrustedIdentityHeader is {dashboard.TrustedIdentityHeader}, but {RouterHost.ForwardedHeadersSection} names no proxy, so the header is never believed.");
+        }
+
         bool remote = urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(u => !RouterHost.IsLoopback(u));
         if (!remote)
         {
@@ -65,8 +99,11 @@ internal static class DoctorCommand
         }
 
         yield return new RouterCheck("listen", RouterCheckStatus.Warning,
-            $"{urls} accepts other machines. Subscription CLI connectors still answer only local requests; consider SemanticRouter:Middleware:GatewayKeys.");
+            $"{urls} accepts other machines. Subscription CLI connectors still answer only local requests.");
+        PromptRouterMiddlewareOptions middleware = app.Services.GetRequiredService<RouterRuntimeProvider>().Current.Configuration.Middleware;
+        yield return new RouterCheck("gateway", middleware.GatewayKeys.Count > 0 ? RouterCheckStatus.Ok : RouterCheckStatus.Warning, RouterHost.RemoteGatewayAccess(middleware));
         if (!dashboard.RequireLocalClient && string.IsNullOrEmpty(dashboard.AdminToken) && string.IsNullOrEmpty(dashboard.ReadOnlyToken)
+            && string.IsNullOrEmpty(dashboard.MetricsToken)
             && !dashboard.AllowUnauthenticatedRemoteClients)
         {
             yield return new RouterCheck("dashboard", RouterCheckStatus.Warning,

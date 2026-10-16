@@ -39,7 +39,7 @@ public sealed class ModelTrialTests : RouterHostTest
 
     private static HttpResponseMessage Reply(string json) => new(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") };
 
-    private Task<HttpClient> StartTrialsAsync() =>
+    private Task<HttpClient> StartTrialsAsync(Action<SemanticRouterOptions>? models = null) =>
         StartAsync(
             o =>
             {
@@ -53,6 +53,7 @@ public sealed class ModelTrialTests : RouterHostTest
                 mid.Model = "mid-model";
                 o.Models.Add(mid);
                 o.Routes.Add(Route("agentic", 4, "implement this feature"));
+                models?.Invoke(o);
             },
             services: s => s.Configure<TuningOptions>(t =>
             {
@@ -193,5 +194,52 @@ public sealed class ModelTrialTests : RouterHostTest
         (await ChangeAsync(client, id)).GetProperty("state").GetString().Should().Be("Undone");
         (await ModelForAsync(client, "task after stopping")).Should().Be("cloud");
         (await RunAsync(client)).GetProperty("changes").EnumerateArray().Should().BeEmpty("a stopped trial is not started again for a while");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_trial_is_not_started_toward_a_model_that_costs_more_once_cache_is_counted(bool cacheReads)
+    {
+        // "cloud" lists $3 input but reads its prompt cache at $0.30; "mid" lists $2.50 and has no cache prices. The free
+        // local model is off, so mid is the only model that could cost less.
+        HttpClient client = await StartTrialsAsync(o =>
+        {
+            o.Models.Single(m => m.Name == "local").Enabled = false;
+            o.Models.Single(m => m.Name == "cloud").CacheReadCostPerMillionTokens = 0.3m;
+            o.Models.Single(m => m.Name == "mid").InputCostPerMillionTokens = 2.5m;
+            o.Models.Single(m => m.Name == "mid").OutputCostPerMillionTokens = 2.5m;
+        });
+        for (int i = 0; i < 5; i++)
+        {
+            Activity.Add(new RoutingActivityEntry
+            {
+                Timestamp = DateTimeOffset.UtcNow.AddMinutes(-5),
+                Tier = 4,
+                Route = "agentic",
+                Reason = RoutingReason.SemanticMatch,
+                ServedBy = "cloud",
+                Outcome = "served",
+                InputTokens = cacheReads ? 100 : 1000,
+                CacheReadTokens = cacheReads ? 900 : 0,
+                OutputTokens = 50,
+            });
+        }
+
+        JsonElement[] changes = [.. (await RunAsync(client)).GetProperty("changes").EnumerateArray()];
+
+        if (cacheReads)
+        {
+            // A typical turn on the route: cloud $0.0021 with 90% of its input read from the cache, mid $0.0038.
+            changes.Should().BeEmpty("cloud costs less than mid once its cache reads are counted");
+            JsonElement cloud = (await JsonOf(await client.GetAsync("/router/api/status"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "cloud");
+            cloud.GetProperty("inputCostPerMillionTokens").GetDecimal().Should().Be(3m);
+            cloud.GetProperty("effectiveInputCostPerMillionTokens").GetDecimal().Should().Be(0.57m);
+            cloud.GetProperty("cacheShare").GetProperty("read").GetDouble().Should().Be(0.9);
+        }
+        else
+        {
+            changes.Should().ContainSingle().Which.GetProperty("newModel").GetString().Should().Be("mid", "at list prices mid costs less");
+        }
     }
 }

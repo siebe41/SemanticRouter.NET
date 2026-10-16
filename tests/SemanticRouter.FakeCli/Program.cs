@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 // Behaviour is chosen with FAKE_CLI_MODE so the router's own argument and stdin handling is what gets exercised.
 //   claude-echo  Claude Code stream-json reply describing what the process received (args, stdin, env, cwd).
@@ -9,7 +10,7 @@ using System.Text.Json;
 //   slow         Sleeps, then creates the file named by FAKE_CLI_MARKER (which must not happen once killed).
 //   claude-agent A simulated Claude Code agent for latency benchmarks: after FAKE_CLI_STARTUP_MS (default 1500) it streams
 //                a reply word by word, FAKE_CLI_WORD_MS apart (default 30). Without a tool result in the prompt the reply
-//                explains its plan and ends in a tool_call block; with one, it answers.
+//                explains its plan and ends in a call fenced with the run's tool_call label; with one, it answers.
 Console.OutputEncoding = new UTF8Encoding(false);
 Console.InputEncoding = new UTF8Encoding(false);
 string mode = Environment.GetEnvironmentVariable("FAKE_CLI_MODE") ?? "cat";
@@ -73,10 +74,11 @@ switch (mode)
         string input = await ReadStdinAsync() + string.Join(' ', args);
         int startup = int.TryParse(Environment.GetEnvironmentVariable("FAKE_CLI_STARTUP_MS"), out int s) ? s : 1500;
         int perWord = int.TryParse(Environment.GetEnvironmentVariable("FAKE_CLI_WORD_MS"), out int w) ? w : 30;
-        bool answered = input.Contains("[tool_result", StringComparison.Ordinal);
+        bool answered = input.Contains("\n[tool_result", StringComparison.Ordinal); // a result in the transcript, not the instructions' mention of one
+        string label = Regex.Match(input, "```(tool_call-[0-9a-f]+)") is { Success: true } run ? run.Groups[1].Value : "tool_call"; // the run's own label, as a model that follows the format writes it
         string reply = answered
             ? "The README describes a semantic router that classifies each prompt by meaning and complexity, then sends it to the cheapest model that can handle it: local models first, subscriptions next, paid APIs last. It also covers failover, budgets and the dashboard."
-            : "I'll start by reading the README so the summary is based on what it actually says, then I'll pull out the main points: what the project does, how routing works, and how to run it.\n```tool_call\n{\"name\": \"Read\", \"input\": {\"path\": \"README.md\"}}\n```";
+            : $"I'll start by reading the README so the summary is based on what it actually says, then I'll pull out the main points: what the project does, how routing works, and how to run it.\n```{label}\n{{\"name\": \"Read\", \"input\": {{\"path\": \"README.md\"}}}}\n```";
         WriteLine(JsonSerializer.Serialize(new { type = "system", subtype = "init", apiKeySource = "none" }));
         await Task.Delay(startup);
         string[] words = reply.Split(' ');

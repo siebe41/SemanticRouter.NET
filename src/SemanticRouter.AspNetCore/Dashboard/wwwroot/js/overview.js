@@ -1,11 +1,12 @@
 /* Semantic Router dashboard: Overview and Activity pages, the prompt tester result and the label form. */
 import { fmtMs, trendsCard } from './charts.js';
 import { tierOptions } from './config.js';
-import { h, num, readOnly, state, tierName, views, when } from './core.js';
+import { adminOnly, h, metricsOnly, num, readOnly, state, tierName, views, when } from './core.js';
 import { digestCard, noticesCard } from './digest.js';
 import { endpointsCard } from './endpoints.js';
 import { learnedBadge, learnedCard } from './learned.js';
 import { unreliableBadge } from './reliability.js';
+import { serviceCard } from './service.js';
 import { isLocalModel } from './live.js';
 import { int, usd } from './usage.js';
 
@@ -21,6 +22,7 @@ views.overview = () => {
   return `
     <div class="section-head"><h1>Overview</h1><span class="muted">What the router is doing right now.</span></div>
     ${noticesCard()}
+    ${serviceCard()}
     ${digestCard()}
     <div class="grid cols-4 section">
       <div class="card stat"><span class="value">${a.total}</span><span class="label">routed (last ${a.total >= 500 ? '500' : a.total})</span></div>
@@ -66,14 +68,14 @@ views.overview = () => {
       <div class="card"><div class="card-head"><h2>Required tier</h2></div>${bars(byTier, (k) => tierName(parseInt(k, 10)), true)}</div>
     </div>
 
-    <div class="card section tester">
+    ${metricsOnly() ? '' : `<div class="card section tester">
       <div class="card-head"><h2>Try a prompt</h2><span class="muted small">Classification calls no model. “Send” goes through the gateway for real${s.gateway.mode !== 'Dispatch' ? ' (Annotate mode: your endpoint answers)' : ''}.</span></div>
       <textarea id="tester-prompt" aria-label="Prompt to try" placeholder="Paste a prompt…">${h(t.prompt)}</textarea>
       <div class="inline" style="margin-top:8px">
         <select id="tester-model" aria-label="Model" style="width:220px">
           ${['auto', 'auto:cheapest', 'auto:best', 'auto:fastest', 'auto:balanced', 'auto:priority'].concat(s.models.map((m) => m.name)).map((m) => `<option ${m === t.model ? 'selected' : ''}>${h(m)}</option>`).join('')}
         </select>
-        <button class="btn primary" data-action="tester-classify" ${t.busy ? 'disabled' : ''}>Classify</button>
+        <button class="btn primary" data-action="tester-classify" ${adminOnly(t.busy)}>Classify</button>
         <button class="btn" data-action="tester-send" ${t.busy ? 'disabled' : ''}>Send</button>
         ${t.busy ? '<span class="muted small">working…</span>' : ''}
       </div>
@@ -84,7 +86,7 @@ views.overview = () => {
     <div class="card section">
       <div class="card-head"><h2>Recent activity</h2><span class="spacer"></span><a href="#/activity" class="small">all →</a></div>
       ${renderActivityTable(state.activity.slice(0, 8))}
-    </div>`;
+    </div>`}`;
 };
 
 export function renderClassification(r) {
@@ -92,6 +94,7 @@ export function renderClassification(r) {
     <div class="result-line">
       <span class="badge signal">tier ${h(tierName(r.requiredTier))}</span>
       <span class="badge">${h(r.reason)}</span>
+      ${r.callout ? `<span class="badge accent" title="Routed as the inline callout asks; classified without it">${h(r.callout)}</span>` : ''}
       ${r.route ? `<span class="badge">route ${h(r.route)} · ${num(r.similarity, 3)}</span>` : ''}
       <span class="badge">complexity ${num(r.complexity.score, 3)}</span>
       ${r.localOnly ? '<span class="badge warn">local only</span>' : ''}
@@ -105,19 +108,20 @@ export function renderClassification(r) {
     </div>`;
 }
 
-export function renderActivityTable(entries, labels) {
+/* With actions, each entry gets Report (a pre-filled GitHub issue) and, for the admin role, Label. */
+export function renderActivityTable(entries, actions) {
   if (!entries.length) return '<div class="muted small">No requests routed yet. Point a client at the gateway or use “Try a prompt”.</div>';
-  return `<div class="table-wrap"><table>
-    <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th>${labels ? '<th></th>' : ''}</tr>
+  return `<div class="table-wrap"><table class="activity-table">
+    <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th>${actions ? '<th></th>' : ''}</tr>
     ${entries.map((e) => `<tr title="${h(e.detail || '')}">
       <td class="nowrap small">${h(when(e.timestamp))}</td>
-      <td><span class="small">${h(e.promptPreview)}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.cacheReadTokens ? ` · <span title="Prompt tokens served from the backend's prompt cache">${int(e.cacheReadTokens)} cached</span>` : ''}${e.cacheCreationTokens ? ` · <span title="Prompt tokens written to the backend's prompt cache">${int(e.cacheCreationTokens)} to cache</span>` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}${e.profile ? ' · <span class="badge accent" title="Routing profile">' + h(e.profile) + '</span>' : ''}${e.project ? ' · <span class="mono" title="Project">' + h(e.project) + '</span>' : ''}${e.signals ? ' · <span class="badge warn" title="Kept local because the conversation contains this">local: ' + h(e.signals) + '</span>' : ''}${e.notes ? ' · <span class="badge ' + (/malformed/.test(e.notes) ? 'warn' : 'info') + '" title="Noted by the connector">' + h(e.notes) + '</span>' : ''}${memoryBadge(e)}</div></td>
+      <td class="prompt-cell"><span class="small">${e.promptPreview ? h(e.promptPreview) : '<span class="faint">prompt not stored</span>'}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.cacheReadTokens ? ` · <span title="Prompt tokens served from the backend's prompt cache">${int(e.cacheReadTokens)} cached</span>` : ''}${e.cacheCreationTokens ? ` · <span title="Prompt tokens written to the backend's prompt cache">${int(e.cacheCreationTokens)} to cache</span>` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}${e.profile ? ' · <span class="badge accent" title="Routing profile">' + h(e.profile) + '</span>' : ''}${e.project ? ' · <span class="mono project" title="' + h('Project: ' + e.project) + '">' + h(e.project) + '</span>' : ''}${e.signals ? ' · <span class="badge warn" title="Kept local because the conversation contains this">local: ' + h(e.signals) + '</span>' : ''}${e.promptedToolCalls ? ` · <span class="badge" title="Tool calls read out of the model's text (prompted tool calling), not returned by a native tool API">${e.promptedToolCalls} prompted call${e.promptedToolCalls > 1 ? 's' : ''}</span>` : ''}${e.notes ? ' · <span class="badge ' + (/malformed/.test(e.notes) ? 'warn' : 'info') + '" title="Noted by the connector">' + h(e.notes) + '</span>' : ''}${memoryBadge(e)}</div></td>
       <td><span class="tier">T${e.tier}</span></td>
       <td class="small">${h(e.reason)}${e.cached ? ' <span class="badge" title="Reused a recent decision: no embedding call">cached</span>' : ''}${learnedBadge(e)}</td>
       <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
-      <td class="small">${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.outcome === 'rate-limited' ? `<span class="badge warn" title="${h(e.detail || '')}">rate limited</span>` : e.servedBy ? `<b>${h(e.servedBy)}</b>${e.attempt > 1 ? ` <span class="badge warn">try ${e.attempt}</span>` : ''}${e.degraded ? ' <span class="badge warn">degraded</span>' : ''}` : `<span class="muted">${h(e.plannedModel || '—')}</span> <span class="faint">planned</span>`}${e.sticky ? ' <span class="badge" title="Stayed on the model that answered the conversation\'s last turn">sticky</span>' : ''}${e.selection ? ` <span class="badge" title="${h(e.selection)}">${h(e.selection.split(':')[0])}</span>` : ''}${e.callout ? ` <span class="badge accent" title="Chosen with an inline callout">${h(e.callout)}</span>` : ''}${unreliableBadge(e)}${feedbackBadges(e)}${gradeBadge(e)}</td>
+      <td class="small served">${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.outcome === 'rate-limited' ? `<span class="badge warn" title="${h(e.detail || '')}">rate limited</span>` : e.servedBy ? `<b>${h(e.servedBy)}</b>${e.attempt > 1 ? ` <span class="badge warn">try ${e.attempt}</span>` : ''}${e.degraded ? ' <span class="badge warn">degraded</span>' : ''}` : `<span class="muted">${h(e.plannedModel || '—')}</span> <span class="faint">planned</span>`}${e.sticky ? ' <span class="badge" title="Stayed on the conversation\'s model: the one that answered its last turn, or the one with its warm prompt cache">sticky</span>' : ''}${e.selection ? ` <span class="badge" title="${h(e.selection)}">${h(e.selection.split(':')[0])}</span>` : ''}${e.callout ? ` <span class="badge accent" title="Chosen with an inline callout">${h(e.callout)}</span>` : ''}${unreliableBadge(e)}${feedbackBadges(e)}${gradeBadge(e)}</td>
       <td class="num small">${e.totalMilliseconds != null ? num(e.totalMilliseconds, 0) : num(e.classificationMilliseconds, 1)}${e.timeToFirstByteMilliseconds != null && e.totalMilliseconds != null ? `<div class="faint" title="Time to the first byte of the reply">first ${num(e.timeToFirstByteMilliseconds, 0)}</div>` : ''}</td>
-      ${labels ? `<td>${e.toolContinuation ? '' : `<button class="btn ghost small" data-action="label-open" data-id="${e.id}" title="Say which tier this prompt should have had">Label</button>`}</td>` : ''}
+      ${actions ? `<td class="nowrap">${e.toolContinuation ? '' : `${readOnly() ? '' : `<button class="btn ghost small" data-action="label-open" data-id="${e.id}" title="Say which tier this prompt should have had">Label</button>`}<button class="btn ghost small" data-action="report-entry" data-id="${e.id}" title="${e.outcome === 'failed' ? 'Report this failure as a GitHub issue' : 'Report a misroute as a GitHub issue, with this decision filled in and the prompt left out'}">Report</button>`}</td>` : ''}
     </tr>`).join('')}
   </table></div>`;
 }
@@ -169,15 +173,15 @@ function judgeNote() {
 
 views.activity = () => {
   const f = state.activityFilter;
-  const entries = state.activity.filter((e) => f === 'all' || (f === 'failed' ? e.outcome === 'failed' : f === 'degraded' ? e.degraded : f === 'tools' ? e.hasTools : f.startsWith('profile:') ? e.profile === f.slice(8) : true));
+  const entries = state.activity.filter((e) => f === 'all' || (f === 'failed' ? e.outcome === 'failed' : f === 'degraded' ? e.degraded : f === 'tools' ? e.hasTools : f === 'prompted calls' ? e.promptedToolCalls > 0 : f.startsWith('profile:') ? e.profile === f.slice(8) : true));
   const profiles = [...new Set(state.activity.map((e) => e.profile).filter(Boolean).concat(Object.keys((state.config && state.config.Profiles) || {})))];
   return `
     <div class="section-head"><h1>Activity</h1><span class="muted">The last ${state.activity.length} routed requests (newest first).${judgeNote()}</span><span class="spacer"></span>
-      <select id="activity-filter" aria-label="Show" style="width:150px">${['all', 'failed', 'degraded', 'tools'].map((x) => `<option value="${x}" ${x === f ? 'selected' : ''}>${x}</option>`).join('')}${profiles.map((x) => `<option value="profile:${h(x)}" ${'profile:' + x === f ? 'selected' : ''}>profile ${h(x)}</option>`).join('')}</select>
+      <select id="activity-filter" aria-label="Show" style="width:150px">${['all', 'failed', 'degraded', 'tools', 'prompted calls'].map((x) => `<option value="${x}" ${x === f ? 'selected' : ''}>${x}</option>`).join('')}${profiles.map((x) => `<option value="profile:${h(x)}" ${'profile:' + x === f ? 'selected' : ''}>profile ${h(x)}</option>`).join('')}</select>
       <label class="check"><input type="checkbox" id="auto-refresh" ${state.autoRefresh ? 'checked' : ''}> auto-refresh</label>
       <button class="btn small" data-action="refresh">Refresh</button></div>
     ${state.label ? labelForm() : ''}
-    ${renderActivityTable(entries, !readOnly())}`;
+    ${renderActivityTable(entries, true)}`;
 };
 
 /* Label an activity entry: add it to the evaluation set and, optionally, as an utterance to a route. */

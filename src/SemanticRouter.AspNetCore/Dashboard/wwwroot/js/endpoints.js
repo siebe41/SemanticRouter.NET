@@ -1,6 +1,6 @@
 /* Semantic Router dashboard: endpoints, where each connector sends requests and how it is doing (Overview card, top bar, Connectors page). */
 import { fmtMs } from './charts.js';
-import { h, num, state } from './core.js';
+import { h, num, readOnly, state } from './core.js';
 
 const STATES = {
   ok: ['ok', 'ok'],
@@ -41,7 +41,7 @@ function where(e) {
   const place = (e.local ? ' <span class="badge info" title="Prompts stay on this machine">local</span>' : '') +
     (e.scheme === 'http' && !e.local ? ' <span class="badge warn" title="Requests leave this machine without TLS: prompts and keys can be read on the network">unencrypted</span>' : '');
   if (e.host) return `<span class="mono">${h(e.host)}</span>${place}`;
-  if (e.program) return `<span class="mono">${h(e.program)}</span>${place}<div class="faint small">runs on this machine${e.via ? ', sends to ' + h(e.via) : ''}</div>`;
+  if (e.program) return `<span class="mono break">${h(e.program)}</span>${place}<div class="faint small">runs on this machine${e.via ? ', sends to ' + h(e.via) : ''}</div>`;
   return '<span class="muted">no address set</span>';
 }
 
@@ -62,7 +62,7 @@ function check(e) {
   const busy = state.checking.has(e.connector);
   const c = e.check;
   const last = c ? `<div class="small"><span class="badge ${CHECKS[c.status] || ''}" title="${h(c.messages.join('\n'))}">${h(c.status === 'Ok' ? 'passed' : c.status === 'Warning' ? 'warning' : 'failed')}</span> <span class="faint" title="${h(at(c.at))}">${h(ago(c.at))} · ${h(fmtMs(c.milliseconds))}</span></div>` : '';
-  return `<button class="btn small" data-action="endpoint-check" data-name="${h(e.connector)}" ${busy ? 'disabled' : ''} title="Ask it now, without calling a model: reachable and key accepted (HTTP), installed and signed in (CLI)">${busy ? 'Checking…' : 'Check'}</button>${last}`;
+  return `${readOnly() ? '' : `<button class="btn small" data-action="endpoint-check" data-name="${h(e.connector)}" ${busy ? 'disabled' : ''} title="Ask it now, without calling a model: reachable and key accepted (HTTP), installed and signed in (CLI)">${busy ? 'Checking…' : 'Check'}</button>`}${last}`;
 }
 
 /* Overview: every endpoint, its state and figures. */
@@ -72,7 +72,7 @@ export function endpointsCard() {
   const now = currentEndpoint();
   return `<div class="card section" id="endpoints">
     <div class="card-head"><h2>Endpoints</h2><span class="muted small">Where each connector sends requests and how it did over the last ${state.status.activity.total} routed requests. Failed attempts that fell through to another model count against it.</span></div>
-    <div class="table-wrap"><table>
+    <div class="table-wrap"><table class="wrap-head">
       <tr><th>Connector</th><th>Host</th><th>State</th><th class="num">Answered</th><th class="num" title="Time until the client starts seeing the reply">First byte p50 / p95</th><th class="num">Total p50 / p95</th><th class="num" title="Output tokens per second after the first byte, when the backend reports usage">Tokens/s</th><th>Last request</th><th>Check</th></tr>
       ${list.map((e) => `<tr>
         <td><b>${h(e.connector)}</b>${e === now ? ' <span class="badge accent" title="The latest request went here">in use</span>' : ''}<div class="faint small">${h(e.kind)} · ${e.models} model${e.models === 1 ? '' : 's'}</div></td>

@@ -4,14 +4,65 @@ using SemanticRouter.Embeddings.Onnx;
 
 namespace SemanticRouter.Host;
 
-/// <summary>Where <c>init</c> looks for local servers and CLIs; replaceable in tests.</summary>
-internal sealed record InitProbes(HttpClient Http, string? SearchPath, bool Windows)
+/// <summary>
+/// Where <c>init</c> looks for local servers and CLIs, and the machine policy it keeps to (<see cref="MachinePolicy"/>:
+/// a connector type or CLI preset it turns off is not added); replaceable in tests.
+/// </summary>
+internal sealed record InitProbes(HttpClient Http, string? SearchPath, bool Windows, MachinePolicy? Policy = null)
 {
     public static readonly Uri LmStudio = new("http://localhost:1234");
     public static readonly Uri Ollama = new("http://localhost:11434");
 
+    /// <exception cref="InvalidDataException">A machine policy is set but cannot be read.</exception>
     public static InitProbes ForThisMachine(HttpClient http) =>
-        new(http, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows());
+        new(http, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows(), MachinePolicyLoader.Load());
+}
+
+/// <summary>
+/// Whether <c>init</c> turns on the subscription CLIs it finds. Each one answers with whatever account that CLI is signed
+/// in to, which may be a personal plan, so it is enabled only on an explicit yes: <c>--yes</c>, or an answer at the terminal.
+/// </summary>
+/// <param name="Yes"><c>--yes</c>: enable them without asking.</param>
+/// <param name="Input">The terminal to ask on; <see langword="null"/> when there is none (input or output redirected).</param>
+/// <param name="Output">Where the questions are written.</param>
+internal sealed record CliConsent(bool Yes, TextReader? Input, TextWriter Output)
+{
+    /// <summary>Which of the CLIs found (executable and path) to enable. Anything but <c>y</c> or <c>yes</c> means no.</summary>
+    public async Task<IReadOnlySet<string>> AskAsync(IReadOnlyList<(string Executable, string Path)> found, CancellationToken cancellationToken)
+    {
+        if (Yes)
+        {
+            return found.Select(f => f.Executable).ToHashSet();
+        }
+
+        var enabled = new HashSet<string>();
+        if (Input is null || found.Count == 0)
+        {
+            return enabled;
+        }
+
+        await Output.WriteLineAsync("Found " + string.Join(", ", found.Select(f => $"{f.Executable} ({f.Path})")) + ".").ConfigureAwait(false);
+        await Output.WriteLineAsync("A CLI connector answers prompts with whatever account that CLI is signed in to, which may be a personal subscription.").ConfigureAwait(false);
+        await Output.WriteLineAsync("On a work machine, check your company's AI policy first: see \"Using it at work\" in docs/TERMS.md.").ConfigureAwait(false);
+        foreach ((string executable, _) in found)
+        {
+            await Output.WriteAsync($"Enable {executable} on the account it is signed in to? [y/N] ").ConfigureAwait(false);
+            await Output.FlushAsync(cancellationToken).ConfigureAwait(false);
+            string? answer = await Input.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            if (answer is null)
+            {
+                await Output.WriteLineAsync().ConfigureAwait(false);
+                break;
+            }
+
+            if (answer.Trim().ToUpperInvariant() is "Y" or "YES")
+            {
+                enabled.Add(executable);
+            }
+        }
+
+        return enabled;
+    }
 }
 
 /// <summary>
@@ -21,7 +72,9 @@ internal sealed record InitProbes(HttpClient Http, string? SearchPath, bool Wind
 /// </summary>
 internal static class InitCommand
 {
-    public static async Task<int> RunAsync(HostSettings settings, InitProbes probes, TextWriter output, CancellationToken cancellationToken = default)
+    /// <param name="input">The terminal to ask on before enabling a subscription CLI; <see langword="null"/> when there is none.</param>
+    public static async Task<int> RunAsync(
+        HostSettings settings, InitProbes probes, TextWriter output, TextReader? input = null, CancellationToken cancellationToken = default)
     {
         if (File.Exists(settings.ConfigurationFile) && !settings.Force)
         {
@@ -35,7 +88,8 @@ internal static class InitCommand
         {
             // A model-family table in the configuration directory (from an earlier setup) is used here too.
             ModelFamilyTable families = ModelFamilyTable.Load(ModelFamilyTable.FileNextTo(settings.ConfigurationFile));
-            await DetectAsync(document, probes, notes, cancellationToken, families).ConfigureAwait(false);
+            CliConsent? cli = settings.NoCli ? null : new CliConsent(settings.Yes, input, output);
+            await DetectAsync(document, probes, notes, cli, cancellationToken, families).ConfigureAwait(false);
         }
 
         IReadOnlyList<string> errors = document.GetDocumentValidationErrors();
@@ -64,15 +118,22 @@ internal static class InitCommand
 
         if (!document.Models.Any(m => m.Enabled))
         {
-            await output.WriteLineAsync("  No model was found. Start LM Studio or Ollama, install a CLI, or add an API model on the dashboard (Models and Connectors).").ConfigureAwait(false);
+            await output.WriteLineAsync(document.Models.Count > 0
+                ? "  No model is enabled. Enable one on the dashboard (Models), start LM Studio or Ollama, or add an API model (Models and Connectors)."
+                : "  No model was found. Start LM Studio or Ollama, install a CLI, or add an API model on the dashboard (Models and Connectors).").ConfigureAwait(false);
         }
 
         await output.WriteLineAsync("Next: `semantic-router doctor` checks every connector; `semantic-router` starts the router and the dashboard.").ConfigureAwait(false);
+        await output.WriteLineAsync($"Then, with ANTHROPIC_BASE_URL pointing at the router: {RouterHost.ClaudeCodeStart(document.Models, probes.Windows)}").ConfigureAwait(false);
         return 0;
     }
 
-    /// <summary>Adds connectors, models and embeddings for what is found. Notes say what was added and why.</summary>
-    internal static async Task DetectAsync(RouterConfiguration document, InitProbes probes, List<string> notes, CancellationToken cancellationToken, ModelFamilyTable? families = null)
+    /// <summary>
+    /// Adds connectors, models and embeddings for what is found. Notes say what was added and why. Without
+    /// <paramref name="cli"/> (<c>--no-cli</c>) no subscription CLI connector is added.
+    /// </summary>
+    internal static async Task DetectAsync(
+        RouterConfiguration document, InitProbes probes, List<string> notes, CliConsent? cli, CancellationToken cancellationToken, ModelFamilyTable? families = null)
     {
         string? embeddingModel = null;
         Uri? embeddingEndpoint = null;
@@ -155,25 +216,64 @@ internal static class InitCommand
                       $"similarity threshold {model.SuggestedThreshold:0.00} (calibrate on the dashboard's Evaluate page).");
         }
 
-        AddCli(document, probes, notes, "claude", "claude-cli", CliPreset.ClaudeCode, maxConcurrency: 2, enabled: true);
-        AddCli(document, probes, notes, "codex", "codex-cli", CliPreset.Codex, maxConcurrency: 1, enabled: true);
-        AddCli(document, probes, notes, "copilot", "copilot-cli", CliPreset.GitHubCopilot, maxConcurrency: 2, enabled: false);
-    }
-
-    private static void AddCli(
-        RouterConfiguration document, InitProbes probes, List<string> notes, string executable, string connector, CliPreset preset, int maxConcurrency, bool enabled)
-    {
-        CliExecutableLookup lookup = CliExecutableLocator.Find(executable, probes.SearchPath, probes.Windows);
-        if (!lookup.Found)
+        if (cli is null)
         {
-            if (lookup.ScriptPath is not null)
-            {
-                notes.Add($"{executable}: only a script wrapper was found ({lookup.ScriptPath}); install the native {executable}.exe to use it.");
-            }
-
             return;
         }
 
+        // Claude and Codex are enabled only on a yes. Copilot is not asked about: it is added disabled because it spends
+        // the plan's premium requests.
+        (string Executable, string Connector, CliPreset Preset, int MaxConcurrency, bool Ask)[] clis =
+        [
+            ("claude", "claude-cli", CliPreset.ClaudeCode, 2, true),
+            ("codex", "codex-cli", CliPreset.Codex, 1, true),
+            ("copilot", "copilot-cli", CliPreset.GitHubCopilot, 2, false),
+        ];
+        var found = new List<(string Executable, string Connector, CliPreset Preset, int MaxConcurrency, bool Ask, string Path)>();
+        foreach ((string executable, string connector, CliPreset preset, int maxConcurrency, bool ask) in clis)
+        {
+            CliExecutableLookup lookup = CliExecutableLocator.Find(executable, probes.SearchPath, probes.Windows);
+            if (lookup.Found && probes.Policy?.Blocks(new ConnectorOptions { Type = ConnectorType.Cli, Preset = preset }) is { } blocked)
+            {
+                // Not added, not asked about: the router would turn it off at start-up anyway.
+                notes.Add($"{executable}: found at {lookup.Path}, but not added: {blocked}.");
+                continue;
+            }
+
+            if (lookup.Found)
+            {
+                found.Add((executable, connector, preset, maxConcurrency, ask, lookup.Path!));
+            }
+            else if (lookup.ScriptPath is not null)
+            {
+                notes.Add($"{executable}: only a script wrapper was found ({lookup.ScriptPath}); install the native {executable}.exe to use it.");
+            }
+        }
+
+        IReadOnlySet<string> yes = await cli.AskAsync(found.Where(f => f.Ask).Select(f => (f.Executable, f.Path)).ToArray(), cancellationToken).ConfigureAwait(false);
+        foreach ((string executable, string connector, CliPreset preset, int maxConcurrency, bool ask, string path) in found)
+        {
+            // Why a CLI is added disabled, and how to turn it on.
+            string? off = !ask ? "(it spends your plan's premium requests); enable it on the dashboard"
+                : yes.Contains(executable) ? null
+                : cli.Input is null ? "(there was no terminal to ask on)"
+                : "(you did not say yes); enable it on the dashboard when you want it";
+            AddCli(document, notes, executable, path, connector, preset, maxConcurrency, off);
+        }
+
+        string[] unasked = cli.Input is null && !cli.Yes ? found.Where(f => f.Ask).Select(f => f.Executable).ToArray() : [];
+        if (unasked.Length > 0)
+        {
+            notes.Add($"{string.Join(", ", unasked)}: init asks before enabling a subscription CLI, because it answers on whatever account that CLI is signed in to, " +
+                      "which may be a personal plan (at work, see \"Using it at work\" in docs/TERMS.md). " +
+                      $"Enable {(unasked.Length == 1 ? "it" : "them")} on the dashboard, or run `semantic-router init --force --yes` to enable {(unasked.Length == 1 ? "it" : "them")} without asking.");
+        }
+    }
+
+    private static void AddCli(
+        RouterConfiguration document, List<string> notes, string executable, string path, string connector, CliPreset preset, int maxConcurrency, string? off)
+    {
+        bool enabled = off is null;
         var options = new ConnectorOptions
         {
             Type = ConnectorType.Cli,
@@ -193,12 +293,13 @@ internal static class InitCommand
             {
                 ModelDefinition model = entry.Suggestion!;
                 model.Description = description;
+                model.Enabled &= enabled;
                 document.Models.Add(model);
             }
 
-            notes.Add($"{executable}: {lookup.Path} as '{connector}' with " +
-                      string.Join(", ", document.Models.Where(m => m.Connector == connector).Select(m => $"{m.Model} (tier {m.Tier}{(m.Enabled ? string.Empty : ", disabled")})")) +
-                      " (uses your own login; answers only requests from this machine).");
+            notes.Add($"{executable}: {path} as '{connector}' with " +
+                      string.Join(", ", document.Models.Where(m => m.Connector == connector).Select(m => $"{m.Model} (tier {m.Tier}{(m.Enabled || !enabled ? string.Empty : ", disabled")})")) +
+                      (enabled ? " (uses your own login; answers only requests from this machine)." : $", all disabled {off}."));
             return;
         }
 
@@ -214,7 +315,7 @@ internal static class InitCommand
             Description = description,
         });
         notes.Add(enabled
-            ? $"{executable}: {lookup.Path} as '{connector}' (uses your own login; answers only requests from this machine)."
-            : $"{executable}: {lookup.Path} as '{connector}', disabled (it spends your plan's premium requests); enable it on the dashboard.");
+            ? $"{executable}: {path} as '{connector}' (uses your own login; answers only requests from this machine)."
+            : $"{executable}: {path} as '{connector}', disabled {off}.");
     }
 }

@@ -234,4 +234,29 @@ public sealed class CliAdapterTests : IDisposable
         system.Should().Be("S");
         prompt.Should().Contain("[user]\nQ1").And.Contain("[assistant]\nA1").And.EndWith("[user]\nQ2\n");
     }
+
+    [Fact]
+    public void Claude_runs_without_background_traffic_unless_the_connector_says_otherwise()
+    {
+        var options = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        options.EnvironmentVariables["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "0";
+        options.EnvironmentVariables["HTTPS_PROXY"] = "http://proxy.example:3128";
+
+        Dictionary<string, string> environment = CliAdapter.For(CliPreset.ClaudeCode).EnvironmentFor(options);
+
+        environment.Should().Contain("DISABLE_AUTOUPDATER", "1").And.Contain("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "0")
+            .And.Contain("HTTPS_PROXY", "http://proxy.example:3128");
+        CliAdapter.For(CliPreset.Custom).EnvironmentFor(new ConnectorOptions()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Codex_runs_without_update_checks_or_analytics()
+    {
+        (List<string> args, _) = new CodexCliAdapter().Build(Request("gpt-6.1-sol", new ChatMessage("user", "hi")));
+
+        args.Should().ContainInOrder("-c", "check_for_update_on_startup=false")
+            .And.ContainInOrder("-c", "analytics.enabled=false")
+            .And.ContainInOrder("-c", "otel.metrics_exporter=\"none\"");
+        args.IndexOf("analytics.enabled=false").Should().BeLessThan(args.IndexOf("-"), "options come before the stdin marker");
+    }
 }

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Host;
 using SemanticRouter.Tests.Support;
@@ -40,6 +41,9 @@ public sealed class HostTests : IDisposable
         HostSettings.Parse(["--help"], _ => null).Command.Should().Be("help");
         HostSettings.Parse(["models", "lmstudio", "--config-dir=/tmp/x"], _ => null).Should().Match<HostSettings>(s => s.Command == "models" && s.Connector == "lmstudio");
         HostSettings.Parse(["models"], _ => null).Connector.Should().BeNull();
+        HostSettings.Parse(["init", "--yes"], _ => null).Should().Match<HostSettings>(s => s.Yes && !s.NoCli);
+        HostSettings.Parse(["init", "-y", "--no-cli"], _ => null).Should().Match<HostSettings>(s => s.Yes && s.NoCli);
+        HostSettings.Parse(["init"], _ => null).Should().Match<HostSettings>(s => !s.Yes && !s.NoCli);
     }
 
     [Fact]
@@ -72,6 +76,43 @@ public sealed class HostTests : IDisposable
         template.Routes.Should().Contain(r => r.Name == "agentic-coding").And.Contain(r => r.Name == "smalltalk");
         template.Middleware.Mode.Should().Be(PromptRouterMode.Dispatch);
         template.Middleware.ModelAliases.Should().ContainKey("*opus*");
+    }
+
+    [Fact]
+    public void The_template_routes_claude_codes_default_opus_name_and_keeps_opus_as_a_choice()
+    {
+        IDictionary<string, string> aliases = RouterConfiguration.FromJson(RouterHost.Template()).Middleware.ModelAliases;
+
+        aliases["*opus*"].Should().Be("auto", "Claude Code sends its default Opus name whether or not you chose Opus");
+        aliases["*sonnet*"].Should().Be("auto");
+        aliases["claude-*"].Should().Be("auto");
+        aliases["*haiku*"].Should().Be("auto:cheapest");
+        aliases["opus-pinned"].Should().Be("family:opus");
+        aliases.Values.Should().ContainSingle(v => v.StartsWith("family:", StringComparison.Ordinal), "only the explicit name pins a family");
+    }
+
+    [Fact]
+    public void Claude_code_is_told_the_smallest_context_window_among_the_models_that_carry_tools()
+    {
+        static ModelDefinition Model(string name, int context, bool tools = true, bool enabled = true)
+        {
+            var model = new ModelDefinition { Name = name, ContextWindow = context, Enabled = enabled };
+            if (tools)
+            {
+                model.Capabilities.Add("tools");
+            }
+
+            return model;
+        }
+
+        RouterHost.ClaudeCodeContextTokens([Model("coder", 131_072), Model("opus", 200_000), Model("small", 8_192, tools: false), Model("off", 4_096, enabled: false)])
+            .Should().Be(131_072, "models without tools and disabled models never get a Claude Code turn");
+        RouterHost.ClaudeCodeContextTokens([Model("coder", 0), Model("opus", 200_000)]).Should().BeNull("an unknown context window is not guessed");
+        RouterHost.ClaudeCodeContextTokens([Model("small", 8_192, tools: false)]).Should().BeNull();
+
+        RouterHost.ClaudeCodeStart([Model("opus", 200_000)], windows: false).Should().Be("export CLAUDE_CODE_MAX_CONTEXT_TOKENS=200000; claude --model semantic-router");
+        RouterHost.ClaudeCodeStart([Model("opus", 200_000)], windows: true).Should().Be("$env:CLAUDE_CODE_MAX_CONTEXT_TOKENS=\"200000\"; claude --model semantic-router");
+        RouterHost.ClaudeCodeStart([], windows: false).Should().Be("claude --model semantic-router");
     }
 
     [Fact]
@@ -108,7 +149,7 @@ public sealed class HostTests : IDisposable
             : throw new HttpRequestException("Connection refused"));
         var output = new StringWriter();
 
-        int exit = await InitCommand.RunAsync(Settings("init"), new InitProbes(new HttpClient(handler), bin, Windows: false), output);
+        int exit = await InitCommand.RunAsync(Settings("init", "--yes"), new InitProbes(new HttpClient(handler), bin, Windows: false), output);
 
         exit.Should().Be(0, output.ToString());
         RouterConfiguration written = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
@@ -132,7 +173,95 @@ public sealed class HostTests : IDisposable
         written.Embeddings.Model.Should().Be("text-embedding-nomic-embed-text-v1.5");
         written.DefaultSimilarityThreshold.Should().BeApproximately(0.62f, 0.001f);
         output.ToString().Should().Contain("lmstudio: http://localhost:1234/").And.Contain("copilot").And.Contain("disabled");
+        output.ToString().Should().Contain("claude --model semantic-router").And.NotContain("CLAUDE_CODE_MAX_CONTEXT_TOKENS", "the local coder model's context window is unknown");
         EvaluationSet.Parse(File.ReadAllText(Path.Combine(_directory, "semantic-router.evaluation.jsonl"))).Should().NotBeEmpty("init writes the sample set next to the configuration");
+        File.ReadAllText(Path.Combine(_directory, "semantic-router.json")).Should().NotContain("Effective", "computed properties are not settings");
+    }
+
+    [Theory]
+    [InlineData("interactive yes", new[] { "init" }, "y\nyes\n", true, true)]
+    [InlineData("interactive no", new[] { "init" }, "n\n\n", false, true)]
+    [InlineData("interactive, input ends", new[] { "init" }, "", false, true)]
+    [InlineData("no terminal", new[] { "init" }, null, false, true)]
+    [InlineData("--yes", new[] { "init", "--yes" }, null, true, true)]
+    [InlineData("--no-cli", new[] { "init", "--no-cli" }, "y\ny\n", false, false)]
+    [InlineData("--no-cli wins over --yes", new[] { "init", "--yes", "--no-cli" }, null, false, false)]
+    public async Task Init_enables_a_subscription_cli_only_on_an_explicit_yes(string scenario, string[] args, string? answers, bool enabled, bool added)
+    {
+        string bin = Directory.CreateDirectory(Path.Combine(_directory, "bin")).FullName;
+        foreach (string cli in new[] { "claude", "codex", "copilot" })
+        {
+            File.WriteAllText(Path.Combine(bin, cli), string.Empty);
+        }
+
+        var handler = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("Connection refused"));
+        var output = new StringWriter();
+
+        int exit = await InitCommand.RunAsync(
+            Settings(args), new InitProbes(new HttpClient(handler), bin, Windows: false), output, answers is null ? null : new StringReader(answers));
+
+        exit.Should().Be(0, output.ToString());
+        RouterConfiguration written = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+        written.GetDocumentValidationErrors().Should().BeEmpty();
+        string[] subscription = ["claude-cli", "codex-cli", "copilot-cli"];
+        if (!added)
+        {
+            written.Connectors.Keys.Should().NotContain(subscription, scenario);
+            written.Models.Should().BeEmpty(scenario);
+            output.ToString().Should().NotContain("Enable claude", "--no-cli asks nothing");
+            return;
+        }
+
+        written.Connectors.Keys.Should().Contain(subscription, scenario);
+        written.Connectors["claude-cli"].ToolCalling.Should().Be(CliToolCalling.Prompted);
+        written.Models.Where(m => m.Connector == "claude-cli" && m.Tier < 5).Should().OnlyContain(m => m.Enabled == enabled, scenario);
+        written.Models.Single(m => m.Connector == "codex-cli").Enabled.Should().Be(enabled, scenario);
+        written.Models.Where(m => m.Connector == "copilot-cli").Should().OnlyContain(m => !m.Enabled, "Copilot is never enabled by init");
+        written.Models.Single(m => m.Connector == "claude-cli" && m.Tier == 5).Enabled.Should().BeFalse("init never enables Claude's top tier");
+
+        string report = output.ToString();
+        if (answers is null)
+        {
+            report.Should().NotContain("Enable claude", "without a terminal init asks nothing");
+            if (!enabled)
+            {
+                report.Should().Contain("claude, codex: init asks before enabling").And.Contain("whatever account").And.Contain("docs/TERMS.md").And.Contain("--force --yes");
+            }
+        }
+        else
+        {
+            report.Should().Contain("whatever account that CLI is signed in to").And.Contain("docs/TERMS.md")
+                .And.Contain("Enable claude on the account it is signed in to? [y/N]").And.NotContain("Enable copilot");
+        }
+
+        if (!enabled)
+        {
+            report.Should().Contain("all disabled").And.Contain(answers is null ? "no terminal to ask on" : "you did not say yes").And.Contain("No model is enabled");
+        }
+    }
+
+    [Theory]
+    [InlineData("""{"DisabledConnectorTypes":["Cli"]}""", new string[0])]
+    [InlineData("""{"DisabledPresets":["Codex","GitHubCopilot"]}""", new[] { "claude-cli" })]
+    public async Task Init_leaves_out_the_clis_the_machine_policy_turns_off(string policy, string[] kept)
+    {
+        string bin = Directory.CreateDirectory(Path.Combine(_directory, "bin")).FullName;
+        foreach (string cli in new[] { "claude", "codex", "copilot" })
+        {
+            File.WriteAllText(Path.Combine(bin, cli), string.Empty);
+        }
+
+        var handler = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("Connection refused"));
+        var output = new StringWriter();
+        var probes = new InitProbes(new HttpClient(handler), bin, Windows: false, MachinePolicy.FromJson(policy));
+
+        (await InitCommand.RunAsync(Settings("init", "--yes"), probes, output, new StringReader("y\ny\n"))).Should().Be(0, output.ToString());
+
+        RouterConfiguration written = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+        written.Connectors.Keys.Where(k => k.EndsWith("-cli", StringComparison.Ordinal)).Should().BeEquivalentTo(kept, "even --yes does not add what the policy turns off");
+        string report = output.ToString();
+        report.Should().Contain("codex: found at").And.Contain("but not added").And.Contain("your organization's policy");
+        report.Should().NotContain("Enable codex", "it is not asked about either");
     }
 
     [Fact]
@@ -187,6 +316,111 @@ public sealed class HostTests : IDisposable
         report.Should().Contain("[FAIL] connector missing:").And.Contain("SemanticRouter:Connectors:missing:Executable");
         report.Should().Contain("[WARN] embeddings: the Hashing provider");
         report.Should().NotContain("sk-doctor-test");
+    }
+
+    [Fact]
+    public async Task Doctor_lists_every_host_the_router_will_contact_without_webhook_tokens()
+    {
+        var document = RouterConfiguration.FromJson(RouterHost.Template());
+        document.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
+        document.Connectors["openai"] = new ConnectorOptions { BaseAddress = new Uri("https://api.example.com:8443/v1"), ApiKey = "sk-doctor-test" };
+        document.Connectors["codex"] = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.Codex, Executable = FakeCli };
+        document.Connectors["copilot"] = new ConnectorOptions { Type = ConnectorType.Copilot };
+        document.Models.Add(new ModelDefinition { Name = "small", Connector = "lmstudio", Model = "qwen3-8b", IsLocal = true });
+        document.Models.Add(new ModelDefinition { Name = "cloud", Connector = "openai", Model = "gpt-x", Tier = 3 });
+        document.Models.Add(new ModelDefinition { Name = "codex", Connector = "codex", Tier = 4 });
+        document.Embeddings = new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx };
+        document.Notifications.Webhooks["ops"] = new WebhookOptions { Url = "https://hooks.example.com/services/T000/B000/hook-secret?token=abc" };
+        new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(document);
+        string bundle = Path.Combine(_directory, "corporate-root.pem");
+        using (var key = System.Security.Cryptography.ECDsa.Create())
+        {
+            var request = new System.Security.Cryptography.X509Certificates.CertificateRequest("CN=Test Root", key, System.Security.Cryptography.HashAlgorithmName.SHA256);
+            using var root = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+            await File.WriteAllTextAsync(bundle, root.ExportCertificatePem());
+        }
+
+        void Stub(WebApplicationBuilder builder)
+        {
+            builder.Services.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "lmstudio")
+                .ConfigurePrimaryHttpMessageHandler(() => StubHttpMessageHandler.Json("""{"data":[{"id":"qwen3-8b"}]}"""));
+            builder.Services.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "openai")
+                .ConfigurePrimaryHttpMessageHandler(() => StubHttpMessageHandler.Json("""{"data":[{"id":"gpt-x"}]}"""));
+
+            // The embeddings check would download the ONNX model; nothing may leave the test.
+            builder.Services.AddHttpClient(SemanticRouter.Embeddings.Onnx.OnnxEmbeddingOptions.HttpClientName)
+                .ConfigurePrimaryHttpMessageHandler(() => StubHttpMessageHandler.Json("{}", HttpStatusCode.NotFound));
+        }
+
+        var first = new StringWriter();
+        await DoctorCommand.RunAsync(Settings("doctor", $"--SemanticRouter:Network:CaBundle={bundle}"), first, Stub);
+
+        string models = Path.Combine(_directory, "models", "all-MiniLM-L6-v2");
+        Directory.CreateDirectory(models);
+        await File.WriteAllTextAsync(Path.Combine(models, "model.onnx"), "placeholder");
+        await File.WriteAllTextAsync(Path.Combine(models, "vocab.txt"), "placeholder");
+        var second = new StringWriter();
+        await DoctorCommand.RunAsync(Settings("doctor"), second, Stub);
+
+        string report = first.ToString();
+        report.Should().Contain("[ OK ] egress: connector lmstudio: localhost:1234 (this machine).");
+        report.Should().Contain("[ OK ] egress: connector openai: api.example.com:8443.");
+        report.Should().Contain($"[ OK ] egress: connector codex: CLI: {FakeCli}, which contacts OpenAI.");
+        report.Should().Contain("[ OK ] egress: connector copilot: CLI: copilot (the Copilot SDK's runtime), which contacts GitHub (no enabled model uses it yet).");
+        report.Should().Contain("[ OK ] egress: embeddings: huggingface.co, once, to download ONNX model all-MiniLM-L6-v2 into " + models);
+        report.Should().Contain("[ OK ] egress: webhook ops: hooks.example.com.");
+        report.Should().Contain("[ OK ] egress: desktop app updates: api.github.com, github.com and objects.githubusercontent.com (only the installed desktop app");
+        report.Should().Contain($"[ OK ] network: HTTPS also trusts the 1 certificate(s) in {bundle}");
+        report.Should().NotContain("hook-secret").And.NotContain("token=abc").And.NotContain("/services/").And.NotContain("sk-doctor-test");
+        second.ToString().Should().Contain($"[ OK ] egress: embeddings: ONNX model all-MiniLM-L6-v2 is in {models}; nothing is downloaded.")
+            .And.NotContain("network: HTTPS also trusts");
+    }
+
+    [Fact]
+    public async Task Doctor_names_a_ca_bundle_it_cannot_load()
+    {
+        new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(RouterConfiguration.FromJson(RouterHost.Template()));
+        var output = new StringWriter();
+
+        int exit = await DoctorCommand.RunAsync(Settings("doctor", "--SemanticRouter:Network:CaBundle=missing.pem"), output);
+
+        exit.Should().Be(1, output.ToString());
+        output.ToString().Should().Contain("[FAIL] network: SemanticRouter:Network:CaBundle: " + Path.Combine(_directory, "missing.pem") + " could not be read");
+    }
+
+    [Fact]
+    public async Task Doctor_warns_when_the_identity_header_has_no_proxy_to_come_from()
+    {
+        new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(RouterConfiguration.FromJson(RouterHost.Template()));
+        var alone = new StringWriter();
+        var behind = new StringWriter();
+
+        await DoctorCommand.RunAsync(Settings("doctor", "--SemanticRouter:Dashboard:TrustedIdentityHeader=X-Forwarded-User"), alone);
+        await DoctorCommand.RunAsync(
+            Settings("doctor", "--SemanticRouter:Dashboard:TrustedIdentityHeader=X-Forwarded-User", "--SemanticRouter:ForwardedHeaders:KnownProxies:0=10.0.0.5",
+                "--SemanticRouter:Dashboard:TrustedIdentityRoles:*=ReadOnly"),
+            behind);
+
+        alone.ToString().Should().Contain("[WARN] identity: Dashboard:TrustedIdentityHeader is X-Forwarded-User, but SemanticRouter:ForwardedHeaders names no proxy");
+        behind.ToString().Should().Contain("[ OK ] identity: the dashboard takes the user from X-Forwarded-User on requests from the known proxies; TrustedIdentityRoles names 1.");
+    }
+
+    [Theory]
+    [InlineData("127.0.0.1", "alice@corp.example")]
+    [InlineData("10.9.9.9", "this machine")]
+    public async Task The_host_believes_the_identity_header_only_from_a_known_proxy(string proxy, string identity)
+    {
+        HostSettings settings = Settings(
+            "--urls", "http://127.0.0.1:0", "--SemanticRouter:Embeddings:Provider=Hashing", $"--SemanticRouter:ForwardedHeaders:KnownProxies:0={proxy}",
+            "--SemanticRouter:Dashboard:TrustedIdentityHeader=X-Forwarded-User", "--SemanticRouter:Dashboard:TrustedIdentityRoles:alice@corp.example=Admin");
+        await using RunningRouter? router = await RouterHost.StartAsync(settings, TextWriter.Null, b => b.Logging.ClearProviders());
+        using var client = new HttpClient { BaseAddress = new Uri(router!.App.Urls.First()) };
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/router/api/session");
+        request.Headers.Add("X-Forwarded-User", "alice@corp.example");
+
+        System.Text.Json.Nodes.JsonNode session = System.Text.Json.Nodes.JsonNode.Parse(await (await client.SendAsync(request)).Content.ReadAsStringAsync())!;
+
+        session["identity"]!.GetValue<string>().Should().Be(identity);
     }
 
     [Fact]
@@ -311,5 +545,29 @@ public sealed class HostTests : IDisposable
         RouterHost.LocalAddress("http://0.0.0.0:8080").Should().Be("http://localhost:8080");
         RouterHost.LocalAddress("http://+:8080").Should().Be("http://localhost:8080");
         RouterHost.LocalAddress("http://127.0.0.1:5080/").Should().Be("http://127.0.0.1:5080");
+    }
+
+    [Fact]
+    public void Forwarded_headers_are_trusted_only_from_the_configured_proxies()
+    {
+        WebApplicationBuilder none = WebApplication.CreateBuilder();
+        RouterHost.ConfigureForwardedHeaders(none).Should().BeFalse("without proxies nothing is forwarded");
+
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        builder.Configuration["SemanticRouter:ForwardedHeaders:KnownProxies:0"] = "10.1.2.3";
+        builder.Configuration["SemanticRouter:ForwardedHeaders:KnownNetworks:0"] = "172.16.0.0/12";
+
+        RouterHost.ConfigureForwardedHeaders(builder).Should().BeTrue();
+
+        using ServiceProvider services = builder.Services.BuildServiceProvider();
+        var options = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>>().Value;
+        options.ForwardedHeaders.Should().Be(Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto,
+            "X-Forwarded-Host would get past the Host check against DNS rebinding");
+        options.KnownProxies.Should().Equal(IPAddress.Parse("10.1.2.3"));
+        options.KnownIPNetworks.Should().Equal(System.Net.IPNetwork.Parse("172.16.0.0/12"));
+
+        WebApplicationBuilder broken = WebApplication.CreateBuilder();
+        broken.Configuration["SemanticRouter:ForwardedHeaders:KnownNetworks:0"] = "everyone";
+        FluentActions.Invoking(() => RouterHost.ConfigureForwardedHeaders(broken)).Should().Throw<InvalidOperationException>().WithMessage("*KnownNetworks*everyone*");
     }
 }

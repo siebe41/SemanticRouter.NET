@@ -16,7 +16,6 @@ namespace SemanticRouter.AspNetCore;
 internal sealed partial class PromptRoutingMiddleware
 {
     private const int ReadChunkSize = 16 * 1024;
-    private const int PreviewLength = 160;
 
     private readonly RequestDelegate _next;
     private readonly RouterRuntimeProvider _runtime;
@@ -35,6 +34,8 @@ internal sealed partial class PromptRoutingMiddleware
     private readonly ClientRateLimiter? _rateLimiter;
     private readonly CorrectionDetector? _corrections;
     private readonly ModelTrials? _trials;
+    private readonly IWarmCacheStore? _warmCaches;
+    private readonly TimeProvider _time;
     private readonly ILogger _logger;
 
     public PromptRoutingMiddleware(
@@ -55,7 +56,9 @@ internal sealed partial class PromptRoutingMiddleware
         ClientTurnPatterns? clientTurns = null,
         ClientRateLimiter? rateLimiter = null,
         CorrectionDetector? corrections = null,
-        ModelTrials? trials = null)
+        ModelTrials? trials = null,
+        IWarmCacheStore? warmCaches = null,
+        TimeProvider? time = null)
     {
         _next = next;
         _runtime = runtime;
@@ -74,6 +77,8 @@ internal sealed partial class PromptRoutingMiddleware
         _rateLimiter = rateLimiter;
         _corrections = corrections;
         _trials = trials;
+        _warmCaches = warmCaches;
+        _time = time ?? TimeProvider.System;
         _logger = logger;
 
         // Building the runtime validates the configuration, so a bad setup fails at start-up rather than on the first request.
@@ -90,28 +95,24 @@ internal sealed partial class PromptRoutingMiddleware
             return;
         }
 
-        string? client = runtime.GatewayKeys.Count > 0 ? IdentifyClient(context.Request, runtime.GatewayKeys) : null;
-        if (client is null && runtime.GatewayKeys.Count > 0
-            && (!DashboardAccess.IsLocal(context) || options.RequireGatewayKeyForLocalClients))
+        GatewayAdmission gateway = GatewayAuthentication.Admit(context, runtime);
+        if (gateway.Refused)
         {
-            LogGatewayKeyMissing(_logger, context.Connection.RemoteIpAddress?.ToString() ?? "unknown", context.Request.Path);
-            await ProtocolErrors.WriteAsync(
-                context, protocol,
-                StatusCodes.Status401Unauthorized,
-                "Gateway key required",
-                "This router requires a gateway key: send it as 'Authorization: Bearer <key>' or 'x-api-key: <key>' " +
-                "(ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY or OPENAI_API_KEY in most clients).",
-                context.RequestAborted).ConfigureAwait(false);
-            return;
-        }
+            if (gateway.KeyMissing)
+            {
+                LogGatewayKeyMissing(_logger, context.Connection.RemoteIpAddress?.ToString() ?? "unknown", context.Request.Path);
+            }
+            else
+            {
+                LogGatewayRequestRefused(_logger, context.Request.Path, gateway.Detail!);
+            }
 
-        if (client is null && GatewayGuard.For(context).Refusal(context) is { } refusal)
-        {
-            LogGatewayRequestRefused(_logger, context.Request.Path, refusal);
-            await ProtocolErrors.WriteAsync(context, protocol, StatusCodes.Status403Forbidden, "Forbidden", refusal, context.RequestAborted)
+            await ProtocolErrors.WriteAsync(context, protocol, gateway.Status, gateway.Title!, gateway.Detail!, context.RequestAborted)
                 .ConfigureAwait(false);
             return;
         }
+
+        string? client = gateway.Client;
 
         using Activity? routeSpan = RouterTelemetry.Source.StartActivity("semantic_router.route");
         routeSpan?.SetTag("semantic_router.protocol", protocol.ToString());
@@ -165,7 +166,7 @@ internal sealed partial class PromptRoutingMiddleware
 
         // An inline callout ("@opus …") routes as the person asked. The tag is taken out of every user message before
         // the request goes on, so the model never sees it; the body is only rewritten when there is one.
-        Callout? callout = options.Callouts.Enabled && Callouts.LeadingTag(prompt) is { } tag ? Callouts.Resolve(tag, runtime) : null;
+        Callout? callout = Callouts.Find(prompt, runtime);
         if (options.Callouts.Enabled && Callouts.Strip(bodyBytes, protocol, runtime) is { } stripped
             && TryParse(context, runtime, protocol, stripped, out string strippedPrompt, out ChatCompletionRequest strippedChat, out IReadOnlyList<MemoryReference> strippedMemory))
         {
@@ -174,7 +175,8 @@ internal sealed partial class PromptRoutingMiddleware
             (prompt, chat, memory) = (strippedPrompt, strippedChat, strippedMemory);
         }
 
-        long started = Stopwatch.GetTimestamp();
+        long started = _time.GetTimestamp();
+        DateTimeOffset routedAt = _time.GetUtcNow();
         ProfileSelection.ModelChoice modelChoice = ProfileSelection.ResolveModel(runtime, chat.Model);
         SelectionStrategy? strategy = modelChoice.Strategy;
         string? requestedModel = modelChoice.RequestedModel;
@@ -189,10 +191,11 @@ internal sealed partial class PromptRoutingMiddleware
         // A client over its rate limit is turned away before anything is spent on it. A client without a gateway key is
         // counted by its address.
         string rateClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
-        (string Name, RateLimitOptions Limit)? rateLimit = _rateLimiter is null ? null : ClientRateLimiter.LimitFor(options.RateLimits, client);
+        bool remoteClient = !DashboardAccess.IsLocal(context);
+        (string Name, RateLimitOptions Limit)? rateLimit = _rateLimiter is null ? null : ClientRateLimiter.LimitFor(options, client, remoteClient);
         if (rateLimit is { } limit)
         {
-            RateLimitDecision admission = _rateLimiter!.TryAdmit(rateClient, limit.Limit, chat.EstimatedInputTokens);
+            RateLimitDecision admission = _rateLimiter!.TryAdmit(rateClient, limit.Limit, chat.EstimatedInputTokens, remoteClient);
             if (!admission.Admitted)
             {
                 await RejectRateLimitedAsync(context, protocol, client, rateClient, chat, prompt, profile.Profile, admission).ConfigureAwait(false);
@@ -227,12 +230,13 @@ internal sealed partial class PromptRoutingMiddleware
         string retryClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
         string? conversationKey = (conversation.Enabled || options.Callouts.Enabled || feedback) && _conversations is not null
             && modelChoice.Strategy != SelectionStrategy.CheapestCapable && !housekeeping
-            ? ConversationTracker.Identify(retryClient, chat)
+            ? ConversationTracker.Identify(retryClient, chat, SessionId(context.Request, conversation))
             : null;
 
         if (conversationKey is not null && firstTurn)
         {
             _conversations!.Forget(conversationKey);
+            _warmCaches?.Forget(conversationKey);
         }
 
         // A conversation that was kept local stays local on every later turn: follow-ups that match no local-only route,
@@ -265,13 +269,9 @@ internal sealed partial class PromptRoutingMiddleware
         }
 
         bool explicitTurn = choice is { Clear: false };
-        if (choice is { Clear: false, Model: { } calloutModel })
+        if (choice is not null)
         {
-            (requestedModel, strategy) = (calloutModel, null);
-        }
-        else if (choice is { Clear: false, Strategy: { } calloutStrategy })
-        {
-            strategy = calloutStrategy;
+            (requestedModel, strategy) = choice.Choose(requestedModel, strategy);
         }
 
         string? affinityModel = options.PinToolCallingTurns && chat.IsToolResultContinuation && requestedModel is null
@@ -289,18 +289,21 @@ internal sealed partial class PromptRoutingMiddleware
         // Route by the conversation: keep the tier recent turns needed and the model that answered them. Not for
         // tool-result turns (pinned above), explicit choices, or a conversation's first turn.
         bool classifiedTurn = requestedModel is null && !chat.IsToolResultContinuation;
-        ConversationContext conversationContext = conversation.Enabled && conversationKey is not null && classifiedTurn && !explicitTurn && !firstTurn
-            ? _conversations!.Lookup(conversationKey, prompt, conversation)
-            : default;
+        bool continued = conversation.Enabled && conversationKey is not null && classifiedTurn && !explicitTurn && !firstTurn;
+        ConversationContext conversationContext = continued ? _conversations!.Lookup(conversationKey!, prompt, conversation) : default;
 
-        bool localOnly = profile.LocalOnly || choice is { Clear: false, Local: true } || keptLocal
+        // The prompt caches earlier turns left on models: staying on one can cost less than moving.
+        IReadOnlyList<WarmCache> warmCaches = continued && conversation.StickToModel && _warmCaches is not null ? _warmCaches.Lookup(conversationKey!) : [];
+
+        bool localOnly = profile.LocalOnly || choice is { LocalOnly: true } || keptLocal
             || (profile.Profile is { } named && runtime.Router.Profiles.TryGetValue(named, out RoutingProfile? rules) && rules.LocalOnly);
         var routingRequest = new PromptRoutingRequest
         {
             ConversationFloor = conversationContext.Floor,
             PreferredModel = conversationContext.PreferredModel,
+            WarmCaches = warmCaches,
             MinimumTier = minimumTier,
-            ExplicitTier = explicitTurn ? choice!.Tier : null,
+            ExplicitTier = choice?.ExplicitTier,
             Profile = profile.Profile,
             LocalOnly = localOnly,
             EmbeddingsAllowed = !localOnly || runtime.Configuration.Embeddings.KeepsPromptsLocal,
@@ -319,23 +322,7 @@ internal sealed partial class PromptRoutingMiddleware
             _conversations!.MarkLocalOnly(localKey);
         }
 
-        string? calloutNote = callout is { Clear: true } ? callout.Tag : null;
-        if (explicitTurn)
-        {
-            calloutNote = choice!.Tag + (remembered ? " (earlier in the conversation)" : string.Empty);
-            if (choice.Model is not null)
-            {
-                if (plan.Classification.Reason == RoutingReason.ModelOverride)
-                {
-                    plan = plan with { Classification = plan.Classification with { Reason = RoutingReason.ExplicitCallout } };
-                }
-                else
-                {
-                    // The routing profile does not allow that model, so it was routed automatically.
-                    calloutNote += " (not allowed here; routed automatically)";
-                }
-            }
-        }
+        (plan, string? calloutNote) = Callouts.Settle(choice, plan, remembered);
 
         // A cheaper model on trial for this route tries a share of its plain matches: the first turn of a conversation
         // the router decided itself (not escalated, explicit, held by the conversation, a tool result or a client's
@@ -381,7 +368,7 @@ internal sealed partial class PromptRoutingMiddleware
             Path = context.Request.Path.Value ?? string.Empty,
             Client = client,
             RequestedModel = chat.Model,
-            PromptPreview = prompt.Length <= PreviewLength ? prompt : prompt[..PreviewLength] + "…",
+            PromptPreview = PromptPreviews.Of(prompt, runtime.Configuration.State.StorePrompts),
             Tier = result.RequiredTier,
             Reason = result.Reason,
             Route = result.RouteName,
@@ -456,7 +443,7 @@ internal sealed partial class PromptRoutingMiddleware
             }
         }
 
-        entry.TotalMilliseconds = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1);
+        entry.TotalMilliseconds = Math.Round(_time.GetElapsedTime(started).TotalMilliseconds, 1);
         routeSpan?.SetTag("semantic_router.outcome", entry.Outcome);
         routeSpan?.SetTag("semantic_router.served_by", entry.ServedBy);
         if (entry.Outcome == "failed")
@@ -501,6 +488,11 @@ internal sealed partial class PromptRoutingMiddleware
             }
         }
 
+        if (conversationKey is not null && entry.ServedBy is { } servedBy && _warmCaches is not null && conversation.Enabled && conversation.StickToModel)
+        {
+            RememberCache(conversationKey, servedBy, entry, routedAt, CacheLifetime(runtime, servedBy, chat) ?? conversation.CacheLifetime);
+        }
+
         if (rateLimit is not null && (entry.InputTokens is not null || entry.OutputTokens is not null))
         {
             // Admission charged the estimate; charge the rest now that the real usage is known.
@@ -515,6 +507,34 @@ internal sealed partial class PromptRoutingMiddleware
             {
                 _judge!.Enqueue(runtime, entry, prompt, protocol, answer, highestTier);
             }
+        }
+    }
+
+    /// <summary>
+    /// How long the cache entries the turn wrote on <paramref name="model"/> live, when its connector tells
+    /// (<see cref="PromptCacheLifetime"/>); otherwise <see cref="ConversationRoutingOptions.CacheLifetime"/> applies.
+    /// </summary>
+    private static TimeSpan? CacheLifetime(RouterRuntime runtime, string model, ChatCompletionRequest chat) =>
+        runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, model, StringComparison.OrdinalIgnoreCase)) is { } served
+        && runtime.Configuration.Connectors.TryGetValue(served.Connector, out ConnectorOptions? connector)
+            ? PromptCacheLifetime.Of(chat, connector)
+            : null;
+
+    /// <summary>
+    /// Records the prompt cache the served turn left on its model: what it read and wrote, warm for the cache's lifetime
+    /// from the turn's start (a read refreshes it). A turn that reported usage without touching the cache means the
+    /// model's cache is cold, or that it does not cache.
+    /// </summary>
+    private void RememberCache(string conversation, string model, RoutingActivityEntry entry, DateTimeOffset started, TimeSpan lifetime)
+    {
+        int cached = (entry.CacheReadTokens ?? 0) + (entry.CacheCreationTokens ?? 0);
+        if (cached > 0)
+        {
+            _warmCaches!.Remember(conversation, new WarmCache(model, cached, started + lifetime));
+        }
+        else if (entry.InputTokens is not null)
+        {
+            _warmCaches!.Forget(conversation, model);
         }
     }
 
@@ -601,9 +621,14 @@ internal sealed partial class PromptRoutingMiddleware
         }
     }
 
+    /// <summary>The client's session id from <see cref="ConversationRoutingOptions.SessionHeader"/>, when it sends one.</summary>
+    private static string? SessionId(HttpRequest request, ConversationRoutingOptions conversation) =>
+        conversation.SessionHeader is { Length: > 0 } header && request.Headers[header].FirstOrDefault() is { Length: > 0 } session ? session : null;
+
     /// <summary>
-    /// Applies the configured model alias globs (first match wins) to the client's model name. Routing aliases and
-    /// catalog model names are returned as they are, so an explicit choice always beats a pattern.
+    /// Applies the configured model aliases to the client's model name: a key without <c>*</c> that names it exactly,
+    /// else the first glob that matches. Routing aliases (<c>auto…</c>, <c>semantic-router</c> and its Claude-style
+    /// names) and catalog model names are returned as they are, so an explicit choice always beats a pattern.
     /// </summary>
     internal static string? MapModel(RouterRuntime runtime, string? model)
     {
@@ -614,9 +639,18 @@ internal sealed partial class PromptRoutingMiddleware
 
         string trimmed = model.Trim();
         if (trimmed.StartsWith(ModelAliases.Auto, StringComparison.OrdinalIgnoreCase)
+            || ModelAliases.IsRouterName(trimmed)
             || runtime.Router.Models.Any(m => string.Equals(m.Name, trimmed, StringComparison.OrdinalIgnoreCase)))
         {
             return model;
+        }
+
+        foreach ((string pattern, string target) in runtime.ModelAliases)
+        {
+            if (!pattern.Contains('*', StringComparison.Ordinal) && string.Equals(pattern, trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                return target;
+            }
         }
 
         foreach ((string pattern, string target) in runtime.ModelAliases)
@@ -888,7 +922,7 @@ internal sealed partial class PromptRoutingMiddleware
             Path = context.Request.Path.Value ?? string.Empty,
             Client = client,
             RequestedModel = chat.Model,
-            PromptPreview = prompt.Length <= PreviewLength ? prompt : prompt[..PreviewLength] + "…",
+            PromptPreview = PromptPreviews.Of(prompt, _runtime.Current.Configuration.State.StorePrompts),
             Reason = RoutingReason.RateLimited,
             Profile = profile,
             HasTools = chat.HasTools,

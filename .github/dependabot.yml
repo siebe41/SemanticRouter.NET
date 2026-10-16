@@ -23,3 +23,28 @@ updates:
     groups:
       actions:
         patterns: [ "*" ]
+
+  # The container's base images are pinned by digest; Dependabot moves the digest when Microsoft republishes a tag
+  # (security fixes in the OS packages included).
+  - package-ecosystem: docker
+    directory: /src/SemanticRouter.Host
+    schedule:
+      interval: weekly
+
+  # Playwright for the dashboard's end-to-end tests.
+  - package-ecosystem: npm
+    directory: /tests/dashboard-e2e
+    schedule:
+      interval: weekly
+    groups:
+      e2e:
+        patterns: [ "*" ]
+
+  # VitePress and Mermaid for the documentation site (site/README.md).
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+    groups:
+      site:
+        patterns: [ "*" ]

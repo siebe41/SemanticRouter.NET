@@ -4,35 +4,35 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- SemanticRouter.Storage.Sqlite only. -->
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.13" />
   </ItemGroup>
   <ItemGroup>
     <!-- SemanticRouter.Embeddings.Onnx only. -->
     <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" />
-    <PackageVersion Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
+    <PackageVersion Include="Microsoft.ML.Tokenizers" Version="2.0.1" />
   </ItemGroup>
   <ItemGroup>
     <!-- SemanticRouter.Connectors.Copilot only. -->
-    <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.19" />
+    <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.22" />
   </ItemGroup>
   <ItemGroup>
     <!-- SemanticRouter.Desktop only: the tray icon and the dashboard window (the platform's own web view). -->
     <PackageVersion Include="Avalonia" Version="12.1.4" />
     <PackageVersion Include="Avalonia.Desktop" Version="12.1.4" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.4" />
-    <PackageVersion Include="Avalonia.Controls.WebView" Version="12.1.0" />
+    <PackageVersion Include="Avalonia.Controls.WebView" Version="12.1.1" />
     <!-- Installers and updates (Setup.exe, .pkg, AppImage), from GitHub Releases. -->
     <PackageVersion Include="Velopack" Version="1.2.161" />
   </ItemGroup>
   <ItemGroup>
     <!-- Test-only dependencies. The Core library ships with zero package references. -->
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="4.0.1" />
     <!-- Pinned to 7.x: the last Apache-2.0 licensed line of FluentAssertions. -->
     <PackageVersion Include="FluentAssertions" Version="7.2.2" />
     <PackageVersion Include="Moq" Version="4.21.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.13" />
     <PackageVersion Include="coverlet.collector" Version="10.1.0" />
   </ItemGroup>
 </Project>

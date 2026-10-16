@@ -7,6 +7,26 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <Deterministic>true</Deterministic>
+    <!-- In CI, paths in the binaries and symbols are normalized, so a build can be reproduced from the same commit. -->
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <PropertyGroup Label="Locked restore">
+    <!--
+      Every project records the exact version and content hash of each package it restores in packages.lock.json.
+      CI, the release, the container build and deploy/publish-desktop.sh restore in locked mode, so they fail rather
+      than use a package (direct or transitive) that the lock files do not name. A normal restore updates them: commit
+      the changed lock files with the change to Directory.Packages.props or a project file. File-based programs
+      (a single .cs file run with `dotnet run`) have none: they would all write one packages.lock.json into their folder.
+    -->
+    <RestorePackagesWithLockFile Condition="'$(FileBasedProgram)' != 'true'">true</RestorePackagesWithLockFile>
+    <!--
+      The runtimes deploy/publish-desktop.sh publishes the desktop app for. `dotnet publish -r <rid>` restores the app
+      and every project it references for that runtime, and a locked restore passes only if each lock file has a
+      section for it. So the app and the libraries it is built from list these as their RuntimeIdentifiers (the
+      libraries stay IsRidAgnostic, built once for every runtime as before). Add a runtime here before publishing for it.
+    -->
+    <DesktopRuntimeIdentifiers>win-x64;win-arm64;osx-x64;osx-arm64;linux-x64;linux-arm64</DesktopRuntimeIdentifiers>
   </PropertyGroup>
 
   <PropertyGroup Label="Package metadata">

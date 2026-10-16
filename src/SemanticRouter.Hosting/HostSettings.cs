@@ -24,6 +24,12 @@ internal sealed record HostSettings
     /// <summary><c>init</c>: skip probing for local servers and CLIs.</summary>
     public bool NoDetect { get; init; }
 
+    /// <summary><c>init</c>: enable the subscription CLIs it finds without asking.</summary>
+    public bool Yes { get; init; }
+
+    /// <summary><c>init</c>: add no subscription CLI connectors.</summary>
+    public bool NoCli { get; init; }
+
     /// <summary><c>models</c>: the one connector to list; <see langword="null"/> lists them all.</summary>
     public string? Connector { get; init; }
 
@@ -35,6 +41,12 @@ internal sealed record HostSettings
 
     /// <summary><c>service start</c>: return as soon as the router is started, without waiting for it to listen.</summary>
     public bool NoWait { get; init; }
+
+    /// <summary>
+    /// <c>SEMANTIC_ROUTER_KEYS_DIR</c>: the folder for the data-protection keys that decrypt the secrets file;
+    /// <see langword="null"/> for ASP.NET Core's default (see <see cref="KeyRing"/>).
+    /// </summary>
+    public string? KeysDirectory { get; init; }
 
     /// <summary>Arguments for the web host (<c>--urls</c>, <c>--SemanticRouter:…=…</c>).</summary>
     public IReadOnlyList<string> HostArguments { get; init; } = [];
@@ -50,7 +62,7 @@ internal sealed record HostSettings
         environment ??= Environment.GetEnvironmentVariable;
         string command = "run";
         string? directory = null, connector = null, serviceAction = null;
-        bool force = false, noDetect = false, dryRun = false, noWait = false;
+        bool force = false, noDetect = false, yes = false, noCli = false, dryRun = false, noWait = false;
         var hostArguments = new List<string>();
         string? error = null;
 
@@ -73,6 +85,12 @@ internal sealed record HostSettings
                     break;
                 case "--no-detect":
                     noDetect = true;
+                    break;
+                case "--yes" or "-y":
+                    yes = true;
+                    break;
+                case "--no-cli":
+                    noCli = true;
                     break;
                 case "--dry-run" when command == "service":
                     dryRun = true;
@@ -130,10 +148,13 @@ internal sealed record HostSettings
             ConfigurationDirectory = Path.GetFullPath(directory ?? DefaultConfigurationDirectory(environment, OperatingSystem.IsWindows(), OperatingSystem.IsMacOS())),
             Force = force,
             NoDetect = noDetect,
+            Yes = yes,
+            NoCli = noCli,
             Connector = connector,
             ServiceAction = serviceAction,
             DryRun = dryRun,
             NoWait = noWait,
+            KeysDirectory = environment(KeysVariable) is { Length: > 0 } keys ? keys : null,
             HostArguments = hostArguments,
             Error = error,
         };

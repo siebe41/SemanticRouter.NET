@@ -10,13 +10,7 @@
       "exclude": []
     }
   },
-  "bypass_actors": [
-    {
-      "actor_id": 5,
-      "actor_type": "RepositoryRole",
-      "bypass_mode": "pull_request"
-    }
-  ],
+  "bypass_actors": [],
   "rules": [
     {
       "type": "deletion"
@@ -40,6 +34,10 @@
         "strict_required_status_checks_policy": false,
         "required_status_checks": [
           {
+            "context": "secret-scan",
+            "integration_id": 15368
+          },
+          {
             "context": "build-and-test (ubuntu-latest)",
             "integration_id": 15368
           },
@@ -49,6 +47,34 @@
           },
           {
             "context": "build-and-test (macos-latest)",
+            "integration_id": 15368
+          },
+          {
+            "context": "dashboard end-to-end",
+            "integration_id": 15368
+          },
+          {
+            "context": "installer (windows)",
+            "integration_id": 15368
+          },
+          {
+            "context": "installer (macos)",
+            "integration_id": 15368
+          },
+          {
+            "context": "installer (linux)",
+            "integration_id": 15368
+          },
+          {
+            "context": "container image",
+            "integration_id": 15368
+          },
+          {
+            "context": "analyze (csharp)",
+            "integration_id": 15368
+          },
+          {
+            "context": "analyze (javascript-typescript)",
             "integration_id": 15368
           }
         ]

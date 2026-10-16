@@ -1,6 +1,6 @@
 /* Semantic Router dashboard: Evaluate page: evaluation set, calibration, route health and embedding comparison. */
 import { H, PAD, W, niceMax } from './charts.js';
-import { API, api, h, num, readOnly, state, tierName, toast, views } from './core.js';
+import { API, adminOnly, api, h, num, readOnly, state, tierName, toast, views } from './core.js';
 import { render } from './shell.js';
 
 /* Evaluate: run labelled prompts through the configuration, calibrate thresholds, check routes, compare embeddings. */
@@ -115,7 +115,7 @@ export function compareCard() {
       <label class="field"><span class="name">Model</span><input type="text" data-state="evaluation.form.model" value="${h(f.model)}" placeholder="nomic-embed-text"></label>
       <label class="field"><span class="name">API key</span><input type="text" data-state="evaluation.form.apiKey" value="${h(f.apiKey)}" placeholder="optional, or \${env:…}"></label>`}
     </div>
-    <div class="inline" style="margin-top:10px"><button class="btn small" data-action="eval-compare" ${readOnly() ? 'disabled title="Needs the admin token"' : ''}>Compare</button></div>
+    <div class="inline" style="margin-top:10px"><button class="btn small" data-action="eval-compare" ${adminOnly()}>Compare</button></div>
     ${cmp ? `<table style="margin-top:10px"><tr><th></th><th>Embeddings</th><th>Accuracy</th></tr><tr><td>Current</td><td class="small">${h(cmp.current.embeddings)}</td><td>${side(cmp.current)}</td></tr><tr><td>Candidate</td><td class="small">${h(cmp.candidate.embeddings)}</td><td>${side(cmp.candidate)}</td></tr></table>${(cmp.warnings || []).map((w) => `<div class="small muted">${h(w)}</div>`).join('')}` : ''}
   </div>`;
 }
@@ -130,8 +130,8 @@ views.evaluate = () => {
       <textarea id="evaluation-text" aria-label="Evaluation set (JSON Lines)" rows="8" spellcheck="false" data-state="evaluation.text" placeholder='{"prompt":"summarize this email","tier":1,"route":"rewrite-summarize"}'>${h(ev.text)}</textarea>
       <div class="hint small muted">One JSON object per line: <code>prompt</code>, the <code>tier</code> it should get, and optionally the <code>route</code> it should match and <code>localOnly</code>. Label prompts from the Activity page too. Local-only prompts are left out of the download.</div>
       <div class="inline" style="margin-top:10px">
-        <button class="btn primary small" data-action="eval-run" data-calibrate="1" ${ev.busy ? 'disabled' : ''}>${ev.busy ? 'Running…' : 'Run and calibrate'}</button>
-        <button class="btn small" data-action="eval-run" ${ev.busy ? 'disabled' : ''}>Run</button>
+        <button class="btn primary small" data-action="eval-run" data-calibrate="1" ${adminOnly(ev.busy)}>${ev.busy ? 'Running…' : 'Run and calibrate'}</button>
+        <button class="btn small" data-action="eval-run" ${adminOnly(ev.busy)}>Run</button>
         ${readOnly() ? '' : '<button class="btn small" data-action="eval-save">Save set</button>'}
         <span class="muted small">Threshold ${state.config.DefaultSimilarityThreshold} · ${(state.config.Routes || []).length} routes · ${h((state.config.Embeddings || {}).Provider || '')}</span></div>
     </div>

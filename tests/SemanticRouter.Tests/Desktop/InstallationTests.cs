@@ -64,7 +64,8 @@ public sealed class InstallationTests
 
         updater.Installed.Should().BeFalse();
         (await updater.CheckAsync()).Should().BeNull();
-        (await updater.ApplyOnExitAsync(restartApp: true)).Should().BeFalse();
+        (await updater.ApplyNowAsync(restartApp: true)).Should().BeFalse();
+        (await updater.ApplyOnQuitAsync()).Should().BeFalse();
         updater.Ready.Should().BeNull();
         platform.Calls.Should().BeEmpty();
     }
@@ -90,7 +91,7 @@ public sealed class InstallationTests
         DesktopUpdater.Create(DesktopOptions.Parse([], _ => null).Host, _ => null, TextWriter.Null).Installed.Should().BeFalse();
     }
 
-    private sealed class RecordingPlatform : ServicePlatform
+    internal sealed class RecordingPlatform : ServicePlatform
     {
         public bool Installed { get; set; }
 

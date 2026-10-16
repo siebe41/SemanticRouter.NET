@@ -33,6 +33,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     private readonly string[] _removedEnvironment;
     private readonly SecretRedactor _redactor;
     private readonly PromptRouterMetrics? _metrics;
+    private readonly PromptStorage _storePrompts;
     private int _waiting; // requests waiting for a free process, for MaxQueue
 
     public CliChatConnector(
@@ -42,7 +43,8 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         ILogger logger,
         IToolCallAffinity? affinity = null,
         SecretRedactor? redactor = null,
-        PromptRouterMetrics? metrics = null)
+        PromptRouterMetrics? metrics = null,
+        PromptStorage storePrompts = PromptStorage.Redacted)
     {
         Name = name;
         _options = options;
@@ -52,6 +54,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         _logger = logger;
         _redactor = redactor ?? SecretRedactor.None;
         _metrics = metrics;
+        _storePrompts = storePrompts;
         _gate = new SemaphoreSlim(Math.Max(1, options.MaxConcurrency));
         _executable = string.IsNullOrWhiteSpace(options.Executable) ? _adapter.DefaultExecutable : options.Executable;
         _quotaPatterns = _adapter.DefaultQuotaPatterns.Concat(options.QuotaErrorPatterns).ToArray();
@@ -91,7 +94,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
 
         int waiting = Interlocked.Increment(ref _waiting);
-        if (_options.MaxQueue is { } maxQueue && _gate.CurrentCount == 0 && waiting > maxQueue)
+        if (_options.EffectiveMaxQueue is var maxQueue && _gate.CurrentCount == 0 && waiting > maxQueue)
         {
             Interlocked.Decrement(ref _waiting);
             return ConnectorResult.Skipped($"{waiting - 1} request(s) are already waiting for this CLI (MaxQueue {maxQueue})");
@@ -142,7 +145,14 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     {
         DroppedFeatures.Report(context, DroppedFeatures.ForCli(request.Chat));
         bool prompted = request.Chat.HasTools || request.Chat.Turns.Any(t => t.Blocks.Any(b => b is ToolUseBlock or ToolResultBlock));
-        CliInvocation invocation = Invocation(new CliRequest(request.Model.Model, request.Chat.Messages, workingDirectory, _options, prompted ? request.Chat : null));
+        // A fresh fence label per run: a tool result or file written before it cannot hold a call the parser accepts. A
+        // call the tool results do hold, repeated by the model, stays text. Without tools there is nothing to parse, and
+        // earlier calls are shown with the plain label.
+        PromptedToolFormat toolFormat = request.Chat.HasTools
+            ? PromptedToolFormat.ForRequest(_options.PromptedToolParsing) with { QuotedCalls = PromptedToolCalls.QuotedCalls(request.Chat) }
+            : PromptedToolFormat.Default;
+        CliInvocation invocation = Invocation(new CliRequest(
+            request.Model.Model, request.Chat.Messages, workingDirectory, _options, prompted ? request.Chat : null, toolFormat));
 
         using var firstOutputTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         firstOutputTimeout.CancelAfter(_options.EffectiveTimeout);
@@ -164,7 +174,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         {
             try
             {
-                return await ReadAsync(process, writer, request, context, workingDirectory, firstOutputTimeout, cancellationToken).ConfigureAwait(false);
+                return await ReadAsync(process, writer, request, context, workingDirectory, toolFormat, firstOutputTimeout, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && !writer.HasStarted)
             {
@@ -188,7 +198,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             Arguments = arguments,
             WorkingDirectory = cliRequest.WorkingDirectory,
             StandardInput = standardInput,
-            SetEnvironment = new Dictionary<string, string>(_options.EnvironmentVariables),
+            SetEnvironment = _adapter.EnvironmentFor(_options),
             RemoveEnvironment = _removedEnvironment,
         };
     }
@@ -199,6 +209,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         ConnectorRequest request,
         HttpContext context,
         string workingDirectory,
+        PromptedToolFormat toolFormat,
         CancellationTokenSource firstOutputTimeout,
         CancellationToken cancellationToken)
     {
@@ -206,7 +217,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         ICliOutputParser? parser = _adapter.OutputMode == CliOutputMode.JsonLines ? _adapter.CreateParser() : null;
         var text = new StringBuilder();
         var streamed = new StringBuilder();
-        PromptedReplyStream? prompted = parseToolCalls ? new PromptedReplyStream(request.Chat.Tools.Select(t => t.Name).ToArray()) : null;
+        PromptedReplyStream? prompted = parseToolCalls ? new PromptedReplyStream(request.Chat.Tools.Select(t => t.Name).ToArray(), toolFormat) : null;
         bool streamPrompted = prompted is not null && _options.StreamPromptedReplies;
         CliEvent? final = null;
         bool quotaSignal = false;
@@ -268,7 +279,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
                 string head = !streamPrompted || sent.Length == 0 ? prompted.Feed(reply)
                     : reply.Length > sent.Length && reply.StartsWith(sent, StringComparison.Ordinal) ? prompted.Feed(reply[sent.Length..])
                     : string.Empty;
-                await WritePromptedEndAsync(writer, request, context, workingDirectory, head, prompted.Finish(), usage, cancellationToken).ConfigureAwait(false);
+                await WritePromptedEndAsync(writer, request, context, workingDirectory, toolFormat, head, prompted.Finish(), usage, cancellationToken).ConfigureAwait(false);
                 return ConnectorResult.Completed;
             }
 
@@ -285,17 +296,17 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         if (writer.HasStarted)
         {
             // Too late to fail over: end the stream cleanly and record what happened.
-            LogMidStreamFailure(_logger, Name, exitCode, Truncate(diagnostics));
+            LogMidStreamFailure(_logger, Name, exitCode, Output(diagnostics, 1000));
             await writer.CompleteAsync(ChatStopReason.EndTurn, default, cancellationToken).ConfigureAwait(false);
             return ConnectorResult.Completed;
         }
 
         bool quota = quotaSignal || _quotaPatterns.Any(p => diagnostics.Contains(p, StringComparison.OrdinalIgnoreCase));
         DateTimeOffset? retryAt = quota && QuotaResetParser.TryParse(diagnostics, DateTimeOffset.UtcNow, null, out DateTimeOffset reset) ? reset : null;
-        LogRunFailed(_logger, Name, exitCode, quota, Truncate(diagnostics));
+        LogRunFailed(_logger, Name, exitCode, quota, Output(diagnostics, 1000));
         return ConnectorResult.Failed(
             quota ? ModelFailureKind.QuotaExceeded : ModelFailureKind.Unavailable,
-            $"exit code {exitCode}: {Truncate(diagnostics, 200)}",
+            $"exit code {exitCode}{(quota && _storePrompts == PromptStorage.Off ? ", usage limit" : string.Empty)}: {Output(diagnostics, 200)}",
             affectsAllConnectorModels: quota && !ModelSpecificLimitPatterns.Any(p => diagnostics.Contains(p, StringComparison.OrdinalIgnoreCase)),
             retryAt: retryAt);
     }
@@ -306,6 +317,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         ConnectorRequest request,
         HttpContext context,
         string workingDirectory,
+        PromptedToolFormat toolFormat,
         string head,
         PromptedReply end,
         ChatUsage usage,
@@ -317,7 +329,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         {
             MalformedToolCall broken = end.Malformed[^1];
             IReadOnlyList<ToolUseBlock> repaired = _options.RepairToolCalls
-                ? await RepairAsync(request, workingDirectory, broken, cancellationToken).ConfigureAwait(false)
+                ? await RepairAsync(request, workingDirectory, toolFormat, broken, cancellationToken).ConfigureAwait(false)
                 : [];
             if (repaired.Count > 0)
             {
@@ -335,6 +347,18 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         else if (end.Malformed.Count > 0)
         {
             AttemptNotes.Report(context, "malformed tool call kept as text: " + Truncate(end.Malformed[0].Problem, 120));
+        }
+
+        if (end.Ignored is not null)
+        {
+            AttemptNotes.Report(context, end.Ignored);
+        }
+
+        if (calls.Count > 0)
+        {
+            // Calls read out of the model's text rather than a native tool API: worth finding when auditing what ran.
+            AttemptNotes.Report(context, "prompted tool calls: " + Truncate(string.Join(", ", calls.Select(c => c.Name)), 120));
+            AttemptNotes.ReportPromptedToolCalls(context, calls.Count);
         }
 
         // Text already sent ended where the held part begins; trailing whitespace before the calls is noise.
@@ -359,7 +383,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     /// a fraction of the turn: the conversation is not re-sent.
     /// </summary>
     private async Task<IReadOnlyList<ToolUseBlock>> RepairAsync(
-        ConnectorRequest request, string workingDirectory, MalformedToolCall broken, CancellationToken cancellationToken)
+        ConnectorRequest request, string workingDirectory, PromptedToolFormat toolFormat, MalformedToolCall broken, CancellationToken cancellationToken)
     {
         IReadOnlyList<ToolDefinition> tools = request.Chat.Tools;
         ToolDefinition[] named = tools.Where(t => broken.Block.Contains('"' + t.Name + '"', StringComparison.Ordinal)).ToArray();
@@ -378,7 +402,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
 
         prompt.Append("\nWrite the call again as valid JSON, exactly in this form, and nothing else:\n\n```")
-            .Append(PromptedToolCalls.Fence).Append("\n{\"name\": \"<tool name>\", \"input\": { <arguments> }}\n```\n");
+            .Append(toolFormat.Label).Append("\n{\"name\": \"<tool name>\", \"input\": { <arguments> }}\n```\n");
         ChatMessage[] messages =
         [
             new("system", "You fix tool calls that could not be parsed. Reply with exactly one fenced tool_call block and no other text."),
@@ -415,7 +439,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
                 }
 
                 await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
-                return PromptedToolCalls.Parse(final ?? output.ToString(), tools.Select(t => t.Name).ToArray()).Calls;
+                return PromptedToolCalls.Parse(final ?? output.ToString(), tools.Select(t => t.Name).ToArray(), toolFormat).Calls;
             }
         }
         catch (Exception ex) when (ex is OperationCanceledException or FileNotFoundException && !cancellationToken.IsCancellationRequested)
@@ -430,6 +454,13 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         IPAddress? remote = context.Connection.RemoteIpAddress;
         return remote is null || IPAddress.IsLoopback(remote);
     }
+
+    /// <summary>
+    /// What the logs and the activity log keep of a failed run's output (the model's reply and the CLI's errors), as
+    /// <see cref="StateOptions.StorePrompts"/> allows: the output can quote the reply, and the reply the prompt.
+    /// </summary>
+    private string Output(string diagnostics, int max) =>
+        PromptPreviews.Excerpt(diagnostics, _storePrompts, max) ?? "output omitted (StorePrompts: Off)";
 
     private static string Truncate(string value, int max = 1000) => value.Length <= max ? value : value[..max] + "…";
 

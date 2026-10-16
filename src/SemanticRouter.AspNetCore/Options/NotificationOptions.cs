@@ -27,6 +27,12 @@ public sealed class NotificationOptions
     /// <summary>The dashboard's address as people reach it (e.g. <c>http://router.lan:5080/router</c>), for links in webhook messages.</summary>
     public string? DashboardUrl { get; set; }
 
+    /// <summary>
+    /// Webhook messages quote text that can come from prompts or replies: utterances learned from prompts and the latest
+    /// error a connector returned. Default <see langword="false"/>: messages carry only counts, names, kinds and links.
+    /// </summary>
+    public bool IncludeDetails { get; set; }
+
     /// <summary>Validation errors; empty when valid.</summary>
     internal IEnumerable<string> GetValidationErrors()
     {

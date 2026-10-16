@@ -54,6 +54,11 @@ public sealed class ClientTurnTests : RouterHostTest
             "Please write a 5-10 word title for the following conversation:\n\nUser: the login test is flaky on CI\nClaude: I'll look at the retry logic.\n\nRespond with the title for the conversation and nothing else."
         },
         {
+            "session title (2.1.300)",
+            null,
+            "<session>\nUser: the login test is flaky on CI\nClaude: I'll look at the retry logic.\n</session>\n\nWrite the title in the predominant language of the session — not the language of these instructions. Reply with the title only."
+        },
+        {
             "short title",
             "Summarize this coding conversation in under 50 characters.\nCapture the main task, key files, problems addressed, and current status.",
             "the login test is flaky on CI, can you look at the retry logic"
@@ -105,6 +110,30 @@ public sealed class ClientTurnTests : RouterHostTest
             ("user", "Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.")));
 
         (compactTier, compactReason).Should().Be(("1", "ClientHousekeeping"));
+    }
+
+    [Fact]
+    public async Task A_session_title_request_is_not_a_turn_of_the_conversation()
+    {
+        HttpClient client = await StartDispatchAsync(o => o.Conversation.DecayTurns = 1);
+        ClassifyAs(tier: 4, route: "agentic-coding");
+        const string Task = "refactor the payment module and update every caller";
+        const string Title = "<session>\nUser: refactor the payment module and update every caller\n</session>\n\nWrite the title in the predominant language of the session — not the language of these instructions.";
+        async Task<(string Tier, string Reason)> SendAsync(HttpContent body)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "/v1/messages") { Content = body };
+            request.Headers.Add("x-claude-code-session-id", "session-1");
+            HttpResponseMessage response = await client.SendAsync(request);
+            return (response.Headers.GetValues("X-Prompt-Route-Tier").Single(), response.Headers.GetValues("X-Prompt-Route-Reason").Single());
+        }
+
+        await SendAsync(Anthropic(ClaudeCodeSystem, ("user", Task)));
+        (string Tier, string Reason) title = await SendAsync(Anthropic(null, ("user", Title)));
+        ClassifyAs(tier: 1, route: "smalltalk");
+        (string Tier, string Reason) next = await SendAsync(Anthropic(ClaudeCodeSystem, ("user", Task), ("assistant", "Done."), ("user", "now write a short note for the changelog about what changed in the module")));
+
+        title.Should().Be(("1", "ClientHousekeeping"));
+        next.Should().Be(("4", "ConversationFloor"), "the title request did not count as a simpler turn, so the floor has not decayed");
     }
 
     [Fact]
@@ -189,7 +218,7 @@ public sealed class ClientTurnTests : RouterHostTest
 
         table.Source.Should().Be("built-in v1");
         table.Warning.Should().BeNull();
-        table.Patterns.Select(p => p.Entry.Id).Should().OnlyHaveUniqueItems().And.Contain(["warmup", "claude-code/resumed", "claude-code/title", "codex/compaction", "claude-code/command-check"]);
+        table.Patterns.Select(p => p.Entry.Id).Should().OnlyHaveUniqueItems().And.Contain(["warmup", "claude-code/resumed", "claude-code/title", "claude-code/session-title", "codex/compaction", "claude-code/command-check"]);
         table.Patterns.Select(p => p.Entry.Kind).Take(2).Should().Equal([ClientTurnKind.Warmup, ClientTurnKind.Resumed], "a warm-up and a resumed session are tried first");
     }
 

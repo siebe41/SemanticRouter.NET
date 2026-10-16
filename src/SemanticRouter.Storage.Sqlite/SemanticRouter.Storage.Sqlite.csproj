@@ -7,6 +7,9 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <Description>Durable state for SemanticRouter in one SQLite file: model cooldowns, tool-call affinity, the routing activity log and the configuration history survive restarts and can be shared by instances on one machine.</Description>
     <PackageTags>$(PackageTags);sqlite</PackageTags>
+    <!-- The desktop app references it: restored for the app's runtimes too, built once (Directory.Build.props). -->
+    <RuntimeIdentifiers>$(DesktopRuntimeIdentifiers)</RuntimeIdentifiers>
+    <IsRidAgnostic>true</IsRidAgnostic>
   </PropertyGroup>
 
   <ItemGroup>

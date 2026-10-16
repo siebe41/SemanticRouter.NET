@@ -36,7 +36,8 @@
       "Utterances": [
         "hi there", "hello, how are you?", "good morning", "thanks a lot",
         "thank you for your help", "who are you?", "tell me a joke", "what can you do?",
-        "hey!", "is this a chatbot?", "see you later", "nice to meet you"
+        "hey!", "is this a chatbot?", "see you later", "nice to meet you", "what can you help me with?",
+        "hey, what can you help me with?"
       ]
     },
     {
@@ -59,7 +60,25 @@
         "write a regex that matches email addresses", "write a unit test for this function", "add a docstring to this method",
         "convert this json to yaml", "write a commit message for this diff", "rename this variable everywhere",
         "write a bash one-liner to count lines in all files",
-        "write a small script that renames files", "add type annotations to this function", "write a sql query for this table", "what does this compiler error mean", "explain what this line of code does", "write a dockerfile for this app", "parse this string into an object", "write a shell script that backs up a folder"
+        "write a small script that renames files", "add type annotations to this function", "write a sql query for this table", "what does this compiler error mean", "explain what this line of code does", "write a dockerfile for this app", "parse this string into an object", "write a shell script that backs up a folder",
+        "add null checks to this method", "convert this loop to a LINQ query", "add a cancellation token parameter to this async method",
+        "write a test for this edge case", "write a test for this calculation", "extract this code into a separate method",
+        "turn this class into a record", "add error handling to this function", "convert this callback code to async/await",
+        "make this field read-only"
+      ]
+    },
+    // Tier 2, not 1: asked in an agentic client, a question about your own system ("what time zone does the server
+    // use?") is answered with a tool call, and a request that carries tools needs a model that calls them well.
+    {
+      "Name": "quick-answers",
+      "Description": "Short factual and explain questions: definitions, status codes, defaults, what a flag, option or pattern does.",
+      "Tier": 2,
+      "Utterances": [
+        "what does this HTTP status code mean", "what does this error code mean", "what is the default value of this setting",
+        "what port does this service listen on by default", "what does this command line flag do", "what does this config option do",
+        "what does this git command do", "what does this regular expression match", "is this a valid date format",
+        "which time zone is this timestamp in", "what does this acronym stand for", "what is the maximum size allowed here",
+        "what is the syntax for a switch expression"
       ]
     },
     {
@@ -95,7 +114,7 @@
         "implement this feature across the codebase", "add a new endpoint and wire it into the service",
         "fix the failing tests and make the build pass", "migrate this project to the new framework version",
         "refactor the module and update every caller", "write the integration tests for this flow",
-        "implement the feature described in this issue", "the build is broken, make it pass again", "replace this library with another one across the repository", "add pagination to this API and update its callers", "set up a CI pipeline for this repository", "add a feature flag and wire it through the app", "upgrade the dependencies and fix whatever breaks"
+        "implement the feature described in this issue", "the build is broken, make it pass again", "replace this library with another one across the repository", "add pagination to this API and update its callers", "set up a CI pipeline for this repository", "add a feature flag and wire it through the app", "upgrade the dependencies and fix whatever breaks", "improve the code quality of this project"
       ]
     },
     {
@@ -134,10 +153,13 @@
   "Middleware": {
     "Mode": "Dispatch",
     "PathPrefixes": [ "/v1/chat/completions" ],
+    // Claude Code sends its default model name (an Opus name) whether or not you chose Opus, so every Claude name routes
+    // as auto. Ask for Opus with an "@opus" callout, or start Claude Code with --model opus-pinned for the whole session.
     "ModelAliases": {
+      "opus-pinned": "family:opus",
       "*haiku*": "auto:cheapest",
       "*sonnet*": "auto",
-      "*opus*": "family:opus",
+      "*opus*": "auto",
       "claude-*": "auto",
       "gpt-*": "auto"
     },

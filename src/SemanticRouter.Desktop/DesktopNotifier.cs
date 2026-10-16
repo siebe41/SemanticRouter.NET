@@ -1,11 +1,13 @@
 using System.Diagnostics;
+using SemanticRouter.Host;
 
 namespace SemanticRouter.Desktop;
 
 /// <summary>
 /// Shows a system notification with the platform's own tool: <c>osascript</c> on macOS, <c>notify-send</c> on Linux, a
 /// PowerShell toast on Windows. Best effort: where the tool is missing nothing is shown, and the tray menu still lists
-/// the notice. The text is passed as arguments or environment variables, never put into a script.
+/// the notice. The text is passed as arguments or environment variables, never put into a script. The tool is started
+/// by its full path: by bare name, a file of that name in the current directory could be started instead.
 /// </summary>
 internal static class DesktopNotifier
 {
@@ -24,12 +26,23 @@ internal static class DesktopNotifier
         "$null = $text.Item(1).AppendChild($xml.CreateTextNode($env:SR_BODY));" +
         "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($env:SR_APP).Show([Windows.UI.Notifications.ToastNotification]::new($xml))";
 
+    /// <summary>The full path of the platform's notification tool, or <see langword="null"/> when it is not installed.</summary>
+    internal static string? Tool() =>
+        OperatingSystem.IsWindows() ? Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe")
+        : ServicePlatform.SystemTool(OperatingSystem.IsMacOS() ? "osascript" : "notify-send", Environment.GetEnvironmentVariable("PATH"));
+
     public static void Show(string title, string body)
     {
+        if (Tool() is not { } tool)
+        {
+            Console.Error.WriteLine("Could not show a notification: no notification tool (notify-send) was found.");
+            return;
+        }
+
         ProcessStartInfo start;
         if (OperatingSystem.IsMacOS())
         {
-            start = new ProcessStartInfo("osascript");
+            start = new ProcessStartInfo(tool);
             foreach (string line in new[] { "on run argv", "display notification (item 2 of argv) with title (item 1 of argv)", "end run" })
             {
                 start.ArgumentList.Add("-e");
@@ -41,7 +54,7 @@ internal static class DesktopNotifier
         }
         else if (OperatingSystem.IsWindows())
         {
-            start = new ProcessStartInfo("powershell.exe") { CreateNoWindow = true };
+            start = new ProcessStartInfo(tool) { CreateNoWindow = true };
             foreach (string argument in new[] { "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", WindowsScript })
             {
                 start.ArgumentList.Add(argument);
@@ -53,7 +66,7 @@ internal static class DesktopNotifier
         }
         else
         {
-            start = new ProcessStartInfo("notify-send");
+            start = new ProcessStartInfo(tool);
             start.ArgumentList.Add("--app-name=SemanticRouter");
             start.ArgumentList.Add(title);
             start.ArgumentList.Add(body);

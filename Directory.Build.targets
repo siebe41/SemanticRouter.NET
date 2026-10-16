@@ -1,0 +1,17 @@
+<Project>
+  <!--
+    Avalonia's build tasks send build telemetry (Avalonia.BuildServices) unless AVALONIA_TELEMETRY_OPTOUT is set. This
+    empty target replaces theirs, so no build in this repository sends it whatever the environment. It is imported
+    after the package targets, and the later definition of a target wins.
+  -->
+  <Target Name="AvaloniaStats" />
+
+  <!--
+    A project that lists RuntimeIdentifiers (Directory.Build.props) would download the runtime packs of all of them on
+    every restore, about 300 MB, in case it is published later without restoring. deploy/publish-desktop.sh restores
+    for the runtime it publishes, so a restore for no particular runtime (build, test) skips them.
+  -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == '' and '$(RuntimeIdentifiers)' != ''">
+    <EnableRuntimePackDownload>false</EnableRuntimePackDownload>
+  </PropertyGroup>
+</Project>

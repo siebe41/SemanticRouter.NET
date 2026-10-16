@@ -6,8 +6,10 @@ import './usage.js';
 import './evaluate.js';
 import './profiles.js';
 import './learned.js';
+import './audit.js';
+import { reportActions } from './feedback.js';
 import { actions } from './actions.js';
-import { $, api, h, isDirty, readInput, setPath, showSignIn, state, toast } from './core.js';
+import { $, api, h, isDirty, metricsOnly, readInput, setPath, showSignIn, state, toast } from './core.js';
 import { connectStream } from './live.js';
 import { graph } from './memory.js';
 import { initTheme, loadAll, refreshStatus, render, renderChrome, route } from './shell.js';
@@ -18,7 +20,10 @@ import { initTheme, loadAll, refreshStatus, render, renderChrome, route } from '
 document.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-action]');
   if (!el) return;
-  const action = actions[el.dataset.action];
+  // A control inside a clickable header (the model's "enabled" box) does not also toggle the header.
+  const own = ev.target.closest('[data-no-action]');
+  if (own && el.contains(own)) return;
+  const action = actions[el.dataset.action] || reportActions[el.dataset.action];
   if (!action) return;
   if (el.tagName === 'INPUT' && el.type === 'checkbox') return;
   ev.preventDefault();
@@ -91,6 +96,7 @@ document.addEventListener('change', (ev) => {
     render();
   } else if (el.id === 'activity-filter') { state.activityFilter = el.value; render(); }
   else if (el.id === 'auto-refresh') { state.autoRefresh = el.checked; }
+  else if (el.id === 'audit-limit') { state.audit.limit = +el.value; state.audit.entries = null; render(); }
   else if (el.id === 'tester-model') { state.tester.model = el.value; }
   else if (el.id === 'memory-filter') { state.memoryUi.filter = el.value; if (graph) graph.redraw(); }
   else if (el.id === 'memory-color') { state.memoryUi.colorBy = el.value; render(); }
@@ -139,7 +145,7 @@ window.addEventListener('beforeunload', (ev) => { if (isDirty()) { ev.preventDef
 initTheme();
 const signOutBtn = $('#sign-out');
 if (signOutBtn) signOutBtn.addEventListener('click', async () => { await api('DELETE', '/session').catch(() => {}); location.reload(); });
-loadAll().then(() => { route(); connectStream(); }).catch((e) => {
+loadAll().then(() => { route(); if (!metricsOnly()) connectStream(); }).catch((e) => {
   if (e.status === 401) { showSignIn(); return; }
   $('#view').innerHTML = `<div class="card"><h3>Could not reach the router API</h3><pre>${h(e.message)}</pre><p class="muted small">Is the dashboard mapped (<code>app.MapRouterDashboard()</code>) and are you browsing from the same machine?</p></div>`; });
 setInterval(() => { if (state.autoRefresh && document.visibilityState === 'visible' && !isDirty()) refreshStatus(); else if (state.autoRefresh && document.visibilityState === 'visible') { api('GET', '/status').then((s) => { state.status = s; renderChrome(); }).catch(() => {}); } }, 5000);
