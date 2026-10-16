@@ -8,7 +8,10 @@ using SemanticRouter.Host;
 
 namespace SemanticRouter.Desktop;
 
-/// <summary>Name, version and where the project lives: the repository, the docs, issues, releases and the licence.</summary>
+/// <summary>
+/// Name, version, where updates stand (<see cref="UpdatesSection"/>) and where the project lives: the repository, the
+/// docs, issues, releases and the licence.
+/// </summary>
 internal sealed class AboutWindow : Window
 {
     public AboutWindow(WindowIcon icon, Bitmap logo)
@@ -60,6 +63,8 @@ internal sealed class AboutWindow : Window
                     TextWrapping = TextWrapping.Wrap,
                     Margin = new Thickness(0, 6, 0, 4),
                 },
+                Updates,
+                new Separator { Margin = new Thickness(0, 6) },
                 Link("GitHub repository", ProjectLinks.Repository),
                 Link("Documentation", ProjectLinks.Documentation),
                 Link("Report an issue or suggest an idea", ProjectLinks.Issues),
@@ -77,6 +82,9 @@ internal sealed class AboutWindow : Window
             },
         };
     }
+
+    /// <summary>Where updates stand, and the choices about them.</summary>
+    public UpdatesSection Updates { get; } = new();
 
     private static HyperlinkButton Link(string text, string url)
     {

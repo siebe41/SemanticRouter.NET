@@ -4,6 +4,10 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ## [Unreleased]
 
+### Added
+
+- Desktop app: an Updates section in **About SemanticRouter**, and **Check for updates now…** in the tray menu. It shows whether the app is up to date and when it last checked, an update that is downloading, ready or available, and why a check failed or updates are off. It has **Check now**, **Restart to update** and the two update switches.
+
 ## [0.3.0] - 2026-10-16
 
 ### Security
