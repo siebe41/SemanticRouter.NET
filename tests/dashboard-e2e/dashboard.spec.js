@@ -214,6 +214,20 @@ test('the endpoints card and the top bar show the host in use, its state and fig
   await expect(page.locator('#endpoints')).not.toContainText('sk-e2e-not-a-real-key');
 });
 
+test('changing the usage window or grouping keeps the figures until the new ones arrive', async ({ page }) => {
+  await open(page, 'usage');
+  await expect(page.locator('#view .card.stat').first()).toBeVisible();
+  await page.route(/\/router\/api\/usage\?/, async (route) => { await new Promise((r) => setTimeout(r, 700)); await route.continue(); });
+  const byRoute = page.waitForResponse(/\/router\/api\/usage\?window=day&by=route/);
+  await page.click('[data-action="usage-set"][data-key="window"][data-value="day"]');
+  await page.click('[data-action="usage-set"][data-key="by"][data-value="route"]');
+  expect(await page.locator('#view .card.stat').count(), 'the page blanked while loading').toBeGreaterThan(0);
+  await expect(page.locator('#view')).not.toContainText('Loading…');
+  await byRoute;
+  await expect(page.locator('#view h2', { hasText: 'By route' })).toBeVisible();
+  await expect(page.locator('[data-action="usage-set"][data-key="window"][data-value="day"]')).toHaveClass(/\bon\b/);
+});
+
 test('router learned runs tuning, pauses and resumes learning', async ({ page }) => {
   await open(page, 'learned');
   await expect(page.locator('#view')).toContainText('applies changes');

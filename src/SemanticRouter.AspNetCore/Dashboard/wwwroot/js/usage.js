@@ -5,8 +5,10 @@ import { render } from './shell.js';
 
 /* Usage: what each model, connector, route or client used and cost, and the budgets. */
 export async function loadUsage() {
-  if (state.usage.loading) return;
+  // A change while a load is under way loads again when it finishes, so the last one wins.
+  if (state.usage.loading) { state.usage.again = true; return; }
   state.usage.loading = true;
+  state.usage.again = false;
   const days = { day: 1, week: 7, month: 30, '7d': 7, '30d': 30 }[state.usage.window] || 7;
   try {
     const [usage, feedback] = await Promise.all([
@@ -17,6 +19,7 @@ export async function loadUsage() {
     state.usage.feedback = feedback;
   } catch (e) { toast(e.message, 'danger'); }
   state.usage.loading = false;
+  if (state.usage.again) { loadUsage(); return; }
   if (state.view === 'usage') render();
 }
 export const usd = (v) => '$' + Number(v || 0).toFixed(v && Math.abs(v) < 1 ? 4 : 2);
