@@ -6,7 +6,7 @@ Who maintains the project, how decisions are made and who can release is in [GOV
 
 ## Reporting routing quality
 
-You do not need to write code to help. If a prompt went to a model that was stronger than it needed (wasted quota or cost) or weaker than it needed (a poor answer), open a **Routed to the wrong tier** issue. The form asks for the router's decision (from the `X-Prompt-Route-*` headers, the dashboard's Activity page or the classify endpoint), the model that answered, what the prompt really needed, and your embedding settings. Describe or paraphrase the prompt instead of pasting anything private.
+You do not need to write code to help. If a prompt went to a model that was stronger than it needed (wasted quota or cost) or weaker than it needed (a poor answer), open a **Routed to the wrong tier** issue. The quickest way is **Report** next to the request on the dashboard's Activity page: it opens the form with the router's decision line, the model that answered, your embedding settings and the router version filled in, and leaves the prompt out. Otherwise the form asks for the decision (from the `X-Prompt-Route-*` headers or the classify endpoint), the model that answered, what the prompt really needed, your embedding settings and the version. Describe or paraphrase the prompt instead of pasting anything private.
 
 ## Building and testing
 

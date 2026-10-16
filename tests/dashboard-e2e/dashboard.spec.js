@@ -7,7 +7,7 @@ const { test: base, expect } = require('@playwright/test');
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'semantic-router.json'), 'utf8')
   .replace(/__STUB__/g, `http://127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`));
 
-const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'json', 'audit'];
+const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'json', 'audit', 'feedback'];
 const THEMES = ['machine-dark', 'machine-light', 'terminal'];
 
 // Every test fails if the page throws or logs an error (a Content-Security-Policy violation is one), or asks any host
@@ -382,6 +382,27 @@ test('a long unbroken token in a prompt or project keeps the Activity table on s
     expect(ms.x + ms.width, 'the ms column is inside the table').toBeLessThanOrEqual(box.x + box.width + 1);
     await expect(row.locator('td.served')).toContainText(/local-small|cloud-large/);
   }
+});
+
+test('Report on an Activity entry opens a pre-filled misroute issue without the prompt', async ({ page, request }) => {
+  await route(request, 'hello there, my-private-words-123');
+  await page.addInitScript(() => { window.__opened = []; window.open = (url) => { window.__opened.push(url); return null; }; });
+  await open(page, 'activity');
+  await page.locator('#view table.activity-table tr', { hasText: 'my-private-words-123' }).first().getByRole('button', { name: 'Report' }).click();
+  await expect(page.locator('#view h1')).toHaveText('Feedback');
+  await expect(page.locator('#feedback-form')).toContainText('Route: smalltalk');
+  await page.getByLabel('What the prompt really needed, and why').fill('Small talk; tier 1 was right.');
+  await page.getByRole('button', { name: 'Open the issue on GitHub' }).click();
+  const [url] = await page.evaluate(() => window.__opened);
+  const issue = new URL(url);
+  expect(issue.origin + issue.pathname).toBe('https://github.com/siebe41/SemanticRouter.NET/issues/new');
+  expect(issue.searchParams.get('template')).toBe('misroute.yml');
+  expect(issue.searchParams.get('decision')).toContain('Route: smalltalk');
+  expect(issue.searchParams.get('answered-by')).toBe('local-small');
+  expect(issue.searchParams.get('expected')).toContain('tier 1 was right');
+  expect(issue.searchParams.get('version')).toBeTruthy();
+  expect(url).not.toContain('my-private-words-123');
+  expect(issue.searchParams.has('prompt')).toBeFalsy();
 });
 
 test.describe('on a phone', () => {

@@ -45,6 +45,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Model names `semantic-router`, `claude-semantic-router`, `-cheapest` and `-best`; `/v1/models` entries have a `display_name`. (#156)
 - `tool-calls` benchmark for prompted tool calling. (#152)
 - A `quick-answers` route (tier 2) in the starting routes, for short factual and explain questions, and small-refactor utterances in `simple-code`; the sample evaluation set has 116 prompts. (#160)
+- Dashboard **Feedback** page and a **Report** button on each Activity entry: they open a GitHub issue (misroute, bug or idea) with the decision line, the model that answered, the embedding settings and the router version filled in. The prompt is left out unless you add it, and a local-only prompt answered by a cloud model points to private security reporting instead. The misroute and bug forms ask for the router version and the decision line. (#164)
 
 ### Changed
 

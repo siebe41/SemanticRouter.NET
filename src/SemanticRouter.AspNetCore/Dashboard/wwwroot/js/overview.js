@@ -108,10 +108,11 @@ export function renderClassification(r) {
     </div>`;
 }
 
-export function renderActivityTable(entries, labels) {
+/* With actions, each entry gets Report (a pre-filled GitHub issue) and, for the admin role, Label. */
+export function renderActivityTable(entries, actions) {
   if (!entries.length) return '<div class="muted small">No requests routed yet. Point a client at the gateway or use “Try a prompt”.</div>';
   return `<div class="table-wrap"><table class="activity-table">
-    <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th>${labels ? '<th></th>' : ''}</tr>
+    <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th>${actions ? '<th></th>' : ''}</tr>
     ${entries.map((e) => `<tr title="${h(e.detail || '')}">
       <td class="nowrap small">${h(when(e.timestamp))}</td>
       <td class="prompt-cell"><span class="small">${e.promptPreview ? h(e.promptPreview) : '<span class="faint">prompt not stored</span>'}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${e.estimatedInputTokens} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${int(e.inputTokens)} in / ${int(e.outputTokens)} out` : ''}${e.cacheReadTokens ? ` · <span title="Prompt tokens served from the backend's prompt cache">${int(e.cacheReadTokens)} cached</span>` : ''}${e.cacheCreationTokens ? ` · <span title="Prompt tokens written to the backend's prompt cache">${int(e.cacheCreationTokens)} to cache</span>` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}${e.profile ? ' · <span class="badge accent" title="Routing profile">' + h(e.profile) + '</span>' : ''}${e.project ? ' · <span class="mono project" title="' + h('Project: ' + e.project) + '">' + h(e.project) + '</span>' : ''}${e.signals ? ' · <span class="badge warn" title="Kept local because the conversation contains this">local: ' + h(e.signals) + '</span>' : ''}${e.promptedToolCalls ? ` · <span class="badge" title="Tool calls read out of the model's text (prompted tool calling), not returned by a native tool API">${e.promptedToolCalls} prompted call${e.promptedToolCalls > 1 ? 's' : ''}</span>` : ''}${e.notes ? ' · <span class="badge ' + (/malformed/.test(e.notes) ? 'warn' : 'info') + '" title="Noted by the connector">' + h(e.notes) + '</span>' : ''}${memoryBadge(e)}</div></td>
@@ -120,7 +121,7 @@ export function renderActivityTable(entries, labels) {
       <td class="small">${h(e.route || '—')}${e.similarity != null ? ` <span class="faint">${num(e.similarity, 2)}</span>` : ''}</td>
       <td class="small served">${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.outcome === 'rate-limited' ? `<span class="badge warn" title="${h(e.detail || '')}">rate limited</span>` : e.servedBy ? `<b>${h(e.servedBy)}</b>${e.attempt > 1 ? ` <span class="badge warn">try ${e.attempt}</span>` : ''}${e.degraded ? ' <span class="badge warn">degraded</span>' : ''}` : `<span class="muted">${h(e.plannedModel || '—')}</span> <span class="faint">planned</span>`}${e.sticky ? ' <span class="badge" title="Stayed on the conversation\'s model: the one that answered its last turn, or the one with its warm prompt cache">sticky</span>' : ''}${e.selection ? ` <span class="badge" title="${h(e.selection)}">${h(e.selection.split(':')[0])}</span>` : ''}${e.callout ? ` <span class="badge accent" title="Chosen with an inline callout">${h(e.callout)}</span>` : ''}${unreliableBadge(e)}${feedbackBadges(e)}${gradeBadge(e)}</td>
       <td class="num small">${e.totalMilliseconds != null ? num(e.totalMilliseconds, 0) : num(e.classificationMilliseconds, 1)}${e.timeToFirstByteMilliseconds != null && e.totalMilliseconds != null ? `<div class="faint" title="Time to the first byte of the reply">first ${num(e.timeToFirstByteMilliseconds, 0)}</div>` : ''}</td>
-      ${labels ? `<td>${e.toolContinuation ? '' : `<button class="btn ghost small" data-action="label-open" data-id="${e.id}" title="Say which tier this prompt should have had">Label</button>`}</td>` : ''}
+      ${actions ? `<td class="nowrap">${e.toolContinuation ? '' : `${readOnly() ? '' : `<button class="btn ghost small" data-action="label-open" data-id="${e.id}" title="Say which tier this prompt should have had">Label</button>`}<button class="btn ghost small" data-action="report-entry" data-id="${e.id}" title="${e.outcome === 'failed' ? 'Report this failure as a GitHub issue' : 'Report a misroute as a GitHub issue, with this decision filled in and the prompt left out'}">Report</button>`}</td>` : ''}
     </tr>`).join('')}
   </table></div>`;
 }
@@ -172,7 +173,7 @@ views.activity = () => {
       <label class="check"><input type="checkbox" id="auto-refresh" ${state.autoRefresh ? 'checked' : ''}> auto-refresh</label>
       <button class="btn small" data-action="refresh">Refresh</button></div>
     ${state.label ? labelForm() : ''}
-    ${renderActivityTable(entries, !readOnly())}`;
+    ${renderActivityTable(entries, true)}`;
 };
 
 /* Label an activity entry: add it to the evaluation set and, optionally, as an utterance to a route. */
