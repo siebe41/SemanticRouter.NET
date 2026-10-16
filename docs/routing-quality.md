@@ -2,6 +2,26 @@
 
 Routing quality depends on route utterances and on a similarity threshold whose right value changes with the embedding model. This guide shows how to measure how well your configuration routes your own prompts, and how to improve it. Everything runs on the dashboard's **Evaluate** page or through the admin API. No model is called; only the embedding provider is.
 
+## The starting routes
+
+`semantic-router init` and the built-in template start with these routes. A prompt that matches none of them gets `FallbackTier` (3).
+
+| Route | Tier | For |
+|---|---|---|
+| `smalltalk` | 1 | Greetings, thanks, questions about what the assistant can do. |
+| `rewrite-summarize` | 1 | Summaries, rewrites, translation, spelling. |
+| `agent-housekeeping` | 1 | An agent's own side requests: titles, transcript summaries, command descriptions. |
+| `simple-code` | 2 | Small, self-contained code tasks: a regex, a unit test, a docstring, null checks, extract a method, a loop to LINQ, a class to a record, a method to async. Needs `code`. |
+| `quick-answers` | 2 | Short factual and explain questions: what a status code, error code, flag, option or pattern means, defaults and ports, date formats. |
+| `continuation` | 3 | "go ahead", "continue": in a conversation they keep its tier (`FollowsConversation`). |
+| `deep-reasoning` | 4 | Design, trade-offs, risk analysis, proofs. |
+| `complex-code` | 4 | Debugging, leaks, deadlocks, performance, reviews. Needs `code`. |
+| `agentic-coding` | 4 | Multi-step work across files: implement, migrate, fix the build. Needs `code`. |
+
+`quick-answers` is tier 2, not 1, because in an agentic client a question about your own system ("what time zone does the server use?") is answered with a tool call. The request then carries tools, which adds the `tools` capability, and tier 2 is where `init` puts the small models that call tools well (Claude Haiku, a local coder model). General-knowledge questions ("what is the capital of Australia?", "how does compound interest work?") are not in it and stay on the fallback tier.
+
+The sample evaluation set that `init` writes (116 prompts) routes 111 to their tier with all-MiniLM-L6-v2 and 112 with bge-small-en-v1.5, each at the threshold `init` sets for it; CI fails below 90%. It includes guard prompts for hard work that looks like a small request ("add retry with backoff to every service client and make the tests pass", "explain why this deadlock happens under load"), so new utterances that pull such work down a tier show up as misses.
+
 ## Evaluation sets
 
 An evaluation set is a list of prompts with the tier each should get. A case can also name the route it should match and mark the prompt as local-only. The format is JSON Lines, one case per line:
