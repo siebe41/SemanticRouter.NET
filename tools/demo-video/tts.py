@@ -34,18 +34,6 @@ def sentences(text):
     return [s.strip() for s in re.findall(r"[^.?!:]+[.?!:]?", text) if s.strip()]
 
 
-# How the voice should say a word, where the model gets it wrong: "Claude" comes out as "Clahd" (like "clod"); spelled
-# "Klaud" it gets the rounded "aw". Only what is spoken changes; the narration file, the checks and the subtitles keep
-# the real word.
-SAY = {"Claude": "Klaud"}
-
-
-def spoken(text):
-    for word, sound in SAY.items():
-        text = re.sub(rf"\b{word}\b", sound, text)
-    return text
-
-
 def chunks(text, limit=280):
     """The line in as few pieces as possible: whole, or split at sentence ends when it is too long for one pass."""
     out, current = [], ""
@@ -133,7 +121,7 @@ if engine == "chatterbox":
         best = None
         for i in range(candidates):
             seed = zlib.crc32(key.encode()) % 100_000 * 10 + i + 1000 * int(os.environ.get("TTS_SEED", "0"))
-            parts = [trim(generate(spoken(c), seed)) for c in chunks(text)]
+            parts = [trim(generate(c, seed)) for c in chunks(text)]
             audio = np.concatenate([np.concatenate([p, np.zeros(int(0.35 * rate), dtype=np.float32)]) for p in parts])[: -int(0.35 * rate)]
             s, info = score(audio, text)
             print(f"    take {i + 1}: score {s:6.2f} {info}", flush=True)
@@ -153,7 +141,7 @@ else:
     def speak(key, text):
         parts = []
         for s in sentences(text):
-            samples, _ = kokoro.create(spoken(s), voice=voice, speed=1.0, lang="en-us")
+            samples, _ = kokoro.create(s, voice=voice, speed=1.0, lang="en-us")
             parts += [samples, np.zeros(int(0.35 * rate), dtype=np.float32)]
         return np.concatenate(parts[:-1])
 
