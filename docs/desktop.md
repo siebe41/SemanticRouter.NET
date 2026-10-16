@@ -20,12 +20,23 @@ The first start is the same as from the archives: the [welcome window](#using-it
 
 ### Signing
 
-The release workflow signs the installers when the repository has the credentials, and builds them unsigned otherwise:
+The release workflow signs the Windows and macOS installers with these credentials, set as repository secrets and variables (or as secrets and variables of the `release` environment):
 
 | Platform | What it takes | Repository secrets | Repository variables |
 |---|---|---|---|
 | Windows | An [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) account and certificate profile, and an app registration allowed to sign with it | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | `AZURE_SIGNING_ENDPOINT` (e.g. `https://weu.codesigning.azure.net`), `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` |
 | macOS | An Apple Developer account: the *Developer ID Application* and *Developer ID Installer* certificates (exported as `.p12`, base64) and an app-specific password for notarization | `APPLE_BUILD_CERTIFICATE_BASE64`, `APPLE_INSTALLER_CERTIFICATE_BASE64`, `APPLE_P12_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` | `APPLE_SIGN_APP_IDENTITY`, `APPLE_SIGN_INSTALL_IDENTITY` (the certificates' names, e.g. `Developer ID Application: Ada Lovelace`) |
+
+Signing is required. The release's first job checks, for each platform, whether every secret and variable in its row is set; it sees only whether each one is set, never its value. Then:
+
+| Each platform's settings | What the release does |
+|---|---|
+| All set | Signs that platform's installers, and checks the signature (and on macOS the notarization ticket) before uploading them. A signature that does not check out fails the release. |
+| None set, and the variable `ALLOW_UNSIGNED_RELEASE` is `true` | Publishes that platform's installers unsigned, with a warning. |
+| None set, `ALLOW_UNSIGNED_RELEASE` not set (or anything but `true`) | Fails before anything is published, naming the platform. |
+| Some set, some not | Fails before anything is published, naming the missing settings. `ALLOW_UNSIGNED_RELEASE` does not change this. |
+
+Until the certificates exist, set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true` (Settings > Secrets and variables > Actions > Variables), or every release fails at its first job. Delete it once both platforms sign, so that a lost secret stops a release instead of publishing unsigned installers. The run's summary has a **Code signing** table, and each installer job adds a line per installer saying whether it was signed. The Linux AppImage and the archives are never code-signed.
 
 The app is built in jobs that hold no secret and can only read the repository (`installer-build`, `desktop-build`): `deploy/publish-desktop.sh` publishes it on each installer's own OS. The signing jobs download that build and run no `dotnet build` or `publish`, so no package's build code runs next to a signing credential; they only install vpk, which packs, signs and uploads. The macOS job imports the certificates into a temporary keychain and stores a `notarytool` profile, and vpk signs, notarizes and staples the app and the `.pkg`.
 

@@ -2,13 +2,16 @@
 
 ## Supported versions
 
-Security fixes go to `main` and into the next release. Only the latest release is supported; there are no back-ported fixes for older versions. If you build from source, use the latest `main`.
+<!-- owner: confirm the support policy -->
+Only the latest minor release gets security fixes. A fix goes to `main` and ships in a new release: a patch release of the latest minor version when `main` has nothing else ready, otherwise the next minor version. Older minor versions get no fixes and nothing is back-ported, so upgrade to the release that has the fix. If you build from source, use the latest `main`.
 
 | Version | Supported |
 |---|---|
 | `main` | yes |
-| Latest release (NuGet packages, `semantic-router` tool, container image, desktop app) | yes |
-| Anything older | no |
+| The latest minor release, newest patch (NuGet packages, `semantic-router` tool, container image, desktop app) | yes |
+| Older minor releases, and older patches of the latest one | no |
+
+The security fixes in each release are listed under **Security** in [CHANGELOG.md](CHANGELOG.md).
 
 ## Verifying a release
 
@@ -18,13 +21,27 @@ Every release asset has a build provenance attestation and a line in `SHA256SUMS
 
 Please do not open a public issue, discussion or pull request for a security problem.
 
-Report it privately through GitHub: on the repository's **Security** tab, choose **Report a vulnerability**. This opens a private advisory that only you and the maintainers can see. Include:
+Report it privately through GitHub's private vulnerability reporting: on the repository's **Security** tab, choose **Report a vulnerability**. This opens a private advisory that only you and the maintainers can see. If you cannot use GitHub, email `<security contact address>` instead. <!-- owner: replace with a contact address, or delete this sentence --> Include:
 
 - what is affected (package or component, version or commit);
 - how to reproduce it, with the configuration involved (replace real keys with placeholders);
 - what an attacker gains, and from where (another process on the same machine, a web page in a browser, another machine on the network).
 
-Reports are handled on a best-effort basis; there is no guaranteed response time. Replies come in the advisory. Once a fix is released, the advisory is published, with credit to the reporter unless you ask otherwise.
+Replies come in the advisory. Once a fix is released, the advisory is published, with credit to the reporter unless you ask otherwise.
+
+## Response targets
+
+<!-- owner: confirm these numbers -->
+The project has one maintainer ([GOVERNANCE.md](GOVERNANCE.md)), so these are targets, not guarantees. Business days are Monday to Friday, excluding public holidays.
+
+| Step | Target |
+|---|---|
+| Acknowledge the report | within 5 business days |
+| Initial assessment: whether it is in scope, and how severe it is | within 10 business days |
+| Fix or mitigation released, critical or high severity | within 30 days of the assessment |
+| Fix or mitigation released, medium or low severity | in the next planned release |
+
+Severity follows [CVSS](https://www.first.org/cvss/). When a fix takes longer than its target, the advisory says why and when to expect it, and gives a workaround when there is one, such as a setting or a machine policy that closes the hole. The advisory is published when the fix is released; if you plan to disclose on your own, please give the fix time to ship first.
 
 ## Scope
 

@@ -2,6 +2,8 @@
 
 Thanks for helping. Bug reports, fixes and documentation changes are welcome as issues and pull requests. For a larger change, open an issue first so the approach can be agreed before you write it; planned work is in [docs/roadmap.md](docs/roadmap.md).
 
+Who maintains the project, how decisions are made and who can release is in [GOVERNANCE.md](GOVERNANCE.md).
+
 ## Reporting routing quality
 
 You do not need to write code to help. If a prompt went to a model that was stronger than it needed (wasted quota or cost) or weaker than it needed (a poor answer), open a **Routed to the wrong tier** issue. The form asks for the router's decision (from the `X-Prompt-Route-*` headers, the dashboard's Activity page or the classify endpoint), the model that answered, what the prompt really needed, and your embedding settings. Describe or paraphrase the prompt instead of pasting anything private.
@@ -34,6 +36,15 @@ Every pull request runs CI ([`.github/workflows/ci.yml`](.github/workflows/ci.ym
 - **Package versions** are set centrally in `Directory.Packages.props`. Each project's `packages.lock.json` records every package it restores, transitive ones included, with a content hash. After changing a version or a package reference, run `dotnet restore` and commit the changed lock files: CI, the release and the container build restore with `--locked-mode` and fail when a lock file is out of date. The desktop app and the libraries it references also record the runtimes it is published for (`DesktopRuntimeIdentifiers` in `Directory.Build.props`); add a runtime there before publishing for it.
 - **Add tests** for behaviour you change. Tests must not need the network, a model or a vendor CLI; the existing tests show how to use `TestServer` and the stand-in CLI in `tests/SemanticRouter.FakeCli`.
 - **Update the documentation** (README or `docs/`) when you change configuration, endpoints or behaviour.
+
+## Changelog
+
+[CHANGELOG.md](CHANGELOG.md) lists every user-visible change. If your pull request changes what someone using the packages, the tool, the container image or the desktop app sees (a setting, an endpoint, a default, a fix to behaviour they could notice, a security fix), add one line under **Unreleased**, in the right group:
+
+- **Security** for anything that changes what can be read, reached or run, or by whom;
+- **Added**, **Changed** or **Fixed** for the rest.
+
+Write what changed for the user, not how, and end the line with the pull request number, e.g. `(#123)`. Internal refactoring, tests, CI and documentation-only changes need no line. When a release is cut, the maintainer renames **Unreleased** to the version and its date.
 
 ## Never commit keys
 
