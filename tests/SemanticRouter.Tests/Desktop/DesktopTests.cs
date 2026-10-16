@@ -32,6 +32,22 @@ public sealed class DesktopTests : IDisposable
         DesktopOptions.Parse(["init"], _ => null).Host.Error.Should().Contain("takes options, not the 'init' command");
     }
 
+    [Theory]
+    [InlineData("http://localhost:5080/router#/tiers", true)]
+    [InlineData("http://LOCALHOST:5080/router/api/status", true)]
+    [InlineData("http://127.0.0.1:5080/router#/models", true)]
+    [InlineData("http://[::1]:5080/router#/live", true)]
+    [InlineData("http://localhost:5081/router", false)]
+    [InlineData("https://localhost:5080/router", false)]
+    [InlineData("https://github.com/siebe41/SemanticRouter.NET", false)]
+    [InlineData("http://192.168.1.20:5080/router", false)]
+    public void The_dashboard_window_keeps_router_links_and_sends_the_rest_to_the_browser(string link, bool router)
+    {
+        var home = new Uri("http://localhost:5080/router#/overview");
+        DashboardWindow.IsSameRouter(new Uri(link), home).Should().Be(router);
+        DashboardWindow.IsSameRouter(new Uri("http://192.168.1.20:5080/router#/tiers"), new Uri("http://192.168.1.20:5080/router")).Should().BeTrue("a router reached by its network address keeps its own links too");
+    }
+
     [Fact]
     public void Preferences_round_trip_and_fall_back_to_the_window()
     {

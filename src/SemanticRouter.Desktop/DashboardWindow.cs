@@ -5,22 +5,26 @@ using Avalonia.Platform;
 namespace SemanticRouter.Desktop;
 
 /// <summary>
-/// The dashboard in the platform's own web view. Links that leave the router open in the default browser. Closing the
-/// window hides it: the router keeps running in the tray. It opens sized to fit the screen, or where it was last.
+/// The dashboard in the platform's own web view. Links that leave the router open in the default browser; links to the
+/// router stay in the window, however the web view asks (a navigation or a new window) and whichever name of this
+/// machine they use. Closing the window hides it: the router keeps running in the tray. It opens sized to fit the
+/// screen, or where it was last.
 /// </summary>
 internal sealed class DashboardWindow : Window
 {
     private readonly NativeWebView _view;
     private readonly WindowPlacement? _saved;
     private readonly Action<WindowPlacement> _savePlacement;
+    private readonly TextWriter _log;
     private Uri _home;
     private bool _closing;
     private bool _placed;
     private WindowPlacement? _normal;
 
-    public DashboardWindow(Uri home, string dataDirectory, WindowIcon icon, WindowPlacement? saved, Action<WindowPlacement> savePlacement)
+    public DashboardWindow(Uri home, string dataDirectory, WindowIcon icon, WindowPlacement? saved, Action<WindowPlacement> savePlacement, TextWriter log)
     {
         _home = home;
+        _log = log;
         _saved = saved;
         _savePlacement = savePlacement;
         Title = "SemanticRouter";
@@ -56,17 +60,24 @@ internal sealed class DashboardWindow : Window
         {
             if (e.Request is { } target)
             {
-                Shell.Open(target.AbsoluteUri);
+                if (IsSameRouter(target, _home))
+                {
+                    _view.Navigate(target);
+                }
+                else
+                {
+                    OpenInBrowser(target, "a new window");
+                }
             }
 
             e.Handled = true;
         };
         _view.NavigationStarted += (_, e) =>
         {
-            if (e.Request is { Scheme: "http" or "https" } target && !IsRouter(target))
+            if (e.Request is { Scheme: "http" or "https" } target && !IsSameRouter(target, _home))
             {
                 e.Cancel = true;
-                Shell.Open(target.AbsoluteUri);
+                OpenInBrowser(target, "a navigation");
             }
         };
         Content = _view;
@@ -158,5 +169,20 @@ internal sealed class DashboardWindow : Window
         base.OnClosing(e);
     }
 
-    private bool IsRouter(Uri target) => Uri.Compare(target, _home, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0;
+    /// <summary>
+    /// Whether <paramref name="target"/> is on the router at <paramref name="home"/>: the same scheme and port, and the
+    /// same host, where localhost, 127.0.0.1 and [::1] all count as this machine.
+    /// </summary>
+    internal static bool IsSameRouter(Uri target, Uri home) =>
+        string.Equals(target.Scheme, home.Scheme, StringComparison.OrdinalIgnoreCase)
+        && target.Port == home.Port
+        && (string.Equals(target.IdnHost, home.IdnHost, StringComparison.OrdinalIgnoreCase) || (target.IsLoopback && home.IsLoopback));
+
+    /// <summary>Hands a link to the default browser, and notes why in the app's log (a router link should never get here).</summary>
+    private void OpenInBrowser(Uri target, string how)
+    {
+        _log.WriteLine($"Dashboard window: opened {target.GetLeftPart(UriPartial.Path)} in the browser ({how}; the router is {_home.GetLeftPart(UriPartial.Authority)}).");
+        _log.Flush();
+        Shell.Open(target.AbsoluteUri);
+    }
 }

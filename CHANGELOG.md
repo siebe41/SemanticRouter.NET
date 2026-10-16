@@ -65,6 +65,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Fixed
 
+- Desktop app: the dashboard's own links (its rail and tabs) opened in the web browser instead of the app window in some setups. A link the web view asks to open in a new window now stays in the window when it is the router's, and the router counts as itself under localhost, 127.0.0.1 or [::1]. Each link handed to the browser is noted in the app's log.
 - Changes made on top of the running configuration (an utterance added from the dashboard, learned changes and undoing them) no longer undo a configuration applied a moment earlier: they are made again on top of it, up to three times. `POST api/config/save` saves exactly the version it read, or answers `409`.
 - Adding an utterance from the dashboard, and applying or undoing a learned change, no longer saves configuration changes that were applied without saving: while the running configuration is unsaved they apply without saving too, and their answers say `"saved": false`.
 - `doctor` labelled a CLI working directory it could not create as the CLI's `--version` failing; it now says what it is.

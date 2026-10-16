@@ -93,7 +93,7 @@ The tray menu:
 | **Router learned N things this week** | Shown when [automatic tuning](routing-quality.md#automatic-tuning) applied changes in the last 7 days; opens the Router learned page. |
 | Status line | Where the router listens, whether it is the app's own or one already running, or why it could not start. While no model is enabled it adds "but no model is enabled yet". |
 | **Restart router** | Restarts the router: the background service's, or the app's own (for example after it failed to start). |
-| **Open the dashboard in** → **App window** / **Web browser** | Your choice of where the dashboard opens, remembered in `desktop.json`. The app window uses the platform's own web view (WebView2, WebKit, WebKitGTK or WPE WebKit); links that leave the router open in your browser. |
+| **Open the dashboard in** → **App window** / **Web browser** | Your choice of where the dashboard opens, remembered in `desktop.json`. The app window uses the platform's own web view (WebView2, WebKit, WebKitGTK or WPE WebKit); links that leave the router open in your browser, and links to the router stay in the window. Each link it hands to the browser is noted in the app's log. |
 | **Keep the router running in the background** | The background service on or off; see [below](#the-app-and-the-background-service). |
 | **Start at sign-in** | Shows the app in the tray whenever you sign in. The router itself starts at sign-in through the background service. |
 | **Check for updates** | Installed app only: whether it looks for updates. |

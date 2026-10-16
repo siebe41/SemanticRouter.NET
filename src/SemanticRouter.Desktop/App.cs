@@ -468,7 +468,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         {
             _preferences = _preferences with { Window = placement };
             _preferences.Save(_directory);
-        });
+        }, log);
         _window.ShowAt(dashboard);
     }
 
