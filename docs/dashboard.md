@@ -14,7 +14,7 @@ builder.Services
 
 ## Pages
 
-The rail on the left has five sections, and the current section's pages are tabs under the top bar. A section opens on the tab last open in it. Every page keeps its own address (`#/learned`, `#/connectors`), so links from the tray, notices, webhooks and bookmarks go straight to the right tab. **Report an issue** (the Feedback page) and **More** (the router's version, the theme picker and **Sign out**) sit at the foot of the rail.
+The rail on the left has five sections, and the current section's pages are tabs under the top bar. A section opens on the tab last open in it. Every page keeps its own address (`#/learned`, `#/connectors`), so links from the tray, notices, webhooks and bookmarks go straight to the right tab. **Report an issue** (the Feedback page) and **More** (the router's version, the theme picker and **Sign out**) sit at the foot of the rail. In the [desktop app's](desktop.md#updates) window, **More** also has **About SemanticRouter**, and a banner under the tabs offers an app update when there is one.
 
 | Section | Tabs |
 |---|---|

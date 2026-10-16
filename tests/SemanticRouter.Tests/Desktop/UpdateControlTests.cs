@@ -189,6 +189,43 @@ public sealed class UpdateControlTests : IDisposable
     }
 
     [Fact]
+    public async Task The_dashboard_in_the_app_window_is_offered_an_update_to_restart_for()
+    {
+        DateTimeOffset now = DateTimeOffset.Now;
+        var updates = new FakeUpdates { UpToDate = true };
+        var updater = new DesktopUpdater(updates, null, TextWriter.Null);
+        await updater.CheckAsync();
+        DesktopPageState.Of(UpdateStatus.Of(updater, false, false, true, now), updater.Offer, downloading: false).Offer.Should().BeNull("up to date: no banner");
+
+        updates.UpToDate = false;
+        await updater.CheckAsync();
+        DesktopPageState ready = DesktopPageState.Of(UpdateStatus.Of(updater, false, false, true, now), updater.Offer, downloading: false);
+        ready.Should().Be(new DesktopPageState("1.0.1", false, "Version 1.0.1 is ready to install.", "It is installed when you quit the app, or now with Restart to update.", true));
+        DesktopPageState.Of(UpdateStatus.Of(updater, false, downloading: true, true, now), updater.Offer, downloading: true).Should()
+            .Match<DesktopPageState>(s => s.Offer == "1.0.1" && s.Downloading && !s.CanRestart);
+
+        string script = DesktopBridge.Script(ready with { Headline = "</script><b>\"x'\u2028" });
+        const string Event = "; window.dispatchEvent(new CustomEvent('semantic-router-desktop', { detail: window.semanticRouterDesktop }));";
+        script.Should().StartWith("window.semanticRouterDesktop = {\"offer\":\"1.0.1\",\"downloading\":false,").And.EndWith(Event);
+        string json = script["window.semanticRouterDesktop = ".Length..^Event.Length];
+        json.Should().NotContain("<").And.NotContain(">").And.NotContain("'").And.NotContain("\u2028", "the state is a safe JavaScript literal");
+        System.Text.Json.JsonDocument.Parse(json).RootElement.GetProperty("headline").GetString().Should().Be("</script><b>\"x'\u2028");
+    }
+
+    [Theory]
+    [InlineData("{\"action\":\"ready\"}", "Ready")]
+    [InlineData("{\"action\":\"about\"}", "About")]
+    [InlineData("{\"action\":\"restart-to-update\"}", "RestartToUpdate")]
+    [InlineData("{\"action\":\"quit\"}", null)]
+    [InlineData("{\"action\":1}", null)]
+    [InlineData("\"about\"", null)]
+    [InlineData("about", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void The_app_does_only_what_the_dashboard_may_ask_of_it(string? body, string? expected) =>
+        (DesktopBridge.Parse(body)?.ToString()).Should().Be(expected);
+
+    [Fact]
     public async Task Without_a_publisher_in_the_policy_the_package_is_not_inspected()
     {
         var updates = new FakeUpdates { Package = null };

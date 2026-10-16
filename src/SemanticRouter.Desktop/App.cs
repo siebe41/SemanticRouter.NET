@@ -90,6 +90,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _updater = DesktopUpdater.Create(options.Host, Environment.GetEnvironmentVariable, log);
         _updater.ApplyOnQuit = _preferences.ApplyUpdatesOnQuit;
         TrayIcon.SetIcons(this, [BuildTray()]);
+        NativeMenu.SetMenu(this, BuildApplicationMenu());
         instance.Listen(command => Dispatcher.UIThread.Post(() =>
         {
             if (command == SingleInstance.Quit)
@@ -211,6 +212,40 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         return tray;
     }
 
+    /// <summary>
+    /// The application menu, which macOS shows in the menu bar while the dashboard window is in front (other
+    /// platforms do not show it): About and Check for updates now, where a Mac app has them.
+    /// </summary>
+    private NativeMenu BuildApplicationMenu()
+    {
+        var about = new NativeMenuItem("About SemanticRouter");
+        about.Click += (_, _) => ShowAbout();
+        var check = new NativeMenuItem("Check for Updates…") { IsVisible = _updater.Installed };
+        check.Click += (_, _) =>
+        {
+            ShowAbout();
+            _ = CheckForUpdatesAsync(chosen: true);
+        };
+        return [about, check];
+    }
+
+    /// <summary>What the dashboard in the app window asked for: its state, the About window, or Restart to update.</summary>
+    private void OnPageAction(DesktopPageAction action) => Dispatcher.UIThread.Post(() =>
+    {
+        switch (action)
+        {
+            case DesktopPageAction.Ready:
+                _window?.Resend();
+                break;
+            case DesktopPageAction.About:
+                ShowAbout();
+                break;
+            case DesktopPageAction.RestartToUpdate:
+                _ = RestartToUpdateAsync();
+                break;
+        }
+    });
+
     private void OnRouterChanged()
     {
         UpdateMenu();
@@ -256,7 +291,9 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _checkUpdates.IsChecked = _preferences.CheckForUpdates;
         _applyOnQuit.IsChecked = !_updater.NotifyOnly;
         _needs.IsVisible = _digest.NeedsLine is not null;
-        _about?.Updates.Show(UpdateStatus.Of(_updater, _checkingUpdates, _downloadingUpdate, _preferences.CheckForUpdates, DateTimeOffset.Now));
+        UpdateStatus updates = UpdateStatus.Of(_updater, _checkingUpdates, _downloadingUpdate, _preferences.CheckForUpdates, DateTimeOffset.Now);
+        _about?.Updates.Show(updates);
+        _window?.Push(DesktopPageState.Of(updates, _updater.Offer, _downloadingUpdate));
         if (_tray is not null)
         {
             _tray.ToolTipText = _digest.NeedsLine is { } needs ? "SemanticRouter: " + needs
@@ -464,11 +501,17 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             return;
         }
 
-        _window ??= new DashboardWindow(dashboard, Path.Combine(_directory, "webview"), _icon, _preferences.Window, placement =>
+        if (_window is null)
         {
-            _preferences = _preferences with { Window = placement };
-            _preferences.Save(_directory);
-        }, log);
+            _window = new DashboardWindow(dashboard, Path.Combine(_directory, "webview"), _icon, _preferences.Window, placement =>
+            {
+                _preferences = _preferences with { Window = placement };
+                _preferences.Save(_directory);
+            }, log);
+            _window.PageAction += OnPageAction;
+            UpdateMenu();
+        }
+
         _window.ShowAt(dashboard);
     }
 

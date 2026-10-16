@@ -245,6 +245,9 @@ pre code { background: none; padding: 0; }
 .banner { padding: 10px 24px; font-size: 13px; border-bottom: 1px solid var(--border); background: var(--warn-soft); }
 .banner.danger { background: var(--danger-soft); }
 .banner.ok { background: var(--ok-soft); }
+/* The desktop app's update banner (desktop.js): the message, then Restart to update and Not now. */
+.update-banner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.update-actions { display: flex; gap: 8px; flex: none; }
 
 /* Pills, badges */
 .pill, .badge {

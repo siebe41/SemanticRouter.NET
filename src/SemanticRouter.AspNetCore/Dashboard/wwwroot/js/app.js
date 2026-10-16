@@ -7,6 +7,7 @@ import './evaluate.js';
 import './profiles.js';
 import './learned.js';
 import './audit.js';
+import './desktop.js';
 import { reportActions } from './feedback.js';
 import { actions } from './actions.js';
 import { $, $$, actionKey, api, evaluationEdited, h, isDirty, jsonEdited, metricsOnly, readInput, readOnly, setPath, showSignIn, state, toast } from './core.js';

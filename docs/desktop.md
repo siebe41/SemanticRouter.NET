@@ -50,6 +50,8 @@ An installed app updates itself from GitHub Releases. It looks a minute after it
 
 **About SemanticRouter** (or **Check for updates now…** in the tray menu, which also checks at once) shows where updates stand: up to date and when it last checked, checking, a version ready to install or available, why a check or download failed, or why updates are off. Its **Check now** looks straight away, even with the automatic checks off; **Restart to update** and the two switches below are the tray menu's own.
 
+The dashboard in the app window says so too: a banner under the tabs when an update is ready or available, with **Restart to update** and **Not now** (which hides it until the next version), and while it downloads. **About SemanticRouter** is also under **More** at the foot of the dashboard's rail, and on macOS in the app menu (with **Check for Updates…**). In a web browser the dashboard shows neither: only the app window can reach the app.
+
 Untick **Install updates when quitting** to decide yourself: the app then only says a new version is available (in the tray menu, and once as a system notification) and downloads nothing until you choose **Restart to update to …**, which downloads it, applies it and starts the app again. Quitting never applies it.
 
 From a script: `SemanticRouter --update` downloads and applies an available update and exits (0 when up to date or updating, 1 when the update could not be applied).

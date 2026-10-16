@@ -8,7 +8,8 @@ namespace SemanticRouter.Desktop;
 /// The dashboard in the platform's own web view. Links that leave the router open in the default browser; links to the
 /// router stay in the window, however the web view asks (a navigation or a new window) and whichever name of this
 /// machine they use. Closing the window hides it: the router keeps running in the tray. It opens sized to fit the
-/// screen, or where it was last.
+/// screen, or where it was last. The page and the app talk through <see cref="DesktopBridge"/>: the page asks for the
+/// About window or Restart to update (<see cref="PageAction"/>), and the app hands it where updates stand (<see cref="Push"/>).
 /// </summary>
 internal sealed class DashboardWindow : Window
 {
@@ -20,6 +21,7 @@ internal sealed class DashboardWindow : Window
     private bool _closing;
     private bool _placed;
     private WindowPlacement? _normal;
+    private DesktopPageState? _state;
 
     public DashboardWindow(Uri home, string dataDirectory, WindowIcon icon, WindowPlacement? saved, Action<WindowPlacement> savePlacement, TextWriter log)
     {
@@ -80,7 +82,57 @@ internal sealed class DashboardWindow : Window
                 OpenInBrowser(target, "a navigation");
             }
         };
+        _view.WebMessageReceived += (_, e) =>
+        {
+            if (DesktopBridge.Parse(e.Body) is { } action)
+            {
+                PageAction?.Invoke(action);
+            }
+        };
+
+        // A page loaded afresh (a reload, the router moved) has none of the app's state yet.
+        _view.NavigationCompleted += (_, e) =>
+        {
+            if (e.IsSuccess)
+            {
+                Send();
+            }
+        };
         Content = _view;
+    }
+
+    /// <summary>The dashboard asked something of the app (<see cref="DesktopPageAction.Ready"/>: it wants the state again).</summary>
+    public event Action<DesktopPageAction>? PageAction;
+
+    /// <summary>Hands <paramref name="state"/> to the page, when it differs from what the page last got.</summary>
+    public void Push(DesktopPageState state)
+    {
+        if (state != _state)
+        {
+            _state = state;
+            Send();
+        }
+    }
+
+    /// <summary>Hands the page the last state again (it loaded afresh, or asked for it).</summary>
+    public void Resend() => Send();
+
+    private async void Send()
+    {
+        if (_state is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _view.InvokeScript(DesktopBridge.Script(_state));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // No page yet, or one going away: it asks again ("ready") when it has loaded. Never take the app down for it.
+            _log.WriteLine($"Dashboard window: could not hand the page the app's state: {ex.Message}");
+        }
     }
 
     /// <summary>Brings the window up on <paramref name="home"/>, reloading only when the router moved.</summary>
