@@ -69,6 +69,31 @@ public sealed class SetupDetectorTests : IDisposable
     }
 
     [Fact]
+    public async Task Offline_the_setup_does_not_even_start_a_cli()
+    {
+        HostSettings settings = HostSettings.Parse(
+            ["--config-dir", _directory, "--urls", "http://127.0.0.1:0", "--SemanticRouter:Embeddings:Provider=Hashing", "--SemanticRouter:Network:Offline=true"]);
+        await using RunningRouter? router = await RouterHost.StartAsync(settings, TextWriter.Null, b => b.Logging.ClearProviders());
+        MachinePolicy policy = SetupDetector.PolicyOf(router!.App.Services);
+        policy.Offline.Should().BeTrue("the router's own Network:Offline counts, not only a machine policy");
+
+        string bin = Directory.CreateDirectory(Path.Combine(_directory, "bin")).FullName;
+        foreach (string cli in new[] { "claude", "codex", "copilot" })
+        {
+            File.WriteAllText(Path.Combine(bin, cli), string.Empty);
+        }
+
+        var runner = new FakeCliProcessRunner(_ => new FakeCliProcess(["1.0.0"]));
+        using ServiceProvider services = new ServiceCollection().AddSingleton<ICliProcessRunner>(runner).BuildServiceProvider();
+        var handler = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("Connection refused"));
+
+        IReadOnlyList<SetupDetection> found = await SetupDetector.DetectAsync(services, new InitProbes(new HttpClient(handler), bin, Windows: false, policy), CancellationToken.None);
+
+        found.Should().BeEmpty();
+        runner.Invocations.Should().BeEmpty("offline, a CLI would be turned off anyway, so it is not started to ask its version");
+    }
+
+    [Fact]
     public async Task The_host_registers_the_detector_and_sends_the_root_to_the_dashboard()
     {
         HostSettings settings = HostSettings.Parse(["--config-dir", _directory, "--urls", "http://127.0.0.1:5603", "--SemanticRouter:Embeddings:Provider=Hashing"]);
