@@ -2,7 +2,7 @@
 import { H, W } from './charts.js';
 import { $, API, h, num, state, views, when } from './core.js';
 import { graph, palette, updateMemorySide, updateMemorySummary } from './memory.js';
-import { render } from './shell.js';
+import { render, selecting } from './shell.js';
 
 /* ---------------------------------------------------------------------------------------------
    Live stream: server-sent events from api/events keep the activity list current between polls.
@@ -26,22 +26,53 @@ export function connectStream() {
   source.addEventListener('activity', (ev) => {
     let entry;
     try { entry = JSON.parse(ev.data); } catch { return; }
-    upsertActivity(entry);
+    const added = upsertActivity(entry);
     if (entry.totalMilliseconds != null) {
       applyExposure(entry);
       if (entry.servedBy || entry.plannedModel) state.live.flash = { model: entry.servedBy || entry.plannedModel, client: clientLabel(entry), until: Date.now() + 1600 };
     }
     if (state.view === 'live') scheduleLive();
-    else if (state.view === 'activity' && !activityRenderTimer) activityRenderTimer = setTimeout(() => { activityRenderTimer = null; if (state.view === 'activity') render(); }, 800);
+    else if (state.view === 'activity') {
+      if (added && activityHeld()) state.activityNew++;
+      // Batched: a burst of requests rebuilds the table once.
+      if (!activityRenderTimer) {
+        activityRenderTimer = setTimeout(() => {
+          activityRenderTimer = null;
+          if (state.view !== 'activity') return;
+          if (activityHeld()) showNewEntries(); else render();
+        }, 800);
+      }
+    }
   });
 }
 
+/*
+ * The Activity table holds still while auto-refresh is off, a label is being written or text is selected in it: a
+ * rebuild would take the form or the selection away. What arrives meanwhile is counted, with a Show button.
+ */
+export const activityHeld = () => !state.autoRefresh || !!state.label || selecting();
+export function showNewEntries() {
+  const n = state.activityNew;
+  if (!n || state.view !== 'activity') return;
+  let el = $('#activity-new');
+  if (!el) {
+    const head = $('#view .section-head');
+    if (!head) return;
+    el = document.createElement('div');
+    el.id = 'activity-new'; el.className = 'new-entries'; el.setAttribute('role', 'status');
+    head.after(el);
+  }
+  el.innerHTML = `<span>${n} new entr${n === 1 ? 'y' : 'ies'}</span> <button class="btn small" type="button" data-action="activity-show">Show</button>`;
+}
+
+/* Adds or updates an entry; true when it is new. */
 export function upsertActivity(entry) {
   const i = state.activity.findIndex((x) => x.id === entry.id);
-  if (i >= 0) { state.activity[i] = entry; return; }
+  if (i >= 0) { state.activity[i] = entry; return false; }
   state.activity.unshift(entry);
   state.activity.sort((a, b) => b.id - a.id);
   if (state.activity.length > 500) state.activity.length = 500;
+  return true;
 }
 
 /* Counts a finished request's notes against the models it reached, as the server does, so the map updates live. */

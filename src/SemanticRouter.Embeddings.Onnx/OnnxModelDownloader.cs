@@ -89,6 +89,18 @@ public static class OnnxModelDownloader
 
             File.Move(temp, path, overwrite: true);
         }
+        catch (HttpRequestException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The usual causes: no internet, a proxy the process does not know about, or one that inspects TLS.
+            string reason = ex.InnerException is System.Security.Authentication.AuthenticationException tls
+                ? "its TLS certificate is not trusted here: " + tls.Message.TrimEnd('.')
+                : ex.Message.TrimEnd('.');
+            throw new HttpRequestException(
+                $"Could not download {Path.GetFileName(path)} from {url.Host} ({reason}). Behind a proxy, set HTTPS_PROXY; if the proxy inspects TLS, " +
+                $"set SemanticRouter:Network:CaBundle to its root certificate. Or download {url} on a machine that can, and copy it to {path} " +
+                $"(SHA-256 {sha256}); or set Embeddings:ModelPath to a folder holding model.onnx and vocab.txt.",
+                ex, ex.StatusCode);
+        }
         finally
         {
             if (File.Exists(temp))

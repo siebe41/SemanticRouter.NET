@@ -1,5 +1,7 @@
 /* Semantic Router dashboard: Memory page: memory sources as a graph, coloured by where their notes have been sent. */
 import { $, api, csv, h, readOnly, state, toast, views, when } from './core.js';
+import { durationField, numField } from './fields.js';
+import { plural } from './labels.js';
 import { appliedExposure, compact, isLocalModel, updateLive } from './live.js';
 import { render } from './shell.js';
 
@@ -101,11 +103,13 @@ views.memory = () => {
   const ui = state.memoryUi;
   const hasNotes = m.nodes.some((n) => !n.missing);
   const admin = !readOnly();
+  const sources = hasSources();
+  // Without sources there is nothing to fit, rescan or clear: the page is the empty state and the sources card.
   return `
-    <div class="section-head"><h1>Memory</h1><span class="muted small" id="memory-summary">${memorySummaryText()}</span><span class="spacer"></span>
-      <button class="btn small" data-action="memory-fit">Fit</button>
-      ${admin ? `<button class="btn small" data-action="memory-refresh">Rescan</button>
-      <button class="btn small" data-action="memory-reset" title="Forget which notes were sent where">Clear sharing</button>` : ''}</div>
+    <div class="section-head"><h1>Memory</h1>${sources ? `<span class="muted small" id="memory-summary">${memorySummaryText()}</span>` : '<span class="muted">Which of your notes reach which model.</span>'}<span class="spacer"></span>
+      ${hasNotes ? '<button class="btn small" data-action="memory-fit" title="Fit the whole map in view">Fit</button>' : ''}
+      ${admin && sources ? '<button class="btn small" data-action="memory-refresh" title="Read the memory sources again">Rescan</button>' : ''}
+      ${admin && hasNotes ? '<button class="btn small" data-action="memory-reset" title="Forget which notes were sent where">Clear sharing</button>' : ''}</div>
     ${m.mode && m.mode !== 'Dispatch' ? '<div class="card section small" style="border-color:var(--warn)">The gateway is in <b>Annotate</b> mode: your own endpoint calls the model, so the router can show which notes were in a request but not where they went.</div>' : ''}
     ${m.trackSharing === false ? '<div class="card section small" style="border-color:var(--warn)">Sharing is not tracked (<code>Memory:TrackSharing</code> is off): the map shows your notes, but requests are not checked for them.</div>' : ''}
     ${hasNotes ? `
@@ -125,14 +129,18 @@ views.memory = () => {
     ${memorySourcesCard()}`;
 };
 
+const hasSources = () => ((state.config.Memory || {}).Sources || []).length > 0 || ((state.memory && state.memory.sources) || []).length > 0;
+
+/* The add-source buttons, the same three wherever they show. */
+const addButtons = (primary) => `<button class="btn ${primary ? 'primary ' : ''}small" data-action="memory-add" data-type="Markdown">Add a notes folder</button>
+      <button class="btn small" data-action="memory-add" data-type="ClaudeCode">Add Claude Code's memory</button>
+      <button class="btn small" data-action="memory-add" data-type="KnowledgeGraph">Add an MCP memory graph</button>`;
+
 export function memoryEmpty() {
   return `<div class="card section empty-state">
     <h2>Map your memory</h2>
     <p class="muted">Point the router at the notes you and your AI tools keep. It draws them as a graph and, for every routed request, checks which notes were in it and which model received them: local, or the cloud. Note text never leaves the router; the dashboard only gets titles, paths, tags and links.</p>
-    ${readOnly() ? '' : `<div class="inline">
-      <button class="btn primary small" data-action="memory-add" data-type="Markdown">Add an Obsidian vault or notes folder</button>
-      <button class="btn small" data-action="memory-add" data-type="ClaudeCode">Add Claude Code's memory</button>
-      <button class="btn small" data-action="memory-add" data-type="KnowledgeGraph">Add an MCP memory graph</button></div>`}
+    ${readOnly() ? '' : hasSources() ? '<p class="small muted">The sources below have no notes yet: check their paths, apply, then Rescan.</p>' : `<p class="small muted">A notes folder can be an Obsidian vault.</p><div class="inline">${addButtons(true)}</div>`}
   </div>`;
 }
 
@@ -182,7 +190,7 @@ export function memorySourcesCard() {
   const custom = (m.sources || []).filter((s) => !sources.some((c) => (c.Name || '').toLowerCase() === s.name.toLowerCase()));
   return `<div class="card section">
     <div class="card-head"><h2>Memory sources</h2><span class="muted small">Changes apply with the save bar, like any setting.</span><span class="spacer"></span>
-      ${ro ? '' : `<button class="btn small" data-action="memory-add" data-type="Markdown">Add folder</button><button class="btn small" data-action="memory-add" data-type="ClaudeCode">Add Claude Code</button><button class="btn small" data-action="memory-add" data-type="KnowledgeGraph">Add MCP graph</button>`}</div>
+      ${ro || !sources.length ? '' : `<span class="inline">${addButtons(false)}</span>`}</div>
     ${sources.map((src, i) => {
       const key = 'mem:' + i;
       const st = status.get((src.Name || '').toLowerCase());
@@ -190,7 +198,7 @@ export function memorySourcesCard() {
       return `<div class="item ${state.open.has(key) ? 'open' : ''} ${src.Enabled === false ? 'disabled' : ''}" data-key="${key}">
         <div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}"><span class="chev">▶</span><span class="title">${h(src.Name || '(unnamed)')}</span>
           <span class="meta"><span class="badge">${h(type)}</span><span class="mono">${h(src.Path || (type === 'ClaudeCode' ? '~/.claude' : ''))}</span>
-          ${st ? (st.error ? `<span class="badge danger" title="${h(st.error)}">error</span>` : `<span class="badge ok">${st.notes} notes</span>${st.skipped ? `<span class="badge warn">${st.skipped} over the limit</span>` : ''}`) : '<span class="badge info">not scanned</span>'}</span>
+          ${st ? (st.error ? `<span class="badge danger" title="${h(st.error)}">error</span>` : `<span class="badge ok">${plural(st.notes, 'note')}</span>${st.skipped ? `<span class="badge warn">${st.skipped} over the limit</span>` : ''}`) : '<span class="badge info">not scanned</span>'}</span>
           ${st && st.error ? `<span class="spacer"></span><span class="small" style="color:var(--danger)">${h(st.error)}</span>` : ''}</div>
         <div class="item-body"><div class="form-grid">
           <label class="field"><span class="name">Name</span><input type="text" data-bind="Memory.Sources.${i}.Name" value="${h(src.Name)}"></label>
@@ -201,12 +209,12 @@ export function memorySourcesCard() {
           <label class="field"><span class="name">Extensions</span><input type="text" data-bind="Memory.Sources.${i}.Extensions" data-kind="csv" value="${h(csv(src.Extensions))}" placeholder=".md"></label>` : ''}
           <label class="check wide"><input type="checkbox" data-bind="Memory.Sources.${i}.Enabled" data-kind="bool" ${src.Enabled !== false ? 'checked' : ''}> Enabled</label>
         </div>${ro ? '' : `<div class="row-actions" style="margin-top:10px"><button class="btn danger small" data-action="memory-remove" data-index="${i}">Remove</button></div>`}</div></div>`;
-    }).join('') || '<p class="muted small">No sources configured.</p>'}
-    ${custom.length ? `<p class="small muted">Registered in code: ${custom.map((s) => `<span class="badge">${h(s.name)} · ${h(s.kind)} · ${s.error ? 'error' : s.notes + ' notes'}</span>`).join(' ')}</p>` : ''}
+    }).join('') || '<p class="muted small">No sources yet: add one above.</p>'}
+    ${custom.length ? `<p class="small muted">Registered in code: ${custom.map((s) => `<span class="badge">${h(s.name)} · ${h(s.kind)} · ${s.error ? 'error' : plural(s.notes, 'note')}</span>`).join(' ')}</p>` : ''}
     <div class="form-grid" style="margin-top:10px">
       <label class="check"><input type="checkbox" data-bind="Memory.TrackSharing" data-kind="bool" ${cfg.TrackSharing !== false ? 'checked' : ''}> Check requests for notes</label>
-      <label class="field"><span class="name">Shortest matching line</span><input type="number" min="8" data-bind="Memory.MinimumLineLength" data-kind="number" value="${cfg.MinimumLineLength || 24}"><span class="hint">Characters; shorter lines are too common to identify a note.</span></label>
-      <label class="field"><span class="name">Rescan every</span><input type="text" data-bind="Memory.RefreshInterval" value="${h(cfg.RefreshInterval || '00:01:00')}"><span class="hint">hh:mm:ss, checked when requests arrive.</span></label>
+      ${numField({ bind: 'Memory.MinimumLineLength', value: cfg.MinimumLineLength, def: 24, label: 'Shortest matching line', min: 8, step: 1, hint: 'Characters; shorter lines are too common to identify a note.' })}
+      ${durationField({ bind: 'Memory.RefreshInterval', value: cfg.RefreshInterval, def: '00:01:00', label: 'Rescan every', hint: 'Checked when requests arrive.' })}
     </div>
   </div>`;
 }

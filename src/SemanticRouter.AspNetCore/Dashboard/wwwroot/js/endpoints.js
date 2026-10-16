@@ -1,6 +1,7 @@
 /* Semantic Router dashboard: endpoints, where each connector sends requests and how it is doing (Overview card, top bar, Connectors page). */
 import { fmtMs } from './charts.js';
 import { h, num, readOnly, state } from './core.js';
+import { plural } from './labels.js';
 
 const STATES = {
   ok: ['ok', 'ok'],
@@ -71,7 +72,7 @@ export function endpointsCard() {
   if (!list.length) return '';
   const now = currentEndpoint();
   return `<div class="card section" id="endpoints">
-    <div class="card-head"><h2>Endpoints</h2><span class="muted small">Where each connector sends requests and how it did over the last ${state.status.activity.total} routed requests. Failed attempts that fell through to another model count against it.</span></div>
+    <div class="card-head"><h2>Connector endpoints</h2><span class="muted small">Where each connector sends requests and how it did over the last ${plural(state.status.activity.total, 'routed request')}. Failed attempts that fell through to another model count against it.</span></div>
     <div class="table-wrap"><table class="wrap-head">
       <tr><th>Connector</th><th>Host</th><th>State</th><th class="num">Answered</th><th class="num" title="Time until the client starts seeing the reply">First byte p50 / p95</th><th class="num">Total p50 / p95</th><th class="num" title="Output tokens per second after the first byte, when the backend reports usage">Tokens/s</th><th>Last request</th><th>Check</th></tr>
       ${list.map((e) => `<tr>

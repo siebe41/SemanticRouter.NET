@@ -272,7 +272,7 @@ pre code { background: none; padding: 0; }
 .endpoint-now { display: inline-flex; align-items: center; gap: 6px; color: inherit; text-decoration: none; max-width: 32ch; overflow: hidden; }
 .endpoint-now .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .endpoint-now:hover .mono { text-decoration: underline; }
-.tier { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 7px; border-radius: 4px; background: var(--bg-sunken); border: 1px solid var(--border); }
+.tier { white-space: nowrap; font-family: var(--font-mono); font-size: 11.5px; padding: 1px 7px; border-radius: 4px; background: var(--bg-sunken); border: 1px solid var(--border); }
 .tier.hot { border-color: var(--signal); color: var(--text); background: var(--signal-soft); }
 
 /* Cards and grids */
@@ -283,7 +283,9 @@ pre code { background: none; padding: 0; }
 @media (max-width: 1000px) { .grid.cols-3, .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .nav-toggle { display: none; font-size: 18px; line-height: 1; padding: 4px 10px; }
 @media (max-width: 720px) {
-  .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
+  /* Phones: one column, but stat tiles stay two abreast. */
+  .grid.cols-2, .grid.cols-3 { grid-template-columns: minmax(0, 1fr); }
+  .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .app { grid-template-columns: 1fr; }
   /* The navigation becomes a drawer behind the menu button. */
   .nav-toggle { display: inline-flex; }
@@ -310,7 +312,7 @@ pre code { background: none; padding: 0; }
   padding: 14px 16px;
 }
 .card.flat { background: transparent; }
-.card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.card-head { display: flex; align-items: center; gap: 6px 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .card-head h2, .card-head h3 { margin: 0; }
 .notices { border-color: var(--warn); }
 .notice + .notice { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
@@ -346,7 +348,7 @@ table.wrap-head th { white-space: normal; }
 label.field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); min-width: 0; }
 label.field > span.name { font-weight: 500; color: var(--text); font-size: 12.5px; }
 label.field > span.hint { font-size: 11.5px; color: var(--text-faint); }
-input[type="text"], input[type="number"], input[type="password"], input[type="url"], select, textarea {
+input[type="text"], input[type="number"], input[type="password"], input[type="url"], input[type="search"], select, textarea {
   background: var(--bg-sunken);
   color: var(--text);
   border: 1px solid var(--border);
@@ -486,7 +488,7 @@ pre.diff .diff-del { color: var(--danger); }
 .meter > i { display: block; height: 100%; border-radius: 4px; background: var(--ok); }
 .meter.warn > i { background: var(--warn); }
 .meter.danger > i { background: var(--danger); }
-.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .seg button { border: 0; background: transparent; color: var(--text-muted); padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
 .seg button.on { background: var(--accent-soft); color: var(--text); }
 
@@ -592,6 +594,112 @@ table.compact th, table.compact td { padding: 3px 6px; }
 .empty-state { text-align: left; max-width: 760px; }
 
 /* ------------------------------------------------------------------------------------------------
+   Page parts: first-run setup, presets, pickers, Basic/Advanced, the decision detail, number and
+   duration fields, and the phone layout of the pages.
+   ------------------------------------------------------------------------------------------------ */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.warn-text { color: var(--warn); }
+.next-step { margin: 8px 0 0; padding: 8px 10px; border-left: 3px solid var(--warn); background: var(--warn-soft); border-radius: 4px; }
+.empty-note { margin-bottom: 10px; padding: 8px 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius); }
+.flat-line { padding: 10px 16px; }
+.danger-zone { border-color: var(--danger); }
+.lineup-common { color: var(--text-muted); border-left: 3px solid var(--warn); padding-left: 8px; }
+
+/* Placeholders read as examples, never as values (a default shown in a field looked stored, in the light theme most). */
+::placeholder { color: var(--text-faint); font-style: italic; opacity: 1; }
+
+/* Tables of label and value (health, runs on, the decision detail). */
+table.kv th { width: 34%; white-space: normal; }
+table.kv th.group { width: auto; color: var(--text); font-size: 13px; background: none; }
+.table-wrap.plain { border: 0; background: transparent; }
+.table-wrap.plain table th { background: none; position: static; }
+
+/* A row of check boxes in a form grid: one per line, never floating beside an unrelated field. */
+.checks { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+
+/* Basic/Advanced: the advanced settings of a card, folded. */
+details.advanced { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 10px; }
+details.advanced > summary { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
+details.advanced[open] > summary { margin-bottom: 12px; }
+details.about > summary, details.reliability > summary { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; list-style: none; }
+details.about > summary::-webkit-details-marker, details.reliability > summary::-webkit-details-marker { display: none; }
+details.about > summary h2, details.reliability > summary h2 { margin: 0; }
+details.about > summary h2::before, details.reliability > summary h2::before { content: "▶"; display: inline-block; margin-right: 8px; font-size: 11px; color: var(--text-faint); transition: transform 0.15s; }
+details.about[open] > summary h2::before, details.reliability[open] > summary h2::before { transform: rotate(90deg); }
+
+/* Pickers: known values as check boxes or chips, with a text field for the rest. */
+fieldset.field { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 12px; color: var(--text-muted); }
+fieldset.field > legend.name { font-weight: 500; color: var(--text); font-size: 12.5px; padding: 0; margin-bottom: 4px; }
+fieldset.field > .hint { font-size: 11.5px; color: var(--text-faint); }
+.pick-options { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.chips-pick .pick-options { gap: 6px; }
+label.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--text); background: var(--bg-sunken); cursor: pointer; max-width: 100%; overflow-wrap: anywhere; }
+label.chip:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+
+/* Durations: their value in words, or how to write one when what is typed is not hh:mm:ss. */
+.duration-bad { display: none; color: var(--danger); }
+input[data-duration]:invalid { border-color: var(--danger); }
+input[data-duration]:invalid ~ .hint .duration-bad { display: inline; }
+input[data-duration]:invalid ~ .hint .duration-words { display: none; }
+.flash { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+/* First run: the setup checklist and the connector presets. */
+.setup { border-color: var(--accent); }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.step { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+.step.current { border-color: var(--accent); }
+.step.done { opacity: 0.85; }
+.step-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.step-mark { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border-strong); font-size: 12px; font-weight: 600; flex: none; }
+.step.current .step-mark { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+.step.done .step-mark { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
+.step-body { margin-top: 10px; padding-left: 32px; min-width: 0; }
+.choices { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+.choice { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-sunken); }
+.choice-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.choice .badge { vertical-align: 1px; }
+details.menu { position: relative; display: inline-block; }
+details.menu > summary { list-style: none; }
+details.menu > summary::-webkit-details-marker { display: none; }
+.menu-panel { position: absolute; right: 0; top: calc(100% + 6px); z-index: 15; width: min(460px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; box-shadow: var(--shadow); border-color: var(--border-strong); }
+
+/* Activity: the toolbar, icon buttons on a row, rows that open their decision. */
+.toolbar { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
+.inline-field { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-muted); }
+.inline-field select, .inline-field input { width: auto; }
+.inline-field.grow { flex: 1 1 220px; }
+.inline-field.grow input { flex: 1; min-width: 0; }
+.icon-btn { padding: 3px 5px; line-height: 0; }
+.icon-btn .icon { width: 16px; height: 16px; }
+.row-icons { white-space: nowrap; }
+tr.clickable { cursor: pointer; }
+tr.clickable:focus-visible { outline-offset: -2px; }
+tr.selected td { background: var(--accent-soft); }
+.decision h2 { font-size: 15px; }
+.decision .grid { align-items: start; }
+.budgets .scope { display: flex; gap: 2px 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.usage-table th.share, .usage-table td.share { width: 20%; min-width: 80px; }
+
+@media (max-width: 720px) {
+  .card { padding: 12px; }
+  .step-body { padding-left: 0; }
+  .choice { flex-wrap: wrap; }
+  .row-actions { flex-wrap: wrap; }
+  /* Long words (paths, model ids, URLs) break instead of pushing the page wider than the phone. */
+  .view { overflow-wrap: break-word; }
+  .section-head .muted { flex-basis: 100%; }
+  .bar-row { grid-template-columns: minmax(0, 110px) minmax(0, 1fr) 40px; }
+  .snippet pre { padding-top: 40px; }
+  /* Point clients at: each address stacks its two base URLs, so neither scrolls out of view. */
+  table.addresses tr:first-child { display: none; }
+  table.addresses, table.addresses tbody, table.addresses tr, table.addresses td { display: block; }
+  table.addresses td { border: 0; padding: 3px 8px; }
+  table.addresses tr { border-bottom: 1px solid var(--border); padding: 4px 0; }
+  table.addresses td[data-label]::before { content: attr(data-label); display: block; font-size: 11.5px; color: var(--text-muted); }
+  table.addresses .mono { overflow-wrap: anywhere; }
+}
+
+/* ------------------------------------------------------------------------------------------------
    Accessibility (last, so these win over the component rules above)
    ------------------------------------------------------------------------------------------------ */
 /* Keyboard focus is always visible, in every theme. */
@@ -607,3 +715,61 @@ main:focus { outline: none; }
 }
 
 @media (max-width: 720px) { .view { padding: 16px 12px 48px; } }
+
+/* ------------------------------------------------------------------------------------------------
+   Draft safety and feedback: the save bars, the conflict notice, toasts, in-page questions, problems
+   tied to their fields, busy and read-only states. Kept together at the end.
+   ------------------------------------------------------------------------------------------------ */
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.link-button { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-ink); text-decoration: underline; cursor: pointer; }
+.link-button:hover { color: var(--text); }
+.save-bar, .unsaved-bar { flex-wrap: wrap; }
+.unsaved-bar { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.unsaved-bar.hidden { display: none; }
+.unsaved-note { display: inline-flex; align-items: center; gap: 6px; color: var(--warn); }
+.draft-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.draft-notice.hidden { display: none; }
+.draft-notice .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+/* On a phone the bars take less of the sticky top bar: small buttons, the note on its own line. */
+@media (max-width: 720px) {
+  .save-bar, .unsaved-bar { width: 100%; gap: 6px; }
+  .save-bar .btn, .unsaved-bar .btn { padding: 3px 8px; font-size: 12px; }
+  .save-bar .dirty-note { flex-basis: 100%; }
+}
+
+/* Toasts: a stack in the corner; each one is its own card. */
+#toast.toasts { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: min(440px, calc(100vw - 32px)); }
+#toast.toasts.hidden { display: none; }
+#toast .toast { position: static; display: flex; align-items: flex-start; gap: 8px; max-width: 100%; }
+#toast .toast-text { flex: 1; min-width: 0; overflow-wrap: anywhere; padding-top: 2px; }
+#toast .toast-icon { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; background: var(--danger); color: var(--bg); font-weight: 700; font-size: 12px; }
+#toast .toast-action, #toast .toast-close { flex: none; }
+#toast .toast-close { padding: 0 6px; }
+@media (max-width: 720px) { #toast.toasts { right: 16px; left: 16px; bottom: 16px; align-items: stretch; max-width: none; } }
+
+/* In-page questions, instead of the browser's confirm(). */
+dialog.ask { max-width: min(520px, calc(100vw - 32px)); width: 100%; padding: 18px 20px; color: var(--text); background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+dialog.ask.wide { max-width: min(960px, calc(100vw - 32px)); }
+dialog.ask::backdrop { background: color-mix(in srgb, var(--bg-sunken) 72%, transparent); }
+dialog.ask h2 { margin: 0 0 10px; font-size: 17px; }
+dialog.ask .ask-body p { margin: 0 0 8px; font-size: 13.5px; }
+dialog.ask .ask-body pre.diff { max-height: 60vh; }
+dialog.ask .ask-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* A problem tied to its field. */
+[aria-invalid="true"] { border-color: var(--danger) !important; }
+.field-error { display: block; margin-top: 3px; font-size: 11.5px; color: var(--danger); }
+.field-error::before { content: "! "; font-weight: 700; }
+.problems { border-color: var(--danger); }
+.problems h3:focus { outline: none; }
+.problems a { color: var(--danger); text-decoration: underline; }
+.load-error { color: var(--danger); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.load-error .btn { color: var(--text); }
+
+/* Busy buttons, new Activity entries, the status pill's short text on a phone, read-only forms. */
+[aria-busy="true"] { cursor: progress; }
+.btn[aria-busy="true"] { opacity: 0.65; }
+.new-entries { display: flex; align-items: center; gap: 10px; margin: -6px 0 12px; padding: 6px 12px; font-size: 13px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--accent-soft); }
+#status-pill .pill-short { display: none; font-size: 12px; }
+@media (max-width: 720px) { #status-pill .pill-short { display: inline; } }
+.read-only input:disabled, .read-only select:disabled, .read-only textarea:disabled { opacity: 1; color: var(--text-muted); background: transparent; border-style: dashed; cursor: default; }

@@ -178,35 +178,64 @@ internal static class EvaluationApi
                 return Results.Problem("'utterance' is required.", statusCode: StatusCodes.Status400BadRequest);
             }
 
-            RouterRuntime runtime = provider.Current;
-            RouterConfiguration next = runtime.Configuration.Clone();
-            RouteDefinition? route = next.Routes.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
-            if (route is null)
+            // Made on a copy of the running configuration, and again on a newer one if another change comes in meanwhile.
+            RouteDefinition? route = null;
+            IResult? refused = null;
+            string routeName = provider.Current.Configuration.Routes.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase))?.Name ?? name.Trim();
+            bool AddTo(RouterConfiguration next)
             {
-                if (request.Tier is not { } tier)
+                route = next.Routes.FirstOrDefault(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase));
+                if (route is null)
                 {
-                    return Results.Problem($"Route '{name}' does not exist; give a 'tier' to create it.", statusCode: StatusCodes.Status404NotFound);
+                    if (request.Tier is not { } tier)
+                    {
+                        refused = Results.Problem($"Route '{name}' does not exist; give a 'tier' to create it.", statusCode: StatusCodes.Status404NotFound);
+                        return false;
+                    }
+
+                    route = new RouteDefinition { Name = name.Trim(), Tier = tier, Description = request.Description, LocalOnly = request.LocalOnly ?? false };
+                    next.Routes.Add(route);
                 }
 
-                route = new RouteDefinition { Name = name.Trim(), Tier = tier, Description = request.Description, LocalOnly = request.LocalOnly ?? false };
-                next.Routes.Add(route);
+                if (!route.Utterances.Contains(utterance, StringComparer.OrdinalIgnoreCase))
+                {
+                    route.Utterances.Add(utterance);
+                }
+
+                IReadOnlyList<string> errors = RouterRuntimeProvider.Validate(next);
+                if (errors.Count > 0)
+                {
+                    refused = Results.Problem(string.Join(" ", errors), statusCode: StatusCodes.Status400BadRequest);
+                    return false;
+                }
+
+                return true;
             }
 
-            if (!route.Utterances.Contains(utterance, StringComparer.OrdinalIgnoreCase))
+            // Saved only when the running configuration is: saving now would also save changes applied without saving.
+            (RouterRuntime Runtime, bool Saved)? result;
+            try
             {
-                route.Utterances.Add(utterance);
+                result = provider.ApplyKeepingSaveState(AddTo, "dashboard", actor(context), $"added an utterance to '{routeName}'");
             }
-
-            IReadOnlyList<string> errors = RouterRuntimeProvider.Validate(next);
-            if (errors.Count > 0)
+            catch (RouterConfigurationConflictException)
             {
-                return Results.Problem(string.Join(" ", errors), statusCode: StatusCodes.Status400BadRequest);
+                return Results.Problem("The configuration kept changing while the utterance was added. Try again.", statusCode: StatusCodes.Status409Conflict);
             }
 
-            RouterRuntime applied = provider.Apply(next, persist: true, "dashboard", actor(context), $"added an utterance to '{route.Name}'");
-            DashboardAudit.Detail(context, $"route {route.Name}, version {applied.Version}");
+            if (result is not (RouterRuntime applied, bool saved) || route is null)
+            {
+                return refused!;
+            }
+
+            DashboardAudit.Detail(context, $"route {route.Name}, version {applied.Version}{(saved || provider.Store is null ? string.Empty : ", not saved")}");
             PromptClassificationResult classification = await applied.Classifier.ClassifyAsync(utterance, context.RequestAborted).ConfigureAwait(false);
-            return Results.Json(new AddUtteranceResponse(applied.Version, route.Name, route.Utterances.Count, classification.RequiredTier, classification.RouteName, classification.Reason, classification.Similarity), json);
+            return Results.Json(
+                new AddUtteranceResponse(applied.Version, route.Name, route.Utterances.Count, classification.RequiredTier, classification.RouteName, classification.Reason, classification.Similarity)
+                {
+                    Saved = saved,
+                },
+                json);
         }).WithMetadata(DashboardWriteMetadata.Instance).Audited("added an utterance to a route");
     }
 
@@ -247,7 +276,7 @@ internal static class EvaluationApi
         }
 
         return fallback is not null && cases.Count == 0
-            ? (null, "The evaluation set is empty: add prompts on the Evaluate page, label activity entries, or send a set.")
+            ? (null, "The evaluation set is empty: add labelled prompts to it (or Label entries on the Activity page), or send a set with the request.")
             : (cases, null);
     }
 
@@ -333,5 +362,12 @@ internal static class EvaluationApi
 
     public sealed record AddUtteranceRequest(string? Utterance, int? Tier = null, string? Description = null, bool? LocalOnly = null);
 
-    public sealed record AddUtteranceResponse(int Version, string Route, int Utterances, int Tier, string? MatchedRoute, RoutingReason Reason, float? Similarity);
+    public sealed record AddUtteranceResponse(int Version, string Route, int Utterances, int Tier, string? MatchedRoute, RoutingReason Reason, float? Similarity)
+    {
+        /// <summary>
+        /// Whether the change was saved. <see langword="false"/> when the running configuration held changes applied
+        /// without saving (the utterance is then applied without saving too), or when there is no configuration store.
+        /// </summary>
+        public bool Saved { get; init; }
+    }
 }

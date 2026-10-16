@@ -353,10 +353,10 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
     /// <summary>What to fix when a server rejects the connector's credentials (names the setting, never the value).</summary>
     internal static string CredentialAdvice(string connector, int status, bool hasKey) => hasKey
-        ? $"the server rejected the credentials; check SemanticRouter:Connectors:{connector}:ApiKey"
+        ? $"the server rejected the credentials; check SemanticRouter:Connectors:{connector}:ApiKey (dashboard: Providers → Connectors → {connector} → API key)"
         : status == 401
-            ? $"the server requires authentication; set SemanticRouter:Connectors:{connector}:ApiKey"
-            : $"the server refused the request; check SemanticRouter:Connectors:{connector}:ApiKey and the server's permissions";
+            ? $"the server requires authentication; set SemanticRouter:Connectors:{connector}:ApiKey (dashboard: Providers → Connectors → {connector} → API key)"
+            : $"the server refused the request; check SemanticRouter:Connectors:{connector}:ApiKey (dashboard: Providers → Connectors → {connector} → API key) and the server's permissions";
 
     private static string? ExtractErrorMessage(string body)
     {
@@ -393,6 +393,30 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 /// <summary>Writes error responses in the client's protocol.</summary>
 internal static class ProtocolErrors
 {
+    /// <summary>
+    /// A request the configuration has no model for: <c>400 invalid_request_error</c> in the client's protocol, which the
+    /// OpenAI and Anthropic SDKs and Claude Code do not retry (they retry 408, 409, 429 and 5xx). The OpenAI shape keeps
+    /// the problem-details fields the gateway's other errors have, for clients that read those.
+    /// </summary>
+    public static async Task WriteNotServableAsync(HttpContext context, ChatProtocol protocol, string message, CancellationToken cancellationToken)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        context.Response.ContentType = "application/json";
+        byte[] body = protocol == ChatProtocol.Anthropic
+            ? JsonSerializer.SerializeToUtf8Bytes(
+                new AnthropicErrorEnvelope("error", new AnthropicError("invalid_request_error", message)), ConnectorJsonContext.Default.AnthropicErrorEnvelope)
+            : JsonSerializer.SerializeToUtf8Bytes(
+                new JsonObject
+                {
+                    ["error"] = new JsonObject { ["message"] = message, ["type"] = "invalid_request_error", ["param"] = "model", ["code"] = "no_model_available" },
+                    ["title"] = "No model can answer this",
+                    ["status"] = StatusCodes.Status400BadRequest,
+                    ["detail"] = message,
+                },
+                ConnectorJsonContext.Default.JsonObject);
+        await context.Response.Body.WriteAsync(body, cancellationToken).ConfigureAwait(false);
+    }
+
     public static async Task WriteAsync(HttpContext context, ChatProtocol protocol, int statusCode, string title, string detail, CancellationToken cancellationToken)
     {
         if (protocol == ChatProtocol.Responses)

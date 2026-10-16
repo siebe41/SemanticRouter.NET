@@ -90,6 +90,12 @@ internal sealed class WelcomeWindow : Window
                     FontSize = 12,
                     Opacity = 0.75,
                 },
+                new TextBlock
+                {
+                    Text = "Next, the dashboard opens on its Overview page. Set up SemanticRouter there: enable Claude Code or another CLI it found, " +
+                           "or add LM Studio, Ollama or an API key, and send a test prompt.",
+                    TextWrapping = TextWrapping.Wrap,
+                },
                 start,
             },
         };

@@ -78,17 +78,22 @@ internal sealed partial class RouterTuner
             return Save(trial with { State = TuningChangeState.Dropped, UndoneAt = now, Actor = Actor, Why = $"{trial.Why} Dropped: {evidence}" });
         }
 
-        RouterConfiguration next = configuration.Clone();
-        RouteDefinition target = Find(next, trial)!;
-        if (!Same(target.PreferredModel, trial.OldModel))
+        // Made on the configuration running by now, which another change may have replaced since it was read.
+        bool Make(RouterConfiguration next)
         {
-            return Save(trial with { State = TuningChangeState.Expired, UndoneAt = now, Why = $"{trial.Why} Ended: the route's model was changed meanwhile." });
+            if (Find(next, trial) is not { } target || !Same(target.PreferredModel, trial.OldModel))
+            {
+                return false;
+            }
+
+            target.PreferredModel = trial.NewModel;
+            return true;
         }
 
-        target.PreferredModel = trial.NewModel;
         string why = $"{trial.Why} It did as well: {evidence} {trial.NewModel} now serves {route.Name}'s plain matches.";
-        RouterRuntime runtime = _provider.Apply(next, persist: true, Source, Actor, $"change {trial.Id}: {trial.Summary}. {why}");
-        return Save(trial with { State = TuningChangeState.Applied, Version = runtime.HistoryVersion, Actor = Actor, Why = why });
+        return _provider.ApplyKeepingSaveState(Make, Source, Actor, $"change {trial.Id}: {trial.Summary}. {why}") is { } applied
+            ? Save(trial with { State = TuningChangeState.Applied, Version = applied.Runtime.HistoryVersion, Actor = Actor, Why = why })
+            : Save(trial with { State = TuningChangeState.Expired, UndoneAt = now, Why = $"{trial.Why} Ended: the route's model was changed meanwhile." });
     }
 
     /// <summary>

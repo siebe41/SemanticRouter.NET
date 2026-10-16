@@ -109,6 +109,12 @@ public sealed record RoutingPlan(
     /// <summary>Models left out because <see cref="IModelReliability"/> says they are unreliable for this kind of work.</summary>
     public IReadOnlyList<string> Unreliable { get; init; } = [];
 
+    /// <summary>
+    /// When there are no <see cref="Candidates"/>: the models that would serve the request but are outside their
+    /// <see cref="ModelDefinition.ActiveHours"/> now, so waiting helps. Empty otherwise.
+    /// </summary>
+    public IReadOnlyList<string> OutsideActiveHours { get; init; } = [];
+
     /// <summary>The first candidate is the route's learned model (<see cref="RouteDefinition.PreferredModel"/>).</summary>
     public string? RouteModel { get; init; }
 
@@ -329,6 +335,11 @@ public sealed class PromptRouter : IPromptRouter
             candidates = _selector.RankCandidates(requirements, models);
         }
 
+        // Still nothing: whether models outside their active hours would serve it, so the caller can tell "not now" from
+        // "never with this configuration".
+        IReadOnlyList<string> resting = candidates.Count > 0 ? []
+            : [.. _selector.RankCandidates(requirements, [.. _models.Where(Usable(request, profile, anyHour: true))]).Select(c => c.Model.Name)];
+
         // A plain match of a route: a model on trial, or the route's learned model, goes first even below the route's
         // tier, as long as it can serve this request. Escalated, explicit and conversation-held turns keep the ranking.
         string? trial = null, routeModel = null;
@@ -377,6 +388,7 @@ public sealed class PromptRouter : IPromptRouter
         return new RoutingPlan(classification, requirements, candidates)
         {
             Unreliable = unreliable,
+            OutsideActiveHours = resting,
             Sticky = sticky,
             RouteModel = routeModel,
             Trial = trial,
@@ -483,10 +495,13 @@ public sealed class PromptRouter : IPromptRouter
     private ModelDefinition? Named(string? name) =>
         name is null ? null : _models.FirstOrDefault(m => m.Enabled && string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Models the profile allows, within their active hours, and local when the request must stay local.</summary>
-    private Func<ModelDefinition, bool> Usable(PromptRoutingRequest request, RoutingProfile? profile)
+    /// <summary>
+    /// Models the profile allows, within their active hours (unless <paramref name="anyHour"/>), and local when the
+    /// request must stay local.
+    /// </summary>
+    private Func<ModelDefinition, bool> Usable(PromptRoutingRequest request, RoutingProfile? profile, bool anyHour = false)
     {
         DateTimeOffset now = _time.GetUtcNow();
-        return model => (profile is null || profile.Allows(model)) && (!request.LocalOnly || model.IsLocal) && model.IsActiveAt(now, _zone);
+        return model => (profile is null || profile.Allows(model)) && (!request.LocalOnly || model.IsLocal) && (anyHour || model.IsActiveAt(now, _zone));
     }
 }

@@ -78,8 +78,9 @@ internal sealed class DashboardAnonymousMetadata
 /// Decides who may use the dashboard and admin API: loopback clients (with a Host header naming this machine, which
 /// stops DNS-rebinding pages from driving it), remote clients presenting the admin, read-only or metrics token as a
 /// bearer token or a session cookie, or users an authenticating reverse proxy names in
-/// <see cref="RouterDashboardOptions.TrustedIdentityHeader"/> (believed only from a known proxy). State-changing calls
-/// must come from the dashboard's own origin. A session cookie carries the time it was issued and a random session id,
+/// <see cref="RouterDashboardOptions.TrustedIdentityHeader"/> (believed only from a known proxy). State-changing calls,
+/// and endpoints marked <see cref="DashboardWriteMetadata"/> whatever their method, must come from the dashboard's own
+/// origin. A session cookie carries the time it was issued and a random session id,
 /// signed with the token, and lapses after <see cref="RouterDashboardOptions.SessionLifetime"/>; signing out revokes the
 /// id on the server (<see cref="DashboardSessions"/>). The metrics role reaches only endpoints marked
 /// <see cref="DashboardMetricsMetadata"/>. Wrong tokens are
@@ -232,12 +233,16 @@ internal sealed class DashboardAccess
                 "or AllowUnauthenticatedRemoteClients when a reverse proxy authenticates callers.");
         }
 
-        if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method) && !IsSameOrigin(context.Request))
+        // Every call that changes something must come from the dashboard's own origin, and so must every endpoint marked as
+        // acting whatever its method (GET /setup starts programs): otherwise an <img src> on another site could call it.
+        Endpoint? endpoint = context.GetEndpoint();
+        bool acts = (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
+            || endpoint?.Metadata.GetMetadata<DashboardWriteMetadata>() is not null;
+        if (acts && !IsSameOrigin(context.Request))
         {
             return Refuse(StatusCodes.Status403Forbidden, "Cross-origin requests cannot change the router (Origin does not match the dashboard).");
         }
 
-        Endpoint? endpoint = context.GetEndpoint();
         RouterDashboardRole? role;
         if (identity is { } person)
         {

@@ -33,6 +33,9 @@ public static class RouterDoctor
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(10);
 
+    /// <summary>The exit code <see cref="RunAsync"/> reports when the CLI's working directory could not be made.</summary>
+    private const int NoWorkingDirectory = int.MinValue;
+
     /// <summary>Runs every check against the router registered in <paramref name="services"/>.</summary>
     public static async Task<IReadOnlyList<RouterCheck>> CheckAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
@@ -143,8 +146,8 @@ public static class RouterDoctor
         {
             return new RouterCheck("embeddings", RouterCheckStatus.Warning,
                 "the Hashing provider only matches shared words. For meaning-based routing set SemanticRouter:Embeddings:Provider to Onnx " +
-                "(in-process, no server) or to an OpenAICompatible endpoint (LM Studio, Ollama, OpenAI), and raise DefaultSimilarityThreshold " +
-                "(see \"Thresholds by embedding model\" in the README).");
+                "(in-process, no server) or to an OpenAICompatible endpoint (LM Studio, Ollama, OpenAI) on the dashboard under Providers → Embeddings, " +
+                "and raise DefaultSimilarityThreshold (https://siebe41.github.io/SemanticRouter.NET/overview#thresholds-by-embedding-model).");
         }
 
         bool onnx = embeddings.Provider == EmbeddingProviderKind.Onnx;
@@ -163,8 +166,8 @@ public static class RouterDoctor
         {
             string reason = ex is OperationCanceledException ? "timed out" : runtime.Redactor.Redact(ex.Message);
             return new RouterCheck("embeddings", RouterCheckStatus.Failed, onnx
-                ? $"{what} failed: {reason} (SemanticRouter:Embeddings:Model / ModelPath)."
-                : $"{what} failed: {reason} (SemanticRouter:Embeddings:Endpoint / Model / ApiKey).");
+                ? $"{what} failed: {reason} (SemanticRouter:Embeddings:Model / ModelPath; dashboard: Providers → Embeddings)."
+                : $"{what} failed: {reason} (SemanticRouter:Embeddings:Endpoint / Model / ApiKey; dashboard: Providers → Embeddings).");
         }
     }
 
@@ -200,7 +203,7 @@ public static class RouterDoctor
             if (found is null)
             {
                 checks.Add(new RouterCheck(modelSubject, RouterCheckStatus.Failed,
-                    $"'{model.Model}' is not offered by {name}; set SemanticRouter:Models:{index}:Model to one of: " +
+                    $"'{model.Model}' is not offered by {name}; set SemanticRouter:Models:{index}:Model (dashboard: Providers → Models → {model.Name} → Model) to one of: " +
                     string.Join(", ", probe.Models.Take(12)) + (probe.Models.Count > 12 ? ", …" : string.Empty) + "."));
                 continue;
             }
@@ -244,6 +247,14 @@ public static class RouterDoctor
         }
 
         (int exit, string output) = await RunAsync(runner, path, ["--version"], connector, cancellationToken).ConfigureAwait(false);
+        if (exit == NoWorkingDirectory)
+        {
+            // Not the CLI's fault: the router could not make the private folder every CLI request runs in.
+            return [new RouterCheck(subject, RouterCheckStatus.Failed,
+                $"the router could not create the private working directory CLIs run in: {output.TrimEnd('.')}. Every request to {name} needs it: " +
+                "make sure your user owns and can write to it (on Linux it is under XDG_RUNTIME_DIR or ~/.cache/semantic-router).")];
+        }
+
         if (exit != 0)
         {
             return [new RouterCheck(subject, RouterCheckStatus.Failed, $"{path} --version failed (exit {exit}): {FirstLine(output)}")];
@@ -251,7 +262,13 @@ public static class RouterDoctor
 
         string version = FirstLine(output);
         var checks = new List<RouterCheck>();
-        if (connector.Preset != CliPreset.ClaudeCode)
+        if (connector.Preset == CliPreset.Codex)
+        {
+            // `codex login status` answers without asking anything: "Logged in using ChatGPT", or "Not logged in".
+            (int loginExit, string login) = await RunAsync(runner, path, ["login", "status"], connector, cancellationToken).ConfigureAwait(false);
+            checks.Add(CodexSignIn(subject, version, path, loginExit, login));
+        }
+        else if (connector.Preset != CliPreset.ClaudeCode)
         {
             checks.Add(new RouterCheck(subject, RouterCheckStatus.Ok, $"{version} at {path}. Sign-in is not checked for this CLI; run it once yourself to log in."));
         }
@@ -278,7 +295,29 @@ public static class RouterDoctor
         return checks;
     }
 
-    private static async Task<(int ExitCode, string Output)> RunAsync(
+    /// <summary>
+    /// What <c>codex login status</c> says about the sign-in. Its output is not repeated: with an API key it shows part
+    /// of the key. A version without the command (or an answer not understood) is not held against the connector.
+    /// </summary>
+    internal static RouterCheck CodexSignIn(string subject, string version, string path, int exitCode, string output)
+    {
+        if (output.Contains("not logged in", StringComparison.OrdinalIgnoreCase))
+        {
+            return new RouterCheck(subject, RouterCheckStatus.Failed, $"{version} at {path} is not signed in. Run `codex login` once (it signs in with your ChatGPT account).");
+        }
+
+        if (exitCode == 0 && output.Contains("API key", StringComparison.OrdinalIgnoreCase))
+        {
+            return new RouterCheck(subject, RouterCheckStatus.Warning,
+                $"{version} at {path} is signed in with an API key, so requests are billed to that key, not to a ChatGPT plan. Run `codex logout`, then `codex login`, to change that.");
+        }
+
+        return exitCode == 0 && output.Contains("logged in", StringComparison.OrdinalIgnoreCase)
+            ? new RouterCheck(subject, RouterCheckStatus.Ok, $"{version} at {path}, signed in{(output.Contains("ChatGPT", StringComparison.OrdinalIgnoreCase) ? " with ChatGPT" : string.Empty)}.")
+            : new RouterCheck(subject, RouterCheckStatus.Ok, $"{version} at {path}. Its sign-in could not be checked (`codex login status` gave no answer); run `codex login` once yourself.");
+    }
+
+    internal static async Task<(int ExitCode, string Output)> RunAsync(
         ICliProcessRunner runner, string executable, string[] arguments, ConnectorOptions connector, CancellationToken cancellationToken)
     {
         string directory;
@@ -288,7 +327,7 @@ public static class RouterDoctor
         }
         catch (IOException ex)
         {
-            return (-1, ex.Message);
+            return (NoWorkingDirectory, ex.Message);
         }
 
         try
@@ -369,6 +408,6 @@ public static class RouterDoctor
         }
     }
 
-    private static string FirstLine(string text) =>
+    internal static string FirstLine(string text) =>
         text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? string.Empty;
 }

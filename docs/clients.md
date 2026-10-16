@@ -26,6 +26,14 @@ export CLAUDE_CODE_AUTO_MODE_SERVER=0
 claude --model semantic-router
 ```
 
+Or in one line, which sets them for that one run and leaves your shell as it was. The router's start-up banner and `semantic-router init` print this line with your own address and context window:
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:5080 ANTHROPIC_AUTH_TOKEN=semantic-router CLAUDE_CODE_MAX_CONTEXT_TOKENS=131072 CLAUDE_CODE_AUTO_MODE_SERVER=0 claude --model semantic-router
+```
+
+PowerShell has no one-line form; there they print `$env:ANTHROPIC_BASE_URL="http://localhost:5080"; …; claude --model semantic-router`, which sets the variables for the rest of the session.
+
 - **`ANTHROPIC_AUTH_TOKEN`** matters: with it set, Claude Code sends that placeholder as its bearer token instead of your real session token, so your login never leaves the `claude` process. The router ignores the `Authorization` and `x-api-key` headers of every request and uses the credentials from its own configuration.
 - **`--model semantic-router`** is the router's own model name: it routes as `auto`, and Claude Code shows it instead of the name of a Claude model that may not be answering. Without it Claude Code sends its default model name, which the `init` template also routes as `auto`.
 - **`CLAUDE_CODE_MAX_CONTEXT_TOKENS`** tells Claude Code how much context it has, so it compacts the conversation before it outgrows a model. Every Claude Code turn carries tools, so use the smallest `ContextWindow` among the enabled models that declare `tools`. The router prints this line with your value at start-up, and `init` prints it after writing the configuration; when one of those models has no `ContextWindow`, they leave the variable out, and so should you. A small local model makes Claude Code compact often: leave it out of the agentic tiers if that is a problem.

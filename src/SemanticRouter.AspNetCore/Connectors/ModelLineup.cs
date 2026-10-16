@@ -152,26 +152,46 @@ public static partial class ModelLineup
             throw new KeyNotFoundException($"Connector '{connector}' is not configured.");
         }
 
+        IModelDiscovery? live = runtime.Connectors.TryGet(connector, out IChatConnector? running) ? running as IModelDiscovery : null;
+        return await DiscoverAsync(services, connector, options, live, runtime.Resolved.Models, runtime.Redactor, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Discovers what a connector with <paramref name="options"/> (secrets resolved) offers, whether or not it is
+    /// configured: the dashboard discovers a connector added to its draft before it is applied.
+    /// </summary>
+    /// <param name="services">The application's services.</param>
+    /// <param name="connector">The connector's name (its HTTP client's name, and the suggestions' <c>Connector</c>).</param>
+    /// <param name="options">Its settings, with secret references resolved.</param>
+    /// <param name="live">A connector that lists models itself (Copilot), if there is one.</param>
+    /// <param name="catalog">The catalog the suggestions are checked against (names in use, models already added).</param>
+    /// <param name="redactor">Removes secrets from failure messages.</param>
+    /// <param name="cancellationToken">Cancels discovery.</param>
+    internal static async Task<ModelLineupReport> DiscoverAsync(
+        IServiceProvider services, string connector, ConnectorOptions options, IModelDiscovery? live, IEnumerable<ModelDefinition> catalog, SecretRedactor redactor,
+        CancellationToken cancellationToken)
+    {
         ModelFamilyTable families = ModelFamilyTable.Load(LocalFamilyFile(services));
+        ModelDefinition[] models = [.. catalog];
         var report = new ModelLineupReport(connector, options.Type) { Families = families.Source, FamiliesWarning = families.Warning };
-        if (runtime.Connectors.TryGet(connector, out IChatConnector? live) && live is IModelDiscovery discovery)
+        if (live is not null)
         {
             try
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(60)); // the first call may start a runtime (Copilot)
-                IReadOnlyList<string> found = await discovery.ListModelsAsync(timeout.Token).ConfigureAwait(false);
+                IReadOnlyList<string> found = await live.ListModelsAsync(timeout.Token).ConfigureAwait(false);
                 report = report with
                 {
                     Ok = true,
                     Note = found.Count == 0 ? "The provider listed no models." : null,
-                    Entries = Suggest(connector, options, found.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, runtime.Resolved.Models, families),
+                    Entries = Suggest(connector, options, found.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, models, families),
                 };
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException or TimeoutException or OperationCanceledException
                                        && !cancellationToken.IsCancellationRequested)
             {
-                report = report with { Note = ex is OperationCanceledException ? "The provider did not answer in time." : runtime.Redactor.Redact(ex.Message) };
+                report = report with { Note = ex is OperationCanceledException ? "The provider did not answer in time." : redactor.Redact(ex.Message) };
             }
 
             return report;
@@ -186,7 +206,7 @@ public static partial class ModelLineup
                 Note = ids.Count > 0
                     ? "A CLI has no model list to ask; these are the names its preset accepts. Any other model id the CLI knows works too."
                     : "A custom CLI has no model list to ask; add models by the names it accepts.",
-                Entries = Suggest(connector, options, ids.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, runtime.Resolved.Models, families),
+                Entries = Suggest(connector, options, ids.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, models, families),
             };
         }
 
@@ -201,11 +221,11 @@ public static partial class ModelLineup
         return report with
         {
             Ok = probe.Ok,
-            Note = probe.Ok ? null : runtime.Redactor.Redact(probe.Message),
+            Note = probe.Ok ? null : redactor.Redact(probe.Message),
             Server = probe.Server,
             Loading = probe.Loading,
             LoadingNote = probe.LoadingNote,
-            Entries = Suggest(connector, options, probe.Details, probe.Loading, runtime.Resolved.Models, families),
+            Entries = Suggest(connector, options, probe.Details, probe.Loading, models, families),
         };
     }
 

@@ -110,6 +110,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<ChatConnectorRegistry>();
         services.TryAddSingleton<ConnectorIncidents>();
         services.TryAddSingleton(sp => new EndpointChecks(sp.GetService<TimeProvider>()));
+        services.TryAddSingleton<RouterDashboardLocation>();
         services.TryAddSingleton<PromptDispatcher>();
         services.TryAddSingleton<AnswerJudge>();
         services.TryAddSingleton<ClientTurnPatterns>();

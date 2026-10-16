@@ -780,7 +780,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
     }
 
     /// <summary>Whether two versions of a connector send their secrets to the same place.</summary>
-    private static bool SameDestination(ConnectorOptions a, ConnectorOptions b) =>
+    internal static bool SameDestination(ConnectorOptions a, ConnectorOptions b) =>
         a.Type == b.Type && Equals(a.BaseAddress, b.BaseAddress) && a.Preset == b.Preset
         && string.Equals(a.Executable, b.Executable, StringComparison.Ordinal);
 

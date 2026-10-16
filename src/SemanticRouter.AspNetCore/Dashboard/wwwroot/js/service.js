@@ -22,7 +22,7 @@ const copyable = (text) =>
   `<span class="mono">${h(text)}</span> <button class="btn ghost small" data-action="copy-text" data-text="${h(text)}" aria-label="Copy ${h(text)}">Copy</button>`;
 
 /* The base addresses: those the server reports, or the one this page was loaded from. */
-function addresses(sv) {
+export function addresses(sv) {
   const list = sv.addresses || [];
   return list.length ? list : [{ url: location.origin, local: ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname), encrypted: true }];
 }
@@ -42,57 +42,61 @@ function reach(sv) {
     : `<span class="badge warn">other machines refused</span> <span class="faint small">Clients on other machines get 401 until you add gateway keys under <a href="#/gateway">Gateway</a>.${cli}</span>`;
 }
 
-/* Overview: where the router runs, the base URLs to give clients, and its health. */
-export function serviceCard() {
+/* Overview: the base URLs to give clients, who else can use the gateway, and the router's health. With quiet (the
+   setup card is showing), "no model is enabled" is left to that card instead of repeated here. */
+export function serviceCard(quiet) {
   const s = state.status;
   const sv = s.service;
   if (!sv) return '';
+  const noModel = (text) => quiet && /no (model is enabled|enabled model)/i.test(text || '');
   const [cls, label] = STATES[sv.state] || ['', sv.state];
+  const note = noModel(sv.stateNote) ? '' : sv.stateNote;
+  const problems = sv.problems.filter((p) => !noModel(p));
   const anthropic = s.gateway.anthropicPathPrefixes[0] || '/v1/messages';
-  const stamp = (iso) => `<span title="${h(new Date(iso).toLocaleString())}">${h(ago(iso))}</span>`;
+  const when = (iso) => `<span title="${h(new Date(iso).toLocaleString())}">${h(ago(iso))}</span>`;
   const last = sv.lastRequest
-    ? stamp(sv.lastRequest) + (sv.lastOutcome && sv.lastOutcome !== 'served' ? ` <span class="badge ${sv.lastOutcome === 'failed' ? 'danger' : 'warn'}">${h(sv.lastOutcome)}</span>` : '')
+    ? when(sv.lastRequest) + (sv.lastOutcome && sv.lastOutcome !== 'served' ? ` <span class="badge ${sv.lastOutcome === 'failed' ? 'danger' : 'warn'}">${h(sv.lastOutcome)}</span>` : '')
     : '<span class="faint">none yet</span>';
   const embeddings = s.warmedUp ? '<span class="badge ok">index ready</span>' : (s.warmUpError ? `<span class="badge danger" title="${h(s.warmUpError)}">warm-up failed</span>` : '<span class="badge info">warming up</span>');
   const connectors = (s.endpoints || []).filter((e) => e.state !== 'unused');
   const answering = connectors.filter((e) => !['failing', 'down'].includes(e.state)).length;
 
   return `<div class="card section" id="service">
-    <div class="card-head"><h2>Service</h2><span class="badge ${cls}">${h(label)}</span>${sv.stateNote ? `<span class="muted small">${h(sv.stateNote)}</span>` : ''}</div>
+    <div class="card-head"><h2>Service</h2><span class="badge ${cls}">${h(label)}</span>${note ? `<span class="muted small">${h(note)}</span>` : ''}</div>
     <h3>Point clients at</h3>
-    <div class="table-wrap"><table>
+    <div class="table-wrap"><table class="addresses">
       <tr><th>From</th><th>OpenAI-compatible base URL</th><th>Anthropic base URL</th></tr>
       ${addresses(sv).map((a) => `<tr>
-        <td class="nowrap">${a.local ? 'this machine' : 'other machines'}${a.encrypted ? '' : ' <span class="badge warn" title="Prompts cross the network without TLS">unencrypted</span>'}</td>
-        <td class="nowrap">${copyable(a.url + '/v1')}</td>
-        <td class="nowrap">${copyable(a.url)}</td>
+        <td>${a.local ? 'this machine' : 'other machines'}${a.encrypted ? '' : ' <span class="badge warn" title="Prompts cross the network without TLS">unencrypted</span>'}</td>
+        <td data-label="OpenAI-compatible">${copyable(a.url + '/v1')}</td>
+        <td data-label="Anthropic">${copyable(a.url)}</td>
       </tr>`).join('')}
     </table></div>
     <div class="small" style="margin-top:8px">${reach(sv)}</div>
     <div class="faint small" style="margin-top:4px">Use model <span class="mono">auto</span> and any API key. Anthropic clients post to <span class="mono">${h(anthropic)}</span> under the base URL. Ready-made snippets: <a href="#/clients">Connect clients</a>.</div>
-    <div class="grid cols-2" style="margin-top:16px">
-      <div>
-        <h3>Runs on</h3>
-        <table>
-          <tr><th>Machine</th><td><b>${h(sv.machine)}</b> <span class="faint small">${h(sv.operatingSystem)}</span></td></tr>
-          <tr><th>Process</th><td>pid ${h(sv.processId)} · up ${h(uptime(sv.startedAt))} <span class="faint small">since ${h(new Date(sv.startedAt).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}</span></td></tr>
-          ${sv.program ? `<tr><th>Program</th><td class="mono small" style="word-break:break-all">${h(sv.program)}</td></tr>` : ''}
-          <tr><th>Version</th><td>${h(s.libraryVersion)} <span class="faint small">${h(sv.runtime)}</span></td></tr>
-          ${sv.listening.length ? `<tr><th>Listening on</th><td class="mono small">${sv.listening.map(h).join(', ')}</td></tr>` : ''}
-          ${s.store ? `<tr><th>Configuration</th><td class="mono small" style="word-break:break-all">${h(s.store)}</td></tr>` : ''}
-        </table>
-      </div>
-      <div>
-        <h3>Health</h3>
-        <table>
-          <tr><th>State</th><td><span class="badge ${cls}">${h(label)}</span>${sv.stateNote ? ` <span class="small muted">${h(sv.stateNote)}</span>` : ''}</td></tr>
-          <tr><th>Connectors</th><td>${connectors.length ? `${answering} of ${connectors.length} answering <span class="faint small">(Endpoints below)</span>` : '<span class="muted">none in use</span>'}</td></tr>
-          <tr><th>Embeddings</th><td>${embeddings}</td></tr>
-          <tr><th>Last request</th><td>${last}</td></tr>
-          <tr><th>Last answered</th><td>${sv.lastServed ? stamp(sv.lastServed) : '<span class="faint">none yet</span>'}</td></tr>
-          ${sv.problems.length ? `<tr><th>Needs a look</th><td><ul class="small" style="margin:0;padding-left:18px">${sv.problems.map((p) => `<li>${h(p)}</li>`).join('')}</ul></td></tr>` : ''}
-        </table>
-      </div>
-    </div>
+    <h3 style="margin-top:16px">Health</h3>
+    <div class="table-wrap plain"><table class="kv">
+      <tr><th>State</th><td><span class="badge ${cls}">${h(label)}</span>${note ? ` <span class="small muted">${h(note)}</span>` : ''}</td></tr>
+      <tr><th>Connectors</th><td>${connectors.length ? `${answering} of ${connectors.length} answering <span class="faint small">(see Connectors below)</span>` : '<span class="muted">none in use</span>'}</td></tr>
+      <tr><th>Embeddings</th><td>${embeddings}</td></tr>
+      <tr><th>Last request</th><td>${last}</td></tr>
+      <tr><th>Last answered</th><td>${sv.lastServed ? when(sv.lastServed) : '<span class="faint">none yet</span>'}</td></tr>
+      ${problems.length ? `<tr><th>Needs a look</th><td><ul class="small" style="margin:0;padding-left:18px">${problems.map((p) => `<li>${h(p)}</li>`).join('')}</ul></td></tr>` : ''}
+    </table></div>
   </div>`;
+}
+
+/* Where the router runs: machine, process, program, version, addresses and configuration file (About this router). */
+export function runsOn() {
+  const s = state.status;
+  const sv = s.service;
+  if (!sv) return '<p class="muted small">This router does not report where it runs.</p>';
+  return `<table class="kv">
+      <tr><th>Machine</th><td><b>${h(sv.machine)}</b> <span class="faint small">${h(sv.operatingSystem)}</span></td></tr>
+      <tr><th>Process</th><td>pid ${h(sv.processId)} · up ${h(uptime(sv.startedAt))} <span class="faint small">since ${h(new Date(sv.startedAt).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }))}</span></td></tr>
+      ${sv.program ? `<tr><th>Program</th><td class="mono small break">${h(sv.program)}</td></tr>` : ''}
+      <tr><th>Version</th><td>${h(s.libraryVersion)} <span class="faint small">${h(sv.runtime)}</span></td></tr>
+      ${sv.listening.length ? `<tr><th>Listening on</th><td class="mono small break">${sv.listening.map(h).join(', ')}</td></tr>` : ''}
+      ${s.store ? `<tr><th>Configuration</th><td class="mono small break">${h(s.store)}</td></tr>` : ''}
+    </table>`;
 }

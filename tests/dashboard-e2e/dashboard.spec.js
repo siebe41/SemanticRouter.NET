@@ -147,9 +147,10 @@ test('the rail groups the pages into sections, each with its pages as tabs', asy
   await page.locator('#nav a', { hasText: 'Monitor' }).click();
   await page.locator('#nav a', { hasText: 'Routing' }).click();
   await expect(page.locator('#tabs a[aria-current="page"]')).toHaveText('Profiles');
-  // Feedback is in no section: no tabs.
+  // Report an issue (the Feedback page) is in no section: no tabs.
+  await expect(page.locator('#sidebar a[data-view="feedback"]')).toHaveText('Report an issue');
   await page.locator('#sidebar a[data-view="feedback"]').click();
-  await expect(page.locator('#view h1')).toHaveText('Feedback');
+  await expect(page.locator('#view h1')).toHaveText('Report an issue');
   await expect(page.locator('#tabs')).toBeHidden();
   await expect(page.locator('#nav a[aria-current]')).toHaveCount(0);
 });
@@ -238,6 +239,14 @@ test('adding a model puts it in the catalog', async ({ page, request }) => {
 });
 
 test('discovering a connector\'s models adds the chosen ones on the chosen tier', async ({ page, request }) => {
+  // Discovery asks with the draft's settings (POST api/connectors/discover). A router without that endpoint is asked
+  // by connector name instead, as the dashboard does after a 404, without the 404 the browser would log as an error.
+  await page.route('**/router/api/connectors/discover', async (r) => {
+    const draft = await r.fetch();
+    if (draft.status() !== 404 && draft.status() !== 405) return r.fulfill({ response: draft });
+    const { name } = r.request().postDataJSON();
+    return r.fulfill({ response: await r.fetch({ url: r.request().url().replace('/connectors/discover', `/connectors/${encodeURIComponent(name)}/discover`), postData: '' }) });
+  });
   await open(page, 'models');
   const group = page.locator('section.model-group', { has: page.locator('h2', { hasText: /^local$/ }) });
   await group.locator('[data-action="lineup-discover"]').click();
@@ -289,9 +298,15 @@ test('validation lists problems and discard restores the configuration', async (
   await page.locator('input[data-bind="Routes.1.Name"]').fill('smalltalk');
   await page.locator('#save-bar [data-action="validate"]').click();
   await expect(page.locator('ul.errors')).toContainText('smalltalk');
+  // Discard asks in the page first, then offers Undo.
   await page.locator('#save-bar [data-action="discard"]').click();
+  await expect(page.locator('dialog#ask')).toContainText('Discard 1 change?');
+  await page.locator('dialog#ask button', { hasText: 'Discard' }).click();
   await expect(page.locator('#save-bar')).toBeHidden();
   await expect(page.locator('.item-head', { hasText: 'architecture' })).toBeVisible();
+  await page.locator('#toast button', { hasText: 'Undo' }).click();
+  await expect(page.locator('#save-bar')).toBeVisible();
+  await expect(page.locator('input[data-bind="Routes.1.Name"]')).toHaveValue('smalltalk');
 });
 
 test('the prompt tester classifies and sends a prompt through the gateway', async ({ page }) => {
@@ -303,7 +318,9 @@ test('the prompt tester classifies and sends a prompt through the gateway', asyn
   await page.locator('#tester-prompt').fill('@tier3 hello there, how are you?');
   await page.locator('[data-action="tester-classify"]').click();
   await expect(page.locator('.tester .result-line .badge.accent')).toHaveText('@tier3');
-  await expect(page.locator('.tester')).toContainText('ExplicitCallout');
+  // The reason in words, with the enum value in its tooltip.
+  await expect(page.locator('.tester')).toContainText('asked for with a callout');
+  await expect(page.locator('.tester [title="Reason: ExplicitCallout"]')).toBeVisible();
   await page.locator('#tester-prompt').fill('hello there, how are you?');
   await page.locator('[data-action="tester-send"]').click();
   await expect(page.locator('.tester')).toContainText('Hello from the stub backend.');
@@ -365,8 +382,12 @@ test('the service card shows where the router runs, the base URLs for clients an
   await expect(card).toContainText(`${base}/v1`);
   await expect(card.locator('[data-action="copy-text"]').first()).toHaveAttribute('data-text', `${base}/v1`);
   await expect(card).toContainText('this machine only');
-  await expect(card).toContainText('pid');
-  await expect(card).toContainText('127.0.0.1');
+  // Where it runs is folded into "About this router", further down.
+  const about = page.locator('details.about');
+  await expect(about).not.toHaveAttribute('open', '');
+  await about.locator('summary').click();
+  await expect(about).toContainText('pid');
+  await expect(about).toContainText('127.0.0.1');
 });
 
 test('router learned runs tuning, pauses and resumes learning', async ({ page }) => {
@@ -496,7 +517,7 @@ test('Report on an Activity entry opens a pre-filled misroute issue without the 
   await page.addInitScript(() => { window.__opened = []; window.open = (url) => { window.__opened.push(url); return null; }; });
   await open(page, 'activity');
   await page.locator('#view table.activity-table tr', { hasText: 'my-private-words-123' }).first().getByRole('button', { name: 'Report' }).click();
-  await expect(page.locator('#view h1')).toHaveText('Feedback');
+  await expect(page.locator('#view h1')).toHaveText('Report an issue');
   await expect(page.locator('#feedback-form')).toContainText('Route: smalltalk');
   await page.getByLabel('What the prompt really needed, and why').fill('Small talk; tier 1 was right.');
   await page.getByRole('button', { name: 'Open the issue on GitHub' }).click();
