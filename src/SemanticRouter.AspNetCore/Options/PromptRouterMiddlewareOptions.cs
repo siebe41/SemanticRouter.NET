@@ -306,10 +306,12 @@ public sealed class ConversationRoutingOptions
     public bool StickToModel { get; set; } = true;
 
     /// <summary>
-    /// How long a model's prompt cache stays warm after a turn that read or wrote it. While it does, the conversation
-    /// stays on that model when moving would cost more (re-sending and re-writing the cached context), above the
-    /// required tier too, and returns to it after a failover. 5 minutes matches Anthropic's default entries and
-    /// OpenAI's; set 1 hour when your requests ask for 1-hour entries. Default 5 minutes.
+    /// How long a model's prompt cache stays warm after a turn that read or wrote it, when the router cannot tell. While
+    /// it does, the conversation stays on that model when moving would cost more (re-sending and re-writing the cached
+    /// context), above the required tier too, and returns to it after a failover. On an Anthropic connector the router
+    /// knows the entries' lifetime and uses that instead: the <c>ttl</c> of the client's own cache markers, or the
+    /// connector's <see cref="ConnectorOptions.CacheTtl"/> for the markers it adds. 5 minutes matches OpenAI's caching;
+    /// set more for a backend you know keeps entries longer. Default 5 minutes.
     /// </summary>
     public TimeSpan CacheLifetime { get; set; } = TimeSpan.FromMinutes(5);
 

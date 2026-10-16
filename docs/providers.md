@@ -335,7 +335,7 @@ Anthropic only caches what a request marks with `cache_control`. Claude Code mar
 - **One breakpoint at the end of the system prompt.** Tools and system come first in Anthropic's prompt and stay the same every turn, so this caches both. Without a system prompt it goes on the last tool. The system text itself is not changed; it is sent as one text block so it can carry the marker.
 - **Automatic caching for the conversation** (a top-level `cache_control`). Anthropic puts that breakpoint on the last block and moves it forward as the conversation grows, so each turn reads the previous turns from the cache.
 - **Only above the model's cacheable minimum:** 4,096 estimated tokens on Opus 4.5 and 4.6 and Haiku 4.5, 512 on other models. A shorter prompt gets no markers.
-- **`CacheTtl`:** `5m` (default) or `1h`, on both markers. Writing a one-hour entry costs twice the input price instead of 1.25 times, so it only pays off when turns are often more than five minutes apart.
+- **`CacheTtl`:** `5m` (default) or `1h`, on both markers. Writing a one-hour entry costs twice the input price instead of 1.25 times, so it only pays off when turns are often more than five minutes apart. [Conversation routing](routing-quality.md#conversations) counts the cache warm for the same time (for an Anthropic client's own markers, their longest `ttl`).
 
 The first turn above the minimum pays the cache-write price on its prompt; later turns read it. The activity entry and the Usage page show the reads and writes ([observability.md](observability.md)). A request from an Anthropic client that the router rebuilds keeps that client's own markers, and the router adds none. Set `PromptCaching: Off` for an Anthropic-compatible server that rejects `cache_control`.
 

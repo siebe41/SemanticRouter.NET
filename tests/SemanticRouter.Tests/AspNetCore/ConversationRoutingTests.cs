@@ -201,6 +201,76 @@ public sealed class ConversationRoutingTests : RouterHostTest
         (Header(later, "Model"), Header(later, "Sticky"), Header(later, "Selection")).Should().Be(("mid", "(none)", "(none)"));
     }
 
+    [Theory]
+    [InlineData("1h", 30, "opus")]
+    [InlineData("1h", 61, "mid")]
+    [InlineData("5m", 4, "opus")]
+    [InlineData("5m", 6, "mid")]
+    public async Task An_anthropic_connectors_cache_ttl_is_how_long_the_cache_counts_as_warm(string ttl, int minutesLater, string expected)
+    {
+        // "opus" is on an Anthropic connector that marks its requests for caching; each turn reads 80k from the cache.
+        AnthropicHttp = StubHttpMessageHandler.Json("""{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":100,"output_tokens":10,"cache_read_input_tokens":80000}}""");
+        Classifier.Setup(c => c.ClassifyAsync(It.Is<string>(p => p.Contains("tests", StringComparison.Ordinal)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PromptClassificationResult
+            {
+                RequiredTier = 3,
+                Reason = RoutingReason.SemanticMatch,
+                RouteName = "testing",
+                Complexity = new ComplexityAnalysis { Score = 0.4, EstimatedTokens = 10 },
+            });
+        var time = new ManualTimeProvider();
+        var caches = new WarmCacheStore(time);
+        Task<HttpClient> StartWithOpusAsync() => StartDispatchAsync(
+            routing: o =>
+            {
+                ModelDefinition opus = TestEmbeddings.Model("opus", 4, costPerMillion: 2m, connector: "anthropic-native");
+                opus.CacheReadCostPerMillionTokens = 0.2m;
+                o.Models.Add(opus);
+                o.Models.Add(TestEmbeddings.Model("mid", 3, costPerMillion: 1m, connector: "lmstudio"));
+            },
+            services: s => s
+                .AddSingleton<IWarmCacheStore>(caches)
+                .AddSingleton<TimeProvider>(time)
+                .Configure<SemanticRouterConnectorsOptions>(o => o.Connectors["anthropic-native"] = new ConnectorOptions
+                {
+                    Type = ConnectorType.Anthropic,
+                    BaseAddress = new Uri("https://api.anthropic.example"),
+                    ApiKey = "sk-ant-test",
+                    CacheTtl = ttl,
+                }));
+        HttpClient client = await StartWithOpusAsync();
+        Header(await client.PostAsync("/v1/chat/completions", Conversation("auto", Task)), "Model").Should().Be("opus");
+
+        // A restart forgets the conversation's tier floor, so only the warm cache can keep it on opus.
+        await DisposeAsync();
+        client = await StartWithOpusAsync();
+        time.Advance(TimeSpan.FromMinutes(minutesLater));
+        HttpResponseMessage tests = await client.PostAsync("/v1/chat/completions", Conversation("auto", Task, "now write the tests for it"));
+
+        Header(tests, "Model").Should().Be(expected, $"a {ttl} cache entry is {(expected == "opus" ? "still warm" : "gone")} {minutesLater} minutes later");
+    }
+
+    [Theory]
+    [InlineData("""{"type":"ephemeral","ttl":"1h"}""", ConnectorType.Anthropic, 60)]
+    [InlineData("""{"type":"ephemeral"}""", ConnectorType.Anthropic, 5)]
+    [InlineData(null, ConnectorType.Anthropic, 60)]
+    [InlineData("""{"type":"ephemeral","ttl":"1h"}""", ConnectorType.OpenAICompatible, null)]
+    public void A_cache_entrys_lifetime_comes_from_the_clients_markers_or_the_connector(string? marker, ConnectorType type, int? minutes)
+    {
+        // The connector asks for one-hour entries; a client's own markers replace the router's.
+        string body = marker is null
+            ? """{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}"""
+            : $$"""{"model":"m","max_tokens":10,"messages":[{"role":"user","content":[{"type":"text","text":"hi","cache_control":{{marker}}}]}]}""";
+        using JsonDocument document = JsonDocument.Parse(body);
+        ChatCompletionRequest chat = ChatCompletionRequest.Parse(document.RootElement, ChatProtocol.Anthropic);
+
+        TimeSpan? lifetime = PromptCacheLifetime.Of(chat, new ConnectorOptions { Type = type, CacheTtl = "1h" });
+
+        lifetime.Should().Be(minutes is { } m ? TimeSpan.FromMinutes(m) : null);
+        PromptCacheLifetime.Of(chat, new ConnectorOptions { Type = type, PromptCaching = PromptCaching.Off })
+            .Should().Be(marker is null || type != ConnectorType.Anthropic ? null : TimeSpan.FromMinutes(minutes == 60 ? 60 : 5), "Off adds no markers of its own");
+    }
+
     [Fact]
     public async Task A_tool_loop_without_assistant_text_keeps_the_conversation_and_its_callout()
     {

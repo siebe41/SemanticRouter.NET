@@ -106,7 +106,7 @@ builder.Services.AddSemanticPromptRouting(builder.Configuration.GetSection("Sema
 |---|---|---|
 | Model cooldowns | model name plus absolute expiry, through `ICooldownStore` | Until they expire. A restart during a weekly limit keeps the model cooling down until the original time. |
 | Tool-call affinity | tool-use id → model, with an in-memory cache in front | `AffinityWindow` (24 h), so a tool turn that spans a restart still goes back to the model that issued the call. |
-| Warm prompt caches | conversation hash and model → cached tokens and expiry, with an in-memory cache in front | Until they expire (`Middleware:Conversation:CacheLifetime`), so a conversation that spans a restart still weighs its warm cache. |
+| Warm prompt caches | conversation hash and model → cached tokens and expiry, with an in-memory cache in front | Until they expire (the expiry is stored with each entry: the Anthropic connector's cache `ttl`, or else `Middleware:Conversation:CacheLifetime`), so a conversation that spans a restart still weighs its warm cache. |
 | Activity | each entry once its request has finished; the log seeds itself on start | `ActivityMaxEntries` (10,000) and `ActivityMaxAge` (30 days). |
 | Configuration history | every applied document, with source, actor and note | `HistoryMaxEntries` (200). The dashboard's JSON page diffs and rolls back; see `api/config/history`. |
 | Usage | one row per served request: model, connector, route, client, tokens, cost, reference cost | `UsageRetention` (400 days), so monthly budgets survive restarts. |

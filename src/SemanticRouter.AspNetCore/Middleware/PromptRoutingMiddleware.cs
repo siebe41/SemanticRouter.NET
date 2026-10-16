@@ -490,7 +490,7 @@ internal sealed partial class PromptRoutingMiddleware
 
         if (conversationKey is not null && entry.ServedBy is { } servedBy && _warmCaches is not null && conversation.Enabled && conversation.StickToModel)
         {
-            RememberCache(conversationKey, servedBy, entry, routedAt, conversation.CacheLifetime);
+            RememberCache(conversationKey, servedBy, entry, routedAt, CacheLifetime(runtime, servedBy, chat) ?? conversation.CacheLifetime);
         }
 
         if (rateLimit is not null && (entry.InputTokens is not null || entry.OutputTokens is not null))
@@ -509,6 +509,16 @@ internal sealed partial class PromptRoutingMiddleware
             }
         }
     }
+
+    /// <summary>
+    /// How long the cache entries the turn wrote on <paramref name="model"/> live, when its connector tells
+    /// (<see cref="PromptCacheLifetime"/>); otherwise <see cref="ConversationRoutingOptions.CacheLifetime"/> applies.
+    /// </summary>
+    private static TimeSpan? CacheLifetime(RouterRuntime runtime, string model, ChatCompletionRequest chat) =>
+        runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, model, StringComparison.OrdinalIgnoreCase)) is { } served
+        && runtime.Configuration.Connectors.TryGetValue(served.Connector, out ConnectorOptions? connector)
+            ? PromptCacheLifetime.Of(chat, connector)
+            : null;
 
     /// <summary>
     /// Records the prompt cache the served turn left on its model: what it read and wrote, warm for the cache's lifetime
