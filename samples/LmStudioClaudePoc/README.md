@@ -107,7 +107,8 @@ Any tool that lets you set an OpenAI base URL will work. Use base URL `http://lo
 | `lmstudio` | force LM Studio |
 | `claude` | force Claude |
 | `auto:best` | the most capable model available |
-| `claude-sonnet-…`, `claude-opus-…` (what Claude Code sends) | mapped by `Middleware:ModelAliases`: `*haiku*` → `auto:cheapest`, `*opus*` → `auto:best`, otherwise `auto` |
+| `claude-sonnet-…`, `claude-opus-…` (what Claude Code sends) | mapped by `Middleware:ModelAliases`: `*haiku*` → `auto:cheapest`, every other Claude name → `auto` (Claude Code sends its default Opus name whether or not you chose Opus) |
+| `opus-pinned` (`claude --model opus-pinned`) | `family:opus`: the catalog's Opus model, or else the most capable (here `claude`) |
 
 Every response carries routing headers:
 
