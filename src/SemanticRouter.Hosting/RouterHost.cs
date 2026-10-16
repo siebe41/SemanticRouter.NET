@@ -123,13 +123,15 @@ internal static partial class RouterHost
     /// Default log levels for the tool: ASP.NET Core's lines per request, Kestrel's binding notes and the hosting
     /// lifetime's "Application started" add nothing to the router's own line per request and the banner, and data
     /// protection's notes about where its keys live and that they are not encrypted are what <see cref="KeyRing"/>
-    /// reports, once, in plain words.
+    /// reports, once, in plain words. On Windows the host also writes to the Event Log, whose own Warning filter outranks
+    /// a category level that names no provider, so data protection is quieted there by name too.
     /// </summary>
     private static readonly Dictionary<string, string?> QuietLogging = new()
     {
         ["Logging:LogLevel:Microsoft.AspNetCore"] = "Warning",
         ["Logging:LogLevel:Microsoft.Hosting.Lifetime"] = "Warning",
         ["Logging:LogLevel:Microsoft.AspNetCore.DataProtection"] = "Error",
+        ["Logging:EventLog:LogLevel:Microsoft.AspNetCore.DataProtection"] = "Error",
         ["Logging:LogLevel:System.Net.Http.HttpClient"] = "Warning",
     };
 

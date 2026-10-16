@@ -181,6 +181,16 @@ public sealed class FirstRunTests : IDisposable
             loggers.CreateLogger("Microsoft.Hosting.Lifetime").IsEnabled(LogLevel.Information).Should().BeFalse("the banner says where it listens");
             loggers.CreateLogger("Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager").IsEnabled(LogLevel.Warning).Should().BeFalse("the key ring reports itself");
             loggers.CreateLogger("SemanticRouter.AspNetCore.PromptRoutingMiddleware").IsEnabled(LogLevel.Information).Should().BeTrue("the router keeps its own line per request");
+
+            // On Windows the host adds the Event Log with a Warning filter of its own, which outranks a category level
+            // that names no provider: a stand-in under the Event Log's alias, with that filter, gets the same rules here.
+            using ServiceProvider eventLog = new ServiceCollection().AddLogging(logging => logging
+                .AddConfiguration(quiet.Configuration.GetSection("Logging"))
+                .AddProvider(new EventLogStandIn())
+                .AddFilter<EventLogStandIn>(level => level >= LogLevel.Warning)).BuildServiceProvider();
+            ILoggerFactory windows = eventLog.GetRequiredService<ILoggerFactory>();
+            windows.CreateLogger("Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager").IsEnabled(LogLevel.Warning).Should().BeFalse("the key ring reports itself, in the Event Log too");
+            windows.CreateLogger("SemanticRouter.AspNetCore.RouterRuntimeProvider").IsEnabled(LogLevel.Warning).Should().BeTrue("the router's own warnings still reach the Event Log");
         }
 
         await using WebApplication loud = RouterHost.Build(Settings("--Logging:LogLevel:Microsoft.AspNetCore=Information"));
@@ -239,5 +249,28 @@ public sealed class FirstRunTests : IDisposable
 
         new JsonFileRouterConfigurationStore(ConfigurationFile).Load()!.Connectors.Should().BeEmpty();
         later.ToString().Should().NotContain("connector");
+    }
+
+    /// <summary>
+    /// Takes the Event Log provider's alias, so its configuration rules apply on any operating system. Its loggers are
+    /// on for every level, so only the filter rules decide what is enabled.
+    /// </summary>
+    [ProviderAlias("EventLog")]
+    private sealed class EventLogStandIn : ILoggerProvider, ILogger
+    {
+        public ILogger CreateLogger(string categoryName) => this;
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
     }
 }
