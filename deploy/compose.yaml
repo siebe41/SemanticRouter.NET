@@ -14,8 +14,9 @@
 services:
   router:
     # A released version (https://github.com/siebe41/SemanticRouter.NET/releases); SEMANTIC_ROUTER_VERSION picks another.
-    # How to verify the image: https://siebe41.github.io/SemanticRouter.NET/releases#check-the-container-image
-    image: ghcr.io/siebe41/semantic-router:${SEMANTIC_ROUTER_VERSION:-0.3.0}
+    # 0.5.0 is the first image that adds the API-key connectors on its first start; with 0.4.0 or older, add them on the
+    # dashboard. How to verify the image: https://siebe41.github.io/SemanticRouter.NET/releases#check-the-container-image
+    image: ghcr.io/siebe41/semantic-router:${SEMANTIC_ROUTER_VERSION:-0.5.0}
     # Or build it from this checkout instead: comment out the image line above and uncomment these.
     # build:
     #   context: ..

@@ -6,7 +6,6 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Added
 
-- Desktop app: an Updates section in **About SemanticRouter**, and **Check for updates now…** in the tray menu. It shows whether the app is up to date and when it last checked, an update that is downloading, ready or available, and why a check failed or updates are off. It has **Check now**, **Restart to update** and the two update switches.
 - `GET api/setup` for the dashboard's first-run setup: whether a model is still needed, what `semantic-router init` would find on this machine (LM Studio, Ollama, and the claude, codex and copilot CLIs with whether they are signed in) and one-click provider presets (LM Studio, Ollama, OpenAI, Anthropic, OpenRouter, Google Gemini, Claude Code, Codex, GitHub Copilot). It only describes; nothing is enabled until the dashboard applies it. The machine policy, offline mode and the allowed endpoints leave out what they turn off (offline, no CLI is started to ask). Like a change, it is refused from other sites, so a page elsewhere cannot set off the CLI checks; `?refresh=true` reuses a look younger than 10 seconds, and a detection that fails still answers with the presets and the problem in `detectionProblem`.
 - `POST api/connectors/discover` discovers the models of a connector that is only in the dashboard's draft, held to the same checks as applying it (policy, what a CLI may run, where a stored secret may go). The audit log records where it asked (`scheme://host:port`, or a CLI's program).
 - `POST api/config/save` and `POST api/config/revert`, and `unsaved` in `GET api/status`: a configuration applied without saving can be kept or undone, and the dashboard can say it is not saved.
@@ -83,6 +82,12 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Dashboard: a failed prompt-tester Send or a plan with no eligible model says why and where to fix it.
 - Dashboard: Memory without sources no longer shows Fit, Rescan and Clear sharing, nor two sets of add buttons; Evaluate with an empty set says what to do on the page itself.
 
+## [0.4.0] - 2026-10-16
+
+### Added
+
+- Desktop app: an Updates section in **About SemanticRouter**, and **Check for updates now…** in the tray menu. It shows whether the app is up to date and when it last checked, an update that is downloading, ready or available, and why a check failed or updates are off. It has **Check now**, **Restart to update** and the two update switches.
+
 ## [0.3.0] - 2026-10-16
 
 ### Security
@@ -154,6 +159,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 See [GitHub Releases](https://github.com/siebe41/SemanticRouter.NET/releases).
 
-[Unreleased]: https://github.com/siebe41/SemanticRouter.NET/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/siebe41/SemanticRouter.NET/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/siebe41/SemanticRouter.NET/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/siebe41/SemanticRouter.NET/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/siebe41/SemanticRouter.NET/releases/tag/v0.2.1
