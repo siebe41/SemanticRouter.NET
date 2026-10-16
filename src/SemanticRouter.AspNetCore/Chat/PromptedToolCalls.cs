@@ -124,10 +124,20 @@ internal static partial class PromptedToolCalls
         return ((text + end.Text).Trim(), end.Calls);
     }
 
+    /// <summary>How much of each tool result is searched for calls written inside a line (<see cref="EmbeddedCalls"/>).</summary>
+    internal const int EmbeddedScanLimit = 1024 * 1024;
+
+    /// <summary>The longest JSON object inside a line that is read as a call.</summary>
+    internal const int EmbeddedCallLength = 16 * 1024;
+
+    /// <summary>How deeply nested JSON objects inside a line are followed.</summary>
+    internal const int EmbeddedNesting = 32;
+
     /// <summary>
     /// The calls written in the request's tool results, read the lenient way a reply is (any tool-ish fence, a json or
-    /// unlabelled fence, bare JSON naming a tool, a fence labelled with another run's token), as <see cref="CallKey"/>s.
-    /// A reply that repeats one of them repeats the result's author, so that call is kept as text.
+    /// unlabelled fence, bare JSON naming a tool, a fence labelled with another run's token), plus JSON objects inside a
+    /// line that name a tool (<see cref="EmbeddedCalls"/>), as <see cref="CallKey"/>s. A reply that repeats one of them
+    /// repeats the result's author, so that call is kept as text.
     /// </summary>
     public static IReadOnlySet<string> QuotedCalls(ChatCompletionRequest request)
     {
@@ -140,7 +150,7 @@ internal static partial class PromptedToolCalls
                 continue;
             }
 
-            foreach (ToolUseBlock call in Parse(RunLabel().Replace(result.Content, Fence), names).Calls)
+            foreach (ToolUseBlock call in Parse(RunLabel().Replace(result.Content, Fence), names).Calls.Concat(EmbeddedCalls(result.Content, names)))
             {
                 keys.Add(CallKey(call.Name, call.InputJson));
             }
@@ -148,6 +158,89 @@ internal static partial class PromptedToolCalls
 
         return keys;
     }
+
+    /// <summary>
+    /// Calls written anywhere in <paramref name="text"/>, also inside a line (<c>run {"name": "Bash", …} now</c>), which a
+    /// model may move to a line of its own: every balanced JSON object that names one of <paramref name="names"/>, read
+    /// as a reply would read it on its own line. Bounded, so a large or hostile tool result cannot make it slow: one pass
+    /// over the first <see cref="EmbeddedScanLimit"/> characters, objects up to <see cref="EmbeddedCallLength"/>
+    /// characters, nested up to <see cref="EmbeddedNesting"/> deep.
+    /// </summary>
+    internal static IEnumerable<ToolUseBlock> EmbeddedCalls(string text, IReadOnlyCollection<string> names)
+    {
+        if (names.Count == 0)
+        {
+            yield break;
+        }
+
+        int length = Math.Min(text.Length, EmbeddedScanLimit);
+        var opens = new List<int>(); // where the objects still open start, innermost last
+        bool inString = false;
+        for (int i = 0; i < length; i++)
+        {
+            char c = text[i];
+            if (opens.Count == 0)
+            {
+                if (c == '{')
+                {
+                    opens.Add(i);
+                }
+
+                continue;
+            }
+
+            if (inString)
+            {
+                if (c == '\\')
+                {
+                    i++;
+                }
+                else if (c == '"')
+                {
+                    inString = false;
+                }
+                else if (c == '\n')
+                {
+                    // A JSON string holds no line break: the braces were prose after all.
+                    opens.Clear();
+                    inString = false;
+                }
+
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inString = true;
+            }
+            else if (c == '{')
+            {
+                if (opens.Count == EmbeddedNesting)
+                {
+                    opens.RemoveAt(0);
+                }
+
+                opens.Add(i);
+            }
+            else if (c == '}')
+            {
+                int start = opens[^1];
+                opens.RemoveAt(opens.Count - 1);
+                if (MayNameTool(text.AsSpan(start, i + 1 - start)))
+                {
+                    foreach (ToolUseBlock call in Parse(text[start..(i + 1)], names).Calls)
+                    {
+                        yield return call;
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>Whether <paramref name="json"/> is short enough to read and has a key a call is named by.</summary>
+    private static bool MayNameTool(ReadOnlySpan<char> json) =>
+        json.Length <= EmbeddedCallLength
+        && (json.Contains("\"name\"", StringComparison.Ordinal) || json.Contains("\"tool", StringComparison.Ordinal));
 
     /// <summary>A call's identity regardless of how it was written: the tool name (any case) and its input with sorted keys.</summary>
     public static string CallKey(string name, string inputJson)
