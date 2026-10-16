@@ -14,7 +14,7 @@ builder.Services
 
 ## Pages
 
-The rail on the left has five sections, and the current section's pages are tabs under the top bar. A section opens on the tab last open in it. Every page keeps its own address (`#/learned`, `#/connectors`), so links from the tray, notices, webhooks and bookmarks go straight to the right tab. **Feedback** and **More** (the router's version, the theme picker and **Sign out**) sit at the foot of the rail.
+The rail on the left has five sections, and the current section's pages are tabs under the top bar. A section opens on the tab last open in it. Every page keeps its own address (`#/learned`, `#/connectors`), so links from the tray, notices, webhooks and bookmarks go straight to the right tab. **Report an issue** (the Feedback page) and **More** (the router's version, the theme picker and **Sign out**) sit at the foot of the rail.
 
 | Section | Tabs |
 |---|---|
@@ -49,7 +49,7 @@ The rail on the left has five sections, and the current section's pages are tabs
 | **Connect clients** | Ready-to-paste snippets for Claude Code, OpenAI SDKs, Codex CLI and curl, filled in with the router's address. |
 | **JSON** | The whole document as text (the same shape as the `SemanticRouter` section of `appsettings.json`): edit, download, compare with the application baseline, reset. **History** lists every applied version (when, what applied it, who), diffs any of them against the draft and rolls back to it. |
 | **Audit log** | Admin only. Every change made through the dashboard or admin API, sign-ins and sign-outs: when, who (the user your proxy signed in, `admin token`, `read-only token`, `metrics token` or `this machine`), from which address, what, the request and its status. **Download JSON Lines** exports it; **Sign out every session** ends every dashboard session ([Sessions](#sessions)). See [Audit log](#audit-log). |
-| **Feedback** | Opens a pre-filled issue on GitHub: routed to the wrong tier, something does not work, or an idea. For a request (picked here, or with **Report** on Activity) it fills in the decision line (reason, tier, route and similarity, complexity, planned and serving model, the request's protocol, client and size, feedback signals), the model that answered, the embedding provider, model and threshold, and the router version; for a bug, the operating system too. It never adds the prompt, the project, memory notes or error details; **Use the stored preview** adds the prompt preview only when you ask. A local-only prompt answered by a non-local model is pointed to private security reporting instead. Nothing is sent from the router: you read the issue over on GitHub and submit it there. |
+| **Report an issue** (Feedback) | Opens a pre-filled issue on GitHub: routed to the wrong tier, something does not work, or an idea. For a request (picked here, or with **Report** on Activity) it fills in the decision line (reason, tier, route and similarity, complexity, planned and serving model, the request's protocol, client and size, feedback signals), the model that answered, the embedding provider, model and threshold, and the router version; for a bug, the operating system too. It never adds the prompt, the project, memory notes or error details; **Use the stored preview** adds the prompt preview only when you ask. A local-only prompt answered by a non-local model is pointed to private security reporting instead. Nothing is sent from the router: you read the issue over on GitHub and submit it there. |
 
 ![The Live page](images/live.png)
 
@@ -107,12 +107,23 @@ Connector failures and usage-limit hits are kept in the state database when ther
 
 ## Apply, save, revert
 
-Editing never touches the running router until you choose:
+Editing never touches the running router until you choose. The top bar counts the draft's changes (**Review** shows them next to the running configuration) and offers:
 
 - **Validate** runs the same checks the router runs on start-up and lists problems.
-- **Apply** builds a new runtime from the draft and swaps it in atomically. In-flight requests finish on the old runtime; new ones use the new one. Model cooldowns are kept.
-- **Apply & save** also writes the document to the configuration store, when one is registered.
-- **Discard** drops the draft.
+- **Apply & save** builds a new runtime from the draft, swaps it in atomically and writes the document to the configuration store, when one is registered. In-flight requests finish on the old runtime; new ones use the new one. Model cooldowns are kept.
+- **Apply only** applies without saving: a restart undoes it. The top bar then says **Running configuration not saved**, with **Save** (write the running configuration to the store as it is) and **Revert to saved** (go back to what the store holds). The More panel shows the source as *not saved*.
+- **Discard** drops the draft, after asking; **Undo** in the message brings it back.
+
+Problems are shown next to their fields: the field is marked, its item opens, and the first one gets the focus. The **Configuration problems** list at the top links each problem to its field, on whichever page it lives. A "Not applied" message stays until you close it.
+
+**The draft is not lost.**
+- Apply names the version the draft started from. When someone else applied a configuration meanwhile (another tab, the CLI, a learned change), the dashboard says who and when, and offers **Reload** (drop your changes), **Compare** (the two side by side) or **Apply mine anyway**. The refresh notices such a change too: a draft without changes is reloaded quietly.
+- Adding an utterance from Evaluate or Activity, applying or undoing a learned change, and **Save** or **Revert** move your unapplied changes onto the new configuration when they touch other settings; otherwise the draft stays as it was and the notice above appears. A rollback says that it replaces the draft.
+- Signing in again after a session ends keeps the draft. Text typed in the JSON editor or the evaluation set is kept across pages, and the browser asks before you leave with any of it unapplied.
+- Removing a route, model, connector, profile, tier, budget or memory source shows **Undo**. A connector that models use, or a profile that rules, virtual models, client mappings or budgets name, asks whether to remove those too.
+- Model aliases and rate limits are edited as rows: two rows with the same name are flagged rather than merged, and the arrows order the aliases (the first matching glob wins). **Add Claude Code defaults** adds the names that are missing and leaves the targets you set.
+
+Adding an utterance or a learned change saves the configuration as before, unless the running configuration has unsaved changes: then it is applied without saving, and the message says "applied, not saved".
 
 **Reset** (JSON page) rebuilds from the application's own configuration for this process. The stored file is left in place; save again to overwrite it.
 
@@ -370,7 +381,8 @@ To add a built-in theme instead, add a token block to `app.css` and `{ id, name 
 ## Accessibility
 
 - **Structure.** Landmarks: a navigation with the sections (the rail), one with the current section's pages (the tabs), a main region, and a skip link to it. The current section and page are marked `aria-current`, and every form control has a label (the end-to-end tests fail when one loses it).
-- **Keyboard.** Everything works from the keyboard, and focus is always visible. Expandable items (routes, models, connectors, profiles, memory sources) are buttons that open with Enter or Space. After navigation, focus moves to the page content.
+- **Keyboard.** Everything works from the keyboard, and focus is always visible. Expandable items (routes, models, connectors, profiles, memory sources) are buttons that open with Enter or Space. After navigation, focus moves to the page content. A new item opens with the focus in its name; after a removal the focus moves to the next item. The refresh every five seconds keeps the focus where it was (a field, a button) and keeps open disclosures open. Questions (discard, remove, revert) are dialogs in the page.
+- **Screen readers.** Messages are spoken once, errors as alerts and prefixed so; a new message does not replace one still showing. The top bar's health dot has a label (and a short word on a phone), and the top bar and banner are rewritten only when what they say changes. A button whose action is running is marked busy and cannot be pressed twice. The read-only role sees forms as read-only.
 - **Small screens.** Below 720 px the rail becomes a drawer behind a menu button, with each section's name beside its icon, and the tabs scroll sideways. Escape closes the drawer, and the **More** panel.
 - **Motion.** `prefers-reduced-motion` turns off transitions, the router graph's flowing edges and the memory map's pulses.
 
@@ -379,6 +391,7 @@ To add a built-in theme instead, add a token block to `app.css` and `{ id, name 
 `tests/dashboard-e2e` is a Playwright suite run in CI against the real `semantic-router` host and a stub model backend. It:
 - visits every page, failing on any script or console error and on any control without an accessible name;
 - edits and applies a route, adds a model, renames a connector (its models follow), and checks that validation errors appear and that discard restores the configuration;
+- keeps the draft safe (`drafts.spec.js`): the change count and diff, the not-saved bar, a configuration changed elsewhere (409 and the refresh), rebasing after an added utterance, problems tied to their fields, alias rows, removals with Undo and their cascades, busy buttons, load errors with Retry, the Activity table holding still, the health dot, the read-only role and signing in again. Answers a router may not give yet are mocked;
 - runs the prompt tester, switches themes and checks the choice is remembered, and picks up a theme file dropped in at run time;
 - checks the rail and its tabs (every page keeps its address, and the rail fits a small window without scrolling), keyboard operation, the phone navigation and contrast;
 - compares screenshots of the three built-in themes at desktop and phone widths.
