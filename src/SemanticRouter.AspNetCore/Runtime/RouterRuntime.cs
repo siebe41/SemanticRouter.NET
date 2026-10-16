@@ -54,6 +54,15 @@ internal sealed class RouterRuntime : IDisposable
 
     public required RouterConfigurationSource Source { get; init; }
 
+    /// <summary>What applied this configuration, as the history names it: <c>startup</c>, <c>admin API</c>, <c>rollback</c>, <c>auto-tune</c>, …</summary>
+    public string? ChangeSource { get; init; }
+
+    /// <summary>Who applied it (<c>admin token</c>, <c>this machine</c>, a user a trusted proxy named), when known.</summary>
+    public string? ChangedBy { get; init; }
+
+    /// <summary>0 not known yet, 1 the store holds this configuration, 2 it does not (see <see cref="RouterRuntimeProvider.IsUnsaved"/>).</summary>
+    internal int SavedState;
+
     public required IEmbeddingProvider EmbeddingProvider { get; init; }
 
     public required IPromptClassifier Classifier { get; init; }
@@ -140,7 +149,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                 if (_current is null)
                 {
                     (RouterConfiguration document, RouterConfigurationSource source) = LoadInitial();
-                    _current = Build(document, source);
+                    _current = Build(document, source, changeSource: "startup");
                     RecordStartup(document, source);
                     ScheduleWarmUp(_current);
                 }
@@ -199,10 +208,41 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     }
 
     /// <summary>
-    /// Validates <paramref name="configuration"/>, builds a runtime from it, swaps it in and optionally saves it to the
-    /// store. The previous runtime is disposed. Throws <see cref="InvalidOperationException"/> when invalid.
+    /// Whether a configuration store is registered and the running configuration is not what it holds: it was applied
+    /// without saving (or reset to the application's configuration), so a restart would bring back the saved one.
     /// </summary>
-    public RouterRuntime Apply(RouterConfiguration configuration, bool persist, string source = "admin API", string? actor = null, string? note = null)
+    public bool Unsaved => IsUnsaved(Current);
+
+    /// <summary>Whether the running configuration is the one the store holds (<see langword="false"/> without a store).</summary>
+    public bool Saved => _store is not null && !Unsaved;
+
+    /// <summary>Whether <paramref name="runtime"/>'s configuration differs from what the store holds. Worked out once per runtime.</summary>
+    internal bool IsUnsaved(RouterRuntime runtime)
+    {
+        if (_store is null || runtime.Source == RouterConfigurationSource.Store)
+        {
+            return false;
+        }
+
+        if (Volatile.Read(ref runtime.SavedState) == 0)
+        {
+            // What a restart would load, held to the same policy the running document was.
+            (RouterConfiguration saved, _) = ReadSaved(log: false);
+            Policy.Enforce(saved);
+            Volatile.Write(ref runtime.SavedState, saved.ToJson() == runtime.Configuration.ToJson() ? 1 : 2);
+        }
+
+        return runtime.SavedState == 2;
+    }
+
+    /// <summary>
+    /// Validates <paramref name="configuration"/>, builds a runtime from it, swaps it in and optionally saves it to the
+    /// store. The previous runtime is disposed. Throws <see cref="InvalidOperationException"/> when invalid, and
+    /// <see cref="RouterConfigurationConflictException"/> when <paramref name="baseVersion"/> is given and another
+    /// version is running by now.
+    /// </summary>
+    public RouterRuntime Apply(
+        RouterConfiguration configuration, bool persist, string source = "admin API", string? actor = null, string? note = null, int? baseVersion = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         IReadOnlyList<string> errors = ValidateChange(configuration);
@@ -214,8 +254,18 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         RouterRuntime? previous;
         RouterRuntime runtime;
         var notes = new List<string>();
+        if (baseVersion is not null)
+        {
+            _ = Current; // built before the lock, so the version check below has a running configuration to compare with
+        }
+
         lock (_gate)
         {
+            if (baseVersion is { } expected && _current is { } running && running.Version != expected)
+            {
+                throw new RouterConfigurationConflictException(running);
+            }
+
             RouterConfigurationSource runtimeSource = persist && _store is not null ? RouterConfigurationSource.Store : RouterConfigurationSource.Memory;
             RouterConfiguration document = configuration.Clone();
             if (persist && _store is not null)
@@ -238,7 +288,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                 }
             }
 
-            runtime = Build(document, runtimeSource, notes);
+            runtime = Build(document, runtimeSource, notes, source, actor);
             if (persist && _store is not null)
             {
                 _store.Save(document);
@@ -257,6 +307,57 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         return runtime;
     }
 
+    /// <summary>
+    /// Applies a change made on top of the running configuration (an utterance added from the dashboard, a learned
+    /// change, an undo) and saves it only when the running configuration is saved: saving it otherwise would also save
+    /// whatever was applied without saving. Returns the runtime and whether the change was saved.
+    /// </summary>
+    public (RouterRuntime Runtime, bool Saved) ApplyKeepingSaveState(RouterConfiguration configuration, string source, string? actor = null, string? note = null)
+    {
+        bool persist = !Unsaved;
+        RouterRuntime runtime = Apply(configuration, persist, source, actor, note);
+        return (runtime, persist && _store is not null);
+    }
+
+    /// <summary>Saves the running configuration to the store as it is. Throws <see cref="InvalidOperationException"/> without a store.</summary>
+    public RouterRuntime SaveRunning(string? actor = null)
+    {
+        if (_store is null)
+        {
+            throw new InvalidOperationException("There is nowhere to save to: no configuration store is registered (see SemanticRouterBuilder.UseConfigurationFile).");
+        }
+
+        return Apply(Current.Configuration.Clone(), persist: true, "save", actor, "saved the running configuration");
+    }
+
+    /// <summary>
+    /// Applies what the store holds, as a restart would (the application's configuration when the store holds nothing
+    /// usable). Throws <see cref="InvalidOperationException"/> without a store.
+    /// </summary>
+    public RouterRuntime RevertToSaved(string? actor = null)
+    {
+        if (_store is null)
+        {
+            throw new InvalidOperationException("There is no saved configuration to go back to: no configuration store is registered (see SemanticRouterBuilder.UseConfigurationFile).");
+        }
+
+        RouterRuntime? previous;
+        RouterRuntime runtime;
+        lock (_gate)
+        {
+            (RouterConfiguration saved, RouterConfigurationSource source) = ReadSaved(log: true);
+            runtime = Build(saved, source, changeSource: "revert", actor: actor);
+            runtime.HistoryVersion = Record(runtime.Configuration, "revert", actor, source == RouterConfigurationSource.Store ? _store.Location : "the application's own configuration");
+            previous = _current;
+            _current = runtime;
+        }
+
+        ScheduleWarmUp(runtime);
+        previous?.Dispose();
+        Changed?.Invoke(runtime);
+        return runtime;
+    }
+
     /// <summary>Discards the stored document and rebuilds from the application's configuration.</summary>
     public RouterRuntime ResetToBaseline(string? actor = null)
     {
@@ -264,7 +365,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         RouterRuntime runtime;
         lock (_gate)
         {
-            runtime = Build(Baseline.Clone(), RouterConfigurationSource.Configuration);
+            runtime = Build(Baseline.Clone(), RouterConfigurationSource.Configuration, changeSource: "reset", actor: actor);
             Record(runtime.Configuration, "reset", actor, "the application's own configuration");
             previous = _current;
             _current = runtime;
@@ -316,7 +417,13 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         }
     }
 
-    private (RouterConfiguration Document, RouterConfigurationSource Source) LoadInitial()
+    private (RouterConfiguration Document, RouterConfigurationSource Source) LoadInitial() => ReadSaved(log: true);
+
+    /// <summary>
+    /// What a start-up loads: the stored document when there is a valid one (with secrets it leaves out taken from the
+    /// application's configuration), else the application's configuration.
+    /// </summary>
+    private (RouterConfiguration Document, RouterConfigurationSource Source) ReadSaved(bool log)
     {
         RouterConfiguration baseline = Baseline;
         if (_store is not null)
@@ -329,23 +436,34 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                     IReadOnlyList<string> errors = stored.GetDocumentValidationErrors();
                     if (errors.Count == 0)
                     {
-                        LogLoadedStore(_logger, _store.Location);
+                        if (log)
+                        {
+                            LogLoadedStore(_logger, _store.Location);
+                        }
+
                         return (stored, RouterConfigurationSource.Store);
                     }
 
-                    LogStoreInvalid(_logger, _store.Location, string.Join("; ", errors));
+                    if (log)
+                    {
+                        LogStoreInvalid(_logger, _store.Location, string.Join("; ", errors));
+                    }
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
             {
-                LogStoreUnreadable(_logger, _store.Location, ex);
+                if (log)
+                {
+                    LogStoreUnreadable(_logger, _store.Location, ex);
+                }
             }
         }
 
         return (baseline.Clone(), RouterConfigurationSource.Configuration);
     }
 
-    private RouterRuntime Build(RouterConfiguration configuration, RouterConfigurationSource source, IReadOnlyList<string>? notes = null)
+    private RouterRuntime Build(
+        RouterConfiguration configuration, RouterConfigurationSource source, IReadOnlyList<string>? notes = null, string? changeSource = null, string? actor = null)
     {
         // The machine policy wins over the configuration: what breaks it is turned off, and said so.
         IReadOnlyList<string> enforced = Policy.Enforce(configuration);
@@ -370,8 +488,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         var warnings = new List<string>(enforced);
         if (configuration.Middleware.Mode == PromptRouterMode.Dispatch && !configuration.Models.Any(m => m.Enabled))
         {
-            // Allowed so a fresh install can start and be configured from the dashboard, but every request gets 503.
-            warnings.Add("No model is enabled, so every request gets 503: add one on the dashboard's Models page or run `semantic-router init`.");
+            // Allowed so a fresh install can start and be set up from the dashboard; until then every request is refused.
+            warnings.Add(NoModelEnabled);
         }
 
         if (!configuration.Embeddings.KeepsPromptsLocal
@@ -451,6 +569,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             Version = ++_version,
             CreatedAt = DateTimeOffset.UtcNow,
             Source = source,
+            ChangeSource = changeSource,
+            ChangedBy = actor,
             EmbeddingProvider = embeddings,
             Classifier = classifier,
             Router = router,
@@ -462,6 +582,13 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             ModelAliases = configuration.Middleware.ModelAliases.Select(kv => (kv.Key, kv.Value)).ToArray(),
         };
     }
+
+    /// <summary>
+    /// The warning (and dashboard banner) while no model is enabled. It points at the dashboard's setup, which every
+    /// install has; the desktop app has no command line to run <c>init</c> from.
+    /// </summary>
+    internal const string NoModelEnabled =
+        "No model is enabled, so the router cannot answer requests yet. Set one up on the dashboard: Overview → Set up SemanticRouter.";
 
     private static PathString[] ToPaths(IEnumerable<string> prefixes) => prefixes
         .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -592,4 +719,15 @@ internal sealed class UnavailableEmbeddingProvider(string reason) : IEmbeddingPr
 
     public ValueTask<IReadOnlyList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default) =>
         throw new InvalidOperationException(reason);
+}
+
+/// <summary>
+/// A change was made against a configuration version that is no longer running (someone else applied one since), so it
+/// was not applied: applying it would silently undo theirs.
+/// </summary>
+internal sealed class RouterConfigurationConflictException(RouterRuntime current)
+    : InvalidOperationException($"The configuration changed since you loaded it: version {current.Version} is running now.")
+{
+    /// <summary>The configuration running now.</summary>
+    public RouterRuntime Current { get; } = current;
 }

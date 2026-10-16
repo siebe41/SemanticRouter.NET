@@ -421,7 +421,7 @@ internal sealed partial class RouterTuner : IDisposable
 
         Set(next, change, change.NewValue);
         long id = change.Id != 0 ? change.Id : NextId();
-        RouterRuntime runtime = _provider.Apply(next, persist: true, Source, actor, note ?? $"change {id}: {change.Summary}. {change.Why}");
+        RouterRuntime runtime = _provider.ApplyKeepingSaveState(next, Source, actor, note ?? $"change {id}: {change.Summary}. {change.Why}").Runtime;
         return Save(change with { Id = id, State = TuningChangeState.Applied, Version = runtime.HistoryVersion, Actor = actor });
     }
 
@@ -477,7 +477,7 @@ internal sealed partial class RouterTuner : IDisposable
             if (Decide(change, options, history, now) == Disposition.Apply)
             {
                 long id = NextId();
-                RouterRuntime applied = _provider.Apply(next, persist: true, Source, Actor, $"change {id}: {change.Summary}. {change.Why}");
+                RouterRuntime applied = _provider.ApplyKeepingSaveState(next, Source, Actor, $"change {id}: {change.Summary}. {change.Why}").Runtime;
                 made.Add(Save(change with { Id = id, State = TuningChangeState.Applied, Version = applied.HistoryVersion, Actor = Actor }));
             }
             else
@@ -570,7 +570,7 @@ internal sealed partial class RouterTuner : IDisposable
             }
 
             DateTimeOffset now = _time.GetUtcNow();
-            RouterRuntime runtime = _provider.Apply(next, persist: true, UndoSource, actor, $"undo of auto-tune change {id}: {change.Summary}");
+            RouterRuntime runtime = _provider.ApplyKeepingSaveState(next, UndoSource, actor, $"undo of auto-tune change {id}: {change.Summary}").Runtime;
             TuningChange undone = change;
             foreach (TuningChange step in chain)
             {
@@ -637,7 +637,7 @@ internal sealed partial class RouterTuner : IDisposable
             if (undone.Count > 0)
             {
                 DateTimeOffset now = _time.GetUtcNow();
-                RouterRuntime runtime = _provider.Apply(next, persist: true, UndoSource, actor, $"undo of all automatic changes ({undone.Count})");
+                RouterRuntime runtime = _provider.ApplyKeepingSaveState(next, UndoSource, actor, $"undo of all automatic changes ({undone.Count})").Runtime;
                 foreach (TuningChange change in undone)
                 {
                     Save(change with { State = TuningChangeState.Undone, UndoneAt = now, Actor = actor, UndoVersion = runtime.HistoryVersion });
@@ -672,7 +672,7 @@ internal sealed partial class RouterTuner : IDisposable
             }
 
             Set(next, change, change.NewValue);
-            RouterRuntime runtime = _provider.Apply(next, persist: true, Source, actor, $"change {id} (suggested): {change.Summary}. {change.Why}");
+            RouterRuntime runtime = _provider.ApplyKeepingSaveState(next, Source, actor, $"change {id} (suggested): {change.Summary}. {change.Why}").Runtime;
             return Save(change with { State = TuningChangeState.Applied, Version = runtime.HistoryVersion, Actor = actor });
         }
         finally

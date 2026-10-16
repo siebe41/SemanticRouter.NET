@@ -87,7 +87,7 @@ internal sealed partial class RouterTuner
 
         target.PreferredModel = trial.NewModel;
         string why = $"{trial.Why} It did as well: {evidence} {trial.NewModel} now serves {route.Name}'s plain matches.";
-        RouterRuntime runtime = _provider.Apply(next, persist: true, Source, Actor, $"change {trial.Id}: {trial.Summary}. {why}");
+        RouterRuntime runtime = _provider.ApplyKeepingSaveState(next, Source, Actor, $"change {trial.Id}: {trial.Summary}. {why}").Runtime;
         return Save(trial with { State = TuningChangeState.Applied, Version = runtime.HistoryVersion, Actor = Actor, Why = why });
     }
 

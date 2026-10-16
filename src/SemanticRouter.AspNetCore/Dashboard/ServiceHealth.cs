@@ -127,7 +127,7 @@ internal static class ServiceHealth
 
         if (used.Length == 0)
         {
-            return ("failing", "No enabled model: requests cannot be answered.", problems);
+            return ("failing", "No model is enabled, so the router cannot answer requests yet. Set one up on the dashboard's Overview.", problems);
         }
 
         if (broken.Length == used.Length)
