@@ -16,6 +16,8 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - The admin API cannot change what a CLI runs (program, arguments, environment, home directory) or which paths memory sources read, unless `Dashboard:AllowProcessSettings` is on. (#114, #144)
 - The read-only dashboard role can no longer trigger calls that cost money or scan the disk (evaluate, classify, embeddings test, discover, check, memory refresh); dashboard sessions expire after `Dashboard:SessionLifetime` (12 hours), and wrong tokens are throttled per address. (#144)
 - Dashboard identity from an authenticating reverse proxy (`Dashboard:TrustedIdentityHeader`, believed only from `KnownProxies`), the real actor on every configuration change, and an append-only audit log (`GET /router/api/audit`, an Audit log page, `State:Retention:AuditDays`). (#150)
+- A `Metrics` dashboard role (`Dashboard:MetricsToken`, or `Metrics` in `TrustedIdentityRoles`) that sees figures only, never prompt or reply text. Signing out ends the session on the server, and an admin can sign out every session (`POST /router/api/session/revoke-all`); sessions from before the upgrade sign in once more. (#161)
+- With `State:StorePrompts: Off`, a failed CLI run's output and the judge's reason for a grade are not stored or logged either; `Redacted` masks credentials in them. (#162)
 - Local-only routing holds in more cases: a failed classification stays local while any route is local-only, a conversation kept local stays local (including named cloud models), local-only prompts stay off remote embedding endpoints (`Embeddings:IsLocal`), and the judge respects routing profiles. (#114)
 - Secrets: CLI environment variables and more header names (auth, cookie, password, credential, session, signature) are masked; masked or stored keys are never sent to a connector that now points somewhere else; the configuration history keeps no secrets; keyed requests do not follow redirects; webhook URLs are not logged. (#114, #116)
 - Keys written into addresses (`user:key@`, key-named query values) are masked in the admin API, the configuration history and every address the dashboard and `doctor` show. (#117, #129)
@@ -43,7 +45,8 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - `PromptRouterMiddlewareOptions.InjectedTags`; the Copilot app's injected context blocks are ignored when classifying. (#118)
 - Model names `semantic-router`, `claude-semantic-router`, `-cheapest` and `-best`; `/v1/models` entries have a `display_name`. (#156)
 - `tool-calls` benchmark for prompted tool calling. (#152)
-- Dashboard **Feedback** page and a **Report** button on each Activity entry: they open a GitHub issue (misroute, bug or idea) with the decision line, the model that answered, the embedding settings and the router version filled in. The prompt is left out unless you add it, and a local-only prompt answered by a cloud model points to private security reporting instead. The misroute and bug forms ask for the router version and the decision line.
+- A `quick-answers` route (tier 2) in the starting routes, for short factual and explain questions, and small-refactor utterances in `simple-code`; the sample evaluation set has 116 prompts. (#160)
+- Dashboard **Feedback** page and a **Report** button on each Activity entry: they open a GitHub issue (misroute, bug or idea) with the decision line, the model that answered, the embedding settings and the router version filled in. The prompt is left out unless you add it, and a local-only prompt answered by a cloud model points to private security reporting instead. The misroute and bug forms ask for the router version and the decision line. (#164)
 
 ### Changed
 
@@ -64,6 +67,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - A user message that holds only injected context (such as the Copilot app's `<system_reminder>`) no longer hides the person's message from the classifier. (#118)
 - "What can you help me with?" goes to smalltalk; classify and Try a prompt apply callouts; computed properties are no longer written into `semantic-router.json`. (#157)
 - Dashboard layout: steady Live rows, no sideways scrolling on Live, long tokens on Activity. (#155)
+- A warm prompt cache on an Anthropic connector counts for its `CacheTtl` (or the client's own `ttl`), not always `Middleware:Conversation:CacheLifetime`; a tool call written inside a line of a tool result is kept as text when the model repeats it. (#162)
 
 ## [0.2.1] and earlier
 

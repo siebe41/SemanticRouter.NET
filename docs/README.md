@@ -6,9 +6,10 @@
 | [clients.md](clients.md) | Point Claude Code, Codex, the OpenAI SDKs or curl at the router, and see what is tested. |
 | [host.md](host.md) | Install and run the `semantic-router` tool or container, and run it in the background as a per-user service. |
 | [desktop.md](desktop.md) | Use the desktop app: the router in the tray, the dashboard in its own window or your browser, start at sign-in. |
-| [dashboard.md](dashboard.md) | Use or extend the dashboard and its admin API, and add a theme. |
-| [routing-quality.md](routing-quality.md) | Measure how well your routes work on your own prompts: evaluation sets, threshold calibration, route health, labelling activity, retry escalation. |
+| [dashboard.md](dashboard.md) | Use or extend the dashboard and its admin API: its pages, access, roles and sessions, the audit log, gateway keys and rate limits, notices and webhooks, themes. |
+| [routing-quality.md](routing-quality.md) | Measure and improve routing on your own prompts: the starting routes, evaluation sets, threshold calibration, route health, conversation routing, feedback, the judge, automatic tuning, model reliability, retry escalation. |
 | [routing-profiles.md](routing-profiles.md) | Route by context, not only by prompt: profiles per project, client or tool set, virtual models, keeping secrets local, budgets per profile, active hours. |
+| [observability.md](observability.md) | See what the router spent and why: usage and cost, budgets, limit reset times, traces, metrics, request ids and activity export. |
 | [memory.md](memory.md) | Map an Obsidian vault, Claude Code's memory or an MCP memory graph, and see which notes reach local and cloud models. |
 | [providers.md](providers.md) | Configure a provider: LM Studio, Ollama, the subscription CLIs, OpenAI, Anthropic, Gemini, Azure, OpenRouter; tool calling per connector. |
 | [enterprise.md](enterprise.md) | Set a machine-wide policy, as an administrator, that users' configuration cannot override: connector types, allowed endpoints, local hosts, the dashboard, updates, features. |

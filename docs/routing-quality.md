@@ -245,7 +245,7 @@ It is off by default: a client that legitimately repeats a prompt (a "regenerate
 | `GET api/routes/health` | Findings and route pairs. |
 | `POST api/routes/{name}/utterances` | `{"utterance": "…", "tier": n}`: add an utterance (creating the route when `tier` is given) and apply. Returns how the utterance now classifies. |
 | `GET api/tuning` | Automatic tuning: `mode`, `paused`, `lastRun`, `nextRun`, `lastResult`, `thisWeek`, `suggestions`, and the `changes` newest first (each with `summary`, `why`, `examples`, `state`, `version` and `effect`). |
-| `GET api/tuning/changes?limit=100` | Just the changes. |
+| `GET api/tuning/changes?limit=100` | The changes only. |
 | `POST api/tuning/run` | Run tuning now; returns what it did. |
 | `POST api/tuning/changes/{id}/undo` | Undo one change (409 when it is not applied, or its setting changed since). |
 | `POST api/tuning/changes/{id}/apply`, `…/dismiss` | Apply or turn down a suggestion. |

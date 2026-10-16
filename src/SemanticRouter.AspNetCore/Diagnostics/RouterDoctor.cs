@@ -144,7 +144,7 @@ public static class RouterDoctor
             return new RouterCheck("embeddings", RouterCheckStatus.Warning,
                 "the Hashing provider only matches shared words. For meaning-based routing set SemanticRouter:Embeddings:Provider to Onnx " +
                 "(in-process, no server) or to an OpenAICompatible endpoint (LM Studio, Ollama, OpenAI), and raise DefaultSimilarityThreshold " +
-                "(see the README's calibration table).");
+                "(see \"Thresholds by embedding model\" in the README).");
         }
 
         bool onnx = embeddings.Provider == EmbeddingProviderKind.Onnx;
