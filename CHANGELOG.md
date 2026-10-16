@@ -83,6 +83,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Dashboard: Usage right-aligns its figures and folds an empty Feedback card to one line.
 - Dashboard: a failed prompt-tester Send or a plan with no eligible model says why and where to fix it.
 - Dashboard: Memory without sources no longer shows Fit, Rescan and Clear sharing, nor two sets of add buttons; Evaluate with an empty set says what to do on the page itself.
+- Deleting activity (`DELETE api/activity`, **Delete all activity**) could leave the deleted prompt previews in `state.db-wal` when another connection was reading the database at that moment (the dashboard, a second router on the same file). It now waits up to the busy timeout for the reader to finish before emptying the log, and logs a warning when it cannot.
 
 ## [0.4.0] - 2026-10-16
 
