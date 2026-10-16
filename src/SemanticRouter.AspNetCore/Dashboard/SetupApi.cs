@@ -255,10 +255,12 @@ internal static partial class SetupApi
         }
         else if (connector.Type == ConnectorType.Cli && connector.Preset == CliPreset.Codex)
         {
-            // `codex login status` says "Logged in using ChatGPT" or "Not logged in"; anything else is left unsaid.
-            (_, string status) = await RouterDoctor.RunAsync(runner, path, ["login", "status"], connector, cancellationToken).ConfigureAwait(false);
+            // `codex login status` says "Logged in using ChatGPT", "… using an API key" or "Not logged in"; anything else is
+            // left unsaid. Its output is not quoted: with an API key it shows part of the key.
+            (int statusExit, string status) = await RouterDoctor.RunAsync(runner, path, ["login", "status"], connector, cancellationToken).ConfigureAwait(false);
             signIn = status.Contains("Not logged in", StringComparison.OrdinalIgnoreCase) ? "Not signed in: run `codex login`"
-                : status.Contains("Logged in", StringComparison.OrdinalIgnoreCase) ? "Signed in"
+                : statusExit == 0 && status.Contains("API key", StringComparison.OrdinalIgnoreCase) ? "Signed in with an API key, so requests are billed to that key, not to a ChatGPT plan"
+                : statusExit == 0 && status.Contains("Logged in", StringComparison.OrdinalIgnoreCase) ? "Signed in"
                 : null;
         }
 
