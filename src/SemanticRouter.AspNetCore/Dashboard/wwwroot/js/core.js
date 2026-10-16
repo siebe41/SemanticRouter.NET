@@ -51,6 +51,7 @@ export const state = {
   usage: { window: '7d', by: 'model', data: null, loading: false },
   evaluation: { text: null, location: null, count: 0, report: null, busy: false, health: null, compare: null, addFor: null, add: {}, form: { provider: 'OpenAICompatible', endpoint: '', model: '', apiKey: '', dimensions: 512 } },
   label: null,         // the Activity "label this prompt" form
+  report: null,        // the Feedback form: kind, Activity entry, the text typed so far
   profileTester: { prompt: '', results: null, busy: false },
   checking: new Set(), // connectors whose endpoint check is running
   audit: { entries: null, loading: false, limit: 200, error: null }, // GET api/audit (Audit log)

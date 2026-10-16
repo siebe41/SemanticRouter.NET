@@ -13,7 +13,9 @@ body:
 
         A local-only prompt that reached a non-local model is a security issue: report it through the Security tab ("Report a vulnerability"), not here.
 
-        The decision is in three places: the `X-Prompt-Route-*` response headers, the request's entry on the dashboard's **Activity** page, or `POST /semantic-router/classify` with the prompt.
+        **Quickest:** on the dashboard's **Activity** page, use **Report** next to the request. It opens this form with the decision line, the model that answered, the embedding settings and the version filled in, and leaves the prompt out unless you add it.
+
+        Otherwise the decision is in the `X-Prompt-Route-*` response headers, or in `POST /semantic-router/classify` with the prompt.
   - type: dropdown
     id: direction
     attributes:
@@ -29,8 +31,18 @@ body:
     id: decision
     attributes:
       label: The router's decision
-      description: Reason, tier, route and similarity, from the headers, the Activity entry or the classify endpoint. Paste them as they are.
+      description: The decision line from the Activity entry (**Report** fills it in, or **Copy the decision line** on the dashboard's Feedback page), or the `X-Prompt-Route-*` headers, or the classify output. Paste it as it is; reason, tier, route and similarity matter most.
       placeholder: |
+        Reason: SemanticMatch
+        Tier: 4
+        Route: complex-code · similarity 0.81
+        Complexity: 0.42
+        Planned model: claude-code-opus
+        Served by: claude-code-opus · served
+        Request: Anthropic · client Claude Code · model auto · tools · ~1200 tokens
+        Activity entry: #123 at 2026-10-16T10:00:00Z
+
+        or the headers:
         X-Prompt-Route-Reason: SemanticMatch
         X-Prompt-Route-Tier: 4
         X-Prompt-Route: complex-code
@@ -42,7 +54,7 @@ body:
     id: answered-by
     attributes:
       label: Model that answered
-      description: The `X-Prompt-Route-Model` header or the Activity entry's "served by".
+      description: The `X-Prompt-Route-Model` header or the Activity entry's "Served by".
       placeholder: e.g. claude-code-opus
     validations:
       required: true
@@ -79,16 +91,17 @@ body:
   - type: textarea
     id: prompt
     attributes:
-      label: Prompt or paraphrase
-      description: "**No secrets or private text.** A paraphrase that keeps the length and shape is enough. Say whether it was the first message or a later turn, and whether tools were attached."
+      label: Prompt, paraphrase or description
+      description: "Optional, but it helps. **No secrets or private text.** A paraphrase that keeps the length and shape is enough. Say whether it was the first message or a later turn, and whether tools were attached."
       render: text
-    validations:
-      required: true
   - type: input
     id: version
     attributes:
-      label: Version
+      label: Router version
+      description: In the dashboard's sidebar footer and on Overview → Service, or from `semantic-router --version`, or the package version.
       placeholder: e.g. 0.2.0, or main at abc1234
+    validations:
+      required: true
   - type: checkboxes
     id: no-secrets
     attributes:
