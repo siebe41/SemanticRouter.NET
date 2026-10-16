@@ -147,9 +147,10 @@ test('the rail groups the pages into sections, each with its pages as tabs', asy
   await page.locator('#nav a', { hasText: 'Monitor' }).click();
   await page.locator('#nav a', { hasText: 'Routing' }).click();
   await expect(page.locator('#tabs a[aria-current="page"]')).toHaveText('Profiles');
-  // Feedback is in no section: no tabs.
+  // Report an issue (the Feedback page) is in no section: no tabs.
+  await expect(page.locator('#sidebar a[data-view="feedback"]')).toHaveText('Report an issue');
   await page.locator('#sidebar a[data-view="feedback"]').click();
-  await expect(page.locator('#view h1')).toHaveText('Feedback');
+  await expect(page.locator('#view h1')).toHaveText('Report an issue');
   await expect(page.locator('#tabs')).toBeHidden();
   await expect(page.locator('#nav a[aria-current]')).toHaveCount(0);
 });
@@ -248,7 +249,7 @@ test('discovering a connector\'s models adds the chosen ones on the chosen tier'
   });
   await open(page, 'models');
   const group = page.locator('section.model-group', { has: page.locator('h2', { hasText: /^local$/ }) });
-  await group.locator('[data-action="lineup-discover-draft"]').click();
+  await group.locator('[data-action="lineup-discover"]').click();
   const lineup = group.locator('.lineup');
   await expect(lineup).toContainText('in the catalog as local-small');
   // The stub is neither LM Studio nor Ollama, so nothing is ticked for you: it could be a proxy to a cloud API.
@@ -297,9 +298,15 @@ test('validation lists problems and discard restores the configuration', async (
   await page.locator('input[data-bind="Routes.1.Name"]').fill('smalltalk');
   await page.locator('#save-bar [data-action="validate"]').click();
   await expect(page.locator('ul.errors')).toContainText('smalltalk');
+  // Discard asks in the page first, then offers Undo.
   await page.locator('#save-bar [data-action="discard"]').click();
+  await expect(page.locator('dialog#ask')).toContainText('Discard 1 change?');
+  await page.locator('dialog#ask button', { hasText: 'Discard' }).click();
   await expect(page.locator('#save-bar')).toBeHidden();
   await expect(page.locator('.item-head', { hasText: 'architecture' })).toBeVisible();
+  await page.locator('#toast button', { hasText: 'Undo' }).click();
+  await expect(page.locator('#save-bar')).toBeVisible();
+  await expect(page.locator('input[data-bind="Routes.1.Name"]')).toHaveValue('smalltalk');
 });
 
 test('the prompt tester classifies and sends a prompt through the gateway', async ({ page }) => {
@@ -510,7 +517,7 @@ test('Report on an Activity entry opens a pre-filled misroute issue without the 
   await page.addInitScript(() => { window.__opened = []; window.open = (url) => { window.__opened.push(url); return null; }; });
   await open(page, 'activity');
   await page.locator('#view table.activity-table tr', { hasText: 'my-private-words-123' }).first().getByRole('button', { name: 'Report' }).click();
-  await expect(page.locator('#view h1')).toHaveText('Feedback');
+  await expect(page.locator('#view h1')).toHaveText('Report an issue');
   await expect(page.locator('#feedback-form')).toContainText('Route: smalltalk');
   await page.getByLabel('What the prompt really needed, and why').fill('Small talk; tier 1 was right.');
   await page.getByRole('button', { name: 'Open the issue on GitHub' }).click();

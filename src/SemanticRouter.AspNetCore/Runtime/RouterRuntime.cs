@@ -507,6 +507,13 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                 double elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
                 LogWarmedUp(_logger, runtime.Version, elapsed);
             }
+            catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or IOException)
+            {
+                // A model that cannot be downloaded or a server that does not answer: the message says what to do, and a
+                // stack trace would only bury it.
+                runtime.WarmUpError = ex.Message;
+                LogWarmUpProblem(_logger, runtime.Version, ex.Message);
+            }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 runtime.WarmUpError = ex.Message;
@@ -543,6 +550,9 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Semantic route index v{Version} warm-up failed; it will be retried on the first request.")]
     private static partial void LogWarmUpFailed(ILogger logger, int version, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Semantic route index v{Version} warm-up failed, and will be retried on the first request: {Problem}")]
+    private static partial void LogWarmUpProblem(ILogger logger, int version, string problem);
 }
 
 /// <summary>DI facades that forward to the current runtime, so consumers never hold a stale instance.</summary>

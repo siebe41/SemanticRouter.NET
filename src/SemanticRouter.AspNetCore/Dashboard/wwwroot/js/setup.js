@@ -187,7 +187,7 @@ export function setupCard() {
   const noModels = conns.filter((c) => !draftEnabledModels().some((m) => (m.Connector || '').toLowerCase() === c.toLowerCase()));
   const step2 = !one ? '' : two && !pending.length ? '' : `
     ${pending.length ? `<div class="inline"><span class="small">${plural(pending.length, 'model')} in the draft, not running yet.</span><button class="btn primary small" data-action="apply-save">Apply &amp; save</button></div>` : ''}
-    ${noModels.map((c) => `<div class="inline" style="margin-top:8px"><span class="small">${h(c)} has no models yet.</span><button class="btn small" data-action="lineup-discover-draft" data-connector="${h(c)}">Discover models</button></div>${lineupPanel(c)}`).join('')}
+    ${noModels.map((c) => `<div class="inline" style="margin-top:8px"><span class="small">${h(c)} has no models yet.</span><button class="btn small" data-action="lineup-discover" data-connector="${h(c)}">Discover models</button></div>${lineupPanel(c)}`).join('')}
     <p class="small muted">Or add them by hand on <a href="#/models">Models</a>.</p>`;
 
   const reply = state.tester.reply;
@@ -218,7 +218,6 @@ Object.assign(pageActions, {
     const m = $('#tester-model'); if (m) m.value = 'auto';
     await actions['tester-send']();
   },
-  async 'lineup-discover-draft'(el) { await discoverDraft(el.dataset.connector); },
 });
 
 // The Add connector menu loads the presets when it opens (toggle does not bubble: capture).

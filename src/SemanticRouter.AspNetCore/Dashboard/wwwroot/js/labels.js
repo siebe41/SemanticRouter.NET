@@ -1,6 +1,6 @@
 /* Semantic Router dashboard: plain-language labels and the formatters every page shares (reasons, where the configuration
    came from, tiers, money, counts, dates, durations). Imports only core.js. */
-import { h, state, tiers } from './core.js';
+import { plural as words, sourceLabel, whenDate, h, state, tiers } from './core.js';
 
 /* Why a prompt got its tier, in words. The enum value stays in the tooltip (it is what headers, logs and exports say). */
 export const REASONS = {
@@ -23,13 +23,12 @@ export const REASONS = {
 export const reasonLabel = (reason) => REASONS[reason] || String(reason || '');
 export const reasonHtml = (reason) => `<span title="${h(`Reason: ${reason}`)}">${h(reasonLabel(reason))}</span>`;
 
-/* Where the running configuration came from (RouterConfigurationSource). */
-const SOURCES = { Store: 'saved', Memory: 'not saved', Configuration: 'from app settings' };
-export const sourceLabel = (source) => SOURCES[source] || String(source || '').toLowerCase();
+/* Where the running configuration came from, in words: core.js's. */
+export { sourceLabel };
 
-/* Counts with thousands separators, and words that follow their number. */
+/* Counts with thousands separators, and words that follow their number (core.js's plural, with the separators). */
 export const count = (n) => Number(n || 0).toLocaleString();
-export const plural = (n, one, many) => `${count(n)} ${n === 1 ? one : many || one + 's'}`;
+export const plural = (n, one, many) => words(n, one, many).replace(/^\S+/, count(n));
 
 /*
  * Money, one way everywhere: "$0" for nothing, "<$0.01" below a cent, cents above. precise keeps two significant digits
@@ -42,13 +41,8 @@ export function usd(v, precise) {
   return (n < 0 ? '-$' : '$') + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-/* A time, with the date when it is not today. */
-export function stamp(iso) {
-  const d = new Date(iso);
-  if (isNaN(d)) return '';
-  const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} ${time}`;
-}
+/* A time, with the date when it is not today: core.js's. */
+export const stamp = whenDate;
 export const fullStamp = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
 
 /* A tier, the same way everywhere: "T2 · Coding", with its description in the tooltip. Running tiers first, so an

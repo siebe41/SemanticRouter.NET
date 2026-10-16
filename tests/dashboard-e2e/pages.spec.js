@@ -99,7 +99,7 @@ test('with no model enabled, the Overview walks through setup: connector, models
   await expect(card.locator('.step.current .step-head')).toContainText('Add models');
 
   // Discover models asks with the draft's settings: the connector is not applied yet.
-  await card.locator('[data-action="lineup-discover-draft"]').click();
+  await card.locator('[data-action="lineup-discover"]').click();
   expect(discovered).toMatchObject({ name: 'lmstudio', settings: { BaseAddress: stub } });
   await expect(card.locator('input[aria-label="Add stub-small"]')).toBeChecked();
   await card.locator('[data-action="lineup-add"]').click();
@@ -270,7 +270,7 @@ test('capabilities are ticked, a refused rename says why, and Gateway keeps Dele
   const name = page.locator('.item.open input[data-action-input="connector-rename"]');
   await name.fill('cloud');
   await name.press('Tab');
-  await expect(page.locator('#toast')).toContainText('There is already a connector called “cloud”');
+  await expect(page.locator('#toast')).toContainText('There is already a connector named cloud');
 
   await open(page, 'gateway');
   const stored = page.locator('.card', { has: page.locator('h2', { hasText: 'Stored activity' }) });

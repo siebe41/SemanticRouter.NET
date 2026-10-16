@@ -489,4 +489,28 @@ public sealed class DesktopTests : IDisposable
             Path.IsPathFullyQualified(tool).Should().BeTrue("a bare name could start a file of that name in the current directory");
         }
     }
+
+    [Fact]
+    public void The_tray_says_when_the_router_runs_without_a_model()
+    {
+        TrayDigest.NoModelEnabled("""{"models":[],"gateway":{"mode":"Dispatch"}}""").Should().BeTrue();
+        TrayDigest.NoModelEnabled("""{"models":[{"name":"a","enabled":false}],"gateway":{"mode":"Dispatch"}}""").Should().BeTrue();
+        TrayDigest.NoModelEnabled("""{"models":[{"name":"a","enabled":false},{"name":"b","enabled":true}],"gateway":{"mode":"Dispatch"}}""").Should().BeFalse();
+        TrayDigest.NoModelEnabled("""{"models":[],"gateway":{"mode":"Annotate"}}""").Should().BeFalse("an annotating router calls no model");
+        TrayDigest.NoModelEnabled("""{"version":3}""").Should().BeFalse("an answer it does not understand is not reported as a problem");
+
+        TrayDigest.StatusLine("Running on http://localhost:5080", noModel: true).Should().Be("Running on http://localhost:5080, but no model is enabled yet");
+        TrayDigest.StatusLine("Running on http://localhost:5080", noModel: false).Should().Be("Running on http://localhost:5080");
+    }
+
+    [Fact]
+    public async Task The_tray_reads_the_routers_own_status()
+    {
+        HostSettings host = HostSettings.Parse(
+            ["--config-dir", Path.Combine(_directory, "status"), "--urls", "http://127.0.0.1:0", "--SemanticRouter:Embeddings:Provider=Hashing"], _ => null);
+        await using RunningRouter? router = await RouterHost.StartAsync(host, TextWriter.Null, b => b.Logging.ClearProviders());
+        using var client = new HttpClient();
+
+        TrayDigest.NoModelEnabled(await client.GetStringAsync(new Uri(router!.LocalUrl + "/router/api/status"))).Should().BeTrue("the template has no model");
+    }
 }

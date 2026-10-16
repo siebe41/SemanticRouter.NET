@@ -1,11 +1,12 @@
 /* Semantic Router dashboard: Configuration pages: tiers, routes, models, connectors, routing rules, embeddings, gateway, clients, history. */
+import { aliasRows, limitRows, rowProblems } from './draft.js';
 import { connectorStateBadge } from './endpoints.js';
 import { advanced, durationField, numField, pickList, timeZoneList } from './fields.js';
 import { fullStamp, plural, tierChip } from './labels.js';
 import { reliabilityBadges, reliabilityCard } from './reliability.js';
 import { addConnectorMenu, presetList } from './setup.js';
 import { addresses } from './service.js';
-import { CAPABILITY_HINTS, CONNECTOR_TYPES, MESSAGE_SELECTION, PRESETS, STRATEGIES, adminOnly, connectorNames, h, isReference, kv, lineupFor, lines, readOnly, state, tiers, toast, views } from './core.js';
+import { CAPABILITY_HINTS, CONNECTOR_TYPES, MESSAGE_SELECTION, PRESETS, STRATEGIES, adminOnly, connectorNames, h, isReference, kv, lineupFor, lines, readOnly, state, tiers, views } from './core.js';
 
 views.tiers = () => {
   const c = state.config;
@@ -175,7 +176,7 @@ views.models = () => {
       const own = models.map((m, i) => ({ m, i })).filter((x) => (x.m.Connector || '').toLowerCase() === (connector || '').toLowerCase()).sort(byTier);
       const tierCounts = [...new Set(own.map((x) => x.m.Tier))].sort((a, b) => a - b).map((t) => `<span class="tier" title="${own.filter((x) => x.m.Tier === t).map((x) => h(x.m.Name)).join(', ')}">T${t}${own.filter((x) => x.m.Tier === t).length > 1 ? ' ×' + own.filter((x) => x.m.Tier === t).length : ''}</span>`).join('');
       return `<section class="model-group" aria-label="Models via ${h(connector)}">
-        <div class="section-head group-head"><h2>${h(connector || '(no connector)')}</h2>${conn ? `<span class="badge accent">${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? ' / ' + h(conn.Preset || 'Custom') : ''}</span>` : '<span class="badge danger">unknown connector</span>'}<span class="muted small">${own.length} model${own.length === 1 ? '' : 's'}</span>${tierCounts}<span class="spacer"></span>${conn && !readOnly() ? `<button class="btn small" data-action="lineup-discover-draft" data-connector="${h(connector)}">Discover models</button>` : ''}</div>
+        <div class="section-head group-head"><h2>${h(connector || '(no connector)')}</h2>${conn ? `<span class="badge accent">${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? ' / ' + h(conn.Preset || 'Custom') : ''}</span>` : '<span class="badge danger">unknown connector</span>'}<span class="muted small">${own.length} model${own.length === 1 ? '' : 's'}</span>${tierCounts}<span class="spacer"></span>${conn && !readOnly() ? `<button class="btn small" data-action="lineup-discover" data-connector="${h(connector)}">Discover models</button>` : ''}</div>
         ${lineupPanel(connector)}
         ${own.map((x) => modelItem(x.m, x.i)).join('')}
       </section>`;
@@ -245,7 +246,7 @@ views.connectors = () => {
             <label class="field"><span class="name">Extra headers (Name=value)</span><textarea data-bind="${p}.Headers" data-kind="kv" rows="3">${h(kv(c.Headers))}</textarea><span class="hint">Azure: <code>api-key=…</code> · OpenAI org: <code>OpenAI-Organization=org_…</code></span></label>
             <label class="field"><span class="name">Forward client headers</span><textarea data-bind="${p}.ForwardHeaders" data-kind="lines" rows="3">${h(lines(c.ForwardHeaders))}</textarea><span class="hint">Copied from the client request (e.g. <code>anthropic-beta</code>). Authorization headers are never forwarded.</span></label>`}
         </div>
-        <div class="row-actions" style="margin-top:10px">${readOnly() ? '' : `<button class="btn small" data-action="lineup-discover-draft" data-connector="${h(name)}">Discover models</button>`}<button class="btn danger small" data-action="connector-remove" data-name="${h(name)}">Remove</button></div>
+        <div class="row-actions" style="margin-top:10px">${readOnly() ? '' : `<button class="btn small" data-action="lineup-discover" data-connector="${h(name)}">Discover models</button>`}<button class="btn danger small" data-action="connector-remove" data-name="${h(name)}">Remove</button></div>
         ${lineupPanel(name)}</div>
       </div>`;
     }).join('') || `<div class="card section empty-state"><h2>Add a connector</h2><p class="muted">A connector is how the router reaches a provider: a local server (LM Studio, Ollama), a cloud API with a key, or a CLI on your own sign-in. Its models are added next.</p>${readOnly() ? '' : presetList(true)}</div>`}`;
@@ -331,7 +332,6 @@ views.embeddings = () => {
 
 views.gateway = () => {
   const m = state.config.Middleware || {};
-  const aliases = Object.entries(m.ModelAliases || {});
   return `
     <div class="section-head"><h1>Gateway</h1><span class="muted">The front door: which requests are routed, and how client model names map.</span></div>
     <div class="card section"><div class="card-head"><h2>Mode and paths</h2></div><div class="form-grid">
@@ -363,10 +363,27 @@ views.gateway = () => {
     </div></div>
     ${rateLimitsCard(m)}
     ${storedPromptsCard(state.config.State || {})}
-    <div class="card section"><div class="card-head"><h2>Model aliases</h2><span class="muted small">Map the names clients send to routing aliases or catalog models. A name without <code>*</code> is matched exactly, before the globs; among the globs the first match wins. Claude Code sends its default Opus name whether or not you chose Opus, so route Claude names as <code>auto</code>.</span><span class="spacer"></span><button class="btn small" data-action="alias-add">Add alias</button><button class="btn ghost small" data-action="alias-claude">Add Claude Code defaults</button></div>
-      <table><tr><th>Client model (glob)</th><th>Routes as</th><th></th></tr>
-        ${aliases.map(([k, v], i) => `<tr><td><input type="text" data-action-input="alias-key" data-index="${i}" value="${h(k)}"></td><td><input type="text" data-action-input="alias-value" data-index="${i}" value="${h(v)}" list="alias-targets"></td><td><button class="btn ghost small" data-action="alias-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="3" class="muted small">No aliases. Unknown names route as <code>auto</code>.</td></tr>'}
-      </table>
+    ${aliasesCard()}`;
+};
+
+/* A row's name input with its problem (a duplicate or an empty name) shown under it and tied to it. */
+const rowName = (attrs, value, problem, id) => `<input type="text" ${attrs} value="${h(value)}"${problem ? ` aria-invalid="true" aria-describedby="${id}"` : ''}>${problem ? `<span class="field-error" id="${id}">${h(problem)}</span>` : ''}`;
+
+/*
+ * Model aliases, edited as rows (draft.js): two rows with the same name are flagged rather than merged into one, and
+ * the order can be changed, since among the globs the first match wins.
+ */
+const aliasesCard = () => {
+  const rows = aliasRows();
+  const problems = rowProblems(rows, 'alias');
+  const globs = rows.filter((r) => r.key.includes('*')).length;
+  return `<div class="card section"><div class="card-head"><h2>Model aliases</h2><span class="muted small">Map the names clients send to routing aliases or catalog models. A name without <code>*</code> is matched exactly, before the globs; among the globs the first match wins, so order them from specific to general. Claude Code sends its default Opus name whether or not you chose Opus, so route Claude names as <code>auto</code>.</span><span class="spacer"></span><button class="btn small" data-action="alias-add">Add alias</button><button class="btn small" data-action="alias-claude">Add Claude Code defaults</button></div>
+      <div class="table-wrap"><table><tr><th>Client model (glob)</th><th>Routes as</th><th>${globs > 1 ? 'Order' : ''}</th><th></th></tr>
+        ${rows.map((r, i) => `<tr><td>${rowName(`aria-label="Client model" data-action-input="alias-key" data-index="${i}" data-row="alias-${i}" data-path="Middleware.ModelAliases.${h(r.key.trim())}"`, r.key, problems.get(i), `alias-problem-${i}`)}</td>
+          <td><input type="text" aria-label="${h(`Routes ${r.key || 'this name'} as`)}" data-action-input="alias-value" data-index="${i}" value="${h(r.value)}" list="alias-targets"></td>
+          <td class="nowrap">${globs > 1 && r.key.includes('*') ? `<button class="btn ghost small" data-action="alias-up" data-index="${i}" aria-label="${h(`Move ${r.key} up`)}" title="Move up: matched earlier" ${i === 0 ? 'disabled' : ''}>↑</button><button class="btn ghost small" data-action="alias-down" data-index="${i}" aria-label="${h(`Move ${r.key} down`)}" title="Move down: matched later" ${i === rows.length - 1 ? 'disabled' : ''}>↓</button>` : ''}</td>
+          <td><button class="btn ghost small" data-action="alias-remove" data-index="${i}" aria-label="${h(`Remove alias ${r.key}`)}">remove</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted small">No aliases. Unknown names route as <code>auto</code>.</td></tr>'}
+      </table></div>
       <datalist id="alias-targets">${['auto', 'auto:cheapest', 'auto:best', 'auto:fastest', 'auto:balanced', 'auto:priority'].concat((state.config.Models || []).map((x) => x.Name)).map((x) => `<option value="${h(x)}">`).join('')}</datalist>
     </div>`;
 };
@@ -385,16 +402,17 @@ const storedPromptsCard = (st) => {
     ${readOnly() ? '' : `<div class="card section danger-zone"><div class="card-head"><h2>Stored activity</h2><span class="muted small">Deletes every activity entry and its prompt preview now, not through the save bar. Usage, budgets and the configuration history are kept.</span><span class="spacer"></span><button class="btn danger small" data-action="activity-purge">Delete all activity…</button></div></div>`}`;
 };
 
-/* Rate limits per gateway client ("*" for every other client), with what each client used in the last minute. */
+/* Rate limits per gateway client ("*" for every other client), as rows (draft.js), with what each client used in the last minute. */
 const rateLimitsCard = (m) => {
-  const limits = Object.entries(m.RateLimits || {});
+  const limits = limitRows();
+  const problems = rowProblems(limits, 'limit');
   const seen = (state.status && state.status.gateway && state.status.gateway.rateLimits) || [];
   const num = (v) => (v == null ? '' : v);
   const used = (used, max) => (max ? `${Number(used).toLocaleString()} / ${Number(max).toLocaleString()}` : Number(used).toLocaleString());
   return `<div class="card section"><div class="card-head"><h2>Rate limits</h2><span class="muted small">Per gateway client, over a sliding minute. A client over its limit gets a 429 with <code>Retry-After</code>. <code>*</code> covers every client without its own limit, and clients without a key by address.</span><span class="spacer"></span><button class="btn small" data-action="ratelimit-add">Add limit</button></div>
-      <table><tr><th>Client</th><th>Requests per minute</th><th>Tokens per minute</th><th></th></tr>
-        ${limits.map(([k, v], i) => `<tr><td><input type="text" aria-label="Client" data-action-input="ratelimit-key" data-index="${i}" value="${h(k)}" list="ratelimit-clients"></td><td><input type="number" min="1" aria-label="Requests per minute for ${h(k)}" data-action-input="ratelimit-rpm" data-index="${i}" value="${num(v.RequestsPerMinute)}" placeholder="no limit"></td><td><input type="number" min="1" aria-label="Tokens per minute for ${h(k)}" data-action-input="ratelimit-tpm" data-index="${i}" value="${num(v.TokensPerMinute)}" placeholder="no limit"></td><td><button class="btn ghost small" data-action="ratelimit-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted small">No rate limits.</td></tr>'}
-      </table>
+      <div class="table-wrap"><table><tr><th>Client</th><th>Requests per minute</th><th>Tokens per minute</th><th></th></tr>
+        ${limits.map((r, i) => { const k = r.key.trim(); const v = r.value || {}; return `<tr><td>${rowName(`aria-label="Client" data-action-input="ratelimit-key" data-index="${i}" data-row="limit-${i}" data-path="Middleware.RateLimits.${h(k)}" list="ratelimit-clients"`, r.key, problems.get(i), `limit-problem-${i}`)}</td><td><input type="number" min="1" aria-label="Requests per minute for ${h(k)}" data-action-input="ratelimit-rpm" data-index="${i}" data-path="Middleware.RateLimits.${h(k)}.RequestsPerMinute" value="${num(v.RequestsPerMinute)}" placeholder="no limit"></td><td><input type="number" min="1" aria-label="Tokens per minute for ${h(k)}" data-action-input="ratelimit-tpm" data-index="${i}" data-path="Middleware.RateLimits.${h(k)}.TokensPerMinute" value="${num(v.TokensPerMinute)}" placeholder="no limit"></td><td><button class="btn ghost small" data-action="ratelimit-remove" data-index="${i}" aria-label="${h(`Remove the limit for ${k || 'this row'}`)}">remove</button></td></tr>`; }).join('') || '<tr><td colspan="4" class="muted small">No rate limits.</td></tr>'}
+      </table></div>
       <div class="form-grid"><label class="field"><span class="name">Default for other machines (requests per minute)</span><input type="number" min="0" data-bind="Middleware.RemoteRequestsPerMinute" data-kind="number" value="${m.RemoteRequestsPerMinute ?? 120}"><span class="hint">Each client on another machine that no entry above covers. 0 turns it off.</span></label></div>
       <datalist id="ratelimit-clients">${['*'].concat(Object.keys(m.GatewayKeys || {})).map((x) => `<option value="${h(x)}">`).join('')}</datalist>
       ${seen.length ? `<table><tr><th>Client</th><th>Limit</th><th>Requests, last minute</th><th>Tokens, last minute</th><th>Turned away</th></tr>
@@ -453,24 +471,6 @@ curl ${origin}${anth} -H 'Content-Type: application/json' -H 'anthropic-version:
 curl -s ${origin}/semantic-router/classify -H 'Content-Type: application/json' -d '{"prompt":"why does this deadlock?"}'`)}
     <div class="card section"><div class="card-head"><h2>Routing headers</h2></div><p class="muted small">Every response carries <code>${h(s.gateway && state.config.Middleware.HeaderPrefix || 'X-Prompt-Route')}</code>, <code>-Tier</code>, <code>-Reason</code>, <code>-Similarity</code>, <code>-Complexity</code>, <code>-Model</code>, <code>-Connector</code>, <code>-Attempt</code> and <code>-Degraded</code> headers (plus <code>-Dropped</code> when the serving backend could not carry a request feature), so you can see what happened without reading logs.</p></div>`;
 };
-
-/*
- * A rename the shared handler refuses (empty, taken, or with @ or . in a profile or virtual model name) puts the old
- * name back; this says why. It runs before that handler and checks the same things.
- */
-document.addEventListener('change', (ev) => {
-  const el = ev.target;
-  const kind = el.dataset && el.dataset.actionInput;
-  const what = { 'connector-rename': 'connector', 'profile-rename': 'profile', 'virtual-rename': 'virtual model' }[kind];
-  if (!what || !state.config) return;
-  const from = el.dataset.name; const to = el.value.trim();
-  if (to === from) return;
-  const taken = kind === 'connector-rename' ? state.config.Connectors : kind === 'profile-rename' ? state.config.Profiles : (state.config.Middleware || {}).VirtualModels;
-  const why = !to ? `A ${what} needs a name`
-    : taken && taken[to] ? `There is already a ${what} called “${to}”`
-      : kind !== 'connector-rename' && /[@.]/.test(to) ? `A ${what} name can't contain @ or . (auto@profile uses them)` : null;
-  if (why) toast(`${why}: kept “${from}”.`, 'danger');
-});
 
 /* Line diff (longest common subsequence), with unchanged runs folded to three lines of context. */
 export function lineDiff(before, after) {

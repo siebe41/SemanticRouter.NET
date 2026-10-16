@@ -30,9 +30,11 @@ COPY --from=build --chown=$APP_UID:$APP_UID /data /data
 # Configuration, the encrypted secrets file and the data-protection keys that decrypt it live on one volume.
 # Port-mapped requests arrive from the container network, so the router treats them as remote: the dashboard needs a
 # token (ROUTER_ADMIN_TOKEN) and the gateway a key (ROUTER_GATEWAY_KEY), both resolved at start-up through ${env:...}
-# references. Without them, everyone is refused.
+# references. Without them, everyone is refused. While the configuration is the untouched template, an OPENAI_API_KEY or
+# ANTHROPIC_API_KEY in the environment gets a connector that refers to it (SEMANTIC_ROUTER_SEED_API_KEYS).
 ENV SEMANTIC_ROUTER_HOME=/data \
     SEMANTIC_ROUTER_KEYS_DIR=/data/keys \
+    SEMANTIC_ROUTER_SEED_API_KEYS=true \
     ASPNETCORE_URLS=http://0.0.0.0:8080 \
     SemanticRouter__Dashboard__RequireLocalClient=false \
     SemanticRouter__Dashboard__AdminToken=\${env:ROUTER_ADMIN_TOKEN} \

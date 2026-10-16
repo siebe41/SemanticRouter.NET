@@ -141,7 +141,7 @@ views.feedback = () => {
   const placeholder = { misroute: 'e.g. It is a one-line rename; the local coder model answers it fine.', bug: 'What you did, what you expected, and what happened instead.', idea: '' }[r.kind];
 
   return `
-    <div class="section-head"><h1>Feedback</h1><span class="muted">Opens a pre-filled issue on GitHub, where you read it over and submit it. Nothing is sent from the router.</span></div>
+    <div class="section-head"><h1>Report an issue</h1><span class="muted">Opens a pre-filled issue on GitHub, where you read it over and submit it. Nothing is sent from the router.</span></div>
     <div class="card section" id="feedback-form">
       <div class="form-grid">
         <label class="field"><span class="name">About</span><select data-state="report.kind">${Object.entries(KINDS).map(([k, v]) => `<option value="${k}" ${k === r.kind ? 'selected' : ''}>${h(v.label)}</option>`).join('')}</select></label>

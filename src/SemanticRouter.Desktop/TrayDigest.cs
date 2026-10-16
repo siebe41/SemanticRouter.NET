@@ -71,6 +71,28 @@ internal sealed record TrayDigest(string? Week, int Learned, IReadOnlyList<TrayN
     /// <summary>Notices not among <paramref name="announced"/>: to show as notifications, when <see cref="Notify"/> is on.</summary>
     public IReadOnlyList<TrayNotice> New(IReadOnlySet<string> announced) => Notify ? [.. Notices.Where(n => !announced.Contains(n.Key))] : [];
 
+    /// <summary>
+    /// Whether the router's status (<c>GET /router/api/status</c>) says it serves requests but has no enabled model, so
+    /// it answers none of them. An annotate-only router needs no model; an answer that is not understood is not a
+    /// problem to report.
+    /// </summary>
+    public static bool NoModelEnabled(string statusJson)
+    {
+        using JsonDocument document = JsonDocument.Parse(statusJson);
+        JsonElement root = document.RootElement;
+        if (!root.TryGetProperty("models", out JsonElement models) || models.ValueKind != JsonValueKind.Array
+            || (root.TryGetProperty("gateway", out JsonElement gateway) && Str(gateway, "mode") is { } mode && !mode.Equals("Dispatch", StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+
+        return !models.EnumerateArray().Any(m => m.TryGetProperty("enabled", out JsonElement enabled) && enabled.ValueKind == JsonValueKind.True);
+    }
+
+    /// <summary>The tray's status line: where the router runs, and that it cannot answer yet when no model is enabled.</summary>
+    public static string StatusLine(string routerStatus, bool noModel) =>
+        noModel ? routerStatus + ", but no model is enabled yet" : routerStatus;
+
     private static int Int(JsonElement element, string name) =>
         element.TryGetProperty(name, out JsonElement value) && value.TryGetInt32(out int number) ? number : 0;
 

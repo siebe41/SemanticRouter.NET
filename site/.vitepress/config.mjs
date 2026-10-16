@@ -130,7 +130,7 @@ export default defineConfig({
   themeConfig: {
     logo: '/logo.png',
     nav: [
-      { text: 'Get started', link: '/overview' },
+      { text: 'Get started', link: '/overview#quick-start' },
       { text: 'Guides', link: '/docs' },
       { text: 'Videos', link: '/videos' },
       { text: 'Changelog', link: '/changelog' },

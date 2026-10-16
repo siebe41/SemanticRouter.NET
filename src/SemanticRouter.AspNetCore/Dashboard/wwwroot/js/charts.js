@@ -55,20 +55,32 @@ export function latencyChart(series, span) {
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Latency p50 and p95">${axes(max, fmtMs, b, span)}<path class="line-2" d="${path('p95Milliseconds')}"/><path class="line-1" d="${path('p50Milliseconds')}"/>${endLabel('p95Milliseconds', 2, 'p95')}${endLabel('p50Milliseconds', 1, 'p50')}${hits}</svg>`;
 }
 
-export async function loadTrends() {
+export async function loadTrends(auto) {
   if (state.trends.loading) return;
+  // After a failure the automatic refresh backs off (10 s, doubling to 5 min) rather than asking on every render.
+  if (auto && state.trends.error && Date.now() < state.trends.retryAt) return;
   state.trends.loading = true;
-  try { state.trends.data = await api('GET', '/activity/series?window=' + state.trends.window); } catch { /* keep the last one */ }
+  try {
+    state.trends.data = await api('GET', '/activity/series?window=' + state.trends.window);
+    state.trends.error = null; state.trends.backoff = 0;
+  } catch (e) {
+    // The last figures stay; the card says the refresh failed.
+    state.trends.backoff = Math.min(300000, (state.trends.backoff || 5000) * 2);
+    state.trends.error = e.message; state.trends.retryAt = Date.now() + state.trends.backoff;
+  }
   state.trends.loading = false;
   if (state.view === 'overview') render();
 }
 
 export const trendsCard = () => {
   const t = state.trends; const s = t.data;
+  const failed = t.error ? `<div class="small load-error">Couldn't load trends: ${h(t.error.replace(/\.$/, ''))}. <button class="btn small" data-action="trends-retry">Retry</button></div>` : '';
+  if (!s && t.error) return `<div class="card section"><div class="card-head"><h2>Trends</h2></div>${failed}</div>`;
   if (!s) { loadTrends(); return '<div class="card section"><div class="card-head"><h2>Trends</h2></div><div class="muted small">Loading…</div></div>'; }
   const seg = ['1h', '24h', '7d', '30d'].map((w) => `<button class="${w === t.window ? 'on' : ''}" data-action="trends-window" data-window="${w}">${w}</button>`).join('');
   const rows = s.buckets.filter((b) => b.requests).map((b) => `<tr><td>${h(fmtTime(b.start, t.window))}</td><td class="num">${b.requests}</td><td class="num">${b.served}</td><td class="num">${b.failed}</td><td class="num">${h(fmtMs(b.p50Milliseconds))}</td><td class="num">${h(fmtMs(b.p95Milliseconds))}</td></tr>`).join('');
   return `<div class="card section"><div class="card-head"><h2>Trends</h2><span class="muted small">${s.requests} requests · p50 ${h(fmtMs(s.p50Milliseconds))} · p95 ${h(fmtMs(s.p95Milliseconds))} · p99 ${h(fmtMs(s.p99Milliseconds))}</span><span class="spacer"></span><span class="seg" role="group" aria-label="Window">${seg}</span></div>
+    ${failed}
     <div class="grid cols-2">
       <div><h3 class="small muted">Requests</h3>${requestsChart(s, t.window)}</div>
       <div><h3 class="small muted">Latency (served requests, end to end)</h3><div class="legend"><span><i class="key" style="background:var(--series-1)"></i>p50</span><span><i class="key" style="background:var(--series-2)"></i>p95</span></div>${latencyChart(s, t.window)}</div>

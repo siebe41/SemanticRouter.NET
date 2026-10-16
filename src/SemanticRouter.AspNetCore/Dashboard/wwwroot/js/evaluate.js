@@ -12,7 +12,8 @@ export async function loadEvaluationSet() {
     state.evaluation.judge = judge;
     state.evaluation.location = r.location; state.evaluation.count = r.count;
     state.evaluation.text = r.cases.map((c) => JSON.stringify(Object.fromEntries(Object.entries({ prompt: c.prompt, tier: c.tier, route: c.route, localOnly: c.localOnly || undefined, note: c.note }).filter(([, v]) => v != null)))).join('\n');
-  } catch (e) { state.evaluation.text = ''; toast(e.message, 'danger'); }
+    state.evaluation.savedText = state.evaluation.text; // what the router holds: typed changes beyond it are unsaved
+  } catch (e) { state.evaluation.text = ''; state.evaluation.savedText = null; toast(e.message, 'danger'); }
   if (state.view === 'evaluate') render();
 }
 
@@ -130,6 +131,14 @@ export function compareCard() {
   </div>`;
 }
 
+/* Run needs prompts: the buttons follow the text as it is typed (data-needs-set), not only at the next render. */
+const runGate = (empty, busy) => adminOnly(busy) || `data-needs-set ${empty ? 'disabled title="Add labelled prompts first"' : ''}`;
+document.addEventListener('input', (ev) => {
+  if (ev.target.id !== 'evaluation-text') return;
+  const empty = !ev.target.value.trim();
+  document.querySelectorAll('[data-needs-set]').forEach((b) => { b.disabled = empty; b.title = empty ? 'Add labelled prompts first' : ''; });
+});
+
 views.evaluate = () => {
   const ev = state.evaluation;
   if (ev.text == null) { loadEvaluationSet(); return '<div class="section-head"><h1>Evaluate routing</h1></div><div class="muted">Loading…</div>'; }
@@ -142,8 +151,8 @@ views.evaluate = () => {
       <textarea id="evaluation-text" aria-label="Evaluation set (JSON Lines)" rows="8" spellcheck="false" data-state="evaluation.text" placeholder='{"prompt":"summarize this email","tier":1,"route":"rewrite-summarize"}'>${h(ev.text)}</textarea>
       <div class="hint small muted">One JSON object per line: <code>prompt</code>, the <code>tier</code> it should get, and optionally the <code>route</code> it should match and <code>localOnly</code>. Local-only prompts are left out of the download.</div>
       <div class="inline" style="margin-top:10px">
-        <button class="btn primary small" data-action="eval-run" data-calibrate="1" ${empty ? 'disabled title="Add labelled prompts first"' : adminOnly(ev.busy)}>${ev.busy ? 'Running…' : 'Run and calibrate'}</button>
-        <button class="btn small" data-action="eval-run" ${empty ? 'disabled title="Add labelled prompts first"' : adminOnly(ev.busy)}>Run</button>
+        <button class="btn primary small" data-action="eval-run" data-calibrate="1" ${runGate(empty, ev.busy)}>${ev.busy ? 'Running…' : 'Run and calibrate'}</button>
+        <button class="btn small" data-action="eval-run" ${runGate(empty, ev.busy)}>Run</button>
         ${readOnly() ? '' : '<button class="btn small" data-action="eval-save">Save set</button>'}
         <span class="muted small">Threshold ${state.config.DefaultSimilarityThreshold} · ${plural((state.config.Routes || []).length, 'route')} · ${h((state.config.Embeddings || {}).Provider || '')}</span></div>
     </div>

@@ -715,3 +715,61 @@ main:focus { outline: none; }
 }
 
 @media (max-width: 720px) { .view { padding: 16px 12px 48px; } }
+
+/* ------------------------------------------------------------------------------------------------
+   Draft safety and feedback: the save bars, the conflict notice, toasts, in-page questions, problems
+   tied to their fields, busy and read-only states. Kept together at the end.
+   ------------------------------------------------------------------------------------------------ */
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.link-button { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-ink); text-decoration: underline; cursor: pointer; }
+.link-button:hover { color: var(--text); }
+.save-bar, .unsaved-bar { flex-wrap: wrap; }
+.unsaved-bar { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.unsaved-bar.hidden { display: none; }
+.unsaved-note { display: inline-flex; align-items: center; gap: 6px; color: var(--warn); }
+.draft-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.draft-notice.hidden { display: none; }
+.draft-notice .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+/* On a phone the bars take less of the sticky top bar: small buttons, the note on its own line. */
+@media (max-width: 720px) {
+  .save-bar, .unsaved-bar { width: 100%; gap: 6px; }
+  .save-bar .btn, .unsaved-bar .btn { padding: 3px 8px; font-size: 12px; }
+  .save-bar .dirty-note { flex-basis: 100%; }
+}
+
+/* Toasts: a stack in the corner; each one is its own card. */
+#toast.toasts { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: min(440px, calc(100vw - 32px)); }
+#toast.toasts.hidden { display: none; }
+#toast .toast { position: static; display: flex; align-items: flex-start; gap: 8px; max-width: 100%; }
+#toast .toast-text { flex: 1; min-width: 0; overflow-wrap: anywhere; padding-top: 2px; }
+#toast .toast-icon { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; background: var(--danger); color: var(--bg); font-weight: 700; font-size: 12px; }
+#toast .toast-action, #toast .toast-close { flex: none; }
+#toast .toast-close { padding: 0 6px; }
+@media (max-width: 720px) { #toast.toasts { right: 16px; left: 16px; bottom: 16px; align-items: stretch; max-width: none; } }
+
+/* In-page questions, instead of the browser's confirm(). */
+dialog.ask { max-width: min(520px, calc(100vw - 32px)); width: 100%; padding: 18px 20px; color: var(--text); background: var(--bg-elevated); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
+dialog.ask.wide { max-width: min(960px, calc(100vw - 32px)); }
+dialog.ask::backdrop { background: color-mix(in srgb, var(--bg-sunken) 72%, transparent); }
+dialog.ask h2 { margin: 0 0 10px; font-size: 17px; }
+dialog.ask .ask-body p { margin: 0 0 8px; font-size: 13.5px; }
+dialog.ask .ask-body pre.diff { max-height: 60vh; }
+dialog.ask .ask-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* A problem tied to its field. */
+[aria-invalid="true"] { border-color: var(--danger) !important; }
+.field-error { display: block; margin-top: 3px; font-size: 11.5px; color: var(--danger); }
+.field-error::before { content: "! "; font-weight: 700; }
+.problems { border-color: var(--danger); }
+.problems h3:focus { outline: none; }
+.problems a { color: var(--danger); text-decoration: underline; }
+.load-error { color: var(--danger); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.load-error .btn { color: var(--text); }
+
+/* Busy buttons, new Activity entries, the status pill's short text on a phone, read-only forms. */
+[aria-busy="true"] { cursor: progress; }
+.btn[aria-busy="true"] { opacity: 0.65; }
+.new-entries { display: flex; align-items: center; gap: 10px; margin: -6px 0 12px; padding: 6px 12px; font-size: 13px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--accent-soft); }
+#status-pill .pill-short { display: none; font-size: 12px; }
+@media (max-width: 720px) { #status-pill .pill-short { display: inline; } }
+.read-only input:disabled, .read-only select:disabled, .read-only textarea:disabled { opacity: 1; color: var(--text-muted); background: transparent; border-style: dashed; cursor: default; }
