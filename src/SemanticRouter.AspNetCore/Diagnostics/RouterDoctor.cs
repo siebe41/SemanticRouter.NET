@@ -317,7 +317,7 @@ public static class RouterDoctor
             : new RouterCheck(subject, RouterCheckStatus.Ok, $"{version} at {path}. Its sign-in could not be checked (`codex login status` gave no answer); run `codex login` once yourself.");
     }
 
-    private static async Task<(int ExitCode, string Output)> RunAsync(
+    internal static async Task<(int ExitCode, string Output)> RunAsync(
         ICliProcessRunner runner, string executable, string[] arguments, ConnectorOptions connector, CancellationToken cancellationToken)
     {
         string directory;
@@ -408,6 +408,6 @@ public static class RouterDoctor
         }
     }
 
-    private static string FirstLine(string text) =>
+    internal static string FirstLine(string text) =>
         text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? string.Empty;
 }

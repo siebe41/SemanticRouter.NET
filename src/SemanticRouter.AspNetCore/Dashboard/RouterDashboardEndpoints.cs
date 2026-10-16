@@ -138,6 +138,12 @@ public static partial class RouterDashboardEndpoints
         configure?.Invoke(options);
 
         prefix = "/" + prefix.Trim('/');
+        if (endpoints.ServiceProvider.GetService<RouterDashboardLocation>() is { } location)
+        {
+            // Gateway errors link to the page that fixes them.
+            location.Prefix = prefix;
+        }
+
         DashboardAccess access = CreateAccess(endpoints.ServiceProvider, options, prefix);
         IAuditLog auditLog = endpoints.ServiceProvider.GetService<IAuditLog>() ?? new InMemoryAuditLog();
         var audit = new DashboardAudit(
@@ -247,6 +253,7 @@ public static partial class RouterDashboardEndpoints
                 StatusResponse status = BuildStatus(
                     provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>(),
                     services.GetService<IModelCacheShare>(), Listening(services), options.PublicOrigins);
+                status = status with { Unsaved = provider.Unsaved };
 
                 // A connector's last error comes from the activity log's details, which can quote a reply.
                 return Results.Json(
@@ -271,31 +278,47 @@ public static partial class RouterDashboardEndpoints
 
         api.MapPost("/config/validate", async (HttpContext context, RouterRuntimeProvider provider) =>
         {
-            RouterConfiguration? candidate = await ReadConfigurationAsync(context, provider).ConfigureAwait(false);
+            (RouterConfiguration? candidate, IResult? unreadable) = await ReadConfigurationAsync(context, provider).ConfigureAwait(false);
             if (candidate is null)
             {
-                return Results.Problem("Expected a configuration document.", statusCode: StatusCodes.Status400BadRequest);
+                return unreadable!;
             }
 
-            return Results.Json(new ValidationResult([.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)]), ApiJson);
+            return Results.Json(Validation([.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)], candidate), ApiJson);
         }).Audited("validated a configuration");
 
-        api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist, string? note) =>
+        // baseVersion: the version the caller's draft started from. When another version runs by now, nothing is applied
+        // and the answer (409) says who changed it when, so the caller can reload or compare instead of undoing that change.
+        api.MapPut("/config", async (HttpContext context, RouterRuntimeProvider provider, bool? persist, string? note, int? baseVersion) =>
         {
-            RouterConfiguration? candidate = await ReadConfigurationAsync(context, provider).ConfigureAwait(false);
+            if (baseVersion is { } expected && provider.Current is { } running && running.Version != expected)
+            {
+                return Conflict(running);
+            }
+
+            (RouterConfiguration? candidate, IResult? unreadable) = await ReadConfigurationAsync(context, provider).ConfigureAwait(false);
             if (candidate is null)
             {
-                return Results.Problem("Expected a configuration document.", statusCode: StatusCodes.Status400BadRequest);
+                return unreadable!;
             }
 
             IReadOnlyList<string> errors = [.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)];
             if (errors.Count > 0)
             {
-                return Results.Json(new ValidationResult(errors), ApiJson, statusCode: StatusCodes.Status400BadRequest);
+                return Results.Json(Validation(errors, candidate), ApiJson, statusCode: StatusCodes.Status400BadRequest);
             }
 
             bool shouldPersist = persist ?? true;
-            RouterRuntime runtime = provider.Apply(candidate, shouldPersist, "admin API", Actor(context), note);
+            RouterRuntime runtime;
+            try
+            {
+                runtime = provider.Apply(candidate, shouldPersist, "admin API", Actor(context), note, baseVersion);
+            }
+            catch (RouterConfigurationConflictException ex)
+            {
+                return Conflict(ex.Current);
+            }
+
             DashboardAudit.Detail(context, $"version {runtime.Version}{(shouldPersist ? ", saved" : ", not saved")}");
             var warnings = new List<string>(runtime.ApplyNotes);
             if (shouldPersist && provider.Store is null)
@@ -312,6 +335,37 @@ public static partial class RouterDashboardEndpoints
             DashboardAudit.Detail(context, $"version {runtime.Version}");
             return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), "Reverted to the application's configuration (the stored document was left in place).");
         }).WithMetadata(DashboardWriteMetadata.Instance).Audited("reset the configuration to the application's");
+
+        // The running configuration was applied without saving: keep it (save) or go back to what is saved (revert).
+        api.MapPost("/config/save", (HttpContext context, RouterRuntimeProvider provider) =>
+        {
+            if (provider.Store is null)
+            {
+                return Results.Problem(
+                    "There is nowhere to save the configuration: this router has no configuration file (see SemanticRouterBuilder.UseConfigurationFile).",
+                    statusCode: StatusCodes.Status409Conflict, title: "Not saved");
+            }
+
+            RouterRuntime runtime = provider.SaveRunning(Actor(context));
+            DashboardAudit.Detail(context, $"version {runtime.Version}");
+            return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), runtime.ApplyNotes.Count > 0 ? string.Join(" ", runtime.ApplyNotes) : null);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("saved the running configuration");
+
+        api.MapPost("/config/revert", (HttpContext context, RouterRuntimeProvider provider) =>
+        {
+            if (provider.Store is null)
+            {
+                return Results.Problem(
+                    "There is no saved configuration to go back to: this router has no configuration file (see SemanticRouterBuilder.UseConfigurationFile).",
+                    statusCode: StatusCodes.Status409Conflict, title: "Nothing saved");
+            }
+
+            RouterRuntime runtime = provider.RevertToSaved(Actor(context));
+            DashboardAudit.Detail(context, $"version {runtime.Version}");
+            return ConfigEnvelope(runtime, provider, runtime.Configuration.Masked(), runtime.Source == RouterConfigurationSource.Store
+                ? null
+                : "Nothing usable is saved, so the application's own configuration is running again.");
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("went back to the saved configuration");
 
         api.MapGet("/config/history", (RouterRuntimeProvider provider, int? limit) =>
             provider.History is { } history
@@ -343,7 +397,7 @@ public static partial class RouterDashboardEndpoints
             IReadOnlyList<string> errors = provider.ValidateChange(document);
             if (errors.Count > 0)
             {
-                return Results.Json(new ValidationResult(errors), ApiJson, statusCode: StatusCodes.Status400BadRequest);
+                return Results.Json(Validation(errors, document), ApiJson, statusCode: StatusCodes.Status400BadRequest);
             }
 
             RouterRuntime runtime = provider.Apply(document, persist: true, "rollback", Actor(context), $"to version {id}");
@@ -505,6 +559,82 @@ public static partial class RouterDashboardEndpoints
             return Results.Json(DiscoverResponse.From(report), ApiJson);
         }).WithMetadata(DashboardWriteMetadata.Instance).Audited("discovered a connector's models");
 
+        // The same for a connector in the dashboard's draft that is not applied yet: {"name", "settings"} and optionally the
+        // draft's "models", to mark what is already in the catalog. Held to the checks applying it would meet; applies nothing.
+        api.MapPost("/connectors/discover", async (HttpContext context, RouterRuntimeProvider provider, IServiceProvider services, CancellationToken cancellationToken) =>
+        {
+            (DraftConnector? draft, IResult? unreadable) = await ReadDraftConnectorAsync(context).ConfigureAwait(false);
+            if (draft is null)
+            {
+                return unreadable!;
+            }
+
+            RouterRuntime runtime = provider.Current;
+            RouterConfiguration current = runtime.Configuration;
+            string name = draft.Name;
+            RouterConfiguration candidate = current.Clone();
+            candidate.Connectors[name] = draft.Document.Connectors[name];
+
+            // A masked secret is filled in from the running connector of the same name only if it points to the same place.
+            candidate.UnmaskFrom(current);
+            ConnectorOptions settings = candidate.Connectors[name];
+            var errors = new List<string>();
+            if (provider.Policy.Blocks(settings) is { } blocked)
+            {
+                errors.Add($"Connectors:{name}: not allowed: {blocked}.");
+            }
+
+            errors.AddRange(candidate.MaskedSecretErrors());
+            errors.AddRange(ProcessSettingErrors(candidate, provider, options));
+            errors.AddRange(candidate.ReferenceErrors(current));
+            if (errors.Count > 0)
+            {
+                return Results.Json(Validation(errors, candidate), ApiJson, statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var alone = new RouterConfiguration();
+            alone.Connectors[name] = settings;
+            var unresolved = new List<string>();
+            RouterConfiguration resolved = alone.ResolveSecrets(provider.Secrets, unresolved);
+            ConnectorOptions connector = resolved.Connectors[name];
+
+            // Copilot lists models through its runtime: the running connector when it is this one, else a new one for this call.
+            IModelDiscovery? live = null;
+            IDisposable? created = null;
+            if (connector.Type == ConnectorType.Copilot)
+            {
+                if (current.Connectors.TryGetValue(name, out ConnectorOptions? existing) && RouterConfiguration.SameDestination(existing, settings)
+                    && runtime.Connectors.TryGet(name, out IChatConnector? running))
+                {
+                    live = running as IModelDiscovery;
+                }
+                else if (services.GetServices<IChatConnectorFactory>().FirstOrDefault(f => f.Type == ConnectorType.Copilot) is { } factory)
+                {
+                    IChatConnector made = factory.Create(name, connector);
+                    (live, created) = (made as IModelDiscovery, made as IDisposable);
+                }
+            }
+
+            try
+            {
+                var redactor = new SecretRedactor([.. runtime.Resolved.SecretValues(), .. resolved.SecretValues()]);
+                ModelLineupReport report = await ModelLineup.DiscoverAsync(
+                    services, name, connector, live, draft.Models ?? [.. runtime.Resolved.Models], redactor, cancellationToken).ConfigureAwait(false);
+                if (unresolved.Count > 0)
+                {
+                    // E.g. ${env:OPENAI_API_KEY} with the variable not set: the provider then refuses, and this says why.
+                    report = report with { Note = string.Join(" ", [.. unresolved, report.Note ?? string.Empty]).Trim() };
+                }
+
+                DashboardAudit.Detail(context, $"{name} ({connector.Type}), not applied");
+                return Results.Json(DiscoverResponse.From(report), ApiJson);
+            }
+            finally
+            {
+                created?.Dispose();
+            }
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("discovered a draft connector's models");
+
         api.MapPost("/connectors/{name}/check", async (string name, IServiceProvider services, RouterRuntimeProvider provider) =>
         {
             EndpointChecks? checks = services.GetService<EndpointChecks>();
@@ -529,11 +659,27 @@ public static partial class RouterDashboardEndpoints
                 : Results.Json(new AuditResponse(entries), ApiJson);
         }).WithMetadata(DashboardAdminReadMetadata.Instance);
 
+        SetupApi.Map(api);
         EvaluationApi.Map(api, ApiJson, Actor);
         TuningApi.Map(api, ApiJson, Actor);
         ReliabilityApi.Map(api, ApiJson);
         DigestApi.Map(api, ApiJson);
         return group;
+    }
+
+    /// <summary>
+    /// Sends a browser that opens the site's root (exactly <c>/</c>, with GET or HEAD) to the dashboard at
+    /// <paramref name="prefix"/>, for an application whose root serves nothing else, such as the <c>semantic-router</c>
+    /// tool. It has the lowest precedence: an endpoint the application maps at <c>/</c> itself wins.
+    /// </summary>
+    public static IEndpointConventionBuilder MapRouterDashboardRedirect(
+        this IEndpointRouteBuilder endpoints, [System.Diagnostics.CodeAnalysis.StringSyntax("Route")] string prefix = "/router")
+    {
+        ArgumentNullException.ThrowIfNull(endpoints);
+        string target = "/" + prefix.Trim('/') + "/";
+        return endpoints.MapMethods("/", [HttpMethods.Get, HttpMethods.Head], (HttpContext context) => Results.Redirect(context.Request.PathBase + target))
+            .WithOrder(int.MaxValue)
+            .WithDisplayName("Redirect / to the router dashboard");
     }
 
     /// <summary>
@@ -784,33 +930,109 @@ public static partial class RouterDashboardEndpoints
         return Results.Stream(stream, contentType);
     }
 
-    private static async Task<RouterConfiguration?> ReadConfigurationAsync(HttpContext context, RouterRuntimeProvider provider)
+    /// <summary>
+    /// Reads the configuration document in the body (bare, or as the <c>config</c> of an envelope) with masked secrets
+    /// filled in from the running configuration. When it cannot be read, the 400 to answer with instead: a field whose
+    /// value does not fit (<c>"Timeout": "5m"</c>) is named, with the format it needs.
+    /// </summary>
+    private static async Task<(RouterConfiguration? Candidate, IResult? Problem)> ReadConfigurationAsync(HttpContext context, RouterRuntimeProvider provider)
     {
         using var reader = new StreamReader(context.Request.Body);
         string raw = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(raw))
         {
-            return null;
+            return (null, NotADocument());
         }
 
+        JsonNode? document = null;
         try
         {
             JsonNode? node = JsonNode.Parse(raw, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
-            JsonNode? document = node is JsonObject obj && obj.TryGetPropertyValue("config", out JsonNode? inner) ? inner : node;
+            document = node is JsonObject obj && obj.TryGetPropertyValue("config", out JsonNode? inner) ? inner : node;
             if (document is not JsonObject)
             {
-                return null;
+                return (null, NotADocument());
             }
 
             RouterConfiguration candidate = RouterConfiguration.FromJson(document.ToJsonString());
             candidate.UnmaskFrom(provider.Current.Configuration);
-            return candidate;
+            return (candidate, null);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            return null;
+            return (null, Unreadable(ex, document));
+        }
+
+        static IResult NotADocument() => Results.Json(
+            new ValidationResult(["Expected a configuration document: a JSON object such as GET api/config returns."]) { Issues = [new ConfigurationIssue(null, "Expected a configuration document: a JSON object such as GET api/config returns.")] },
+            ApiJson,
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    /// <summary>A connector from the dashboard's draft: its name, settings and the draft's catalog, if sent.</summary>
+    private sealed record DraftConnector(string Name, RouterConfiguration Document, IReadOnlyList<ModelDefinition>? Models);
+
+    /// <summary>Reads <c>{"name": …, "settings": {…}, "models": [ … ]}</c>; when it cannot be read, the 400 to answer with instead.</summary>
+    private static async Task<(DraftConnector? Draft, IResult? Problem)> ReadDraftConnectorAsync(HttpContext context)
+    {
+        const string expected = "Expected {\"name\": \"…\", \"settings\": { …connector settings… }}, with the draft's \"models\" optionally.";
+        using var reader = new StreamReader(context.Request.Body);
+        string raw = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
+        JsonObject? wrapper = null;
+        try
+        {
+            JsonObject? body = string.IsNullOrWhiteSpace(raw)
+                ? null
+                : JsonNode.Parse(raw, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true }) as JsonObject;
+            string? name = body?["name"] is JsonValue value && value.TryGetValue(out string? text) ? text?.Trim() : null;
+            if (string.IsNullOrEmpty(name) || body!["settings"] is not JsonObject settings)
+            {
+                return (null, Results.Json(new ValidationResult([expected]) { Issues = [new ConfigurationIssue(null, expected)] }, ApiJson, statusCode: StatusCodes.Status400BadRequest));
+            }
+
+            // Parsed as part of a document, so it reads exactly as PUT api/config would read it.
+            wrapper = new JsonObject { ["Connectors"] = new JsonObject { [name] = settings.DeepClone() } };
+            bool withModels = body["models"] is JsonArray;
+            if (withModels)
+            {
+                wrapper["Models"] = body["models"]!.DeepClone();
+            }
+
+            RouterConfiguration document = RouterConfiguration.FromJson(wrapper.ToJsonString());
+            return (new DraftConnector(name, document, withModels ? [.. document.Models] : null), null);
+        }
+        catch (JsonException ex)
+        {
+            return (null, Unreadable(ex, wrapper));
         }
     }
+
+    /// <summary>The 400 for JSON that does not parse, or a value that does not fit its field.</summary>
+    private static IResult Unreadable(JsonException exception, JsonNode? document, string? pathPrefix = null)
+    {
+        ConfigurationIssue issue = ConfigurationIssues.FromJsonException(exception, document, pathPrefix);
+        return Results.Json(
+            new ValidationResult([issue.Path is null ? issue.Message : $"{issue.Path}: {issue.Message}"]) { Issues = [issue] },
+            ApiJson,
+            statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    /// <summary>The validation outcome, with each error tied to its field.</summary>
+    private static ValidationResult Validation(IReadOnlyList<string> errors, RouterConfiguration candidate) =>
+        new(errors) { Issues = ConfigurationIssues.Locate(errors, candidate) };
+
+    /// <summary>The 409 for a change made against a version that is no longer running.</summary>
+    private static IResult Conflict(RouterRuntime running) => Results.Json(
+        new ConflictResponse(
+            "The configuration changed since you loaded it.",
+            running.Version,
+            running.ChangedBy,
+            running.CreatedAt,
+            running.ChangeSource,
+            $"Version {running.Version} is running now ({running.ChangeSource ?? "applied"}{(running.ChangedBy is null ? string.Empty : " by " + running.ChangedBy)}). " +
+            "Nothing was applied: reload it, or apply yours again on top of it."),
+        ApiJson,
+        statusCode: StatusCodes.Status409Conflict);
 
     private static IResult ConfigEnvelope(RouterRuntime runtime, RouterRuntimeProvider provider, RouterConfiguration masked, string? warning)
     {
@@ -821,6 +1043,7 @@ public static partial class RouterDashboardEndpoints
             ["createdAt"] = runtime.CreatedAt,
             ["store"] = provider.Store?.Location,
             ["secretStore"] = provider.Secrets?.Location,
+            ["unsaved"] = provider.IsUnsaved(runtime),
             ["warning"] = warning,
             ["config"] = JsonNode.Parse(masked.ToJson()),
         };
@@ -933,6 +1156,24 @@ public static partial class RouterDashboardEndpoints
     {
         /// <summary>Whether the document can be applied.</summary>
         public bool Valid => Errors.Count == 0;
+
+        /// <summary>The same problems, each tied to the field it is about (see <see cref="ConfigurationIssue.Path"/>).</summary>
+        public IReadOnlyList<ConfigurationIssue> Issues { get; init; } = [];
+    }
+
+    /// <summary>
+    /// <c>409</c> from <c>PUT api/config?baseVersion=N</c> when another version runs by now: nothing was applied.
+    /// </summary>
+    /// <param name="Title">What happened.</param>
+    /// <param name="CurrentVersion">The version running now.</param>
+    /// <param name="Actor">Who applied it, when known.</param>
+    /// <param name="At">When it was applied.</param>
+    /// <param name="Source">What applied it (<c>admin API</c>, <c>auto-tune</c>, <c>rollback</c>, <c>startup</c>, …).</param>
+    /// <param name="Detail">The same in a sentence, with what to do.</param>
+    public sealed record ConflictResponse(string Title, int CurrentVersion, string? Actor, DateTimeOffset At, string? Source, string Detail)
+    {
+        /// <summary>The HTTP status, as in a problem document.</summary>
+        public int Status { get; } = StatusCodes.Status409Conflict;
     }
 
     /// <summary>Usage over a window.</summary>
@@ -1056,7 +1297,14 @@ public static partial class RouterDashboardEndpoints
         IReadOnlyList<BudgetStatus> Budgets,
         IReadOnlyList<EndpointStatus> Endpoints,
         string Machine,
-        ServiceStatus Service);
+        ServiceStatus Service)
+    {
+        /// <summary>
+        /// Whether the running configuration was applied without saving: a configuration file exists and holds something
+        /// else, so a restart would bring that back. <c>POST api/config/save</c> keeps it; <c>POST api/config/revert</c> undoes it.
+        /// </summary>
+        public bool Unsaved { get; init; }
+    }
 
     /// <summary>Embedding provider in use.</summary>
     public sealed record EmbeddingsStatus(

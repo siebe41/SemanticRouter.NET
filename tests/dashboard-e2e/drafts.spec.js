@@ -100,15 +100,17 @@ test('a router without the save endpoints shows the note but no buttons after th
 
 test('Apply sends the version the draft started from; a 409 offers reload, compare or apply anyway', async ({ page }) => {
   const sent = [];
+  let version;
+  // The server enforces baseVersion, so the made-up conflict names the version that really runs.
   await page.route(/\/router\/api\/config\?/, async (route) => {
     const url = new URL(route.request().url());
     sent.push(url.searchParams.get('baseVersion'));
     if (route.request().method() === 'PUT' && sent.length === 1) {
-      await route.fulfill({ status: 409, json: { title: 'The configuration changed since you loaded it.', currentVersion: 99, actor: 'admin token', at: new Date().toISOString(), source: 'admin API' } });
+      await route.fulfill({ status: 409, json: { title: 'The configuration changed since you loaded it.', currentVersion: Number(version), actor: 'admin token', at: new Date().toISOString(), source: 'admin API' } });
     } else await route.continue();
   });
   await open(page, 'routes');
-  const version = String((await (await page.request.get('/router/api/config')).json()).version);
+  version = String((await (await page.request.get('/router/api/config')).json()).version);
   await page.locator('.item-head', { hasText: 'smalltalk' }).click();
   await page.locator('textarea[data-bind="Routes.0.Utterances"]').fill('hello there\ngood evening');
   await page.locator('#save-bar [data-action="apply"]').click();
@@ -121,7 +123,7 @@ test('Apply sends the version the draft started from; a 409 offers reload, compa
   await dialog(page).getByRole('button', { name: 'Close' }).click();
   await notice.getByRole('button', { name: 'Apply mine anyway' }).click();
   await expect(page.locator('#toast')).toContainText('Applied');
-  expect(sent[1]).toBe('99');
+  expect(sent[1]).toBe(version);
   await expect(notice).toBeHidden();
   const config = (await (await page.request.get('/router/api/config')).json()).config;
   expect(config.Routes[0].Utterances).toContain('good evening');

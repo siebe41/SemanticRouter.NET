@@ -153,21 +153,23 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 
 | Method and path | Purpose |
 |---|---|
-| `GET api/status` | Runtime version and source, warm-up state, tiers, models with cooldowns, connectors, routes, gateway settings, activity counters, `machine` (the host name of the machine the router runs on), `service` (the router itself: `processId`, `program`, `startedAt`, `runtime`, `operatingSystem`, `listening`, `addresses` with `url`, `local` and `encrypted`, `remote`, `gatewayKeyRequired`, `state` and `stateNote`, `problems`, `lastRequest`, `lastOutcome`, `lastServed`), and `endpoints`: per connector its `host` (or `program` and `via`), `local`, `encrypted`, `state` and `stateNote`, `attempts`, `failures`, `successRate`, `lastUsed`, `lastSuccess`, `lastFailure` and `lastError`, `failingSince`, `modelsCoolingDown` and `cooldownUntil`, `limitDays`, `firstByteP50`/`P95`, `totalP50`/`P95`, `tokensPerSecond`, and the latest `check`. Addresses here and in check, discovery and doctor messages are shown without their user name, password, query or fragment, where a key may sit. |
-| `GET api/config` | The active document (masked) with version, source and store location. |
+| `GET api/status` | Runtime version and source, warm-up state, tiers, models with cooldowns, connectors, routes, gateway settings, activity counters, `machine` (the host name of the machine the router runs on), `service` (the router itself: `processId`, `program`, `startedAt`, `runtime`, `operatingSystem`, `listening`, `addresses` with `url`, `local` and `encrypted`, `remote`, `gatewayKeyRequired`, `state` and `stateNote`, `problems`, `lastRequest`, `lastOutcome`, `lastServed`), and `endpoints`: per connector its `host` (or `program` and `via`), `local`, `encrypted`, `state` and `stateNote`, `attempts`, `failures`, `successRate`, `lastUsed`, `lastSuccess`, `lastFailure` and `lastError`, `failingSince`, `modelsCoolingDown` and `cooldownUntil`, `limitDays`, `firstByteP50`/`P95`, `totalP50`/`P95`, `tokensPerSecond`, and the latest `check`; `unsaved` is `true` when a configuration file is registered and the running configuration is not what it holds (applied without saving, or reset), so a restart would bring the saved one back. Addresses here and in check, discovery and doctor messages are shown without their user name, password, query or fragment, where a key may sit. |
+| `GET api/config` | The active document (masked) with version, source, store location and `unsaved` (as in `api/status`). The same envelope answers every call below that applies a configuration. |
 | `GET api/policy` | The [machine-wide policy](enterprise.md) in effect and where it came from (`source`). |
 | `GET api/config/baseline` | The application's own configuration (masked). |
-| `POST api/config/validate` | Validation errors for a document. |
-| `PUT api/config?persist=true\|false` | Validate, apply, and save (default) or apply in memory. `400` with `errors` when invalid. |
+| `POST api/config/validate` | Validation errors for a document: `valid`, `errors` and `issues` (see [Validation issues](#validation-issues)). |
+| `PUT api/config?persist=true\|false&baseVersion=N` | Validate, apply, and save (default) or apply in memory. `400` with `errors` and `issues` when invalid. With `baseVersion` (the version the edit started from), `409` when another version runs by now, and nothing is applied (see [Version conflicts](#version-conflicts)). |
+| `POST api/config/save` | Save the running configuration to the configuration file as it is (after an apply without saving). `409` when there is no file. Admin role only. |
+| `POST api/config/revert` | Apply what the configuration file holds, as a restart would (the application's configuration when it holds nothing usable). `409` when there is no file. Admin role only. |
 | `POST api/config/reset` | Back to the baseline. |
-| `GET api/config/history?limit=50` | Applied versions, newest first: `id`, `timestamp`, `source` (`startup`, `admin API`, `reset`, `rollback`), `actor`, `note`. `PUT api/config?note=...` sets the note. |
+| `GET api/config/history?limit=50` | Applied versions, newest first: `id`, `timestamp`, `source` (`startup`, `admin API`, `reset`, `rollback`, `save`, `revert`, `dashboard`, `auto-tune`, …), `actor`, `note`. `PUT api/config?note=...` sets the note. |
 | `GET api/config/history/{id}` | That version's document (masked). |
 | `POST api/config/history/{id}/rollback` | Apply and save that version; recorded as a `rollback`. |
 | `GET api/activity?limit=100&after=<id>` | Recent routing activity. Entries carry `sentTo` (the models a request was sent to, failed attempts included) and `memory` (notes found in it); `feedback` maps entry ids to the [feedback](routing-quality.md#feedback) they received. |
 | `DELETE api/activity?since=&until=` | Delete activity and its prompt previews for good: everything, or the range given (**Gateway → Settings → Stored activity → Delete all activity**). See [host.md](host.md#what-the-router-stores). Admin role only. |
 | `GET api/feedback?limit=200` | Recent feedback about routing decisions, newest first. |
 | `GET api/feedback/summary?days=7` | Decisions and feedback per route and per model, with the share that received feedback. |
-| `GET api/tuning`, `POST api/tuning/run`, `POST api/tuning/changes/{id}/undo` … | [Automatic tuning](routing-quality.md#automatic-tuning): what the router learned, why, and undo. |
+| `GET api/tuning`, `POST api/tuning/run`, `POST api/tuning/changes/{id}/undo` … | [Automatic tuning](routing-quality.md#automatic-tuning): what the router learned, why, and undo. Run, apply, undo, dismiss and undo-all answer with `saved` (see [Saved state](#saved-state)). |
 | `GET api/reliability`, `POST api/reliability/reset` | [Model reliability](routing-quality.md#model-reliability) per route and with tools, and offering a left-out model again. |
 | `GET api/activity/series?window=1h\|24h\|7d\|30d` | Counts, mix and latency percentiles per bucket. |
 | `GET api/activity/export?format=csv\|jsonl&prompts=false&since=&until=` | Download activity; prompt previews only with `prompts=true`. |
@@ -182,23 +184,49 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `GET/PUT api/evaluation/set`, `POST api/evaluation/cases`, `GET api/evaluation/set/export` | The evaluation set. See [routing-quality.md](routing-quality.md#api). |
 | `POST api/evaluate?calibrate=true`, `POST api/evaluate/compare`, `GET api/routes/health` | Evaluate, calibrate, compare embedding models, check routes. |
 | `GET api/themes` | Built-in themes and theme files, with missing tokens and contrast issues; the files are served at `{prefix}/themes/{id}.css`. |
-| `POST api/routes/{name}/utterances` | Add an utterance (or create the route) and apply. |
+| `POST api/routes/{name}/utterances` | Add an utterance (or create the route) and apply; `saved` says whether it was also saved (see [Saved state](#saved-state)). |
 | `POST api/embeddings/test` | Embed a sentence with the applied provider. |
 | `POST api/connectors/{name}/check` | Checks the connector now without calling a model, as `semantic-router doctor` does for it: `status` (`Ok`, `Warning`, `Failed`), `milliseconds`, `messages`, `at`. The result is kept for the Endpoints card until the connector points somewhere else. A check of a connector that is already being checked joins it. |
 | `POST api/connectors/{name}/discover` | What the connector offers: `models` (ids it serves), `server` (`LM Studio`, `Ollama`), `loading` (`OnDemand`, `LoadedOnly`, `Unknown`) with `loadingNote`, and `lineup`: per model its `kind`, `listed`, `loaded`, `contextLength`, `parametersBillions`, `capabilities`, `inCatalog`, `recommended`, `reason` and a `suggestion` in the configuration document's shape. HTTP connectors are asked (`/v1/models`, plus LM Studio's and Ollama's own APIs on local addresses), the Copilot SDK lists your account's models, and CLI presets return the names they accept. A `401` is reported as "requires authentication", naming the key to set. |
+| `POST api/connectors/discover` | The same for a connector that is only in the dashboard's draft: `{ "name": "lmstudio", "settings": { …connector settings… }, "models": [ … ] }` (`models`, the draft's catalog, is optional and marks what is already in it). Nothing is applied. The settings meet the checks `PUT api/config` would apply: the machine policy and offline mode, what a CLI may run, and secrets: `***` is filled in from the running connector of the same name only when it points to the same place, and a moved connector cannot take a stored or environment secret. Failures are `400` with `errors` and `issues`. Admin role only. |
+| `GET api/setup?refresh=true` | The first-run setup: `needed` (no model is enabled), `detected` (what `semantic-router init` would find on this machine: `id`, `title`, `detail`, `kind` (`cli` or `local`), `consent`, `connector` (`name`, `settings`), `models`, `aliases`) and `presets` (LM Studio, Ollama, OpenAI, Anthropic, OpenRouter, Google Gemini, Claude Code, Codex, GitHub Copilot: `id`, `title`, `detail`, `kind` (`local`, `cloud` or `cli`), `needsKey`, `keyVariable` and `keySet` for API keys referenced as `${env:…}`, `consent`, `connector`). Settings and models are in the configuration document's shape. Nothing is enabled: adding one is a configuration change. What the policy or offline mode turns off is left out; a name already used by a connector that points elsewhere gets `-2`. Detection starts the CLIs (`--version`, the sign-in check) and probes local ports, so its result is reused for 30 seconds unless `refresh=true`; without a detector (an application that is not the `semantic-router` tool or the desktop app) `detected` is empty. Admin role only. |
 | `GET api/session` | `{ role, tokenRequired, tokensConfigured, identity }` for the caller; `identity` is who it acts as (see [Audit log](#audit-log)). |
 | `POST api/session` | `{ "token": "..." }` → sets the session cookie, good for `SessionLifetime`. After five wrong tokens from one address in 15 minutes, `429` with `Retry-After` until the first is 15 minutes old. |
 | `DELETE api/session` | Signs out, and ends the session on the server: the cookie is refused from then on, even if replayed. |
 | `POST api/session/revoke-all` | Ends every session signed in until now, the caller's included ([Sessions](#sessions)). Admin role only. |
 | `GET api/audit?since=&until=&limit=200&format=jsonl` | The [audit log](#audit-log), newest first: `id`, `timestamp`, `actor`, `client`, `method`, `path`, `route`, `status`, `summary`. `since` is inclusive, `until` exclusive; `limit` up to 10,000. `format=jsonl` downloads JSON Lines. Admin role only. |
 
-`PUT api/config`, `POST api/config/reset`, rollback, `DELETE api/activity`, `POST api/health/reset`, `POST api/memory/exposure/reset`, changes to the evaluation set, adding utterances and every tuning action need the admin role. So does everything that spends embedding or API calls or scans the disk: `POST api/classify`, `POST api/evaluate` and `api/evaluate/compare`, `POST api/embeddings/test`, `POST api/connectors/{name}/check` and `/discover`, and `POST api/memory/refresh`. Everything else is open to the read-only role, except `GET api/audit`; the dashboard disables or hides those buttons for it. The metrics role reaches only the endpoints listed under [Roles](#roles).
+`PUT api/config`, `POST api/config/reset`, `save`, `revert`, rollback, `DELETE api/activity`, `POST api/health/reset`, `POST api/memory/exposure/reset`, changes to the evaluation set, adding utterances and every tuning action need the admin role. So does everything that spends embedding or API calls or scans the disk: `POST api/classify`, `POST api/evaluate` and `api/evaluate/compare`, `POST api/embeddings/test`, `POST api/connectors/{name}/check` and `/discover`, `POST api/connectors/discover`, `GET api/setup`, and `POST api/memory/refresh`. Everything else is open to the read-only role, except `GET api/audit`; the dashboard disables or hides those buttons for it. The metrics role reaches only the endpoints listed under [Roles](#roles).
 
 The same document works with `PUT` from scripts, e.g. to promote a tested configuration:
 
 ```bash
 curl -X PUT http://localhost:5080/router/api/config -H 'Content-Type: application/json' --data @semantic-router.json
 ```
+
+### Validation issues
+
+Every `400` from `PUT api/config` and `POST api/config/validate` (and the `200` of a failed validation) keeps `errors` (strings) and adds `issues`: one per error, `{ "path": "Routes.1.Name", "message": "…" }`. `path` names the field the way the dashboard's `data-bind` attributes do: property names as in the configuration JSON, dot-separated, with list indexes and dictionary keys (`Connectors.local.Timeout`, `Middleware.RateLimits.*.RequestsPerMinute`, `Usage.Budgets.0.Model`). It can be more specific than a form field (a dictionary entry inside a key-value box); walk it up to the nearest field. It is `null` when the problem has no single field. A value that does not fit its field is named with the format it needs, instead of a generic error:
+
+```json
+{ "errors": [ "Connectors.local.Timeout: \"5m\" is not a duration; use hh:mm:ss, e.g. 00:05:00" ],
+  "issues": [ { "path": "Connectors.local.Timeout", "message": "\"5m\" is not a duration; use hh:mm:ss, e.g. 00:05:00" } ], "valid": false }
+```
+
+### Version conflicts
+
+The dashboard sends `baseVersion` with every `PUT api/config`. When someone else applied a version since (another browser, a learned change, a script), the change is refused and nothing is applied:
+
+```json
+{ "title": "The configuration changed since you loaded it.", "currentVersion": 7, "actor": "admin token",
+  "at": "2026-10-16T09:12:00+00:00", "source": "admin API", "detail": "…", "status": 409 }
+```
+
+`actor` is `null` for a version from start-up. Without `baseVersion`, `PUT` applies over whatever runs, as before.
+
+### Saved state
+
+A configuration applied without saving runs until the next restart; `unsaved` in `api/status` says so, and `POST api/config/save` or `POST api/config/revert` settles it. While it is unsaved, changes made on top of the running configuration (adding an utterance, a learned change being applied or undone, automatic tuning) are applied without saving too, so they do not save the unsaved changes along with them; their answers say `"saved": false`. Once it is saved, they save as before.
 
 ## Access and security
 

@@ -20,6 +20,7 @@ internal sealed partial class PromptDispatcher
     private readonly BudgetGate? _budgets;
     private readonly ConnectorIncidents? _incidents;
     private readonly TimeProvider _time;
+    private readonly RouterDashboardLocation? _dashboard;
     private readonly ILogger _logger;
 
     public PromptDispatcher(
@@ -29,7 +30,8 @@ internal sealed partial class PromptDispatcher
         IUsageLedger? ledger = null,
         BudgetGate? budgets = null,
         TimeProvider? time = null,
-        ConnectorIncidents? incidents = null)
+        ConnectorIncidents? incidents = null,
+        RouterDashboardLocation? dashboard = null)
     {
         _health = health;
         _metrics = metrics;
@@ -37,6 +39,7 @@ internal sealed partial class PromptDispatcher
         _ledger = ledger;
         _budgets = budgets;
         _incidents = incidents;
+        _dashboard = dashboard;
         _time = time ?? TimeProvider.System;
     }
 
@@ -233,10 +236,13 @@ internal sealed partial class PromptDispatcher
         }
 
         current.Model = null;
-        string detail = plan.Candidates.Count == 0
-            ? $"No configured model satisfies the request (tier {plan.Requirements.RequiredTier}" +
-              (plan.Requirements.RequiredCapabilities.Count > 0 ? $", capabilities {string.Join(", ", plan.Requirements.RequiredCapabilities)}" : string.Empty) +
-              (plan.Requirements.LocalOnly ? ", local only" : string.Empty) + ")."
+
+        // No candidate even ignoring cooldowns: the configuration has no model for this request, and retrying cannot help.
+        // A 400 tells clients (the OpenAI and Anthropic SDKs, Claude Code) not to retry, and says where to fix it. When
+        // models exist but failed or cooled down, 503 lets them retry later.
+        bool notServable = plan.Candidates.Count == 0;
+        string detail = notServable
+            ? NotServable(context, runtime, plan.Requirements)
             : "Every candidate model failed: " + string.Join("; ", attempts);
 
         _metrics.RecordRequest(null, null, "failed", _time.GetElapsedTime(started));
@@ -247,8 +253,57 @@ internal sealed partial class PromptDispatcher
             activity.Budget = budgetsHit.Count > 0 ? string.Join(", ", budgetsHit.Distinct(StringComparer.OrdinalIgnoreCase)) : null;
         }
 
+        if (notServable)
+        {
+            await ProtocolErrors.WriteNotServableAsync(context, chat.Protocol, detail, context.RequestAborted).ConfigureAwait(false);
+            return;
+        }
+
         await PromptRoutingMiddleware.WriteProblemAsync(
             context, chat.Protocol, StatusCodes.Status503ServiceUnavailable, "No model available", detail).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Why no model can answer and where to fix it, e.g. <c>SemanticRouter has no model that can answer this (no model is
+    /// enabled). Add one on the dashboard: http://localhost:5080/router#/overview</c>.
+    /// </summary>
+    private string NotServable(HttpContext context, RouterRuntime runtime, ModelRequirements requirements)
+    {
+        bool anyEnabled = runtime.Configuration.Models.Any(m => m.Enabled);
+        string why = "no model is enabled";
+        if (anyEnabled)
+        {
+            var needs = new List<string> { $"tier {requirements.RequiredTier.ToString(CultureInfo.InvariantCulture)}" };
+            if (requirements.RequiredCapabilities.Count > 0)
+            {
+                needs.Add("capabilities " + string.Join(", ", requirements.RequiredCapabilities));
+            }
+
+            if (requirements.LocalOnly)
+            {
+                needs.Add("local only");
+            }
+
+            if (requirements.Profile is { Length: > 0 } profile)
+            {
+                needs.Add($"profile '{profile}'");
+            }
+
+            why = "no enabled model fits what it needs: " + string.Join(", ", needs);
+        }
+
+        // The dashboard as this client reaches the router; the setup on Overview when nothing is enabled yet.
+        string? page = _dashboard?.Prefix is { } prefix
+            ? $"{context.Request.Scheme}://{context.Request.Host}{context.Request.PathBase}{prefix}#/{(anyEnabled ? "models" : "overview")}"
+            : null;
+        string fix = (anyEnabled, page) switch
+        {
+            (false, { } url) => $"Add one on the dashboard: {url}",
+            (false, null) => "Add one to the router's configuration (SemanticRouter:Models).",
+            (true, { } url) => $"Enable or add one that fits on the dashboard: {url}",
+            (true, null) => "Enable or add one that fits in the router's configuration (SemanticRouter:Models).",
+        };
+        return $"SemanticRouter has no model that can answer this ({why}). {fix}";
     }
 
     private void ReportFailure(ModelDefinition model, ConnectorResult result)

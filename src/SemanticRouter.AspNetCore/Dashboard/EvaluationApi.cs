@@ -203,10 +203,16 @@ internal static class EvaluationApi
                 return Results.Problem(string.Join(" ", errors), statusCode: StatusCodes.Status400BadRequest);
             }
 
-            RouterRuntime applied = provider.Apply(next, persist: true, "dashboard", actor(context), $"added an utterance to '{route.Name}'");
-            DashboardAudit.Detail(context, $"route {route.Name}, version {applied.Version}");
+            // Saved only when the running configuration is: saving now would also save changes applied without saving.
+            (RouterRuntime applied, bool saved) = provider.ApplyKeepingSaveState(next, "dashboard", actor(context), $"added an utterance to '{route.Name}'");
+            DashboardAudit.Detail(context, $"route {route.Name}, version {applied.Version}{(saved || provider.Store is null ? string.Empty : ", not saved")}");
             PromptClassificationResult classification = await applied.Classifier.ClassifyAsync(utterance, context.RequestAborted).ConfigureAwait(false);
-            return Results.Json(new AddUtteranceResponse(applied.Version, route.Name, route.Utterances.Count, classification.RequiredTier, classification.RouteName, classification.Reason, classification.Similarity), json);
+            return Results.Json(
+                new AddUtteranceResponse(applied.Version, route.Name, route.Utterances.Count, classification.RequiredTier, classification.RouteName, classification.Reason, classification.Similarity)
+                {
+                    Saved = saved,
+                },
+                json);
         }).WithMetadata(DashboardWriteMetadata.Instance).Audited("added an utterance to a route");
     }
 
@@ -333,5 +339,12 @@ internal static class EvaluationApi
 
     public sealed record AddUtteranceRequest(string? Utterance, int? Tier = null, string? Description = null, bool? LocalOnly = null);
 
-    public sealed record AddUtteranceResponse(int Version, string Route, int Utterances, int Tier, string? MatchedRoute, RoutingReason Reason, float? Similarity);
+    public sealed record AddUtteranceResponse(int Version, string Route, int Utterances, int Tier, string? MatchedRoute, RoutingReason Reason, float? Similarity)
+    {
+        /// <summary>
+        /// Whether the change was saved. <see langword="false"/> when the running configuration held changes applied
+        /// without saving (the utterance is then applied without saving too), or when there is no configuration store.
+        /// </summary>
+        public bool Saved { get; init; }
+    }
 }
