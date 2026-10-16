@@ -12,8 +12,9 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'sem
 const PAGES = ['overview', 'live', 'activity', 'usage', 'memory', 'tiers', 'routes', 'routing', 'profiles', 'evaluate', 'learned', 'models', 'connectors', 'embeddings', 'gateway', 'clients', 'json', 'audit', 'feedback'];
 
 // As in dashboard.spec.js: a test fails if the page throws, logs an error or asks another host for anything. A test
-// that answers a request with 404 on purpose (an older router) lets the browser's "Failed to load resource" through.
-const expects404 = new WeakSet();
+// that expects a 4xx on purpose (an older router's 404, the gateway's refusal) lets the browser's "Failed to load
+// resource" through.
+const expects4xx = new WeakSet();
 const test = base.extend({
   page: async ({ page, baseURL }, use) => {
     const errors = [];
@@ -23,7 +24,7 @@ const test = base.extend({
       if (!url.startsWith('data:') && !url.startsWith('blob:') && new URL(url).origin !== own) errors.push(`request to another host: ${url}`);
     });
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
-    page.on('console', (m) => { if (m.type() === 'error' && !(expects404.has(page) && /status of 404/.test(m.text()))) errors.push(`console: ${m.text()}`); });
+    page.on('console', (m) => { if (m.type() === 'error' && !(expects4xx.has(page) && /status of 4\d\d/.test(m.text()))) errors.push(`console: ${m.text()}`); });
     await use(page);
     expect(errors, 'the dashboard logged errors').toEqual([]);
   },
@@ -113,9 +114,27 @@ test('with no model enabled, the Overview walks through setup: connector, models
   await expect(page.locator('#setup')).toHaveCount(0);
 });
 
+test('the setup card lists the router\'s own presets, and a gateway refusal says where to fix it', async ({ page, request }) => {
+  expects4xx.add(page); // the gateway refuses the Send with a 400
+  const setup = await request.get('/router/api/setup');
+  test.skip(setup.status() === 404, 'this router has no setup endpoint');
+  expect((await request.put('/router/api/config?persist=false', { data: empty })).ok()).toBeTruthy();
+  await open(page, 'overview');
+  const card = page.locator('#setup');
+  await expect(card.locator('h2')).toHaveText('Set up SemanticRouter');
+  await expect(card.locator('.choice b', { hasText: /^LM Studio$/ })).toBeVisible();
+  await expect(card.locator('.choice b', { hasText: /^OpenAI$/ })).toBeVisible();
+  // The banner leaves "no model is enabled" to the card here.
+  await expect(page.locator('#banner')).not.toContainText(/no model is enabled/i);
+  await page.locator('#tester-prompt').fill('hello there');
+  await page.locator('[data-action="tester-send"]').click();
+  await expect(page.locator('.tester .next-step')).toBeVisible();
+  await expect(page.locator('.tester .next-step a').first()).toHaveAttribute('href', '#/overview');
+});
+
 test('without the setup endpoint the checklist still shows, pointing to Connectors', async ({ page, request }) => {
   expect((await request.put('/router/api/config?persist=false', { data: empty })).ok()).toBeTruthy();
-  expects404.add(page);
+  expects4xx.add(page);
   await page.route('**/router/api/setup', (r) => r.fulfill({ status: 404, json: { title: 'Not Found' } }));
   await open(page, 'overview');
   const card = page.locator('#setup');

@@ -11,7 +11,7 @@ import { isLocalModel } from './live.js';
 import { pageActions } from './page-actions.js';
 import { unreliableBadge } from './reliability.js';
 import { runsOn, serviceCard } from './service.js';
-import { setupCard, setupShowing } from './setup.js';
+import { gatewayError, setupCard, setupShowing } from './setup.js';
 import { render } from './shell.js';
 
 views.overview = () => {
@@ -117,14 +117,18 @@ function testerCard(s) {
 
 /* A failed Send says why and where to fix it, instead of only the gateway's status line. */
 function replyHint(reply) {
-  const m = /^HTTP (\d{3}):/.exec(reply.text || '');
-  if (!m) return '';
+  const err = gatewayError(reply);
+  if (!err) return '';
   const s = state.status;
+  const PAGES = { overview: 'the setup steps', models: 'Models', connectors: 'Connectors', gateway: 'Gateway settings' };
+  const link = err.page && PAGES[err.page] ? ` <a href="#/${err.page}"${err.page === 'overview' ? ' data-action="setup-scroll"' : ''}>Open ${PAGES[err.page]}</a>` : '';
+  // The router's own message (a 400 with code no_model_available) already says why and where: show it, linked.
+  if (err.code === 'no_model_available') return `<p class="small next-step">${h(err.message.replace(/\s*https?:\/\/\S+#\/\S+/, '').trim())}${link}</p>`;
   const where = setupShowing() ? 'Follow the steps in <a href="#/overview" data-action="setup-scroll">Set up SemanticRouter</a> above.'
     : '<a href="#/models">Models</a> (enabled, tier, capabilities) and <a href="#/connectors">Connectors</a> (Check) are where to look.';
   if (!s.models.some((x) => x.enabled)) return `<p class="small next-step">No model is enabled, so nothing can answer. ${where}</p>`;
-  if (m[1] === '401' || m[1] === '403') return '<p class="small next-step">The gateway refused the request: see <a href="#/gateway">Gateway → Settings</a> (gateway keys).</p>';
-  if (m[1] === '429') return '<p class="small next-step">Over a rate limit: see <a href="#/gateway">Gateway → Settings</a> (rate limits).</p>';
+  if (err.status === 401 || err.status === 403) return '<p class="small next-step">The gateway refused the request: see <a href="#/gateway">Gateway → Settings</a> (gateway keys).</p>';
+  if (err.status === 429) return '<p class="small next-step">Over a rate limit: see <a href="#/gateway">Gateway → Settings</a> (rate limits).</p>';
   return `<p class="small next-step">No model could answer this one. ${where} The <a href="#/activity">Activity</a> entry has the details.</p>`;
 }
 

@@ -35,6 +35,17 @@ const draftConnectors = () => Object.keys((state.config && state.config.Connecto
 const draftEnabledModels = () => ((state.config && state.config.Models) || []).filter((m) => m.Enabled !== false);
 // The tester's reply text starts with "HTTP <status>:" when the gateway refused or failed.
 const replyFailed = (r) => !!r && /^HTTP \d{3}:/.test(r.text || '');
+
+/* A failed Send's status, message and error code, out of the OpenAI or Anthropic error body. */
+export function gatewayError(reply) {
+  const m = /^HTTP (\d{3}): ([\s\S]*)$/.exec((reply && reply.text) || '');
+  if (!m) return null;
+  let message = m[2].trim(); let code = null;
+  try { const j = JSON.parse(m[2]); const e = j.error || j; message = e.message || j.detail || j.title || message; code = e.code || null; } catch { /* not JSON */ }
+  // The message names a dashboard page by its full address: link the page here.
+  const page = (/#\/([a-z]+)/.exec(message) || [])[1] || null;
+  return { status: +m[1], message, code, page };
+}
 // Answered since the card first showed: by the test prompt, or by any client.
 const servedOnce = () => (!!state.tester.reply && !replyFailed(state.tester.reply))
   || state.activity.some((e) => e.servedBy && e.outcome !== 'failed' && new Date(e.timestamp) >= setup().since);
@@ -54,10 +65,12 @@ const KIND = { cli: 'your sign-in', local: 'this machine', cloud: 'cloud API', c
 /* One detected tool or preset, with what enabling it means. */
 function choice(c, detected) {
   const added = setup().added.includes(c.id);
-  const note = detected ? c.consent : c.needsKey ? 'Needs an API key: set the environment variable it names, or type the key on the connector after adding it.' : '';
+  const key = c.keyVariable ? `<span class="mono">${h(c.keyVariable)}</span>` : 'its API key variable';
+  const note = [c.consent ? h(c.consent) : '',
+    c.needsKey ? (c.keySet ? `Uses ${key}, which is set where the router runs.` : `Needs an API key: set ${key} where the router runs, or type the key on the connector after adding it.`) : ''].filter(Boolean).join(' ');
   return `<li class="choice">
-    <div class="choice-text"><b>${h(c.title)}</b>${detected ? ' <span class="badge ok">found</span>' : ''}${c.needsKey ? ' <span class="badge">needs an API key</span>' : ''}${KIND[c.kind] ? ` <span class="badge">${KIND[c.kind]}</span>` : ''}
-      ${c.detail ? `<div class="small muted">${h(c.detail)}</div>` : ''}${note ? `<div class="small faint">${h(note)}</div>` : ''}</div>
+    <div class="choice-text"><b>${h(c.title)}</b>${detected ? ' <span class="badge ok">found</span>' : ''}${c.needsKey ? (c.keySet ? ' <span class="badge ok">key set</span>' : ' <span class="badge">needs an API key</span>') : ''}${KIND[c.kind] ? ` <span class="badge">${KIND[c.kind]}</span>` : ''}
+      ${c.detail ? `<div class="small muted">${h(c.detail)}</div>` : ''}${note ? `<div class="small faint">${note}</div>` : ''}</div>
     ${readOnly() ? '' : added ? '<span class="badge ok">added</span>' : `<button class="btn small ${detected ? 'primary' : ''}" data-action="setup-choose" data-id="${h(c.id)}" data-detected="${detected ? '1' : ''}">${detected ? 'Enable' : 'Add'}</button>`}
   </li>`;
 }
@@ -69,7 +82,7 @@ export function presetList(blank) {
   const detected = s.data.detected || []; const presets = s.data.presets || [];
   return `<ul class="choices">${detected.map((c) => choice(c, true)).join('')}${presets.map((c) => choice(c, false)).join('')}
     ${blank ? `<li class="choice"><div class="choice-text"><b>Blank connector</b><div class="small muted">Any OpenAI-compatible server, the Anthropic API or a CLI, set up by hand.</div></div><button class="btn small" data-action="connector-add">Add</button></li>` : ''}</ul>
-    ${s.error ? `<p class="small muted">Couldn't look for providers on this machine: ${h(s.error)}</p>` : ''}`;
+    ${s.error || s.data.detectionProblem ? `<p class="small muted">Couldn't look for everything on this machine: ${h(s.error || s.data.detectionProblem)}</p>` : ''}`;
 }
 
 /* The Add connector button: a menu of the presets and a blank connector. */
@@ -133,7 +146,8 @@ export async function discoverDraft(connector) {
   let r;
   try {
     try {
-      r = await api('POST', '/connectors/discover', { name: connector, settings });
+      // The draft's catalog too, so models added a moment ago count as in the catalog.
+      r = await api('POST', '/connectors/discover', { name: connector, settings, models: state.config.Models || [] });
     } catch (e) {
       if (e.status !== 404 && e.status !== 405) throw e;
       r = await api('POST', `/connectors/${encodeURIComponent(connector)}/discover`);
@@ -192,7 +206,7 @@ export function setupCard() {
 
   const reply = state.tester.reply;
   const step3 = !two ? '' : `<div class="inline"><button class="btn ${three ? '' : 'primary'} small" data-action="setup-test" ${state.tester.busy ? 'disabled' : ''}>Send a test prompt</button><span class="small muted">Sends “Say hello in five words.” through the gateway, as a client would.</span></div>
-    ${replyFailed(reply) ? `<p class="small" style="color:var(--danger);margin-top:6px">${h(reply.text.slice(0, 300))}</p>` : ''}`;
+    ${replyFailed(reply) ? `<p class="small" style="color:var(--danger);margin-top:6px">${h(gatewayError(reply).message.slice(0, 300))}</p>` : ''}`;
 
   return `<div class="card section setup" id="setup" role="region" aria-label="Set up SemanticRouter">
     <div class="card-head"><h2>${three ? 'SemanticRouter is set up' : 'Set up SemanticRouter'}</h2><span class="spacer"></span><button class="btn ghost small" data-action="setup-dismiss">${three ? 'Done' : 'Hide'}</button></div>

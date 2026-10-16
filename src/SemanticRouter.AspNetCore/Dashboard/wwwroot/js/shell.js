@@ -8,6 +8,7 @@ import { loadTuning } from './learned.js';
 import { activityHeld, scheduleLive, showNewEntries } from './live.js';
 import { graph, mounts, readPalette, unmount } from './memory.js';
 import { loadUsage } from './usage.js';
+import { setupShowing } from './setup.js';
 
 /* ---------------------------------------------------------------------------------------------
    Data loading
@@ -234,7 +235,9 @@ export function renderChrome() {
   if (metricsOnly()) notes.push(`${who && !/ token$|^this machine$/.test(who) ? `Signed in as <b>${h(who)}</b> with the <b>metrics</b> role` : 'Signed in with the <b>metrics</b> token'}: you see figures only, not prompts, activity or the configuration.`);
   else if (readOnly()) notes.push(`${who && !/ token$|^this machine$/.test(who) ? `Signed in as <b>${h(who)}</b> with the <b>read-only</b> role` : 'Signed in with the <b>read-only</b> token'}: you can look, but not change settings or run what spends embedding or API calls (classify, evaluate, check, discover).`);
   if (state.meta.warning) notes.push(h(state.meta.warning));
-  ((s && s.warnings) || []).forEach((w) => notes.push(h(w)));
+  // On the Overview, the setup card says "no model is enabled" (with what to do): the banner does not repeat it.
+  const setupCard = state.view === 'overview' && setupShowing();
+  ((s && s.warnings) || []).filter((w) => !(setupCard && /no model is enabled/i.test(w))).forEach((w) => notes.push(h(w)));
   ((s && s.budgets) || []).filter((b) => b.exceeded || b.warning).forEach((b) => notes.push(`Budget <b>${h(b.name)}</b> (${h(b.covers)}) is ${b.exceeded ? 'spent' : 'at ' + b.percent + '%'}. <a href="#/usage">Usage</a>`));
   if (notes.length) banner(notes.join('<br>'), 'warn'); else banner(null);
   const signOut = $('#sign-out');
