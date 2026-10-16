@@ -253,7 +253,7 @@ internal static class EvaluationApi
         }
 
         return fallback is not null && cases.Count == 0
-            ? (null, "The evaluation set is empty: add prompts on the Evaluate page, label activity entries, or send a set.")
+            ? (null, "The evaluation set is empty: add labelled prompts to it (or Label entries on the Activity page), or send a set with the request.")
             : (cases, null);
     }
 

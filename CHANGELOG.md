@@ -7,10 +7,80 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 ### Added
 
 - Desktop app: an Updates section in **About SemanticRouter**, and **Check for updates now…** in the tray menu. It shows whether the app is up to date and when it last checked, an update that is downloading, ready or available, and why a check failed or updates are off. It has **Check now**, **Restart to update** and the two update switches.
+- `GET api/setup` for the dashboard's first-run setup: whether a model is still needed, what `semantic-router init` would find on this machine (LM Studio, Ollama, and the claude, codex and copilot CLIs with whether they are signed in) and one-click provider presets (LM Studio, Ollama, OpenAI, Anthropic, OpenRouter, Google Gemini, Claude Code, Codex, GitHub Copilot). It only describes; nothing is enabled until the dashboard applies it. The machine policy and offline mode leave out what they turn off.
+- `POST api/connectors/discover` discovers the models of a connector that is only in the dashboard's draft, held to the same checks as applying it (policy, what a CLI may run, where a stored secret may go).
+- `POST api/config/save` and `POST api/config/revert`, and `unsaved` in `GET api/status`: a configuration applied without saving can be kept or undone, and the dashboard can say it is not saved.
+- `PUT api/config?baseVersion=N` refuses a change made against a version that is no longer running (`409` with who changed it, when and how), so two editors cannot silently undo each other.
+- Validation errors from `PUT api/config` and `POST api/config/validate` come with `issues` that name the field (`Routes.1.Name`, `Connectors.local.Timeout`), and a value that does not fit its field says the format it needs (`"5m" is not a duration; use hh:mm:ss, e.g. 00:05:00`) instead of "Expected a configuration document".
+- The `semantic-router` tool and the desktop app redirect `/` to the dashboard (`MapRouterDashboardRedirect`; an application's own `/` endpoint wins).
+- The start-up banner has a **Try it** block: a request to send (curl, or `Invoke-RestMethod` on Windows), where to watch it on the dashboard (`#/live`), and the Claude Code command as one line with its variables inline, as in the client guide. While no model is enabled it says so instead, with the link to the setup on the dashboard's Overview.
+- The container seeds a connector for `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` on its first start, while the configuration is still the template; the connector refers to the key as `${env:…}`, so the key never lands in the file (`SEMANTIC_ROUTER_SEED_API_KEYS`, on in the image).
+- `doctor` checks the Codex CLI's sign-in with `codex login status`.
+- Desktop app: on the first start the dashboard opens on its Overview, where the setup is, and the welcome window says so. While the router has no enabled model, the tray menu says so and offers the setup, with one notification.
+- README: a Quick start right under the introduction (who it is for, what to install, the commands, the desktop app, where to go next).
+- Dashboard: **Running configuration not saved** in the top bar when the router runs a configuration that was applied without saving, with **Save** and **Revert to saved** for the admin (the More panel shows the source as "not saved").
+- Dashboard: the save bar counts the draft's changes, and **Review** shows them next to the running configuration.
+- Dashboard: Apply names the version the draft started from; when someone else applied a configuration meanwhile, a notice says who and when and offers **Reload**, **Compare** or **Apply mine anyway**. The refresh notices such a change too and reloads a draft without changes quietly.
+- Dashboard: removing a route, model, connector, profile, tier, budget or memory source offers **Undo**; removing a connector that models use, or a profile that rules, virtual models, client mappings or budgets name, asks whether to remove those too.
+- Dashboard: problems from Validate and Apply are shown next to their fields (the item opens, the first gets the focus), and the problem list links each one to its field on its page.
+- Dashboard: model aliases can be reordered (the first matching glob wins).
+- Dashboard: new Activity entries that arrive while the table holds still (auto-refresh off, a label being written, text selected) are counted, with **Show**.
+- Dashboard: **Set up SemanticRouter** on the Overview while no model is enabled: add a connector (tools found on this machine first, then presets for LM Studio, Ollama, OpenAI, Anthropic, OpenRouter, Gemini and the CLIs), add models (Discover models, Apply & save), send a test prompt. Read-only users see that an admin needs to add a model.
+- Dashboard: **Add connector** is a menu of presets and a blank connector, also shown on an empty Connectors page.
+- Dashboard: Activity has a search box, and a click (or Enter) on a row opens the whole decision.
+- Dashboard: Router learned has a small Settings form for the common `Tuning` options.
+- Dashboard: Routes can be set to follow the conversation (`FollowsConversation`).
 
 ### Changed
 
-- Dashboard: the 19-link sidebar, which no longer fit a laptop screen or the desktop app's default window, is a narrow rail of five sections (Monitor, Routing, Providers, Gateway, Admin) with each section's pages as tabs under the top bar. Routing rules is the **Rules** tab and the gateway page the **Settings** tab. Feedback sits at the foot of the rail, and the version, theme picker and **Sign out** moved under **More**. Every page keeps its address, so existing links and bookmarks still work.
+- Dashboard: the 19-link sidebar, which no longer fit a laptop screen or the desktop app's default window, is a narrow rail of five sections (Monitor, Routing, Providers, Gateway, Admin) with each section's pages as tabs under the top bar. Routing rules is the **Rules** tab and the gateway page the **Settings** tab. **Report an issue** (the Feedback page) sits at the foot of the rail, and the version, theme picker and **Sign out** moved under **More**. Every page keeps its address, so existing links and bookmarks still work.
+- A request no model can serve because of the configuration (no model enabled, or none with the tier, capabilities, locality or profile it needs) gets `400 invalid_request_error` in the client's protocol instead of `503`, so the SDKs and Claude Code stop retrying, with what to do and where: "SemanticRouter has no model that can answer this (no model is enabled). Add one on the dashboard: http://localhost:5080/router#/overview". Failed or cooling-down models still give a retryable `503`.
+- The "no model is enabled" warning and service note point to the dashboard's setup on Overview instead of the Models page or `semantic-router init`.
+- `init` replaces a configuration that still holds the built-in template (as the router writes it on its first start) without `--force`.
+- `init` output: a one-line tier legend, no similarity-threshold note, the Claude Code command on one line (no `export`) and only when a model is enabled; with none, the dashboard's setup. When a subscription CLI is all it found, the question says that without it the router has no model to use.
+- `doctor`: no enabled model is a `[FAIL]` (exit code 1), whose fix is a step that helps (the dashboard's setup, or `init` while the configuration is still the template). Fix lines name the dashboard field beside the setting, e.g. *Providers → Connectors → openai → API key*.
+- An unreachable LM Studio or Ollama says how to start it (Developer → Start server, `ollama serve`); other servers name the address setting and where it is on the dashboard.
+- A failed ONNX model download names huggingface.co, `HTTPS_PROXY` and `Network:CaBundle`, and where to copy the file instead, and is logged without a stack trace.
+- A quieter console: ASP.NET Core's lines per request and the hosting start-up notes from `Warning`, data protection from `Error` (the router's own key-ring line covers it); the router keeps its one line per request. `Logging:LogLevel` turns any of it back up.
+- The key-ring warning (unencrypted keys, macOS and Linux) appears only once the secrets file holds a key.
+- An address that is in use is explained without a stack trace; when it is this configuration's own router, the message says so with its dashboard address.
+- Links in the tool's output, the help text and the desktop app point to the documentation site instead of files in the repository.
+- `deploy/compose.yaml` runs the published image `ghcr.io/siebe41/semantic-router:<version>`; building from the checkout is a commented-out alternative.
+- The site's **Get started** (home page and top bar) goes to the README's Quick start; its **Try it** names the .NET 10 SDK and the Claude Code line.
+- Dashboard: **Apply & save** is the primary action; **Apply** is now **Apply only** ("a restart undoes it").
+- Dashboard: Discard, Use defaults (tiers, complexity rules), revert, reset, rollback and the other confirmations ask in the page instead of the browser's dialog; Discard says how many changes go and offers Undo.
+- Dashboard: the top bar's health dot shows the router's overall state (red when failing or no model is enabled, amber when degraded or warming up), with a label, and a short word next to it on a phone.
+- Dashboard: messages stack instead of replacing one another, are spoken once (errors as alerts, prefixed so), and "Not applied" stays until it is closed; the top bar and banner are rewritten only when they change.
+- Dashboard: a button is marked busy while its action runs and cannot be sent twice.
+- Dashboard: the read-only role sees forms as read-only (no add or remove buttons, no Send in the prompt tester), and is not asked before leaving.
+- Dashboard: adding an item opens it with the focus in its name; after a removal the focus moves to the next item; a refresh keeps the focus on the button in use and keeps open tables open.
+- Dashboard: actions that add an utterance or apply a learned change say "applied and saved" or "applied, not saved".
+- Dashboard: a refused rename (a duplicate name, `@` or `.`) says why.
+- Dashboard: Discover models asks a connector as the draft describes it (`POST api/connectors/discover`), so a connector added a moment ago works before Apply; a reason every row shares is stated once above the list.
+- Dashboard: the Overview leads with setup, decisions, the week, the models and recent activity; "Runs on" and the runtime fold into **About this router**; one row of counters.
+- Dashboard: Rules, Gateway and Profiles split basic from advanced settings; Profiles is four cards; **Delete all activity** has its own Stored activity card.
+- Dashboard: settings show their defaults as placeholders instead of as values, with the limits validation uses; durations show in words ("15 min") and are flagged when not hh:mm:ss.
+- Dashboard: capabilities, allowed/denied models and connectors are picked from lists; time zones have suggestions; a budget covers one model, connector or profile picked with **Covers**, and a new budget is valid.
+- Dashboard: routing reasons, configuration sources and settings are in plain words, with the raw value in a tooltip; one format for money, counts, dates and tiers ("T2 · Coding"); consistent Remove, Use defaults and Download buttons.
+- Dashboard: Label starts with no tier picked and warns when it is the tier the prompt was routed to.
+
+### Fixed
+
+- Adding an utterance from the dashboard, and applying or undoing a learned change, no longer saves configuration changes that were applied without saving: while the running configuration is unsaved they apply without saving too, and their answers say `"saved": false`.
+- `doctor` labelled a CLI working directory it could not create as the CLI's `--version` failing; it now says what it is.
+- The tool's prerequisite is the .NET 10 SDK (installing a .NET tool needs it), not "runtime or SDK".
+- Dashboard: unapplied edits survive adding an utterance from Evaluate or Activity, a learned change, Save or Revert (moved onto the new configuration, or kept with a notice), and signing in again.
+- Dashboard: text typed in the JSON editor or the evaluation set is kept across pages and renders, counts as unsaved when leaving, and is not replaced by **Show baseline** or **Load into editor** without asking.
+- Dashboard: two model aliases or rate limits with the same name are flagged instead of one silently disappearing; **Add Claude Code defaults** no longer overwrites targets you set.
+- Dashboard: removing an item no longer opens the item that moves into its place.
+- Dashboard: Usage and Trends that fail to load say why with **Retry**, instead of asking again on every render.
+- Dashboard: an error page from a proxy shows what it said instead of only "HTTP 502".
+- Dashboard: **Discover** on a model shows its result under the field.
+- Dashboard: no page scrolls sideways on a phone (Usage, Profiles, Evaluate, Overview); stat tiles stay two abreast.
+- Dashboard: chart axes count in whole numbers without repeated labels; the Evaluate sweep's "too high"/"too low" labels no longer overlap.
+- Dashboard: Usage right-aligns its figures and folds an empty Feedback card to one line.
+- Dashboard: a failed prompt-tester Send or a plan with no eligible model says why and where to fix it.
+- Dashboard: Memory without sources no longer shows Fit, Rescan and Clear sharing, nor two sets of add buttons; Evaluate with an empty set says what to do on the page itself.
 
 ## [0.3.0] - 2026-10-16
 
