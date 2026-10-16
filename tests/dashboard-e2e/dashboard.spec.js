@@ -147,7 +147,8 @@ test('the rail groups the pages into sections, each with its pages as tabs', asy
   await page.locator('#nav a', { hasText: 'Monitor' }).click();
   await page.locator('#nav a', { hasText: 'Routing' }).click();
   await expect(page.locator('#tabs a[aria-current="page"]')).toHaveText('Profiles');
-  // Feedback is in no section: no tabs.
+  // Report an issue (the Feedback page) is in no section: no tabs.
+  await expect(page.locator('#sidebar a[data-view="feedback"]')).toHaveText('Report an issue');
   await page.locator('#sidebar a[data-view="feedback"]').click();
   await expect(page.locator('#view h1')).toHaveText('Feedback');
   await expect(page.locator('#tabs')).toBeHidden();
@@ -289,9 +290,15 @@ test('validation lists problems and discard restores the configuration', async (
   await page.locator('input[data-bind="Routes.1.Name"]').fill('smalltalk');
   await page.locator('#save-bar [data-action="validate"]').click();
   await expect(page.locator('ul.errors')).toContainText('smalltalk');
+  // Discard asks in the page first, then offers Undo.
   await page.locator('#save-bar [data-action="discard"]').click();
+  await expect(page.locator('dialog#ask')).toContainText('Discard 1 change?');
+  await page.locator('dialog#ask button', { hasText: 'Discard' }).click();
   await expect(page.locator('#save-bar')).toBeHidden();
   await expect(page.locator('.item-head', { hasText: 'architecture' })).toBeVisible();
+  await page.locator('#toast button', { hasText: 'Undo' }).click();
+  await expect(page.locator('#save-bar')).toBeVisible();
+  await expect(page.locator('input[data-bind="Routes.1.Name"]')).toHaveValue('smalltalk');
 });
 
 test('the prompt tester classifies and sends a prompt through the gateway', async ({ page }) => {
