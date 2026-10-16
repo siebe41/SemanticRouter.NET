@@ -4,6 +4,7 @@
 //   node lmstudio-stub.js [port]     (default 1234, LM Studio's own port)
 const http = require('http');
 const { replyFor, words, toolCallFor, afterTool } = require('./replies');
+const { cachedPrefix } = require('./prompt-cache');
 
 const lmStudioModels = ['qwen/qwen3-8b', 'qwen/qwen3-coder-30b'];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -22,6 +23,7 @@ function lastUserText(request) {
 function createStub({ project = process.cwd(), models: listed = lmStudioModels, loaded = listed, localApi = true } = {}) {
   const models = [...listed];
   const inMemory = new Set(loaded);
+  const recent = [];
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
@@ -68,6 +70,10 @@ function createStub({ project = process.cwd(), models: listed = lmStudioModels, 
       const reply = toolResultBack ? afterTool(typeof toolResult?.content === 'string' ? toolResult.content : JSON.stringify(toolResult?.content)) : replyFor(lastUserText(request));
       const usage = { prompt_tokens: Math.round(body.length / 4), completion_tokens: words(reply).length, total_tokens: 0 };
       usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
+      if (process.env.DEMO_FULL_ANSWERS) {
+        const prompt = JSON.stringify([request.tools, request.messages]);
+        usage.prompt_tokens_details = { cached_tokens: Math.min(usage.prompt_tokens, Math.floor(cachedPrefix(recent, prompt) / 4)) };
+      }
       await sleep(150 + Math.random() * 150);
 
       if (!request.stream) {

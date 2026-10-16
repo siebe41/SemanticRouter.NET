@@ -83,20 +83,25 @@ public static partial class ModelLineup
         ["mythos"] = (5, "Claude Mythos: Fable-class (Project Glasswing)"),
     };
 
-    /// <summary>Anthropic API list prices (USD per million tokens, input/output) and context windows, longest prefix first.</summary>
-    private static readonly (string Prefix, int Context, decimal Input, decimal Output)[] AnthropicModels =
+    /// <summary>
+    /// Anthropic API list prices (USD per million tokens: input, output, and cache reads where they are not a tenth of
+    /// input) and context windows, longest prefix first.
+    /// </summary>
+    private static readonly (string Prefix, int Context, decimal Input, decimal Output, decimal? CacheRead)[] AnthropicModels =
     [
-        ("claude-fable-5", 1_000_000, 10m, 50m),
-        ("claude-mythos-5", 1_000_000, 10m, 50m),
-        ("claude-opus-5-5", 1_000_000, 4m, 20m),
-        ("claude-opus-5", 1_000_000, 5m, 25m),
-        ("claude-opus-4-8", 1_000_000, 5m, 25m),
-        ("claude-opus-4-7", 1_000_000, 5m, 25m),
-        ("claude-opus-4-6", 1_000_000, 5m, 25m),
-        ("claude-sonnet-5", 1_000_000, 2m, 10m),
-        ("claude-sonnet-4-6", 1_000_000, 3m, 15m),
-        ("claude-haiku-5-5", 1_000_000, 0.10m, 0.50m),
-        ("claude-haiku-4-5", 200_000, 1m, 5m),
+        ("claude-fable-5-1", 1_000_000, 10m, 50m, 0.25m),
+        ("claude-fable-5", 1_000_000, 10m, 50m, null),
+        ("claude-mythos-5", 1_000_000, 10m, 50m, null),
+        ("claude-opus-5-5", 1_000_000, 4m, 20m, 0.20m),
+        ("claude-opus-5", 1_000_000, 5m, 25m, null),
+        ("claude-opus-4-8", 1_000_000, 5m, 25m, null),
+        ("claude-opus-4-7", 1_000_000, 5m, 25m, null),
+        ("claude-opus-4-6", 1_000_000, 5m, 25m, null),
+        ("claude-sonnet-5-5", 1_000_000, 2m, 10m, null),
+        ("claude-sonnet-5", 1_000_000, 2m, 10m, null),
+        ("claude-sonnet-4-6", 1_000_000, 3m, 15m, null),
+        ("claude-haiku-5-5", 1_000_000, 0.10m, 0.50m, null),
+        ("claude-haiku-4-5", 200_000, 1m, 5m, null),
     ];
 
     private static readonly string[] CoderNames = ["coder", "codestral", "devstral", "codellama", "codegemma", "starcoder", "code-"];
@@ -294,7 +299,7 @@ public static partial class ModelLineup
             tierFrom = "family";
             familyName = family.Split(':')[0];
             string normalized = lower.Replace('.', '-'); // Copilot writes claude-sonnet-5.5
-            (string Prefix, int Context, decimal Input, decimal Output)[] listed = AnthropicModels.Where(m => normalized.StartsWith(m.Prefix, StringComparison.Ordinal)).Take(1).ToArray();
+            (string Prefix, int Context, decimal Input, decimal Output, decimal? CacheRead)[] listed = AnthropicModels.Where(m => normalized.StartsWith(m.Prefix, StringComparison.Ordinal)).Take(1).ToArray();
             if (connector.Preset == CliPreset.ClaudeCode && connector.Type == ConnectorType.Cli)
             {
                 suggestion.ContextWindow = 200_000;
@@ -302,10 +307,12 @@ public static partial class ModelLineup
             }
             else if (connector.Type == ConnectorType.Anthropic && listed.Length == 1)
             {
-                (_, int context, decimal input, decimal output) = listed[0];
+                (_, int context, decimal input, decimal output, decimal? cacheRead) = listed[0];
                 suggestion.ContextWindow = model.MaxContextLength ?? context;
                 suggestion.InputCostPerMillionTokens = input;
                 suggestion.OutputCostPerMillionTokens = output;
+                suggestion.CacheReadCostPerMillionTokens = cacheRead ?? input / 10;
+                suggestion.CacheWriteCostPerMillionTokens = input * 1.25m;
                 reasons.Add($"Anthropic list price ${input.ToString(CultureInfo.InvariantCulture)}/${output.ToString(CultureInfo.InvariantCulture)} per million tokens (check the current price)");
             }
             else
@@ -315,15 +322,15 @@ public static partial class ModelLineup
 
             // A subscription costs nothing per request, but its use is worth what the API would charge: Claude Code's
             // aliases (opus) follow the family's latest model, the first listed.
-            (string Prefix, int Context, decimal Input, decimal Output)[] api = listed.Length == 1 || lower != claude.Groups[1].Value
+            (string Prefix, int Context, decimal Input, decimal Output, decimal? CacheRead)[] api = listed.Length == 1 || lower != claude.Groups[1].Value
                 ? listed
                 : AnthropicModels.Where(m => m.Prefix.Contains($"-{lower}-", StringComparison.Ordinal)).Take(1).ToArray();
             if (subscription && api.Length == 1)
             {
-                (_, _, decimal input, decimal output) = api[0];
+                (_, _, decimal input, decimal output, decimal? cacheRead) = api[0];
                 suggestion.ApiInputCostPerMillionTokens = input;
                 suggestion.ApiOutputCostPerMillionTokens = output;
-                suggestion.ApiCacheReadCostPerMillionTokens = input / 10;
+                suggestion.ApiCacheReadCostPerMillionTokens = cacheRead ?? input / 10;
                 suggestion.ApiCacheWriteCostPerMillionTokens = input * 1.25m;
                 reasons.Add($"its use valued at Anthropic's API price, ${input.ToString(CultureInfo.InvariantCulture)}/${output.ToString(CultureInfo.InvariantCulture)} per million tokens, shown on Usage apart from spend");
             }

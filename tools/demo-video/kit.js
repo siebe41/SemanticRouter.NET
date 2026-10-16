@@ -138,6 +138,7 @@ function captionPhrases(words) {
  */
 async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], ['claude', 88, 34]], loaded, paidApi, vertical = false, fullAnswers = false }) {
   if (fullAnswers) process.env.DEMO_FULL_ANSWERS = env.DEMO_FULL_ANSWERS = '1';
+  fs.rmSync(path.join(os.tmpdir(), 'semantic-router-demo-cache'), { recursive: true, force: true });
   const durations = JSON.parse(fs.readFileSync(path.join(voiceDir, 'durations.json'), 'utf8'));
   const size = vertical ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 };
   const wordsFile = path.join(voiceDir, 'words.json');

@@ -15,6 +15,7 @@ if (!fromRouter && process.env.DEMO_REAL_CLAUDE) {
 }
 
 const { replyFor, words } = require(path.join(fs.realpathSync(__dirname), '..', 'replies.js'));
+const { cachedPrefixOnDisk } = require(path.join(fs.realpathSync(__dirname), '..', 'prompt-cache.js'));
 const model = args.includes('--model') ? args[args.indexOf('--model') + 1] : 'sonnet';
 const limitFile = process.env.DEMO_CLAUDE_LIMIT_FILE;
 const write = (o) => process.stdout.write(JSON.stringify(o) + '\n');
@@ -43,6 +44,14 @@ process.stdin.on('end', async () => {
     write({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: word } } });
     if (!process.env.DEMO_FULL_ANSWERS) await sleep(28); // long answers off camera need no typing pace
   }
-  // Everything Claude would read counts: the conversation on stdin and the system prompt passed as an argument.
-  write({ type: 'result', subtype: 'success', is_error: false, result: reply, usage: { input_tokens: Math.round((input.length + process.argv.slice(2).join(' ').length) / 4), output_tokens: words(reply).length } });
+  // Everything Claude would read counts: the conversation on stdin and the system prompt passed as an argument. In the
+  // savings video the part a recent request already sent is a cache read and the rest a cache write, as Claude Code's
+  // requests are billed.
+  const read = process.argv.slice(2).join(' ') + input;
+  const usage = { input_tokens: Math.round(read.length / 4), output_tokens: words(reply).length };
+  if (process.env.DEMO_FULL_ANSWERS) {
+    const cached = cachedPrefixOnDisk(read);
+    Object.assign(usage, { input_tokens: 0, cache_read_input_tokens: Math.floor(cached / 4), cache_creation_input_tokens: Math.round((read.length - cached) / 4) });
+  }
+  write({ type: 'result', subtype: 'success', is_error: false, result: reply, usage });
 });

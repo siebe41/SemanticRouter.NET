@@ -1,10 +1,10 @@
 {
   "lines": {
-    "title": "What does routing actually save you? Here's a day's worth of requests through the router, from quick questions to hard debugging.",
-    "local": "Nearly a third of it never left the machine. Quick questions and small coding tasks the routes recognise went to a local model, and cost nothing.",
-    "subscription": "Most of the rest went to your Claude subscription. You don't pay per request there, but that use is still worth something. At API prices, this is what it would have cost.",
-    "paid": "When the session limit hit, the cloud requests went to a paid API instead. That's the only money actually spent today.",
-    "saved": "Compared with sending everything to a frontier model through its API, this is what routing saved. And the overview keeps a running total for the week.",
+    "title": "What does routing actually save you? Here's a day of agentic coding through the router: five long agent sessions in Claude Code, and the quick questions in between.",
+    "local": "The quick questions and small edits stayed on this machine. They're free, and they don't touch your Claude limits.",
+    "subscription": "The agent sessions are where the tokens go: every step resends the whole conversation. On your Claude subscription, that's worth this much at API prices.",
+    "paid": "Then the session limit hit. Instead of stopping, the last two sessions moved to a paid API. That's the only money actually spent today.",
+    "saved": "Compared with running the whole day on a frontier model through its API, this is what routing saved. And the overview keeps a running total for the week.",
     "end": "Semantic Router dot net. Spend frontier money only where it counts. It's open source, and MIT licensed."
   }
 }

@@ -38,7 +38,8 @@ const afterReadme = "It's the billing service: it builds invoices from ledger ev
 const afterNote = 'The migration is on track: ledger events replay nightly into the new store, and cutover is the weekend of November 14 with a two-hour write freeze. Three risks are open: duplicate invoices on replay, reused account numbers, and one-cent tax rounding differences.';
 
 /** What a model says once the tool result it asked for comes back. */
-const afterTool = (result) => (/Billing migration/.test(result || '') ? afterNote : afterReadme);
+const afterTool = (result) => (process.env.DEMO_FULL_ANSWERS ? fullAnswer(latest(result), 'Next step.')
+  : /Billing migration/.test(result || '') ? afterNote : afterReadme);
 
 /** The prompt without the <system-reminder> blocks clients add, and only its last 400 characters (the latest turn). */
 function latest(prompt) {
@@ -61,7 +62,9 @@ const more = [
   'The numbers line up with what the metrics showed during last week\'s incident.',
 ];
 function fullAnswer(text, reply) {
-  const target = /root cause|step by step|race condition|diagnose|deadlock|design|plan |why does|review|figure out/i.test(text) ? 1000
+  // A step of an agent's loop, after a tool result: the model's thinking and its next tool call, a few thousand tokens.
+  const target = /\(end of tool output\)|summary of the conversation/.test(text) ? 4500
+    : /root cause|step by step|race condition|diagnose|deadlock|design|plan |why does|review|figure out/i.test(text) ? 1000
     : /^(write|add|convert|turn|extract|refactor|implement|make)\b/i.test(text) ? 380 : 110;
   // The same prompt always gets the same length, somewhere within a quarter either side of the target.
   const hash = [...text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);

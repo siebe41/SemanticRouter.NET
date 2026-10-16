@@ -1,37 +1,45 @@
-// "What it saves you" (~1 min): a day's worth of requests sent through the router off camera (90 of them: quick
-// questions, small coding tasks, hard debugging, with a coding agent's context and answers of real length; Claude's
-// session limit hits partway, so the rest spill over to a paid API), then the Usage page and the Overview's weekly
-// digest. Every figure on screen is the router's own accounting of that traffic, routed as the default routes do.
+// "What it saves you" (~1 min): a day of agentic coding sent through the router off camera, then the Usage page and
+// the Overview's weekly digest. Every figure on screen is the router's own accounting of that traffic.
+//
+// The day is what Claude Code sends: five agent sessions, each one prompt that runs for dozens of steps (read a file,
+// grep, edit, run the tests), every step resending the whole conversation, which grows from Claude Code's system prompt
+// until Claude Code compacts it near the end of the 200k window; most of that is cache reads, as the stand-ins report
+// it (prompt-cache.js), and each step writes a few thousand tokens of thinking and tool calls. In between, quick questions and small edits. Claude's
+// session limit runs out after the third session, so the last two move to a paid API.
 const fs = require('fs');
 const path = require('path');
 
-// What a coding agent sends along with each prompt: its instructions and the conversation so far, which grows through
-// a session, from about 8k to 20k tokens (within the local models' 32k context).
-const docs = path.join(__dirname, '../../../docs');
-const context = ['providers.md', 'dashboard.md', 'routing-quality.md'].map((f) => fs.readFileSync(path.join(docs, f), 'utf8')).join('\n\n');
-const contextAt = (i) => context.slice(0, 32000 + (i % 12) * 4000);
+const repo = path.join(__dirname, '../../..');
+// Claude Code's own instructions and tool definitions come to about 16k tokens on every request.
+const docs = ['providers.md', 'dashboard.md'].map((f) => fs.readFileSync(path.join(repo, 'docs', f), 'utf8')).join('\n\n');
+const SYSTEM = docs.slice(0, 64000);
+const TOOLS = ['Read', 'Grep', 'Edit', 'Bash'].map((name) => ({ name, description: `Claude Code's ${name} tool.`, input_schema: { type: 'object', properties: {} } }));
+// What the tools return: real source files from this repository, as a coding agent reads them.
+const sources = [];
+(function walk(dir) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.isDirectory() && !/^(bin|obj|node_modules|\.)/.test(e.name)) walk(path.join(dir, e.name));
+    else if (e.name.endsWith('.cs')) sources.push(path.join(dir, e.name));
+  }
+})(path.join(repo, 'src'));
+sources.sort();
 
-// Every prompt once: the router counts the same prompt sent again soon as a sign the first answer fell short.
-const PARTS = ['InvoiceTotal', 'ParseInvoice', 'LedgerWriter', 'SendInvoiceAsync', 'CacheWarmer', 'InvoiceJob', 'the FX client', 'the PDF renderer', 'the webhook handler'];
+// The sessions, each one prompt and how many steps it runs; the limit hits after the third.
+const SESSIONS = [
+  ['the invoice job deadlocks under load, find the root cause and fix it', 80],
+  ['add idempotency keys to the ledger replay, with tests', 70],
+  ['migrate InvoiceJob to the new event store API and update its callers', 90],
+  ['why does the cache serve stale data after a deploy? fix it', 35],
+  ['the FX client returns stale rates under load, find the root cause', 30],
+];
+// Between sessions: quick questions and small edits, each once (the router counts a prompt sent again soon as a sign
+// the first answer fell short).
 const QUICK = ['hi! what can you do?', 'summarize this function in one sentence', 'translate this error message into plain English',
-  'rename the variable total to subtotal', 'what does this pattern match?', 'format this JSON', 'thanks, that worked',
-  'write a commit message for this change', 'what does HTTP 409 mean?', 'shorten this log message', 'is this date format ISO 8601?',
-  'list the files this change touches', 'fix the spelling in this comment', 'what time zone does the server use?',
-  'explain what this flag does', 'make this sentence friendlier', 'what is the default port?', 'summarize the last test run',
-  ...PARTS.flatMap((p) => [`what does ${p} return?`, `which file is ${p} in?`, `one-line summary of ${p}`])];
-const CODE = ['write a unit test for the InvoiceTotal function', 'write a regex that matches email addresses',
-  'add null checks to ParseInvoice', 'convert this loop to LINQ', 'add XML docs to the public methods',
-  'write a bash script that backs up the database', 'add a CancellationToken to SendInvoiceAsync', 'write a SQL query for unpaid invoices',
-  'turn this class into a record', 'add retry with backoff to the HTTP client', 'write a test for the currency rounding',
-  'extract this block into a method', ...PARTS.flatMap((p) => [`add logging to ${p}`, `add a unit test for ${p}`])];
-const HARD = ['the invoice job deadlocks under load, find the root cause', 'design a scalable architecture for a multi-tenant SaaS platform',
-  'why does the cache serve stale data after a deploy?', 'review this migration plan for data loss risks, step by step',
-  'explain step by step how to shard this database', 'find the race condition in the ledger writer and prove the fix',
-  'plan the split of the billing monolith into services', 'diagnose the memory growth in the export worker',
-  'why does the export worker time out on large invoices?', 'the FX client returns stale rates under load, find the root cause',
-  'design the retry strategy for webhook delivery, with the trade-offs', 'review the tax rounding change for correctness, step by step',
-  'figure out why ParseInvoice drops lines on Windows', 'explain step by step why InvoiceJob bills twice after a crash',
-  'plan how to make the ledger replay idempotent'];
+  'format this JSON', 'write a commit message for this change', 'shorten this log message', 'fix the spelling in this comment',
+  'make this sentence friendlier', 'summarize the last test run', 'write a unit test for the InvoiceTotal function',
+  'write a regex that matches email addresses', 'add XML docs to the public methods', 'write a bash script that backs up the database',
+  'write a SQL query for unpaid invoices', 'list the files this change touches', 'thanks, that worked', 'what does HTTP 409 mean?',
+  'what is the default port?', 'convert this loop to LINQ', 'extract this block into a method'];
 
 const usd = (n) => (n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
 
@@ -43,29 +51,55 @@ module.exports = async function savings(k) {
   await k.startRouter((config) => {
     config.Connectors['paid-api'] = { Type: 'OpenAICompatible', BaseAddress: 'http://paid-api.example:4000', ApiKey: ['sk', 'demo', 'not', 'a', 'real', 'key'].join('-') };
     config.Models.push(
-      { Name: 'paid-api-deepseek-chat-v3', Connector: 'paid-api', Model: 'deepseek/deepseek-chat-v3', Tier: 3, Capabilities: ['chat', 'code', 'tools'], InputCostPerMillionTokens: 0.27, OutputCostPerMillionTokens: 1.1, Enabled: true },
-      { Name: 'claude-opus-api', Connector: 'paid-api', Model: 'claude-opus-5-5', Tier: 4, Capabilities: ['chat', 'code'], InputCostPerMillionTokens: 4, OutputCostPerMillionTokens: 20, Enabled: false,
+      { Name: 'paid-api-deepseek-chat-v3', Connector: 'paid-api', Model: 'deepseek/deepseek-chat-v3', Tier: 3, Capabilities: ['chat', 'code', 'tools'], InputCostPerMillionTokens: 0.27, OutputCostPerMillionTokens: 1.1, CacheReadCostPerMillionTokens: 0.07, ContextWindow: 128000, Enabled: true },
+      { Name: 'claude-opus-api', Connector: 'paid-api', Model: 'claude-opus-5-5', Tier: 4, Capabilities: ['chat', 'code'], InputCostPerMillionTokens: 4, OutputCostPerMillionTokens: 20, CacheReadCostPerMillionTokens: 0.2, CacheWriteCostPerMillionTokens: 5, Enabled: false,
         Description: "Opus through Anthropic's API: the yardstick for what routing saved" },
     );
     config.Usage.ReferenceModel = 'claude-opus-api';
   });
 
-  // A day of requests, as an agent sends them: mostly quick questions and small tasks, with a hard one every few.
-  const ask = (prompt, i) => fetch(`${router}/v1/chat/completions`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'auto', messages: [{ role: 'system', content: contextAt(i) }, { role: 'user', content: prompt }] }),
+  // A day of agentic coding, as Claude Code sends it (the Anthropic Messages API).
+  const send = (messages) => fetch(`${router}/v1/messages`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' },
+    body: JSON.stringify({ model: 'semantic-router', max_tokens: 32000, system: SYSTEM, tools: TOOLS, messages }),
   }).then((r) => r.text());
-  const day = [];
-  for (let q = 0, c = 0, h = 0; q < QUICK.length || c < CODE.length || h < HARD.length;) {
-    day.push(...QUICK.slice(q, q += 3), ...CODE.slice(c, c += 2));
-    if (h < HARD.length) day.push(HARD[h++]);
+  let seed = 7;
+  const random = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  let call = 0;
+  const step = () => {
+    // A file read, a search or a test run: about 1,000 to 6,000 tokens of output.
+    const file = sources[Math.floor(random() * sources.length)];
+    let text = fs.readFileSync(file, 'utf8');
+    while (text.length < 24000) text += `\n${fs.readFileSync(sources[Math.floor(random() * sources.length)], 'utf8')}`;
+    const length = 4000 + Math.floor(random() * 20000);
+    const start = Math.floor(random() * Math.max(1, text.length - length));
+    const name = ['Read', 'Read', 'Grep', 'Edit', 'Bash'][Math.floor(random() * 5)];
+    const id = `toolu_demo_${++call}`;
+    return [
+      { role: 'assistant', content: [{ type: 'text', text: `Checking ${path.relative(repo, file)}.` }, { type: 'tool_use', id, name, input: { file_path: file } }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: `${text.slice(start, start + length)}\n(end of tool output)` }] },
+    ];
+  };
+  const quick = async (n) => { for (const prompt of QUICK.splice(0, n)) await send([{ role: 'user', content: prompt }]); };
+  for (const [s, [prompt, steps]] of SESSIONS.entries()) {
+    await quick(4);
+    // Claude's session limit runs out after the third session: the rest of the day goes elsewhere.
+    if (s === 3) fs.writeFileSync(k.limitFile, '');
+    let messages = [{ role: 'user', content: prompt }];
+    for (let i = 0; i < steps; i++) {
+      await send(messages);
+      messages.push(...step());
+      // As the context fills, Claude Code compacts: the conversation so far becomes a summary (early enough here that the
+      // afternoon's sessions fit the paid model's 128k window).
+      if (JSON.stringify(messages).length / 4 > 110000) {
+        await send([...messages, { role: 'user', content: 'Your task is to create a detailed summary of the conversation so far.' }]);
+        messages = [{ role: 'user', content: prompt }, { role: 'assistant', content: `Summary of the work so far: ${'The investigation continues. '.repeat(1100)}` },
+          { role: 'user', content: 'Continue from the summary.' }, ...step()];
+      }
+    }
+    await send(messages);
   }
-  // Claude's session limit runs out mid-afternoon, two thirds of the way through: the rest go elsewhere.
-  const limitAt = Math.round(day.length * 0.65);
-  for (const [i, prompt] of day.entries()) {
-    if (i === limitAt) fs.writeFileSync(k.limitFile, '');
-    await ask(prompt, i);
-  }
+  await quick(QUICK.length);
 
   const figures = async (by) => k.api('GET', `/usage?window=day&by=${by}`);
   const byLocation = await figures('location');
@@ -89,7 +123,7 @@ module.exports = async function savings(k) {
 
   // Local.
   line = k.say('local');
-  await k.stage('caption', `${local.requests} of ${total.requests} requests answered on this machine`, 'local models · free · nothing left the machine');
+  await k.stage('caption', `${local.requests} quick questions answered on this machine`, 'a local model · free · no Claude limits used');
   await k.dashClick('[data-action="usage-set"][data-key="window"][data-value="day"]');
   await k.dashClick('[data-action="usage-set"][data-key="by"][data-value="location"]');
   await k.frame().locator('td:text-is("local")').first().waitFor();
@@ -99,14 +133,15 @@ module.exports = async function savings(k) {
 
   // Subscription value.
   line = k.say('subscription');
-  await k.stage('caption', `${usd(total.subscriptionValueUsd)} of Claude use, at API prices`, `${onClaude} requests · included in your subscription · not spent`);
+  await k.stage('caption', `${usd(total.subscriptionValueUsd)} of Claude use, at API prices`,
+    `3 agent sessions · ${onClaude} requests · ${(total.totalTokens / 1e6).toFixed(0)}M tokens in the day · included in your subscription`);
   await k.highlight('.card.stat:has-text("subscription use")');
   await line;
   await k.unhighlight();
 
   // The real spend.
   line = k.say('paid');
-  await k.stage('caption', `${usd(total.costUsd)} actually spent`, `paid-api-deepseek-chat-v3 · ${paidRow?.requests ?? 0} requests after Claude's session limit`);
+  await k.stage('caption', `${usd(total.costUsd)} actually spent`, `2 agent sessions after Claude's session limit · paid-api-deepseek-chat-v3 · ${paidRow?.requests ?? 0} requests`);
   await k.highlight('.card.stat:has-text("spent, at catalog prices")');
   await sleep(2500);
   await k.unhighlight();
@@ -119,7 +154,7 @@ module.exports = async function savings(k) {
   // Saved, and the weekly total.
   line = k.say('saved');
   await k.stage('caption', `${usd(total.referenceCostUsd - total.costUsd)} saved`,
-    `${usd(total.referenceCostUsd)} if all ${total.requests} went to Opus through its API − ${usd(total.costUsd)} spent · Usage:ReferenceModel`);
+    `${usd(total.referenceCostUsd)} if all ${total.requests} requests went to Opus through its API − ${usd(total.costUsd)} spent · Usage:ReferenceModel`);
   await k.highlight('.card.stat:has-text("saved compared with")');
   await sleep(3500);
   await k.nav('overview');
