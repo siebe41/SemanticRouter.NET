@@ -1,5 +1,7 @@
 /* Semantic Router dashboard: "Router learned" (automatic tuning): the page, its Overview card and the Activity badge. */
 import { api, h, readOnly, state, views } from './core.js';
+import { durationField, numField } from './fields.js';
+import { pageActions } from './page-actions.js';
 
 /* GET api/tuning into state.tuning; an older router without tuning leaves it null. */
 export async function loadTuning() {
@@ -62,15 +64,37 @@ views.learned = () => {
         <button class="btn small danger" data-action="tuning-undo-all" ${t.changes.some((c) => c.state === 'Applied') ? '' : 'disabled'}>Undo all</button>`}
       </div>
       ${t.lastResult ? `<p class="small muted">${h(t.lastResult)}</p>` : ''}
-      <p class="small faint">It learns from the <a href="#/evaluate">evaluation set</a> and from feedback (retries, corrections), in steps of at most a few hundredths a day, and only when no labelled prompt routes worse. An undone change is not made again for a while (30 days by default). Settings: <span class="mono">Tuning</span> on the <a href="#/json">JSON</a> page.</p>
+      <p class="small faint">It learns from the <a href="#/evaluate">evaluation set</a> and from feedback (retries, corrections), in steps of at most a few hundredths a day, and only when no labelled prompt routes worse. An undone change is not made again for a while (30 days by default).${readOnly() ? '' : ' Its settings are <a href="#learned-settings" data-action="learned-settings">below</a>.'}</p>
     </div>
     <div class="card section">
       <div class="card-head"><h2>Changes</h2><span class="spacer"></span>
         <select data-state="learnedFilter" aria-label="Show" style="width:auto"><option value="active" ${state.learnedFilter !== 'all' ? 'selected' : ''}>applied and suggested</option><option value="all" ${state.learnedFilter === 'all' ? 'selected' : ''}>everything</option></select>
       </div>
       ${shown.length ? shown.map((c) => change(c, false)).join('') : '<div class="muted small">Nothing learned yet.</div>'}
-    </div>`;
+    </div>
+    ${readOnly() ? '' : settingsCard()}`;
 };
+
+/* The common Tuning settings, in the draft like any setting; the rest are on the JSON page. */
+function settingsCard() {
+  const t = state.config.Tuning || {};
+  return `<div class="card section" id="learned-settings"><div class="card-head"><h2>Settings</h2><span class="muted small">Part of the configuration: apply them with the save bar.</span></div>
+    <div class="form-grid">
+      <label class="field"><span class="name">Mode</span><select data-bind="Tuning.Mode">${[['Apply', 'Apply changes (each can be undone)'], ['Suggest', 'Suggest changes for you to apply'], ['Off', 'Off']].map(([v, label]) => `<option value="${v}" ${v === (t.Mode || 'Apply') ? 'selected' : ''}>${label}</option>`).join('')}</select></label>
+      ${durationField({ bind: 'Tuning.Interval', value: t.Interval, def: '1.00:00:00', label: 'Runs every', hint: 'And early, once enough new prompts are labelled.' })}
+      ${numField({ bind: 'Tuning.MinimumPrompts', value: t.MinimumPrompts, def: 20, label: 'Labelled prompts needed', min: 1, step: 1, hint: 'Nothing is tuned before there are this many.' })}
+      ${numField({ bind: 'Tuning.MaxStep', value: t.MaxStep, def: 0.02, label: 'Largest threshold step', min: 0.001, max: 1, step: 0.005, float: true, hint: 'The most a threshold moves in one run.' })}
+      ${numField({ bind: 'Tuning.HoldDays', value: t.HoldDays, def: 30, label: 'Keep undone changes away (days)', min: 0, step: 1 })}
+      ${numField({ bind: 'Tuning.ModelTrialRate', value: t.ModelTrialRate, def: 0.05, label: 'Share of turns that try a cheaper model', min: 0, max: 1, step: 0.01, float: true, hint: '0 turns model trials off.' })}
+      <label class="check wide"><input type="checkbox" data-bind="Tuning.Utterances" data-kind="bool" ${t.Utterances !== false ? 'checked' : ''}> Add missed prompts to their route as utterances</label>
+    </div>
+    <p class="small faint" style="margin-top:8px">More (feedback and judge weights, trial length) on the <a href="#/json">JSON</a> page, under <span class="mono">Tuning</span>.</p>
+  </div>`;
+}
+
+Object.assign(pageActions, {
+  'learned-settings'() { const card = document.getElementById('learned-settings'); if (card) { card.scrollIntoView({ block: 'start' }); const first = card.querySelector('select, input'); if (first) first.focus({ preventScroll: true }); } },
+});
 
 /* The Overview card: what was learned this week. */
 export function learnedCard() {

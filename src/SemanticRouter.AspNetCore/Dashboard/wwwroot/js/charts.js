@@ -8,7 +8,15 @@ import { render } from './shell.js';
    --------------------------------------------------------------------------------------------- */
 export const fmtTime = (iso, span) => { const d = new Date(iso); return span === '7d' || span === '30d' ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + (span === '7d' ? ' ' + d.getHours() + 'h' : '') : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }); };
 export const fmtMs = (v) => v == null ? '–' : v >= 1000 ? (v / 1000).toFixed(1) + ' s' : Math.round(v) + ' ms';
-export const niceMax = (v) => { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p; };
+/*
+ * The top of a y-axis with ticks at 0, half and the top. Every chart counts things or milliseconds, so the half must be
+ * a whole number too: up to 10 the top is the next even number (a top of 1 used to label "0, 1, 1").
+ */
+export const niceMax = (v) => {
+  if (v <= 10) return Math.max(2, 2 * Math.ceil(v / 2));
+  const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p;
+};
 export const W = 640;
 export const H = 170;
 export const PAD = { l: 44, r: 64, t: 10, b: 22 };
@@ -16,7 +24,9 @@ export const PAD = { l: 44, r: 64, t: 10, b: 22 };
 export function axes(max, fmt, buckets, span) {
   const ih = H - PAD.t - PAD.b;
   let g = '';
-  [0, 0.5, 1].forEach((f) => { const y = PAD.t + ih - f * ih; g += `<line class="grid-line" x1="${PAD.l}" x2="${W - PAD.r}" y1="${y}" y2="${y}"/><text class="axis" x="${PAD.l - 6}" y="${y + 3}" text-anchor="end">${h(fmt(max * f))}</text>`; });
+  // A label that reads the same as the one below it is left out (rounding can make two ticks look alike).
+  let below = null;
+  [0, 0.5, 1].forEach((f) => { const y = PAD.t + ih - f * ih; const text = fmt(max * f); g += `<line class="grid-line" x1="${PAD.l}" x2="${W - PAD.r}" y1="${y}" y2="${y}"/>${text === below ? '' : `<text class="axis" x="${PAD.l - 6}" y="${y + 3}" text-anchor="end">${h(text)}</text>`}`; below = text; });
   const iw = W - PAD.l - PAD.r; const step = Math.max(1, Math.ceil(buckets.length / 6));
   buckets.forEach((b, i) => { if (i % step === 0) g += `<text class="axis" x="${PAD.l + (i + 0.5) * iw / buckets.length}" y="${H - 6}" text-anchor="middle">${h(fmtTime(b.start, span))}</text>`; });
   return g;

@@ -21,8 +21,10 @@ export function reliabilityCard() {
   if (!r) { loadReliability(); return ''; }
   const rows = r.models.filter((m) => m.turns > 0 || left(m)).sort((a, b) => (left(b) - left(a)) || (b.rate - a.rate));
   if (!rows.length) return '';
-  return `<div class="card section">
-    <div class="card-head"><h2>Reliability</h2><span class="muted small">How often each model's turns drew feedback (retried, corrected, tool errors, empty replies), per route and with tools${r.enabled ? `. A model clearly worse than the others at some work is left out of it for a while, then tried again.` : '. Leaving unreliable models out is off (<span class="mono">Middleware:Reliability</span>).'}</span></div>
+  // Below the model list; folded away while every figure is still too thin to judge.
+  const judged = rows.some((m) => left(m) || m.turns >= r.minimumTurns);
+  return `<details class="card section reliability" data-open-key="reliability" ${judged ? 'open' : ''}><summary><h2>Reliability</h2>${judged ? '' : '<span class="muted small">too few turns to judge yet</span>'}</summary>
+    <div class="card-head" style="margin-top:8px"><span class="muted small">How often each model's turns drew feedback (retried, corrected, tool errors, empty replies), per route and with tools${r.enabled ? `. A model clearly worse than the others at some work is left out of it for a while, then tried again.` : '. Leaving unreliable models out is off (<span class="mono">Middleware:Reliability</span>).'}</span></div>
     <div class="table-wrap"><table>
       <tr><th>Model</th><th>Work</th><th class="num">Turns</th><th class="num">With feedback</th><th class="num">Others</th><th></th></tr>
       ${rows.map((m) => `<tr>
@@ -34,7 +36,7 @@ export function reliabilityCard() {
         <td class="small">${left(m) ? `<span class="badge warn" title="${h(m.detail || '')}">left out until ${h(day(m.excludedUntil))}</span> <span class="faint">${h(m.detail || '')}</span>${readOnly() ? '' : ` <button class="btn small" data-action="reliability-reset" data-model="${h(m.model)}" ${m.route ? `data-route="${h(m.route)}"` : `data-capability="${h(m.capability)}"`}>Offer again</button>`}` : (m.turns < r.minimumTurns ? '<span class="faint">too few turns to judge</span>' : '')}</td>
       </tr>`).join('')}
     </table></div>
-  </div>`;
+  </details>`;
 }
 
 /* On a model's row: the work it is left out of. */

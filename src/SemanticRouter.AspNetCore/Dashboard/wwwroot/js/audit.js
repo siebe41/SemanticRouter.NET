@@ -30,10 +30,10 @@ views.audit = () => {
   return head + `
     <div class="card section">
       <div class="card-head"><h2>Recent actions</h2><span class="muted small">${who}</span><span class="spacer"></span>
-        <label class="small">Show <select id="audit-limit" style="width:auto">${[100, 200, 1000].map((n) => `<option value="${n}" ${a.limit === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-        <button class="btn ghost small" data-action="audit-load">Refresh</button>
-        <a class="btn ghost small" href="${API}/audit?format=jsonl&amp;limit=10000" download>Download JSON Lines</a>
-        <button class="btn ghost small" data-action="sessions-revoke-all" title="End every dashboard session signed in with a token, yours included">Sign out every session</button>
+        <label class="small inline-field"><span>Show</span><select id="audit-limit" style="width:auto">${[100, 200, 1000].map((n) => `<option value="${n}" ${a.limit === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+        <button class="btn small" data-action="audit-load">Refresh</button>
+        <a class="btn small" href="${API}/audit?format=jsonl&amp;limit=10000" download>Download JSON Lines</a>
+        <button class="btn danger small" data-action="sessions-revoke-all" title="End every dashboard session signed in with a token, yours included">Sign out every session…</button>
       </div>
       ${a.error ? `<p class="small" style="color:var(--danger)">${h(a.error)}</p>` : ''}
       <div class="table-wrap"><table aria-label="Audit log">
@@ -47,6 +47,6 @@ views.audit = () => {
           <td>${outcome(e.status)}</td>
         </tr>`).join('') || '<tr><td colspan="6" class="muted small">Nothing recorded yet.</td></tr>'}</tbody>
       </table></div>
-      <p class="small faint">Kept in the state database for <span class="mono">State:Retention:AuditDays</span> (365 days by default), or in memory without one. Also written to the log under <span class="mono">SemanticRouter.Audit</span>.</p>
+      <p class="small faint">Kept for <span title="State:Retention:AuditDays">365 days</span> by default in the state database (in memory without one), and written to the router's log too.</p>
     </div>`;
 };
