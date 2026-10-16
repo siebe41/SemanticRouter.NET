@@ -10,6 +10,9 @@ name: Release
 # SHA256SUMS; CycloneDX SBOMs and THIRD-PARTY-NOTICES.txt are attached. Signatures and attestations use short-lived
 # Sigstore certificates issued to this workflow (GitHub OIDC), so no signing key is stored anywhere. The jobs that hold
 # the OIDC token build nothing; they sign and attest what the build jobs produced, after any code signing.
+#
+# The Windows and macOS installers must be code-signed: a release fails at its first job when a platform's signing
+# secrets are missing, unless the variable ALLOW_UNSIGNED_RELEASE is `true` (docs/releases.md#code-signing).
 on:
   push:
     tags: [ 'v*' ]
@@ -28,6 +31,10 @@ jobs:
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
+    outputs:
+      # signed or unsigned, per platform; the installer jobs sign and check signatures by these.
+      windows-signing: ${{ steps.signing.outputs.windows }}
+      macos-signing: ${{ steps.signing.outputs.macos }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,6 +46,71 @@ jobs:
         run: |
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
             echo "::error::$GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main. Tag a commit on main."
+            exit 1
+          fi
+
+      # Code signing is required, and checked here so that a release without it publishes nothing. Each platform's
+      # signing is complete (signed), absent (fails, unless ALLOW_UNSIGNED_RELEASE is `true`: unsigned) or partial
+      # (always fails: the installer job would stop half-way, after the packages are on nuget.org). Only whether each
+      # secret is set reaches this job, as true or false, never its value.
+      - name: Code signing
+        id: signing
+        env:
+          ALLOW_UNSIGNED_RELEASE: ${{ vars.ALLOW_UNSIGNED_RELEASE }}
+          WINDOWS: >-
+            AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID != '' }}
+            AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID != '' }}
+            AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET != '' }}
+            AZURE_SIGNING_ENDPOINT=${{ vars.AZURE_SIGNING_ENDPOINT != '' }}
+            AZURE_SIGNING_ACCOUNT=${{ vars.AZURE_SIGNING_ACCOUNT != '' }}
+            AZURE_SIGNING_PROFILE=${{ vars.AZURE_SIGNING_PROFILE != '' }}
+          MACOS: >-
+            APPLE_BUILD_CERTIFICATE_BASE64=${{ secrets.APPLE_BUILD_CERTIFICATE_BASE64 != '' }}
+            APPLE_INSTALLER_CERTIFICATE_BASE64=${{ secrets.APPLE_INSTALLER_CERTIFICATE_BASE64 != '' }}
+            APPLE_P12_PASSWORD=${{ secrets.APPLE_P12_PASSWORD != '' }}
+            APPLE_ID=${{ secrets.APPLE_ID != '' }}
+            APPLE_APP_PASSWORD=${{ secrets.APPLE_APP_PASSWORD != '' }}
+            APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID != '' }}
+            APPLE_SIGN_APP_IDENTITY=${{ vars.APPLE_SIGN_APP_IDENTITY != '' }}
+            APPLE_SIGN_INSTALL_IDENTITY=${{ vars.APPLE_SIGN_INSTALL_IDENTITY != '' }}
+        run: |
+          failed=false
+          {
+            echo "## Code signing"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          for platform in windows macos; do
+            case "$platform" in
+              windows) name=Windows settings="$WINDOWS" how="Azure Trusted Signing" ;;
+              macos) name=macOS settings="$MACOS" how="Developer ID, notarized" ;;
+            esac
+            present=() missing=()
+            for pair in $settings; do
+              if [ "${pair#*=}" = true ]; then present+=("${pair%%=*}"); else missing+=("${pair%%=*}"); fi
+            done
+            if [ ${#missing[@]} -eq 0 ]; then
+              state=signed line="**signed** ($how)"
+            elif [ ${#present[@]} -gt 0 ]; then
+              echo "::error::$name signing is only partly set up. Missing: ${missing[*]}. Set them, or remove the others (docs/desktop.md#signing)."
+              failed=true state=partial line="**failed**: signing only partly set up, missing ${missing[*]}"
+            elif [ "$ALLOW_UNSIGNED_RELEASE" = true ]; then
+              echo "::warning::The $name installers will be unsigned: no signing secrets are set and ALLOW_UNSIGNED_RELEASE is true."
+              state=unsigned line="**unsigned**: no signing secrets, and ALLOW_UNSIGNED_RELEASE is true"
+            else
+              echo "::error::No $name signing secrets are set. Add them (docs/desktop.md#signing), or set the variable ALLOW_UNSIGNED_RELEASE to true to publish unsigned installers."
+              failed=true state=missing line="**failed**: no signing secrets, and ALLOW_UNSIGNED_RELEASE is not true"
+            fi
+            echo "$platform=$state" >> "$GITHUB_OUTPUT"
+            echo "| $name installers | $line |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          {
+            echo "| Linux AppImage, archives (.zip, .tar.gz) | not code-signed |"
+            echo "| Container image | signed with keyless cosign |"
+            echo "| Every asset | build provenance attestation and SHA256SUMS |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$failed" = true ]; then
             exit 1
           fi
 
@@ -377,8 +449,9 @@ jobs:
 
   # The installers (Velopack): each platform is a channel with its own update feed; the previous release's package is
   # fetched for a delta update. These jobs only pack, sign and upload what installer-build published (PUBLISH_DIR);
-  # vpk, the packaging and signing tool itself, is the one tool installed. Signing happens only when its secrets are
-  # set (docs/desktop.md#signing).
+  # vpk, the packaging and signing tool itself, is the one tool installed. The Windows and macOS jobs sign when the
+  # packages job found their platform's signing set up, and then check the signature before anything is uploaded
+  # (docs/desktop.md#signing).
   installers:
     needs: [ desktop, installer-build ]
     runs-on: ubuntu-latest
@@ -416,7 +489,7 @@ jobs:
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
 
   installer-windows:
-    needs: [ desktop, installer-build ]
+    needs: [ packages, desktop, installer-build ]
     environment: release
     runs-on: windows-latest
     permissions:
@@ -426,6 +499,7 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
+      SIGNING: ${{ needs.packages.outputs.windows-signing }}
       # Azure Trusted Signing: the credentials (DefaultAzureCredential reads them from the environment) and the
       # account's endpoint, name and certificate profile (repository variables).
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -454,23 +528,43 @@ jobs:
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       - name: Signing metadata
-        if: env.AZURE_CLIENT_ID != '' && env.SIGNING_ACCOUNT != ''
+        if: env.SIGNING == 'signed'
         shell: bash
         run: |
           printf '{"Endpoint":"%s","CodeSigningAccountName":"%s","CertificateProfileName":"%s"}' \
             "$SIGNING_ENDPOINT" "$SIGNING_ACCOUNT" "$SIGNING_PROFILE" > "$RUNNER_TEMP/metadata.json"
           echo "AZURE_SIGN_METADATA=$RUNNER_TEMP/metadata.json" >> "$GITHUB_ENV"
 
-      - name: Package and attach
+      - name: Package
         shell: bash
         run: |
           mkdir -p published && tar -C published -xzf publish-win-x64.tar.gz
           PUBLISH_DIR=published deploy/package-installer.sh win-x64 "${GITHUB_REF_NAME#v}" installers/win-x64
+
+      # A release meant to be signed uploads nothing whose signature does not check out.
+      - name: Check the signature
+        shell: pwsh
+        run: |
+          $setup = @(Get-ChildItem installers/win-x64 -Filter '*-Setup.exe')
+          if ($setup.Count -eq 0) { Write-Output '::error::No Setup.exe in installers/win-x64.'; exit 1 }
+          foreach ($file in $setup) {
+            $status = (Get-AuthenticodeSignature $file.FullName).Status
+            if ($env:SIGNING -eq 'signed' -and $status -ne 'Valid') {
+              Write-Output "::error::$($file.Name) should be signed, but its signature is $status."
+              exit 1
+            }
+            $line = if ($status -eq 'Valid') { 'signed, signature checked' } else { "**unsigned** ($status)" }
+            Add-Content $env:GITHUB_STEP_SUMMARY "Windows installer ``$($file.Name)``: $line"
+          }
+
+      - name: Attach
+        shell: bash
+        run: |
           vpk upload github --outputDir installers/win-x64 --channel win-x64 \
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
 
   installer-macos:
-    needs: [ desktop, installer-build ]
+    needs: [ packages, desktop, installer-build ]
     runs-on: macos-latest
     environment: release
     permissions:
@@ -480,6 +574,7 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
+      SIGNING: ${{ needs.packages.outputs.macos-signing }}
       # Signing and notarization (an Apple Developer account): the two Developer ID certificates as base64 .p12 files,
       # their password, the identities, and the Apple ID that notarizes.
       BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_BUILD_CERTIFICATE_BASE64 }}
@@ -509,7 +604,7 @@ jobs:
 
       # A throw-away keychain with both certificates, and the notarytool profile vpk uses.
       - name: Signing keychain
-        if: env.BUILD_CERTIFICATE_BASE64 != '' && env.APP_IDENTITY != ''
+        if: env.SIGNING == 'signed'
         run: |
           keychain="$RUNNER_TEMP/signing.keychain-db"
           password="$(uuidgen)"
@@ -530,11 +625,41 @@ jobs:
             echo "APPLE_KEYCHAIN=$keychain"
           } >> "$GITHUB_ENV"
 
-      - name: Package and attach
+      - name: Package
         run: |
           for rid in osx-arm64 osx-x64; do
             mkdir -p "published/$rid" && tar -C "published/$rid" -xzf "publish-$rid.tar.gz"
             PUBLISH_DIR="published/$rid" deploy/package-installer.sh "$rid" "${GITHUB_REF_NAME#v}" "installers/$rid"
+          done
+
+      # A release meant to be signed uploads nothing whose signature or notarization ticket does not check out.
+      - name: Check the signature
+        run: |
+          shopt -s nullglob
+          for rid in osx-arm64 osx-x64; do
+            pkgs=("installers/$rid"/*-Setup.pkg)
+            if [ ${#pkgs[@]} -eq 0 ]; then
+              echo "::error::No Setup.pkg in installers/$rid."
+              exit 1
+            fi
+            for pkg in "${pkgs[@]}"; do
+              status="$(pkgutil --check-signature "$pkg" || true)"
+              if grep -q 'Status: signed' <<<"$status" && xcrun stapler validate "$pkg" >/dev/null 2>&1; then
+                line="signed and notarized, checked"
+              elif [ "$SIGNING" = signed ]; then
+                echo "$status"
+                echo "::error::$(basename "$pkg") should be signed and notarized, but is not."
+                exit 1
+              else
+                line="**unsigned**"
+              fi
+              echo "macOS installer \`$(basename "$pkg")\`: $line" >> "$GITHUB_STEP_SUMMARY"
+            done
+          done
+
+      - name: Attach
+        run: |
+          for rid in osx-arm64 osx-x64; do
             vpk upload github --outputDir "installers/$rid" --channel "$rid" \
               --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish
           done

@@ -81,7 +81,25 @@ The SBOMs are [CycloneDX](https://cyclonedx.org/) JSON, generated with [Syft](ht
 
 [`deploy/third-party-notices.cs`](../deploy/third-party-notices.cs) writes it at publish time from the build's `*.deps.json` and each package's `.nuspec` and licence files in the NuGet cache, without network access. The same packages always give the same file. The container's Ubuntu and ASP.NET Core base layers come from Microsoft's image, with their own licence files.
 
+## Code signing
+
+Windows SmartScreen and macOS Gatekeeper check a publisher's code signature, not these attestations. Provenance shows where a file came from; it does not stop the warnings on first start.
+
+The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([desktop.md](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true`; until the signing certificates exist, that variable is what lets a release through, and those installers are unsigned. The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before anything is uploaded.
+
+To check an installer you downloaded:
+
+```powershell
+Get-AuthenticodeSignature .\SemanticRouter-win-x64-Setup.exe     # Status: Valid when signed
+```
+
+```bash
+pkgutil --check-signature SemanticRouter-osx-arm64-Setup.pkg     # "Status: signed by a developer certificate ..."
+```
+
+The Linux AppImage and the `.zip` and `.tar.gz` archives are not code-signed; check them with `gh attestation verify` as above.
+
 ## Not covered yet
 
-- **Operating system code signing.** Windows SmartScreen and macOS Gatekeeper check a publisher's code signature, not these attestations. The installers are code-signed only when the release has signing certificates ([desktop.md](desktop.md#signing)), and the archives' contents are not. Provenance shows where a file came from; it does not stop the warnings on first start.
+- **Code signing until the certificates exist.** While `ALLOW_UNSIGNED_RELEASE` is set, the installers are unsigned and SmartScreen and Gatekeeper warn on first start ([Code signing](#code-signing)). The archives' contents are not signed in any case.
 - **NuGet author signatures.** Only nuget.org's repository signature, as above.
