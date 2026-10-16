@@ -3,7 +3,6 @@
 // the cache, and the rest is new. Agentic coding resends the whole conversation on every step, so most of its input is
 // cache reads, billed at a fraction of the input price.
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 
 const KEEP = 12;
@@ -23,9 +22,12 @@ function cachedPrefix(store, text) {
   return hit;
 }
 
-/** The same, for processes that live for one request (the fake claude CLI): the recent requests are kept on disk. */
+/**
+ * The same, for processes that live for one request (the fake claude CLI): the recent requests are kept on disk, under
+ * the kit's own out/ (not the shared temp directory, where another user could plant or read the files).
+ */
 function cachedPrefixOnDisk(text) {
-  const dir = path.join(os.tmpdir(), 'semantic-router-demo-cache');
+  const dir = path.join(__dirname, 'out', 'prompt-cache');
   fs.mkdirSync(dir, { recursive: true });
   const files = fs.readdirSync(dir).sort().reverse();
   const store = files.map((f) => fs.readFileSync(path.join(dir, f), 'utf8'));
