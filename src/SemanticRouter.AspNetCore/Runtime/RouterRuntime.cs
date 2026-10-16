@@ -124,6 +124,12 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     /// <summary>Raised after a new runtime replaced the previous one.</summary>
     public event Action<RouterRuntime>? Changed;
 
+    /// <summary>
+    /// A random id for this provider (in practice, this run of the process): 12 hex characters. Versions start again at
+    /// 1 on every start, so a client compares this too before trusting that a version number means the same document.
+    /// </summary>
+    public string Instance { get; } = Convert.ToHexStringLower(System.Security.Cryptography.RandomNumberGenerator.GetBytes(6));
+
     /// <summary>The store, when configured.</summary>
     public IRouterConfigurationStore? Store => _store;
 
@@ -308,18 +314,47 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     }
 
     /// <summary>
-    /// Applies a change made on top of the running configuration (an utterance added from the dashboard, a learned
-    /// change, an undo) and saves it only when the running configuration is saved: saving it otherwise would also save
-    /// whatever was applied without saving. Returns the runtime and whether the change was saved.
+    /// Makes a change on top of the running configuration (an utterance added from the dashboard, a learned change, an
+    /// undo): <paramref name="change"/> edits a copy of it, and returns <see langword="false"/> when the change no longer
+    /// applies (nothing is applied then, and the result is <see langword="null"/>). The change is saved only when the
+    /// running configuration is: saving it otherwise would also save whatever was applied without saving. When another
+    /// version is applied meanwhile, the change is made again on top of that one (up to <see cref="ChangeAttempts"/>
+    /// times, then <see cref="RouterConfigurationConflictException"/>), so it never undoes the other.
+    /// <paramref name="change"/> may run more than once, each time on a fresh copy.
     /// </summary>
-    public (RouterRuntime Runtime, bool Saved) ApplyKeepingSaveState(RouterConfiguration configuration, string source, string? actor = null, string? note = null)
+    public (RouterRuntime Runtime, bool Saved)? ApplyKeepingSaveState(Func<RouterConfiguration, bool> change, string source, string? actor = null, string? note = null)
     {
-        bool persist = !Unsaved;
-        RouterRuntime runtime = Apply(configuration, persist, source, actor, note);
-        return (runtime, persist && _store is not null);
+        ArgumentNullException.ThrowIfNull(change);
+        for (int attempt = 1; ; attempt++)
+        {
+            RouterRuntime running = Current;
+            RouterConfiguration next = running.Configuration.Clone();
+            if (!change(next))
+            {
+                return null;
+            }
+
+            // Whether the version the change builds on is saved, not whatever runs by the time it is applied.
+            bool persist = !IsUnsaved(running);
+            try
+            {
+                return (Apply(next, persist, source, actor, note, running.Version), persist && _store is not null);
+            }
+            catch (RouterConfigurationConflictException) when (attempt < ChangeAttempts)
+            {
+                // Another version came in after this one was read: make the change again on top of it.
+            }
+        }
     }
 
-    /// <summary>Saves the running configuration to the store as it is. Throws <see cref="InvalidOperationException"/> without a store.</summary>
+    /// <summary>How many times <see cref="ApplyKeepingSaveState"/> makes a change before giving up on a busy configuration.</summary>
+    internal const int ChangeAttempts = 3;
+
+    /// <summary>
+    /// Saves the running configuration to the store as it is: exactly the version read here. Throws
+    /// <see cref="RouterConfigurationConflictException"/> when another version was applied meanwhile (so what is saved is
+    /// never something the caller did not see), and <see cref="InvalidOperationException"/> without a store.
+    /// </summary>
     public RouterRuntime SaveRunning(string? actor = null)
     {
         if (_store is null)
@@ -327,7 +362,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             throw new InvalidOperationException("There is nowhere to save to: no configuration store is registered (see SemanticRouterBuilder.UseConfigurationFile).");
         }
 
-        return Apply(Current.Configuration.Clone(), persist: true, "save", actor, "saved the running configuration");
+        RouterRuntime running = Current;
+        return Apply(running.Configuration.Clone(), persist: true, "save", actor, "saved the running configuration", running.Version);
     }
 
     /// <summary>

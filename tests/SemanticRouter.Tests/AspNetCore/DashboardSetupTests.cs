@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Moq;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Tests.Support;
 
@@ -149,21 +150,59 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
         RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
         provider.SaveRunning();
 
-        RouterConfiguration next = provider.Current.Configuration.Clone();
-        next.DefaultSimilarityThreshold = 0.33f;
-        provider.ApplyKeepingSaveState(next, "auto-tune").Saved.Should().BeTrue();
+        provider.ApplyKeepingSaveState(c => Set(c, threshold: 0.33f), "auto-tune")!.Value.Saved.Should().BeTrue();
         provider.Unsaved.Should().BeFalse();
 
-        next = provider.Current.Configuration.Clone();
+        RouterConfiguration next = provider.Current.Configuration.Clone();
         next.FallbackTier = 2;
         provider.Apply(next, persist: false);
-        next = provider.Current.Configuration.Clone();
-        next.DefaultSimilarityThreshold = 0.44f;
-        (RouterRuntime runtime, bool savedNow) = provider.ApplyKeepingSaveState(next, "auto-tune");
+        (RouterRuntime runtime, bool savedNow) = provider.ApplyKeepingSaveState(c => Set(c, threshold: 0.44f), "auto-tune")!.Value;
 
         savedNow.Should().BeFalse();
         runtime.Source.Should().Be(RouterConfigurationSource.Memory);
         provider.Store!.Load()!.DefaultSimilarityThreshold.Should().BeApproximately(0.33f, 0.0001f, "the file keeps the last saved version");
+        provider.ApplyKeepingSaveState(_ => false, "auto-tune").Should().BeNull("a change that no longer applies applies nothing");
+    }
+
+    [Fact]
+    public async Task A_change_on_top_of_the_running_configuration_is_made_again_when_another_version_comes_in()
+    {
+        await StartDispatchAsync(store: true);
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        provider.SaveRunning();
+
+        int calls = 0;
+        (RouterRuntime runtime, bool saved) = provider.ApplyKeepingSaveState(next =>
+        {
+            if (++calls == 1)
+            {
+                // Someone applies a version after this copy was made.
+                RouterConfiguration other = provider.Current.Configuration.Clone();
+                other.FallbackTier = 2;
+                provider.Apply(other, persist: true);
+            }
+
+            return Set(next, threshold: 0.33f);
+        }, "auto-tune")!.Value;
+
+        calls.Should().Be(2);
+        (runtime.Configuration.FallbackTier, runtime.Configuration.DefaultSimilarityThreshold).Should().Be((2, 0.33f), "the other change is kept, not undone");
+        saved.Should().BeTrue();
+
+        // A configuration that keeps changing: given up after a few tries.
+        provider.Invoking(p => p.ApplyKeepingSaveState(next =>
+            {
+                p.Apply(p.Current.Configuration.Clone(), persist: false);
+                return Set(next, threshold: 0.44f);
+            }, "auto-tune"))
+            .Should().Throw<RouterConfigurationConflictException>();
+        provider.Current.Configuration.DefaultSimilarityThreshold.Should().Be(0.33f);
+    }
+
+    private static bool Set(RouterConfiguration configuration, float threshold)
+    {
+        configuration.DefaultSimilarityThreshold = threshold;
+        return true;
     }
 
     // ---- Contract 3: version conflicts ----
@@ -189,6 +228,32 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
         (await client.PutAsync("/router/api/config?persist=false", Body(config))).StatusCode.Should().Be(HttpStatusCode.OK, "without baseVersion nothing changes");
         Services.GetRequiredService<RouterRuntimeProvider>().Invoking(p => p.Apply(p.Current.Configuration.Clone(), persist: false, baseVersion: 1))
             .Should().Throw<RouterConfigurationConflictException>().Which.Current.Version.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task A_change_based_on_another_run_of_the_router_is_refused_even_with_the_same_version()
+    {
+        HttpClient client = await StartDispatchAsync();
+        JsonNode envelope = await NodeAsync(await client.GetAsync("/router/api/config"));
+        string instance = (string)envelope["instance"]!;
+        JsonNode config = envelope["config"]!;
+
+        instance.Should().MatchRegex("^[0-9a-f]{12}$");
+        ((string?)(await NodeAsync(await client.GetAsync("/router/api/status")))["instance"]).Should().Be(instance);
+
+        // Versions start at 1 on every start: version 1 of the run before a restart is not this one's.
+        HttpResponseMessage restarted = await client.PutAsync("/router/api/config?persist=false&baseVersion=1&instance=0123456789ab", Body(config));
+        restarted.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        JsonNode conflict = await NodeAsync(restarted);
+        ((string?)conflict["instance"], (int)conflict["currentVersion"]!).Should().Be((instance, 1));
+        ((string?)conflict["detail"]).Should().StartWith("The router restarted since you loaded it.");
+        (await client.PutAsync("/router/api/config?persist=false&instance=0123456789ab", Body(config))).StatusCode.Should().Be(HttpStatusCode.Conflict, "the instance alone is checked too");
+
+        HttpResponseMessage same = await client.PutAsync($"/router/api/config?persist=false&baseVersion=1&instance={instance}", Body(config));
+        same.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode applied = await NodeAsync(same);
+        ((int)applied["version"]!, (string?)applied["instance"]).Should().Be((2, instance));
+        ((string?)(await NodeAsync(await client.PutAsync("/router/api/config?persist=false&baseVersion=1", Body(config))))["instance"]).Should().Be(instance, "a version conflict names the instance too");
     }
 
     // ---- Contract 4: issues tied to fields ----
@@ -338,6 +403,44 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
     }
 
     [Fact]
+    public async Task When_the_prompt_could_not_be_classified_the_answer_stays_a_retryable_503()
+    {
+        Classifier.Setup(c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new HttpRequestException("embeddings down"));
+        HttpClient client = await StartDispatchAsync(routing: o =>
+        {
+            RouteDefinition customers = TestEmbeddings.Route("customers", 1, "look up the customer record");
+            customers.LocalOnly = true;
+            o.Routes.Add(customers);
+        });
+
+        // Unclassified, the fallback stays local (a local-only route might have covered it), and the local model has no tools.
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json("""
+            {"model":"auto","messages":[{"role":"user","content":"hello there"}],
+             "tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]}
+            """));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "once the prompt can be classified, it may go to another model");
+        (await response.Content.ReadAsStringAsync()).Should().Contain("could not classify this prompt").And.Contain("local only");
+    }
+
+    [Fact]
+    public async Task When_the_only_models_that_fit_are_outside_their_active_hours_the_answer_is_a_retryable_503()
+    {
+        HttpClient client = await StartDispatchAsync(
+            routing: o =>
+            {
+                o.Selection.TimeZone = "UTC";
+                o.Models.ToList().ForEach(m => m.ActiveHours = "20:00-23:00");
+            },
+            services: s => s.AddSingleton<TimeProvider>(new ManualTimeProvider())); // 12:00 UTC
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "the models come back at 20:00");
+        (await response.Content.ReadAsStringAsync()).Should().Contain("no model is in its active hours right now").And.Contain("Try again later");
+    }
+
+    [Fact]
     public async Task Models_that_exist_but_failed_still_get_a_retryable_503()
     {
         LocalHttp = StubHttpMessageHandler.Throws();
@@ -423,6 +526,63 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
         setup["presets"]!.AsArray().Should().HaveCount(9);
     }
 
+    [Fact]
+    public async Task Setup_starts_nothing_for_another_site_and_a_refresh_reuses_a_look_younger_than_ten_seconds()
+    {
+        var time = new ManualTimeProvider();
+        var detector = new FixedDetector();
+        HttpClient client = await StartDispatchAsync(services: s =>
+        {
+            s.AddSingleton<IRouterSetupDetector>(detector);
+            s.AddSingleton<TimeProvider>(time);
+        });
+
+        HttpRequestMessage Setup(string? fetchSite, string? origin = null)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "/router/api/setup?refresh=true");
+            if (fetchSite is not null)
+            {
+                request.Headers.Add("Sec-Fetch-Site", fetchSite);
+            }
+
+            if (origin is not null)
+            {
+                request.Headers.Add("Origin", origin);
+            }
+
+            return request;
+        }
+
+        // <img src="http://localhost:5080/router/api/setup?refresh=true"> on another site.
+        (await client.SendAsync(Setup("cross-site"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.SendAsync(Setup("same-site"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.SendAsync(Setup(null, "http://evil.example"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        detector.Calls.Should().Be(0, "nothing is started for a refused request");
+
+        (await client.SendAsync(Setup("same-origin"))).StatusCode.Should().Be(HttpStatusCode.OK, "the dashboard's own fetch");
+        (await client.SendAsync(Setup(null, "http://localhost"))).StatusCode.Should().Be(HttpStatusCode.OK);
+        detector.Calls.Should().Be(1, "a refresh within 10 seconds of the last look reuses it");
+
+        time.Advance(TimeSpan.FromSeconds(11));
+        (await client.SendAsync(Setup(null))).StatusCode.Should().Be(HttpStatusCode.OK, "scripts send no Origin");
+        detector.Calls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task A_detection_that_fails_still_answers_with_the_presets()
+    {
+        HttpClient client = await StartDispatchAsync(services: s =>
+            s.AddSingleton<IRouterSetupDetector>(new ThrowingDetector(new System.ComponentModel.Win32Exception("An error occurred trying to start process 'claude'."))));
+
+        HttpResponseMessage response = await client.GetAsync("/router/api/setup");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonNode setup = await NodeAsync(response);
+        ((string?)setup["detectionProblem"]).Should().Be("Could not look for models on this machine: An error occurred trying to start process 'claude'.");
+        setup["presets"]!.AsArray().Should().HaveCount(9);
+        setup["detected"]!.AsArray().Should().BeEmpty();
+    }
+
     // ---- Contract 2: discovery for a draft connector ----
 
     [Fact]
@@ -444,11 +604,30 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
         JsonNode qwen = result["lineup"]!.AsArray().Single(e => (string?)e!["id"] == "qwen3-8b")!;
         qwen["inCatalog"].Should().BeNull("the draft's own (empty) catalog is used, not the running one");
         ((int)(await NodeAsync(await client.GetAsync("/router/api/config")))["version"]!).Should().Be(1, "nothing is applied");
-        (await client.GetStringAsync("/router/api/audit")).Should().Contain("discovered a draft connector\\u0027s models: lmstudio (OpenAICompatible), not applied");
+        (await client.GetStringAsync("/router/api/audit")).Should().Contain("discovered a draft connector\\u0027s models: lmstudio (OpenAICompatible) at http://localhost:1234, not applied");
 
         HttpResponseMessage cli = await client.PostAsJsonAsync("/router/api/connectors/discover", new { name = "claude-new", settings = new { Type = "Cli", Preset = "ClaudeCode" } });
         (await NodeAsync(cli))["models"]!.AsArray().Select(m => (string?)m).Should().Contain(["haiku", "sonnet", "opus"]);
         Cli.Invocations.Should().BeEmpty("a CLI's names come from its preset, nothing is run");
+    }
+
+    [Theory]
+    [InlineData("OpenAICompatible", "https://user:secret@api.example.com/v1/chat?key=sk-1", null, "https://api.example.com:443")]
+    [InlineData("OpenAICompatible", "http://[::1]:1234/", null, "http://[::1]:1234")]
+    [InlineData("Cli", null, "/opt/tools/claude", "claude")]
+    [InlineData("Cli", null, null, "claude")]
+    [InlineData("Copilot", null, null, "copilot")]
+    public void The_audit_names_where_a_draft_connector_was_asked_without_its_path_or_credentials(string type, string? address, string? executable, string expected)
+    {
+        var connector = new ConnectorOptions
+        {
+            Type = Enum.Parse<ConnectorType>(type),
+            BaseAddress = address is null ? null : new Uri(address),
+            Executable = executable,
+            Preset = CliPreset.ClaudeCode,
+        };
+
+        RouterDashboardEndpoints.Destination(connector).Should().Be(expected);
     }
 
     [Fact]
@@ -550,6 +729,11 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
                     });
                 }))
             .StartAsync();
+
+    private sealed class ThrowingDetector(Exception problem) : IRouterSetupDetector
+    {
+        public Task<IReadOnlyList<SetupDetection>> DetectAsync(CancellationToken cancellationToken = default) => Task.FromException<IReadOnlyList<SetupDetection>>(problem);
+    }
 
     private sealed class FixedDetector(params SetupDetection[] found) : IRouterSetupDetector
     {

@@ -82,6 +82,10 @@ internal static class TuningApi
         {
             return Results.Problem(ex.Message, statusCode: ex.NotFound ? StatusCodes.Status404NotFound : StatusCodes.Status409Conflict);
         }
+        catch (RouterConfigurationConflictException)
+        {
+            return Results.Problem("The configuration kept changing while this was applied. Try again.", statusCode: StatusCodes.Status409Conflict);
+        }
         catch (InvalidOperationException ex)
         {
             return Results.Problem(ex.Message, statusCode: StatusCodes.Status400BadRequest);

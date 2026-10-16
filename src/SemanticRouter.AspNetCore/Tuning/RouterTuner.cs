@@ -413,16 +413,26 @@ internal sealed partial class RouterTuner : IDisposable
     /// <summary>Applies a threshold change as its own configuration version, unless the setting changed meanwhile.</summary>
     private TuningChange? ApplyThreshold(TuningChange change, string actor, string? note = null)
     {
-        RouterConfiguration next = _provider.Current.Configuration.Clone();
-        if (!Matches(next, change, change.OldValue))
+        if (!Matches(_provider.Current.Configuration, change, change.OldValue))
         {
             return null;
         }
 
-        Set(next, change, change.NewValue);
         long id = change.Id != 0 ? change.Id : NextId();
-        RouterRuntime runtime = _provider.ApplyKeepingSaveState(next, Source, actor, note ?? $"change {id}: {change.Summary}. {change.Why}").Runtime;
-        return Save(change with { Id = id, State = TuningChangeState.Applied, Version = runtime.HistoryVersion, Actor = actor });
+        bool Make(RouterConfiguration next)
+        {
+            if (!Matches(next, change, change.OldValue))
+            {
+                return false;
+            }
+
+            Set(next, change, change.NewValue);
+            return true;
+        }
+
+        return _provider.ApplyKeepingSaveState(Make, Source, actor, note ?? $"change {id}: {change.Summary}. {change.Why}") is { } applied
+            ? Save(change with { Id = id, State = TuningChangeState.Applied, Version = applied.Runtime.HistoryVersion, Actor = actor })
+            : null;
     }
 
     private async Task LearnUtterancesAsync(
@@ -476,9 +486,23 @@ internal sealed partial class RouterTuner : IDisposable
 
             if (Decide(change, options, history, now) == Disposition.Apply)
             {
+                // Made on the configuration running by now, which may have changed during the evaluation.
                 long id = NextId();
-                RouterRuntime applied = _provider.ApplyKeepingSaveState(next, Source, Actor, $"change {id}: {change.Summary}. {change.Why}").Runtime;
-                made.Add(Save(change with { Id = id, State = TuningChangeState.Applied, Version = applied.HistoryVersion, Actor = Actor }));
+                bool Make(RouterConfiguration latest)
+                {
+                    if (!Matches(latest, candidate, null))
+                    {
+                        return false;
+                    }
+
+                    Set(latest, candidate, null);
+                    return true;
+                }
+
+                if (_provider.ApplyKeepingSaveState(Make, Source, Actor, $"change {id}: {change.Summary}. {change.Why}") is { } applied)
+                {
+                    made.Add(Save(change with { Id = id, State = TuningChangeState.Applied, Version = applied.Runtime.HistoryVersion, Actor = Actor }));
+                }
             }
             else
             {
@@ -548,29 +572,33 @@ internal sealed partial class RouterTuner : IDisposable
             TuningChange[] chain = _store.Changes()
                 .Where(c => c.State == TuningChangeState.Applied && c.Setting == change.Setting && c.Id >= id)
                 .OrderBy(c => c.Id).ToArray();
-            RouterConfiguration next = _provider.Current.Configuration.Clone();
-            if (change.Kind == TuningChangeKind.RouteModel)
+            bool Revert(RouterConfiguration next)
             {
-                if (!MatchesModel(next, change, chain[^1].NewModel))
+                if (change.Kind == TuningChangeKind.RouteModel)
+                {
+                    if (!MatchesModel(next, change, chain[^1].NewModel))
+                    {
+                        throw new TuningConflictException(
+                            $"The {Setting(change)} was changed since (it is {Find(next, change)?.PreferredModel ?? "the tier's choice"}), so undoing change {id} would overwrite that. Change it on the Routes page instead.");
+                    }
+
+                    SetModel(next, change, change.OldModel);
+                }
+                else if (change.Kind != TuningChangeKind.Utterance && !Matches(next, change, chain[^1].NewValue))
                 {
                     throw new TuningConflictException(
-                        $"The {Setting(change)} was changed since (it is {Find(next, change)?.PreferredModel ?? "the tier's choice"}), so undoing change {id} would overwrite that. Change it on the Routes page instead.");
+                        $"The {Setting(change)} was changed since (it is {TuningChange.Format(Current(next, change))}), so undoing change {id} would overwrite that. Change it on the Routes page instead.");
+                }
+                else
+                {
+                    Set(next, change, change.OldValue, remove: true);
                 }
 
-                SetModel(next, change, change.OldModel);
-            }
-            else if (change.Kind != TuningChangeKind.Utterance && !Matches(next, change, chain[^1].NewValue))
-            {
-                throw new TuningConflictException(
-                    $"The {Setting(change)} was changed since (it is {TuningChange.Format(Current(next, change))}), so undoing change {id} would overwrite that. Change it on the Routes page instead.");
-            }
-            else
-            {
-                Set(next, change, change.OldValue, remove: true);
+                return true;
             }
 
             DateTimeOffset now = _time.GetUtcNow();
-            RouterRuntime runtime = _provider.ApplyKeepingSaveState(next, UndoSource, actor, $"undo of auto-tune change {id}: {change.Summary}").Runtime;
+            RouterRuntime runtime = _provider.ApplyKeepingSaveState(Revert, UndoSource, actor, $"undo of auto-tune change {id}: {change.Summary}")!.Value.Runtime;
             TuningChange undone = change;
             foreach (TuningChange step in chain)
             {
@@ -608,40 +636,52 @@ internal sealed partial class RouterTuner : IDisposable
                 return (trials.Length, []);
             }
 
-            RouterConfiguration next = _provider.Current.Configuration.Clone();
             var undone = new List<TuningChange>();
             var skipped = new List<string>();
-            foreach (IGrouping<string, TuningChange> setting in applied.GroupBy(c => c.Setting))
+            bool Revert(RouterConfiguration next)
             {
-                TuningChange first = setting.MinBy(c => c.Id)!, last = setting.MaxBy(c => c.Id)!;
-                if (first.Kind == TuningChangeKind.RouteModel
-                    ? !MatchesModel(next, first, last.NewModel)
-                    : first.Kind != TuningChangeKind.Utterance && !Matches(next, first, last.NewValue))
+                // Decided again on each copy: another version may have changed a setting since the last one.
+                undone.Clear();
+                skipped.Clear();
+                foreach (IGrouping<string, TuningChange> setting in applied.GroupBy(c => c.Setting))
                 {
-                    skipped.Add($"the {Setting(first)} (changed since)");
-                    continue;
+                    TuningChange first = setting.MinBy(c => c.Id)!, last = setting.MaxBy(c => c.Id)!;
+                    if (first.Kind == TuningChangeKind.RouteModel
+                        ? !MatchesModel(next, first, last.NewModel)
+                        : first.Kind != TuningChangeKind.Utterance && !Matches(next, first, last.NewValue))
+                    {
+                        skipped.Add($"the {Setting(first)} (changed since)");
+                        continue;
+                    }
+
+                    if (first.Kind == TuningChangeKind.RouteModel)
+                    {
+                        SetModel(next, first, first.OldModel);
+                    }
+                    else
+                    {
+                        Set(next, first, first.OldValue, remove: true);
+                    }
+
+                    undone.AddRange(setting);
                 }
 
-                if (first.Kind == TuningChangeKind.RouteModel)
-                {
-                    SetModel(next, first, first.OldModel);
-                }
-                else
-                {
-                    Set(next, first, first.OldValue, remove: true);
-                }
-
-                undone.AddRange(setting);
+                return undone.Count > 0;
             }
 
-            if (undone.Count > 0)
+            // The note counts what would be undone now; a retry on a newer version rarely changes that.
+            int count = Revert(_provider.Current.Configuration.Clone()) ? undone.Count : 0;
+            DateTimeOffset now = _time.GetUtcNow();
+            if (count > 0 && _provider.ApplyKeepingSaveState(Revert, UndoSource, actor, $"undo of all automatic changes ({count})") is { } reverted)
             {
-                DateTimeOffset now = _time.GetUtcNow();
-                RouterRuntime runtime = _provider.ApplyKeepingSaveState(next, UndoSource, actor, $"undo of all automatic changes ({undone.Count})").Runtime;
                 foreach (TuningChange change in undone)
                 {
-                    Save(change with { State = TuningChangeState.Undone, UndoneAt = now, Actor = actor, UndoVersion = runtime.HistoryVersion });
+                    Save(change with { State = TuningChangeState.Undone, UndoneAt = now, Actor = actor, UndoVersion = reverted.Runtime.HistoryVersion });
                 }
+            }
+            else
+            {
+                undone.Clear();
             }
 
             return (undone.Count + trials.Length, skipped);
@@ -664,15 +704,19 @@ internal sealed partial class RouterTuner : IDisposable
                 throw new TuningConflictException($"Change {id} is {change.State.ToString().ToLowerInvariant()}, not a suggestion.");
             }
 
-            RouterConfiguration next = _provider.Current.Configuration.Clone();
-            if (!Matches(next, change, change.OldValue))
+            bool Make(RouterConfiguration next)
             {
-                Save(change with { State = TuningChangeState.Expired });
-                throw new TuningConflictException($"The {Setting(change)} changed since this was suggested; it no longer applies.");
+                if (!Matches(next, change, change.OldValue))
+                {
+                    Save(change with { State = TuningChangeState.Expired });
+                    throw new TuningConflictException($"The {Setting(change)} changed since this was suggested; it no longer applies.");
+                }
+
+                Set(next, change, change.NewValue);
+                return true;
             }
 
-            Set(next, change, change.NewValue);
-            RouterRuntime runtime = _provider.ApplyKeepingSaveState(next, Source, actor, $"change {id} (suggested): {change.Summary}. {change.Why}").Runtime;
+            RouterRuntime runtime = _provider.ApplyKeepingSaveState(Make, Source, actor, $"change {id} (suggested): {change.Summary}. {change.Why}")!.Value.Runtime;
             return Save(change with { State = TuningChangeState.Applied, Version = runtime.HistoryVersion, Actor = actor });
         }
         finally
