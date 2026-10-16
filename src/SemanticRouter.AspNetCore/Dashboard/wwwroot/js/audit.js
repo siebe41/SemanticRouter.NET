@@ -33,6 +33,7 @@ views.audit = () => {
         <label class="small">Show <select id="audit-limit" style="width:auto">${[100, 200, 1000].map((n) => `<option value="${n}" ${a.limit === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
         <button class="btn ghost small" data-action="audit-load">Refresh</button>
         <a class="btn ghost small" href="${API}/audit?format=jsonl&amp;limit=10000" download>Download JSON Lines</a>
+        <button class="btn ghost small" data-action="sessions-revoke-all" title="End every dashboard session signed in with a token, yours included">Sign out every session</button>
       </div>
       ${a.error ? `<p class="small" style="color:var(--danger)">${h(a.error)}</p>` : ''}
       <div class="table-wrap"><table aria-label="Audit log">

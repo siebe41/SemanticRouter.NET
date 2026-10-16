@@ -15,8 +15,14 @@ internal static class DigestApi
     private static readonly RoutingReason[] Escalations = [RoutingReason.ComplexityEscalation, RoutingReason.AmbiguousMatchEscalation, RoutingReason.RetryEscalation];
 
     public static void Map(RouteGroupBuilder api, JsonSerializerOptions json) =>
-        api.MapGet("/digest", (RouterRuntimeProvider provider, IUsageLedger ledger, RoutingActivityLog activity, RoutingFeedbackLog feedback, RouterTuner tuner, RouterNotices notices, string? window) =>
-            Results.Json(Build(provider.Current.Configuration, ledger, activity, feedback, tuner, notices, window, DateTimeOffset.UtcNow), json));
+        api.MapGet("/digest", (HttpContext context, RouterRuntimeProvider provider, IUsageLedger ledger, RoutingActivityLog activity, RoutingFeedbackLog feedback, RouterTuner tuner, RouterNotices notices, string? window) =>
+            {
+                DigestResponse digest = Build(provider.Current.Configuration, ledger, activity, feedback, tuner, notices, window, DateTimeOffset.UtcNow);
+
+                // The metrics role gets what webhooks get without IncludeDetails: no learned utterance, no connector's error.
+                return Results.Json(DashboardAccess.RoleOf(context) == RouterDashboardRole.Metrics ? WebhookNotifier.WithoutDetails(digest) : digest, json);
+            })
+            .WithMetadata(DashboardMetricsMetadata.Instance);
 
     /// <summary>The digest for <paramref name="window"/> (as on the Usage page) at <paramref name="now"/>.</summary>
     internal static DigestResponse Build(

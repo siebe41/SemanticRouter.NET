@@ -15,7 +15,7 @@ internal static class ReliabilityApi
             ReliabilityOptions options = provider.Current.Configuration.Middleware.Reliability;
             IReadOnlyList<ModelReliability> models = tracker.Refresh();
             return Results.Json(new ReliabilityResponse(options.Enabled, options.Window, options.MinimumTurns, [.. models.OrderBy(m => m.Model).ThenBy(m => m.Route ?? m.Capability)]), json);
-        });
+        }).WithMetadata(DashboardMetricsMetadata.Instance);
 
         api.MapPost("/reliability/reset", (HttpContext context, ModelReliabilityTracker tracker, ResetRequest request) =>
         {

@@ -103,6 +103,7 @@ internal static class DoctorCommand
         PromptRouterMiddlewareOptions middleware = app.Services.GetRequiredService<RouterRuntimeProvider>().Current.Configuration.Middleware;
         yield return new RouterCheck("gateway", middleware.GatewayKeys.Count > 0 ? RouterCheckStatus.Ok : RouterCheckStatus.Warning, RouterHost.RemoteGatewayAccess(middleware));
         if (!dashboard.RequireLocalClient && string.IsNullOrEmpty(dashboard.AdminToken) && string.IsNullOrEmpty(dashboard.ReadOnlyToken)
+            && string.IsNullOrEmpty(dashboard.MetricsToken)
             && !dashboard.AllowUnauthenticatedRemoteClients)
         {
             yield return new RouterCheck("dashboard", RouterCheckStatus.Warning,

@@ -82,6 +82,24 @@ test('the audit log lists changes with who made them and from where', async ({ p
   await expect(table).toContainText('PUT /router/api/config');
 });
 
+test('a metrics user sees only the figures and never asks for prompts or the configuration', async ({ page }) => {
+  // The router here admits this machine as admin; the page is told it signed in with the metrics token.
+  await page.route('**/router/api/session', (route) => route.request().method() === 'GET'
+    ? route.fulfill({ json: { role: 'Metrics', tokenRequired: true, tokensConfigured: true, identity: 'metrics token' } })
+    : route.continue());
+  const asked = [];
+  page.on('request', (r) => { const u = new URL(r.url()); if (u.pathname.startsWith('/router/api/')) asked.push(u.pathname); });
+  await open(page, 'routes');
+  await expect(page.locator('#view h1')).toHaveText('Overview');
+  await expect(page.locator('#nav a:visible')).toHaveText(['Overview', 'Usage']);
+  await expect(page.locator('#banner')).toContainText('metrics');
+  await expect(page.locator('#view')).not.toContainText('Try a prompt');
+  await page.locator('#nav a', { hasText: 'Usage' }).click();
+  await expect(page.locator('#view h1')).toHaveText('Usage');
+  await expect(page.locator('#view')).not.toContainText('Reference model');
+  expect(asked.filter((p) => /\/(config|activity|events|tuning|memory|audit)$/.test(p))).toEqual([]);
+});
+
 test('the page has landmarks, a skip link and marks the current page', async ({ page }) => {
   await open(page, 'routes');
   await expect(page.locator('nav[aria-label="Pages"]')).toBeVisible();

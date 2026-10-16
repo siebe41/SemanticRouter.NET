@@ -1,5 +1,5 @@
 /* Semantic Router dashboard: Usage page: tokens and cost by model, connector, route, client or profile, and budgets. */
-import { api, connectorNames, h, state, toast, views } from './core.js';
+import { api, connectorNames, h, metricsOnly, state, toast, views } from './core.js';
 import { pct } from './evaluate.js';
 import { render } from './shell.js';
 
@@ -69,7 +69,7 @@ views.usage = () => {
       <table><tr><th>${h(u.by)}</th><th>Requests</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th title="Prompt tokens served from a prompt cache">Cache hits</th><th>Cost</th><th style="width:30%"></th></tr>
       ${d.groups.map((g) => { const tk = g.totals.inputTokens + g.totals.outputTokens + g.totals.cacheReadTokens + g.totals.cacheWriteTokens; const share = byCost ? g.totals.costUsd / max : tk / maxTok; return `<tr><td>${h(g.key)}</td><td class="num">${int(g.totals.requests)}</td><td class="num">${int(g.totals.inputTokens)}</td><td class="num">${int(g.totals.outputTokens)}</td><td class="num">${int(g.totals.cacheReadTokens)}</td><td class="num">${int(g.totals.cacheWriteTokens)}</td><td class="num">${hitRate(g.totals)}</td><td class="num">${usd(g.totals.costUsd)}</td><td><div class="bar" title="${byCost ? 'share of cost' : 'share of tokens'}"><i style="width:${Math.round(share * 100)}%"></i></div></td></tr>`; }).join('') || '<tr><td colspan="9" class="muted small">Nothing recorded in this window. Usage appears once backends report tokens (streamed OpenAI pass-through replies only when the client asks for <code>stream_options.include_usage</code>).</td></tr>'}
       </table></div>
-    <div class="card section"><div class="card-head"><h2>Settings</h2><span class="muted small">Saved with the configuration.</span></div><div class="form-grid">
+    ${metricsOnly() ? '' : `<div class="card section"><div class="card-head"><h2>Settings</h2><span class="muted small">Saved with the configuration.</span></div><div class="form-grid">
       <label class="field"><span class="name">Reference model</span><select data-bind="Usage.ReferenceModel" data-kind="nulltext"><option value="">(none)</option>${(state.config.Models || []).map((m) => `<option ${m.Name === (state.config.Usage || {}).ReferenceModel ? 'selected' : ''}>${h(m.Name)}</option>`).join('')}</select><span class="hint">Its prices are the yardstick for "saved".</span></label>
       <label class="field"><span class="name">Warn at (%)</span><input type="number" min="1" max="100" data-bind="Usage.WarnAtPercent" data-kind="number" value="${(state.config.Usage || {}).WarnAtPercent || 80}"></label>
       <label class="field"><span class="name">Time zone for periods</span><input type="text" data-bind="Usage.TimeZone" data-kind="nulltext" value="${h((state.config.Usage || {}).TimeZone || '')}" placeholder="this machine's"></label>
@@ -87,5 +87,5 @@ views.usage = () => {
         <td><button class="btn ghost small" data-action="budget-remove" data-index="${i}">remove</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted small">No budgets.</td></tr>'}
     </table>
     <div class="inline" style="margin-top:8px"><button class="btn small" data-action="budget-add">Add budget</button></div>
-    </div>`;
+    </div>`}`;
 };

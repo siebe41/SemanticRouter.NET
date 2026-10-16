@@ -67,7 +67,10 @@ export const h = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
 export const num = (v, d) => (v == null || v === '' ? '' : (typeof v === 'number' ? Number(v.toFixed(d == null ? 3 : d)) : v));
 export const when = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleTimeString(); };
 export const isDirty = () => state.config && JSON.stringify(state.config) !== state.original;
-export const readOnly = () => state.session.role === 'ReadOnly';
+export const readOnly = () => state.session.role === 'ReadOnly' || state.session.role === 'Metrics';
+// The metrics role sees figures only (no prompts, configuration or activity): the Overview's counts and the Usage page.
+export const metricsOnly = () => state.session.role === 'Metrics';
+export const METRICS_VIEWS = ['overview', 'usage'];
 // Attributes for a button that spends embedding or API calls: the read-only role sees it disabled.
 export const adminOnly = (busy) => (readOnly() ? 'disabled title="Needs the admin token"' : busy ? 'disabled' : '');
 export const isReference = (v) => typeof v === 'string' && /\$\{(env|secret):[^}]+\}/i.test(v);
@@ -153,7 +156,7 @@ export function showSignIn(message) {
   $('#view').innerHTML = `
     <div class="card section signin" style="max-width:460px">
       <h2>Sign in</h2>
-      <p class="muted small">This router asks for its dashboard token (<code>SemanticRouter:Dashboard:AdminToken</code>, or the read-only token).</p>
+      <p class="muted small">This router asks for its dashboard token (<code>SemanticRouter:Dashboard:AdminToken</code>, or the read-only or metrics token).</p>
       <form id="signin-form">
         <label class="field"><span class="name">Token</span><input type="password" id="signin-token" autocomplete="current-password" required></label>
         ${message ? `<p class="small" style="color:var(--danger)">${h(message)}</p>` : ''}

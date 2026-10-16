@@ -37,7 +37,7 @@ builder.Services
 | **Gateway** | Mode (Dispatch or Annotate), OpenAI and Anthropic path prefixes, model aliases, tool-turn pinning, system-reminder stripping, body limit, response headers, fail-open, message selection. |
 | **Connect clients** | Ready-to-paste snippets for Claude Code, OpenAI SDKs, Codex CLI and curl, filled in with the router's address. |
 | **JSON** | The whole document as text (the same shape as the `SemanticRouter` section of `appsettings.json`): edit, download, compare with the application baseline, reset. **History** lists every applied version (when, what applied it, who), diffs any of them against the draft and rolls back to it. |
-| **Audit log** | Admin only. Every change made through the dashboard or admin API, sign-ins and sign-outs: when, who (the user your proxy signed in, `admin token`, `read-only token` or `this machine`), from which address, what, the request and its status. **Download JSON Lines** exports it. See [Audit log](#audit-log). |
+| **Audit log** | Admin only. Every change made through the dashboard or admin API, sign-ins and sign-outs: when, who (the user your proxy signed in, `admin token`, `read-only token`, `metrics token` or `this machine`), from which address, what, the request and its status. **Download JSON Lines** exports it; **Sign out every session** ends every dashboard session ([Sessions](#sessions)). See [Audit log](#audit-log). |
 
 ![The Live page](images/live.png)
 
@@ -163,10 +163,11 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `POST api/connectors/{name}/discover` | What the connector offers: `models` (ids it serves), `server` (`LM Studio`, `Ollama`), `loading` (`OnDemand`, `LoadedOnly`, `Unknown`) with `loadingNote`, and `lineup`: per model its `kind`, `listed`, `loaded`, `contextLength`, `parametersBillions`, `capabilities`, `inCatalog`, `recommended`, `reason` and a `suggestion` in the configuration document's shape. HTTP connectors are asked (`/v1/models`, plus LM Studio's and Ollama's own APIs on local addresses), the Copilot SDK lists your account's models, and CLI presets return the names they accept. A `401` is reported as "requires authentication", naming the key to set. |
 | `GET api/session` | `{ role, tokenRequired, tokensConfigured, identity }` for the caller; `identity` is who it acts as (see [Audit log](#audit-log)). |
 | `POST api/session` | `{ "token": "..." }` → sets the session cookie, good for `SessionLifetime`. After five wrong tokens from one address in 15 minutes, `429` with `Retry-After` until the first is 15 minutes old. |
-| `DELETE api/session` | Signs out. |
+| `DELETE api/session` | Signs out, and ends the session on the server: the cookie is refused from then on, even if replayed. |
+| `POST api/session/revoke-all` | Ends every session signed in until now, the caller's included ([Sessions](#sessions)). Admin role only. |
 | `GET api/audit?since=&until=&limit=200&format=jsonl` | The [audit log](#audit-log), newest first: `id`, `timestamp`, `actor`, `client`, `method`, `path`, `route`, `status`, `summary`. `since` is inclusive, `until` exclusive; `limit` up to 10,000. `format=jsonl` downloads JSON Lines. Admin role only. |
 
-`PUT api/config`, `POST api/config/reset`, rollback, `POST api/health/reset`, `POST api/memory/exposure/reset`, changes to the evaluation set, adding utterances and every tuning action need the admin role. So does everything that spends embedding or API calls or scans the disk: `POST api/classify`, `POST api/evaluate` and `api/evaluate/compare`, `POST api/embeddings/test`, `POST api/connectors/{name}/check` and `/discover`, and `POST api/memory/refresh`. Everything else is open to the read-only role, except `GET api/audit`; the dashboard disables or hides those buttons for it.
+`PUT api/config`, `POST api/config/reset`, rollback, `POST api/health/reset`, `POST api/memory/exposure/reset`, changes to the evaluation set, adding utterances and every tuning action need the admin role. So does everything that spends embedding or API calls or scans the disk: `POST api/classify`, `POST api/evaluate` and `api/evaluate/compare`, `POST api/embeddings/test`, `POST api/connectors/{name}/check` and `/discover`, and `POST api/memory/refresh`. Everything else is open to the read-only role, except `GET api/audit`; the dashboard disables or hides those buttons for it. The metrics role reaches only the endpoints listed under [Roles](#roles).
 
 The same document works with `PUT` from scripts, e.g. to promote a tested configuration:
 
@@ -181,7 +182,7 @@ The admin API can change where prompts go, so the default is strict and opening 
 | Setup | Settings | What happens |
 |---|---|---|
 | **Loopback only** (default) | nothing | Requests from other machines get `403`. Loopback requests must carry a `Host` header naming this machine (`localhost`, `127.0.0.1`, `[::1]`, or a `PublicOrigins` entry), which stops a web page from reaching the dashboard through DNS rebinding. |
-| **Token** | `RequireLocalClient: false`, `AdminToken` (and optionally `ReadOnlyToken`) | Remote callers send `Authorization: Bearer <token>`, or sign in on the dashboard, which sets an `HttpOnly`, `SameSite=Strict` session cookie: the time it was issued, signed with the token (never the token itself). It lapses after `SessionLifetime` (12 hours), and changing the token signs everyone out. Five wrong tokens from one address within 15 minutes, at sign-in or as a bearer token, make that address wait (`429` with `Retry-After`) until the first is 15 minutes old; a right token does not count. The read-only token can view status, activity and the masked configuration; it cannot apply, save or reset, nor classify, evaluate, test embeddings, check or discover connectors, or rescan memory, which spend embedding or API calls or read the disk. Loopback clients still need no token. |
+| **Token** | `RequireLocalClient: false`, `AdminToken` (and optionally `ReadOnlyToken`, `MetricsToken`) | Remote callers send `Authorization: Bearer <token>`, or sign in on the dashboard, which sets an `HttpOnly`, `SameSite=Strict` session cookie (see [Sessions](#sessions)). Five wrong tokens from one address within 15 minutes, at sign-in or as a bearer token, make that address wait (`429` with `Retry-After`) until the first is 15 minutes old; a right token does not count. Each token gives its [role](#roles). Loopback clients still need no token. |
 | **Reverse proxy that signs people in** | `RequireLocalClient: false`, `ForwardedHeaders:KnownProxies`, `TrustedIdentityHeader`, `TrustedIdentityRoles` | The proxy (oauth2-proxy, Cloudflare Access, an IdP-aware gateway) names the user in a header; each user gets the role you map them to, and is named in the history and the [audit log](#audit-log). See [Signed-in users from a reverse proxy](#signed-in-users-from-a-reverse-proxy). |
 | **Reverse proxy that authenticates** | `RequireLocalClient: false`, `AllowUnauthenticatedRemoteClients: true` | Remote callers are trusted. Only for a proxy that authenticates every request; a warning is logged at start-up. Everyone is admin and recorded as `unauthenticated remote client`; prefer the row above. |
 
@@ -191,13 +192,14 @@ The admin API can change where prompts go, so the default is strict and opening 
     "RequireLocalClient": false,
     "AdminToken": "${env:ROUTER_ADMIN_TOKEN}",       // 16+ characters, e.g. `openssl rand -hex 24`
     "ReadOnlyToken": "${env:ROUTER_VIEW_TOKEN}",
+    "MetricsToken": "${env:ROUTER_METRICS_TOKEN}",   // figures only, e.g. for a monitoring screen
     "SessionLifetime": "12:00:00",                   // how long a sign-in lasts
     "PublicOrigins": [ "https://router.home.lan" ]    // where people browse to it, if not localhost
   }
 }
 ```
 
-The same settings are on `RouterDashboardOptions` (`app.MapRouterDashboard("/router", o => ...)` runs after the bound section). With `RequireLocalClient: false` and no token, remote requests are still refused and the log says what to configure.
+The same settings are on `RouterDashboardOptions` (`app.MapRouterDashboard("/router", o => ...)` runs after the bound section). With `RequireLocalClient: false` and no token, remote requests are still refused and the log says what to configure. The three tokens must differ.
 
 Whatever the setup:
 
@@ -206,6 +208,38 @@ Whatever the setup:
 - **A reverse proxy on this machine makes every request look local.** Name it in `SemanticRouter:ForwardedHeaders:KnownProxies` so the real client address is seen (see [host.md](host.md#serving-over-https)), or set `RequireTokenForLocalClients: true`.
 - **Subscription CLI connectors stay loopback-only** (`AllowRemoteClients: false`) whatever the dashboard allows: a remote client's request falls through to an API-key or local model. Serving other people from your personal subscription is what [TERMS.md](TERMS.md) rules out.
 - **Admin is as powerful as the router's own account.** The admin role chooses where prompts and keys go and, with `AllowProcessSettings`, what programs run. Give it to the people you would let log in as the router's user.
+
+### Roles
+
+| Role | Who gets it | What it can do |
+|---|---|---|
+| `Admin` | `AdminToken`, loopback clients without a token, `AllowUnauthenticatedRemoteClients`, or `TrustedIdentityRoles` | Everything, including applying, saving and resetting the configuration, reading the [audit log](#audit-log) and [signing out every session](#sessions). |
+| `ReadOnly` | `ReadOnlyToken` or `TrustedIdentityRoles` | View status, activity (with prompt previews), the masked configuration, memory and what the router learned. It cannot apply, save or reset, nor classify, evaluate, test embeddings, check or discover connectors, or rescan memory, which spend embedding or API calls or read the disk. |
+| `Metrics` | `MetricsToken` or `TrustedIdentityRoles` | Figures only, never prompt or reply text, utterances, evaluation prompts, the configuration, memory, the judge's notes or the audit log. The dashboard shows it the Overview's counts and the Usage page. |
+
+The metrics role is an allow-list: it reaches these endpoints and no others (`403`), so an endpoint added later stays closed to it until it is marked as showing no text.
+
+| Endpoint | What the metrics role gets |
+|---|---|
+| `GET api/status` | As for other roles, without each endpoint's `lastError` (it comes from activity details, which can quote a reply). |
+| `GET api/usage` | Usage totals and groups, budgets. |
+| `GET api/activity/series` | Counts and latency per bucket. |
+| `GET api/feedback/summary` | Feedback counts per route and per model. |
+| `GET api/reliability` | Each model's reliability per route and with tools. |
+| `GET api/digest` | The counts, with learned changes and notices as webhooks get them without `IncludeDetails`: no learned utterance, no connector's error. |
+| `GET api/themes`, `api/session`, the page and its assets | As for everyone. |
+
+Everything else, including `api/activity`, its export and `api/events`, `api/config` and its history, `api/memory`, `api/tuning`, `api/judge/agreement`, the evaluation set and `api/audit`, is refused. The metrics role changes nothing. The machine policy's `Dashboard: ReadOnly` leaves it as it is. Dashboard tokens are not gateway keys: none of them opens the chat endpoints or `/semantic-router/classify`.
+
+### Sessions
+
+Signing in on the dashboard sets a cookie holding the role, the time it was issued and a random session id, signed with the role's token (never the token itself). It lapses after `SessionLifetime` (12 hours), and changing a token signs out everyone who signed in with it.
+
+- **Signing out ends the session on the server.** `DELETE api/session` (the **Sign out** button) revokes the session's id, so the cookie is refused (`401`) even if someone kept a copy. Other sessions are unaffected. Requests with `Authorization: Bearer` have no session to end.
+- **Sign out every session.** An admin can end every session signed in until now, their own included, with **Sign out every session** on the Audit log page (`POST api/session/revoke-all`). Tokens keep working; people sign in again. Under the machine policy's `Dashboard: ReadOnly` it is refused, as other changes are: change the tokens instead.
+- **Where revocations are kept.** In memory, and with the state database (`UseSqliteState`, which the `semantic-router` host uses) also in it, so they survive a restart; routers sharing the file see each other's sign-outs within a second. Each is kept until the session it names would have lapsed. Past 10,000 at once, every session issued up to the newest of them is ended instead, so signing in and out in a loop cannot grow the list.
+- **Cookies issued before sessions had ids** are refused, since they could not be signed out: whoever was signed in signs in again once after the upgrade.
+- Both are [audited](#audit-log): `signed out: session revoked` and `signed out every session`.
 
 ### Signed-in users from a reverse proxy
 
@@ -222,6 +256,7 @@ Put the router behind a proxy that signs people in with your identity provider, 
     "TrustedIdentityRoles": {
       "alice@corp.example": "Admin",
       "router-admins": "Admin",                      // a group
+      "finance": "Metrics",                          // figures only
       "*": "ReadOnly"                                // everyone else the proxy signed in
     }
   }
@@ -231,8 +266,8 @@ Put the router behind a proxy that signs people in with your identity provider, 
 - **The header is believed only from a known proxy.** A request that does not come straight from an address in `SemanticRouter:ForwardedHeaders:KnownProxies` or `KnownNetworks` is treated as if it had no such header, whatever it sends: it needs a token like any other caller. The `semantic-router` host does this for you, and `semantic-router doctor` warns when the header is set but no proxy is named; in your own app, call `app.UseRouterForwardedHeaders()` (in place of `UseForwardedHeaders()`) after configuring `ForwardedHeadersOptions`, whose defaults trust loopback.
 - **A proxy on this machine trusts this machine.** With `KnownProxies: [ "127.0.0.1" ]`, any program on the machine can connect from that address and name any user, as it can already use the dashboard as `this machine` by default. Run the proxy on another host when local programs must not act as others. The request must also carry a `Host` naming this machine or a `PublicOrigins` entry (add the address people browse to), so a web page cannot use DNS rebinding to send the header itself.
 - **The proxy must replace the header, not add to it.** Configure it to drop any copy the client sent. A header that appears twice, lists several names (a comma) or is longer than 256 characters is refused with `403`.
-- **Roles.** The user's own entry in `TrustedIdentityRoles` wins, then the highest role among the groups in `TrustedGroupsHeader`, then `*`. Names are compared ignoring case. A user with no role gets `403` naming the setting; there are two roles, `Admin` and `ReadOnly`, as for tokens.
-- **The proxy decides.** On a request that names a user, tokens and session cookies are not consulted, and there is nothing to sign out of on the dashboard. The machine policy's `Dashboard: ReadOnly` still makes everyone read-only.
+- **Roles.** The user's own entry in `TrustedIdentityRoles` wins, then the highest role among the groups in `TrustedGroupsHeader`, then `*`. Names are compared ignoring case. A user with no role gets `403` naming the setting; the [roles](#roles) are those of the tokens, `Admin`, `ReadOnly` and `Metrics`, highest first.
+- **The proxy decides.** On a request that names a user, tokens and session cookies are not consulted, and there is nothing to sign out of on the dashboard. The machine policy's `Dashboard: ReadOnly` still makes admins read-only (a metrics user stays metrics).
 - Tokens and loopback access keep working for requests without the header (scripts on the proxy's network with `Authorization: Bearer`, the machine itself).
 
 ### Audit log
@@ -242,11 +277,11 @@ Every request that changes something through the dashboard or admin API (each `P
 | Field | |
 |---|---|
 | `timestamp` | When it was answered. |
-| `actor` | The user your proxy signed in, `admin token`, `read-only token`, `this machine` (loopback without a token), `unauthenticated remote client` (`AllowUnauthenticatedRemoteClients`), or `anonymous` for a wrong token. The same name goes into the configuration history and onto learned changes someone undid, applied or dismissed. |
+| `actor` | The user your proxy signed in, `admin token`, `read-only token`, `metrics token`, `this machine` (loopback without a token), `unauthenticated remote client` (`AllowUnauthenticatedRemoteClients`), or `anonymous` for a wrong token. The same name goes into the configuration history and onto learned changes someone undid, applied or dismissed. |
 | `client` | The caller's address (the real one behind a known proxy); empty for in-process calls. |
 | `method`, `path`, `route` | The request without its query string, and the endpoint's route template. Ids in the path (a version, a learned change, a connector name) are kept. |
 | `status` | The status code answered: refusals of a signed-in caller (a read-only user trying a change, `403`) are recorded too. |
-| `summary` | What was done, e.g. `applied the configuration: version 14, saved`, `deleted activity: 230 entries, everything`, `undid a learned change: change 7`, `sign-in failed: wrong token`. |
+| `summary` | What was done, e.g. `applied the configuration: version 14, saved`, `deleted activity: 230 entries, everything`, `undid a learned change: change 7`, `sign-in failed: wrong token`, `signed out: session revoked`. |
 
 Never recorded: request bodies, tokens, keys, prompt text or utterances. Requests refused before anyone signed in (no credentials) are not recorded, so a stranger cannot fill the log; wrong tokens are, and they are throttled per address. Reading `GET api/audit` is not recorded.
 

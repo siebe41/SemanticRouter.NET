@@ -391,7 +391,7 @@ public sealed class DashboardAccessTests : RouterHostTest
         (await StatusWithAsync(cookie)).Should().Be(HttpStatusCode.OK);
 
         string[] parts = cookie.Split('.');
-        string moved = $"{parts[0]}.{_time.GetUtcNow().ToUnixTimeSeconds()}.{parts[2]}";
+        string moved = $"{parts[0]}.{_time.GetUtcNow().ToUnixTimeMilliseconds()}.{parts[2]}.{parts[3]}";
         (await StatusWithAsync(moved)).Should().Be(HttpStatusCode.Unauthorized, "the issue time is signed");
         (await StatusWithAsync(cookie.Replace("session=r.", "session=a.", StringComparison.Ordinal))).Should().Be(HttpStatusCode.Unauthorized, "so is the role");
 
