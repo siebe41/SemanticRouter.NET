@@ -1,6 +1,7 @@
 // Privacy (~1:30): what leaves your machine. A vault of notes on the Memory page; Claude Code reads a note and a local
 // model answers (the Live page shows the note stayed local); Opus is asked to review it and the note goes to the cloud
-// (the map marks it); a credential keeps a conversation local even with @opus; Activity records all of it.
+// (the map marks it); a credential that slips into a prompt (not recommended) keeps the conversation local, even with
+// @opus; Activity records all of it.
 const fs = require('fs');
 const path = require('path');
 const { writeNotes } = require('../notes');
@@ -72,7 +73,7 @@ module.exports = async function privacy(k) {
   await k.stage('layout', 'split');
   await k.go('live');
   line = k.say('secret');
-  await k.stage('caption', 'A credential in the conversation → it stays local', 'Middleware:LocalOnlyWhen:Secrets · even after @opus');
+  await k.stage('caption', "Don't put secrets in prompts. If one slips in, it stays local", 'secret detection on (Middleware:LocalOnlyWhen:Secrets) · even after @opus');
   e = await k.ask(`@opus why does this call fail? curl -H "Authorization: Bearer ${fakeKey}" https://api.billing.example/v1/invoices`, /rotate this one/);
   await k.stage('sub', `${k.describe(e)}<span class="tag local">local only · secret detected</span>`);
   await Promise.all([line, sleep(2500)]);
