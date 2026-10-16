@@ -45,6 +45,12 @@ public sealed class RouterDashboardOptions
     public string? ReadOnlyToken { get; set; }
 
     /// <summary>
+    /// Token for figures only (<see cref="RouterDashboardRole.Metrics"/>): status and health, usage and cost totals,
+    /// activity counts and the digest's counts, never prompt or reply text, utterances, the configuration or memory.
+    /// </summary>
+    public string? MetricsToken { get; set; }
+
+    /// <summary>
     /// Serve remote clients without a token. Only for a reverse proxy that authenticates every request itself; ignored
     /// when a token is configured. Default <see langword="false"/>.
     /// </summary>
@@ -73,7 +79,7 @@ public sealed class RouterDashboardOptions
 
     /// <summary>
     /// How long a dashboard sign-in lasts: the session cookie then lapses and the token must be entered again. Changing
-    /// a token ends every session signed in with it. Default 12 hours.
+    /// a token ends every session signed in with it, and signing out ends that session on the server. Default 12 hours.
     /// </summary>
     public TimeSpan SessionLifetime { get; set; } = TimeSpan.FromHours(12);
 
@@ -96,8 +102,8 @@ public sealed class RouterDashboardOptions
 
     /// <summary>
     /// The role of each user or group a trusted proxy names, e.g. <c>{ "alice@corp.example": "Admin", "router-admins":
-    /// "Admin", "*": "ReadOnly" }</c>. The user's own entry wins, then the highest role among their groups, then <c>*</c>.
-    /// Names are compared ignoring case.
+    /// "Admin", "finance": "Metrics", "*": "ReadOnly" }</c>. The user's own entry wins, then the highest role among their
+    /// groups (<c>Admin</c>, then <c>ReadOnly</c>, then <c>Metrics</c>), then <c>*</c>. Names are compared ignoring case.
     /// </summary>
     public IDictionary<string, RouterDashboardRole> TrustedIdentityRoles { get; } = new Dictionary<string, RouterDashboardRole>(StringComparer.OrdinalIgnoreCase);
 
@@ -184,7 +190,8 @@ public static partial class RouterDashboardEndpoints
         group.MapGet("/graph.js", (HttpContext context) => Asset(context, "graph.js", "text/javascript; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
 
         RouteGroupBuilder api = group.MapGroup("/api");
-        api.MapGet("/themes", () => Results.Json(new ThemesResponse(themes.Directory, ThemeCatalog.RequiredTokens, themes.List()), ApiJson));
+        api.MapGet("/themes", () => Results.Json(new ThemesResponse(themes.Directory, ThemeCatalog.RequiredTokens, themes.List()), ApiJson))
+            .WithMetadata(DashboardMetricsMetadata.Instance);
         api.MapGet("/session", (HttpContext context) =>
                 Results.Json(new SessionResponse(
                     DashboardAccess.RoleOf(context)?.ToString(), access.TokenRequired(context), access.TokensConfigured,
@@ -212,16 +219,41 @@ public static partial class RouterDashboardEndpoints
             .WithMetadata(DashboardAnonymousMetadata.Instance)
             .Audited("signed in");
 
+        // Ends the caller's session on the server too: the cookie is refused from now on, even if someone kept a copy.
         api.MapDelete("/session", (HttpContext context) =>
             {
-                DashboardAccess.SignOut(context, prefix);
+                if (access.SignOut(context, prefix))
+                {
+                    DashboardAudit.Detail(context, "session revoked");
+                }
+
                 return Results.NoContent();
             })
             .WithMetadata(DashboardAnonymousMetadata.Instance)
             .Audited("signed out");
 
-        api.MapGet("/status", (RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories, ClientRateLimiter rateLimits, IServiceProvider services) =>
-            Results.Json(BuildStatus(provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>(), services.GetService<IModelCacheShare>(), Listening(services), options.PublicOrigins), ApiJson));
+        // Ends every session signed in until now, everyone's (tokens and loopback access keep working).
+        api.MapPost("/session/revoke-all", (HttpContext context) =>
+            {
+                access.Sessions.RevokeAll();
+                access.SignOut(context, prefix);
+                return Results.NoContent();
+            })
+            .WithMetadata(DashboardWriteMetadata.Instance)
+            .Audited("signed out every session");
+
+        api.MapGet("/status", (HttpContext context, RouterRuntimeProvider provider, IModelHealth health, RoutingActivityLog activity, BudgetGate budgets, IEnumerable<IEmbeddingProviderFactory> factories, ClientRateLimiter rateLimits, IServiceProvider services) =>
+            {
+                StatusResponse status = BuildStatus(
+                    provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>(),
+                    services.GetService<IModelCacheShare>(), Listening(services), options.PublicOrigins);
+
+                // A connector's last error comes from the activity log's details, which can quote a reply.
+                return Results.Json(
+                    DashboardAccess.RoleOf(context) == RouterDashboardRole.Metrics ? status with { Endpoints = [.. status.Endpoints.Select(e => e with { LastError = null })] } : status,
+                    ApiJson);
+            })
+            .WithMetadata(DashboardMetricsMetadata.Instance);
 
         api.MapGet("/config", (RouterRuntimeProvider provider) =>
         {
@@ -348,7 +380,7 @@ public static partial class RouterDashboardEndpoints
         {
             DateTimeOffset until = DateTimeOffset.UtcNow, since = until.AddDays(-Math.Clamp(days ?? 7, 1, 90));
             return Results.Json(FeedbackSummary.Build(activity.Between(since, until), feedback.Between(since, until), since, until), ApiJson);
-        });
+        }).WithMetadata(DashboardMetricsMetadata.Instance);
 
         api.MapGet("/events", StreamEventsAsync);
 
@@ -384,7 +416,7 @@ public static partial class RouterDashboardEndpoints
             DateTimeOffset until = Align(DateTimeOffset.UtcNow, bucket) + bucket;
             DateTimeOffset since = until - span;
             return Results.Json(ActivityReports.Series(activity.Between(since, until), since, until, bucket), ApiJson);
-        });
+        }).WithMetadata(DashboardMetricsMetadata.Instance);
 
         api.MapGet("/activity/export", (HttpContext context, RoutingActivityLog activity, string? format, bool? prompts, DateTimeOffset? since, DateTimeOffset? until) =>
         {
@@ -406,7 +438,7 @@ public static partial class RouterDashboardEndpoints
             UsageGrouping grouping = Enum.TryParse(by, ignoreCase: true, out UsageGrouping parsed) ? parsed : UsageGrouping.Model;
             return Results.Json(new UsageResponse(
                 since, until, grouping, usage.ReferenceModel, ledger.Total(since, until), ledger.Summarize(since, until, grouping, zone), budgets.Status(usage)), ApiJson);
-        });
+        }).WithMetadata(DashboardMetricsMetadata.Instance);
 
         api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, CancellationToken cancellationToken) =>
         {
@@ -586,7 +618,7 @@ public static partial class RouterDashboardEndpoints
 
     /// <summary>
     /// Who is making a change, for the configuration history, learned changes and the audit log: the user a trusted proxy
-    /// named, <c>admin token</c>, <c>read-only token</c> or <c>this machine</c>. Never contains a token.
+    /// named, <c>admin token</c>, <c>read-only token</c>, <c>metrics token</c> or <c>this machine</c>. Never contains a token.
     /// </summary>
     private static string Actor(HttpContext context) =>
         DashboardAccess.ActorOf(context) ?? (DashboardAccess.IsLocal(context) ? "this machine" : "unknown");
@@ -620,6 +652,7 @@ public static partial class RouterDashboardEndpoints
             copy.RequireLocalClient = source.RequireLocalClient;
             copy.AdminToken = source.AdminToken;
             copy.ReadOnlyToken = source.ReadOnlyToken;
+            copy.MetricsToken = source.MetricsToken;
             copy.AllowUnauthenticatedRemoteClients = source.AllowUnauthenticatedRemoteClients;
             copy.RequireTokenForLocalClients = source.RequireTokenForLocalClients;
             copy.AllowProcessSettings = source.AllowProcessSettings;
@@ -648,7 +681,9 @@ public static partial class RouterDashboardEndpoints
         var problems = new List<string>();
         string? admin = SecretReference.Resolve(options.AdminToken, secrets, "Dashboard:AdminToken", problems);
         string? readOnly = SecretReference.Resolve(options.ReadOnlyToken, secrets, "Dashboard:ReadOnlyToken", problems);
-        foreach ((string setting, string? token) in new[] { ("AdminToken", admin), ("ReadOnlyToken", readOnly) })
+        string? metrics = SecretReference.Resolve(options.MetricsToken, secrets, "Dashboard:MetricsToken", problems);
+        (string Setting, string? Token)[] tokens = [("AdminToken", admin), ("ReadOnlyToken", readOnly), ("MetricsToken", metrics)];
+        foreach ((string setting, string? token) in tokens)
         {
             if (!string.IsNullOrEmpty(token) && token.Length < RouterDashboardOptions.MinimumTokenLength)
             {
@@ -657,9 +692,16 @@ public static partial class RouterDashboardEndpoints
             }
         }
 
-        if (!string.IsNullOrEmpty(admin) && admin == readOnly)
+        // One token, one role: a token shared by two roles would get the higher one.
+        for (int i = 0; i < tokens.Length; i++)
         {
-            throw new InvalidOperationException("SemanticRouter:Dashboard:AdminToken and ReadOnlyToken must differ.");
+            for (int j = i + 1; j < tokens.Length; j++)
+            {
+                if (!string.IsNullOrEmpty(tokens[i].Token) && tokens[i].Token == tokens[j].Token)
+                {
+                    throw new InvalidOperationException($"SemanticRouter:Dashboard:{tokens[i].Setting} and {tokens[j].Setting} must differ.");
+                }
+            }
         }
 
         if (options.SessionLifetime <= TimeSpan.Zero)
@@ -673,7 +715,8 @@ public static partial class RouterDashboardEndpoints
         }
 
         var access = new DashboardAccess(
-            options, admin, readOnly, services.GetService<MachinePolicy>()?.Dashboard ?? DashboardPolicy.Default, services.GetService<TimeProvider>());
+            options, admin, readOnly, services.GetService<MachinePolicy>()?.Dashboard ?? DashboardPolicy.Default, services.GetService<TimeProvider>(),
+            metrics, services.GetService<IStateValueStore>());
         ILogger logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("SemanticRouter.Dashboard");
         foreach (string problem in problems)
         {
@@ -875,7 +918,7 @@ public static partial class RouterDashboardEndpoints
     }
 
     /// <summary>Who the caller is signed in as.</summary>
-    /// <param name="Role"><c>Admin</c>, <c>ReadOnly</c>, or <see langword="null"/> when not signed in.</param>
+    /// <param name="Role"><c>Admin</c>, <c>ReadOnly</c>, <c>Metrics</c>, or <see langword="null"/> when not signed in.</param>
     /// <param name="TokenRequired">Whether this caller needs a token (it is remote, or tokens are required locally).</param>
     /// <param name="TokensConfigured">Whether the router has a token to sign in with.</param>
     /// <param name="Identity">Who the caller acts as (the user a trusted proxy named, <c>admin token</c>, …), when signed in.</param>

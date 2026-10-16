@@ -11,6 +11,12 @@ namespace SemanticRouter.AspNetCore;
 public enum RouterDashboardRole
 {
     /// <summary>
+    /// Aggregate figures only: status and health, usage and cost totals, activity counts and the digest's counts, on the
+    /// endpoints marked for it. Never prompt or reply text, utterances, the configuration, memory or the audit log.
+    /// </summary>
+    Metrics = 0,
+
+    /// <summary>
     /// View status, activity and the (masked) configuration. No changes, and nothing that spends embedding or API calls
     /// or scans the disk: classifying, evaluating, testing embeddings, checking or discovering connectors, rescanning memory.
     /// </summary>
@@ -22,11 +28,21 @@ public enum RouterDashboardRole
 
 /// <summary>
 /// Marks an admin API endpoint that changes the router, or spends embedding or API calls or scans the disk (refused for
-/// <see cref="RouterDashboardRole.ReadOnly"/>).
+/// <see cref="RouterDashboardRole.ReadOnly"/> and <see cref="RouterDashboardRole.Metrics"/>).
 /// </summary>
 internal sealed class DashboardWriteMetadata
 {
     public static DashboardWriteMetadata Instance { get; } = new();
+}
+
+/// <summary>
+/// Marks an endpoint the <see cref="RouterDashboardRole.Metrics"/> role may call: one that answers figures, never prompt
+/// or reply text, utterances, configuration or memory content. Every other endpoint is refused to that role, so a new
+/// endpoint stays closed to it until it is marked.
+/// </summary>
+internal sealed class DashboardMetricsMetadata
+{
+    public static DashboardMetricsMetadata Instance { get; } = new();
 }
 
 /// <summary>
@@ -60,11 +76,13 @@ internal sealed class DashboardAnonymousMetadata
 
 /// <summary>
 /// Decides who may use the dashboard and admin API: loopback clients (with a Host header naming this machine, which
-/// stops DNS-rebinding pages from driving it), remote clients presenting the admin or read-only token as a bearer
-/// token or a session cookie, or users an authenticating reverse proxy names in
+/// stops DNS-rebinding pages from driving it), remote clients presenting the admin, read-only or metrics token as a
+/// bearer token or a session cookie, or users an authenticating reverse proxy names in
 /// <see cref="RouterDashboardOptions.TrustedIdentityHeader"/> (believed only from a known proxy). State-changing calls
-/// must come from the dashboard's own origin. A session cookie carries the time it was issued, signed with the token, and
-/// lapses after <see cref="RouterDashboardOptions.SessionLifetime"/>; nothing is kept on the server. Wrong tokens are
+/// must come from the dashboard's own origin. A session cookie carries the time it was issued and a random session id,
+/// signed with the token, and lapses after <see cref="RouterDashboardOptions.SessionLifetime"/>; signing out revokes the
+/// id on the server (<see cref="DashboardSessions"/>). The metrics role reaches only endpoints marked
+/// <see cref="DashboardMetricsMetadata"/>. Wrong tokens are
 /// throttled per address (<see cref="SignInThrottle"/>). Who each request acts as (<see cref="ActorOf"/>) goes into the
 /// configuration history and the audit log.
 /// </summary>
@@ -75,7 +93,13 @@ internal sealed class DashboardAccess
     private const string ActorKey = "SemanticRouter.DashboardActor";
     private const string ProxyUserKey = "SemanticRouter.DashboardProxyUser";
     private const string WrongTokenKey = "SemanticRouter.DashboardWrongToken";
-    private const string SessionLabel = "semantic-router-dashboard-session-v2";
+    private const string SessionKey = "SemanticRouter.DashboardSession";
+
+    // v3 added the session id. Cookies of the earlier "{kind}.{issued}.{mac}" form are refused: they cannot be revoked.
+    private const string SessionLabel = "semantic-router-dashboard-session-v3";
+
+    /// <summary>A session id's length: 16 random bytes, base64url without padding.</summary>
+    private const int SessionIdLength = 22;
 
     /// <summary>The longest user or group name taken from the identity headers.</summary>
     private const int MaxIdentityLength = 256;
@@ -86,29 +110,36 @@ internal sealed class DashboardAccess
     private readonly RouterDashboardOptions _options;
     private readonly byte[]? _admin;
     private readonly byte[]? _readOnly;
+    private readonly byte[]? _metrics;
     private readonly HashSet<string> _publicAuthorities;
     private readonly DashboardPolicy _policy;
     private readonly TimeProvider _time;
     private readonly Dictionary<string, RouterDashboardRole> _identityRoles;
 
     public DashboardAccess(
-        RouterDashboardOptions options, string? adminToken, string? readOnlyToken, DashboardPolicy policy = DashboardPolicy.Default, TimeProvider? time = null)
+        RouterDashboardOptions options, string? adminToken, string? readOnlyToken, DashboardPolicy policy = DashboardPolicy.Default, TimeProvider? time = null,
+        string? metricsToken = null, IStateValueStore? sessionStore = null)
     {
         _options = options;
         _policy = policy;
         _admin = string.IsNullOrEmpty(adminToken) ? null : Encoding.UTF8.GetBytes(adminToken);
         _readOnly = string.IsNullOrEmpty(readOnlyToken) ? null : Encoding.UTF8.GetBytes(readOnlyToken);
+        _metrics = string.IsNullOrEmpty(metricsToken) ? null : Encoding.UTF8.GetBytes(metricsToken);
         _publicAuthorities = LocalHosts.Authorities(options.PublicOrigins);
         _time = time ?? TimeProvider.System;
         _identityRoles = new Dictionary<string, RouterDashboardRole>(options.TrustedIdentityRoles, StringComparer.OrdinalIgnoreCase);
         Throttle = new SignInThrottle(_time);
+        Sessions = new DashboardSessions(sessionStore, _time, options.SessionLifetime + ClockSkew);
     }
 
     /// <summary>Failed sign-ins per address.</summary>
     public SignInThrottle Throttle { get; }
 
+    /// <summary>Sessions ended on the server.</summary>
+    public DashboardSessions Sessions { get; }
+
     /// <summary>Whether any token is configured, so remote clients can sign in.</summary>
-    public bool TokensConfigured => _admin is not null || _readOnly is not null;
+    public bool TokensConfigured => _admin is not null || _readOnly is not null || _metrics is not null;
 
     /// <summary>The role the current request was admitted with, once the filter has run.</summary>
     public static RouterDashboardRole? RoleOf(HttpContext context) =>
@@ -116,7 +147,8 @@ internal sealed class DashboardAccess
 
     /// <summary>
     /// Who the current request acts as, once the filter has run: the user a trusted proxy named, <c>admin token</c>,
-    /// <c>read-only token</c>, <c>this machine</c> or <c>unauthenticated remote client</c>. Never contains a token.
+    /// <c>read-only token</c>, <c>metrics token</c>, <c>this machine</c> or <c>unauthenticated remote client</c>. Never
+    /// contains a token.
     /// </summary>
     public static string? ActorOf(HttpContext context) =>
         context.Items.TryGetValue(ActorKey, out object? actor) ? actor as string : null;
@@ -125,7 +157,12 @@ internal sealed class DashboardAccess
     public static void SetActor(HttpContext context, string actor) => context.Items[ActorKey] = actor;
 
     /// <summary>The actor name for a token role.</summary>
-    public static string TokenActor(RouterDashboardRole role) => role == RouterDashboardRole.Admin ? "admin token" : "read-only token";
+    public static string TokenActor(RouterDashboardRole role) => role switch
+    {
+        RouterDashboardRole.Admin => "admin token",
+        RouterDashboardRole.ReadOnly => "read-only token",
+        _ => "metrics token",
+    };
 
     /// <summary>Whether the request presented a wrong token (counted by <see cref="Throttle"/>).</summary>
     public static bool PresentedWrongToken(HttpContext context) => context.Items.ContainsKey(WrongTokenKey);
@@ -191,7 +228,7 @@ internal sealed class DashboardAccess
         if (!local && !TokensConfigured && !_options.AllowUnauthenticatedRemoteClients && identity is null)
         {
             return Refuse(StatusCodes.Status403Forbidden,
-                "Remote access to the router dashboard needs a token: set SemanticRouter:Dashboard:AdminToken (or ReadOnlyToken), " +
+                "Remote access to the router dashboard needs a token: set SemanticRouter:Dashboard:AdminToken (or ReadOnlyToken, MetricsToken), " +
                 "or AllowUnauthenticatedRemoteClients when a reverse proxy authenticates callers.");
         }
 
@@ -252,6 +289,14 @@ internal sealed class DashboardAccess
                 : Refuse(StatusCodes.Status401Unauthorized, "Sign in with the dashboard token (Authorization: Bearer <token>).");
         }
 
+        // The metrics role reaches only the endpoints marked for it (and those that need no role): a new endpoint is closed
+        // to it until someone decides it shows no prompt text.
+        if (role == RouterDashboardRole.Metrics && endpoint?.Metadata.GetMetadata<DashboardMetricsMetadata>() is null
+            && endpoint?.Metadata.GetMetadata<DashboardAnonymousMetadata>() is null)
+        {
+            return Refuse(StatusCodes.Status403Forbidden, "The metrics role sees figures only: status, usage and the digest's counts.");
+        }
+
         if (role != RouterDashboardRole.Admin && endpoint?.Metadata.GetMetadata<DashboardAdminReadMetadata>() is not null)
         {
             return Refuse(StatusCodes.Status403Forbidden, "Only the admin role can read the audit log.");
@@ -268,7 +313,7 @@ internal sealed class DashboardAccess
             role = RouterDashboardRole.ReadOnly;
         }
 
-        if (role == RouterDashboardRole.ReadOnly && endpoint?.Metadata.GetMetadata<DashboardWriteMetadata>() is not null)
+        if (role != RouterDashboardRole.Admin && endpoint?.Metadata.GetMetadata<DashboardWriteMetadata>() is not null)
         {
             return Refuse(StatusCodes.Status403Forbidden, "The read-only token cannot change the router.");
         }
@@ -291,16 +336,23 @@ internal sealed class DashboardAccess
             return RouterDashboardRole.Admin;
         }
 
-        return _readOnly is not null && FixedTimeEquals(presented, _readOnly) ? RouterDashboardRole.ReadOnly : null;
+        if (_readOnly is not null && FixedTimeEquals(presented, _readOnly))
+        {
+            return RouterDashboardRole.ReadOnly;
+        }
+
+        return _metrics is not null && FixedTimeEquals(presented, _metrics) ? RouterDashboardRole.Metrics : null;
     }
 
     /// <summary>
-    /// Sets the session cookie for <paramref name="role"/>, good for <see cref="RouterDashboardOptions.SessionLifetime"/>.
-    /// The cookie holds the time it was issued and a value derived from it and the token, never the token.
+    /// Sets the session cookie for <paramref name="role"/>, good for <see cref="RouterDashboardOptions.SessionLifetime"/>
+    /// or until signed out. The cookie holds the time it was issued, a random session id and a value derived from them and
+    /// the token, never the token.
     /// </summary>
     public void SignIn(HttpContext context, RouterDashboardRole role, string path)
     {
-        context.Response.Cookies.Append(CookieName, SessionValue(role, _time.GetUtcNow().ToUnixTimeSeconds())!, new CookieOptions
+        string id = Base64Url(RandomNumberGenerator.GetBytes(16));
+        context.Response.Cookies.Append(CookieName, SessionValue(role, _time.GetUtcNow().ToUnixTimeMilliseconds(), id)!, new CookieOptions
         {
             HttpOnly = true,
             SameSite = SameSiteMode.Strict,
@@ -322,8 +374,21 @@ internal sealed class DashboardAccess
             title: "Too many sign-in attempts");
     }
 
-    public static void SignOut(HttpContext context, string path) =>
+    /// <summary>
+    /// Clears the session cookie and, when the request was admitted with one, revokes its id on the server so the cookie
+    /// is refused even if replayed. Returns whether a session was revoked.
+    /// </summary>
+    public bool SignOut(HttpContext context, string path)
+    {
         context.Response.Cookies.Delete(CookieName, new CookieOptions { Path = path, SameSite = SameSiteMode.Strict, HttpOnly = true });
+        if (context.Items.TryGetValue(SessionKey, out object? value) && value is Session session)
+        {
+            Sessions.Revoke(session.Id, session.Issued);
+            return true;
+        }
+
+        return false;
+    }
 
     private RouterDashboardRole? Authenticate(HttpRequest request)
     {
@@ -339,22 +404,36 @@ internal sealed class DashboardAccess
             return bearer;
         }
 
-        // "a.{issued}.{mac}" or "r.{issued}.{mac}": issued in Unix seconds, the mac signed with that role's token.
-        if (request.Cookies.TryGetValue(CookieName, out string? cookie) && cookie?.Split('.') is [var kind, var stamp, _]
+        // "{kind}.{issued}.{id}.{mac}": kind a, r or m; issued in Unix milliseconds; the mac signed with that role's token.
+        if (request.Cookies.TryGetValue(CookieName, out string? cookie) && cookie?.Split('.') is [var kind, var stamp, var id, _]
+            && RoleOfKind(kind) is { } role && id.Length == SessionIdLength && id.All(IsBase64UrlChar)
             && long.TryParse(stamp, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long issued)
-            && issued <= DateTimeOffset.MaxValue.ToUnixTimeSeconds())
+            && issued <= DateTimeOffset.MaxValue.ToUnixTimeMilliseconds())
         {
-            RouterDashboardRole role = kind == "a" ? RouterDashboardRole.Admin : RouterDashboardRole.ReadOnly;
-            TimeSpan age = _time.GetUtcNow() - DateTimeOffset.FromUnixTimeSeconds(issued);
-            if (kind is "a" or "r" && age < _options.SessionLifetime && age > -ClockSkew
-                && SessionValue(role, issued) is { } expected && FixedTimeEquals(Encoding.UTF8.GetBytes(cookie), Encoding.UTF8.GetBytes(expected)))
+            TimeSpan age = _time.GetUtcNow() - DateTimeOffset.FromUnixTimeMilliseconds(issued);
+            if (age < _options.SessionLifetime && age > -ClockSkew
+                && SessionValue(role, issued, id) is { } expected && FixedTimeEquals(Encoding.UTF8.GetBytes(cookie), Encoding.UTF8.GetBytes(expected))
+                && !Sessions.IsRevoked(id, issued))
             {
+                request.HttpContext.Items[SessionKey] = new Session(id, issued);
                 return role;
             }
         }
 
         return null;
     }
+
+    private static RouterDashboardRole? RoleOfKind(string kind) => kind switch
+    {
+        "a" => RouterDashboardRole.Admin,
+        "r" => RouterDashboardRole.ReadOnly,
+        "m" => RouterDashboardRole.Metrics,
+        _ => null,
+    };
+
+    private static bool IsBase64UrlChar(char c) => char.IsAsciiLetterOrDigit(c) || c is '-' or '_';
+
+    private static string Base64Url(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     /// <summary>
     /// The role for a user a trusted proxy named: the user's own entry in <see cref="RouterDashboardOptions.TrustedIdentityRoles"/>,
@@ -403,20 +482,27 @@ internal sealed class DashboardAccess
                 .SelectMany(v => (v ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
                 .Where(g => g.Length <= MaxIdentityLength && !g.Any(char.IsControl));
 
-    private string? SessionValue(RouterDashboardRole role, long issued)
+    private string? SessionValue(RouterDashboardRole role, long issued, string id)
     {
-        byte[]? token = role == RouterDashboardRole.Admin ? _admin : _readOnly;
+        (byte[]? token, string kind) = role switch
+        {
+            RouterDashboardRole.Admin => (_admin, "a"),
+            RouterDashboardRole.ReadOnly => (_readOnly, "r"),
+            _ => (_metrics, "m"),
+        };
         if (token is null)
         {
             return null;
         }
 
-        // Signed with the token, so changing the token signs every browser out, and the issue time cannot be moved.
-        string kind = role == RouterDashboardRole.Admin ? "a" : "r";
+        // Signed with the token, so changing the token signs every browser out, and the issue time and id cannot be moved.
         string stamp = issued.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        byte[] mac = HMACSHA256.HashData(token, Encoding.UTF8.GetBytes($"{SessionLabel}\n{kind}\n{stamp}"));
-        return $"{kind}.{stamp}." + Convert.ToBase64String(mac).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        byte[] mac = HMACSHA256.HashData(token, Encoding.UTF8.GetBytes($"{SessionLabel}\n{kind}\n{stamp}\n{id}"));
+        return $"{kind}.{stamp}.{id}." + Base64Url(mac);
     }
+
+    /// <summary>The session a request was admitted with: its id and when it was issued (Unix milliseconds).</summary>
+    private sealed record Session(string Id, long Issued);
 
     private bool IsSameOrigin(HttpRequest request)
     {

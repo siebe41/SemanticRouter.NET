@@ -8,7 +8,7 @@ import './profiles.js';
 import './learned.js';
 import './audit.js';
 import { actions } from './actions.js';
-import { $, api, h, isDirty, readInput, setPath, showSignIn, state, toast } from './core.js';
+import { $, api, h, isDirty, metricsOnly, readInput, setPath, showSignIn, state, toast } from './core.js';
 import { connectStream } from './live.js';
 import { graph } from './memory.js';
 import { initTheme, loadAll, refreshStatus, render, renderChrome, route } from './shell.js';
@@ -143,7 +143,7 @@ window.addEventListener('beforeunload', (ev) => { if (isDirty()) { ev.preventDef
 initTheme();
 const signOutBtn = $('#sign-out');
 if (signOutBtn) signOutBtn.addEventListener('click', async () => { await api('DELETE', '/session').catch(() => {}); location.reload(); });
-loadAll().then(() => { route(); connectStream(); }).catch((e) => {
+loadAll().then(() => { route(); if (!metricsOnly()) connectStream(); }).catch((e) => {
   if (e.status === 401) { showSignIn(); return; }
   $('#view').innerHTML = `<div class="card"><h3>Could not reach the router API</h3><pre>${h(e.message)}</pre><p class="muted small">Is the dashboard mapped (<code>app.MapRouterDashboard()</code>) and are you browsing from the same machine?</p></div>`; });
 setInterval(() => { if (state.autoRefresh && document.visibilityState === 'visible' && !isDirty()) refreshStatus(); else if (state.autoRefresh && document.visibilityState === 'visible') { api('GET', '/status').then((s) => { state.status = s; renderChrome(); }).catch(() => {}); } }, 5000);

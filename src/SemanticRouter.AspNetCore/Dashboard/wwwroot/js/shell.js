@@ -1,5 +1,5 @@
 /* Semantic Router dashboard: Loading, the sidebar and top bar, themes, rendering and hash routing. */
-import { $, $$, api, banner, h, isDirty, PREFIX, readOnly, state, THEME_KEY, THEMES, views } from './core.js';
+import { $, $$, api, banner, h, isDirty, METRICS_VIEWS, metricsOnly, PREFIX, readOnly, state, THEME_KEY, THEMES, views } from './core.js';
 import { loadDigest } from './digest.js';
 import { endpointPill } from './endpoints.js';
 import { loadTuning } from './learned.js';
@@ -12,6 +12,15 @@ import { loadUsage } from './usage.js';
    --------------------------------------------------------------------------------------------- */
 export async function loadAll() {
   try { state.session = await api('GET', '/session'); } catch { /* older router: no session endpoint */ }
+  if (metricsOnly()) {
+    // Figures only: no configuration, activity or learned changes to load.
+    state.status = await api('GET', '/status');
+    setConfig({ config: {} });
+    await loadDigest();
+    renderChrome();
+    loadThemes();
+    return;
+  }
   const [status, cfg, activity] = await Promise.all([api('GET', '/status'), api('GET', '/config'), api('GET', '/activity?limit=200')]);
   state.status = status;
   setConfig(cfg);
@@ -31,6 +40,11 @@ export function setConfig(envelope) {
 
 export async function refreshStatus() {
   try {
+    if (metricsOnly()) {
+      state.status = await api('GET', '/status');
+      if (state.view === 'overview') { await loadDigest(); state.trends.data = null; render(); } else { loadUsage(); renderChrome(); }
+      return;
+    }
     const [status, activity] = await Promise.all([api('GET', '/status'), api('GET', '/activity?limit=200')]);
     state.status = status;
     state.activity = activity.entries;
@@ -64,10 +78,12 @@ export function renderChrome() {
       (s.warmedUp ? '' : (s.warmUpError ? ` · <span class="badge danger" title="${h(s.warmUpError)}">embeddings failed</span>` : ' · <span class="badge info">warming up</span>'));
   }
   $('#save-bar').classList.toggle('hidden', !isDirty() || readOnly());
+  $$('#nav a, #nav .nav-group').forEach((el) => el.classList.toggle('hidden', metricsOnly() && !METRICS_VIEWS.includes(el.dataset.view)));
   $$('#nav a').forEach((a) => { const on = a.dataset.view === state.view; a.classList.toggle('active', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
   const notes = [];
   const who = state.session.identity;
-  if (readOnly()) notes.push(`${who && !/ token$|^this machine$/.test(who) ? `Signed in as <b>${h(who)}</b> with the <b>read-only</b> role` : 'Signed in with the <b>read-only</b> token'}: you can look, but not change settings or run what spends embedding or API calls (classify, evaluate, check, discover).`);
+  if (metricsOnly()) notes.push(`${who && !/ token$|^this machine$/.test(who) ? `Signed in as <b>${h(who)}</b> with the <b>metrics</b> role` : 'Signed in with the <b>metrics</b> token'}: you see figures only, not prompts, activity or the configuration.`);
+  else if (readOnly()) notes.push(`${who && !/ token$|^this machine$/.test(who) ? `Signed in as <b>${h(who)}</b> with the <b>read-only</b> role` : 'Signed in with the <b>read-only</b> token'}: you can look, but not change settings or run what spends embedding or API calls (classify, evaluate, check, discover).`);
   if (state.meta.warning) notes.push(h(state.meta.warning));
   ((s && s.warnings) || []).forEach((w) => notes.push(h(w)));
   ((s && s.budgets) || []).filter((b) => b.exceeded || b.warning).forEach((b) => notes.push(`Budget <b>${h(b.name)}</b> (${h(b.covers)}) is ${b.exceeded ? 'spent' : 'at ' + b.percent + '%'}. <a href="#/usage">Usage</a>`));
@@ -145,7 +161,7 @@ export function render() {
 
 export function route() {
   const hash = location.hash.replace(/^#\/?/, '') || 'overview';
-  state.view = views[hash] ? hash : 'overview';
+  state.view = views[hash] && (!metricsOnly() || METRICS_VIEWS.includes(hash)) ? hash : 'overview';
   if (state.view === 'models') state.reliability = null; // fresh figures each visit
   if (state.view === 'audit') state.audit.entries = null;
   render();

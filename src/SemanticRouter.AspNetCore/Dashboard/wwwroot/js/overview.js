@@ -1,7 +1,7 @@
 /* Semantic Router dashboard: Overview and Activity pages, the prompt tester result and the label form. */
 import { fmtMs, trendsCard } from './charts.js';
 import { tierOptions } from './config.js';
-import { adminOnly, h, num, readOnly, state, tierName, views, when } from './core.js';
+import { adminOnly, h, metricsOnly, num, readOnly, state, tierName, views, when } from './core.js';
 import { digestCard, noticesCard } from './digest.js';
 import { endpointsCard } from './endpoints.js';
 import { learnedBadge, learnedCard } from './learned.js';
@@ -68,7 +68,7 @@ views.overview = () => {
       <div class="card"><div class="card-head"><h2>Required tier</h2></div>${bars(byTier, (k) => tierName(parseInt(k, 10)), true)}</div>
     </div>
 
-    <div class="card section tester">
+    ${metricsOnly() ? '' : `<div class="card section tester">
       <div class="card-head"><h2>Try a prompt</h2><span class="muted small">Classification calls no model. “Send” goes through the gateway for real${s.gateway.mode !== 'Dispatch' ? ' (Annotate mode: your endpoint answers)' : ''}.</span></div>
       <textarea id="tester-prompt" aria-label="Prompt to try" placeholder="Paste a prompt…">${h(t.prompt)}</textarea>
       <div class="inline" style="margin-top:8px">
@@ -86,7 +86,7 @@ views.overview = () => {
     <div class="card section">
       <div class="card-head"><h2>Recent activity</h2><span class="spacer"></span><a href="#/activity" class="small">all →</a></div>
       ${renderActivityTable(state.activity.slice(0, 8))}
-    </div>`;
+    </div>`}`;
 };
 
 export function renderClassification(r) {

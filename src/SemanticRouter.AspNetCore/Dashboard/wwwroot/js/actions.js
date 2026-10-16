@@ -78,6 +78,11 @@ export const actions = {
   'budget-add'() { state.config.Usage = state.config.Usage || {}; (state.config.Usage.Budgets = state.config.Usage.Budgets || []).push({ Name: 'budget-' + (state.config.Usage.Budgets.length + 1), Model: null, Connector: null, Period: 'Day', MaxTokens: null, MaxCostUsd: 5 }); render(); },
   'budget-remove'(el) { state.config.Usage.Budgets.splice(+el.dataset.index, 1); render(); },
   async 'audit-load'() { state.audit.entries = null; await loadAudit(); },
+  async 'sessions-revoke-all'() {
+    if (!confirm('Sign out every dashboard session signed in with a token, yours included? Tokens keep working; everyone signs in again.')) return;
+    await api('POST', '/session/revoke-all');
+    location.reload();
+  },
   async 'history-load'() { state.history.versions = (await api('GET', '/config/history?limit=100')).versions; render(); },
   async 'history-diff'(el) {
     const v = await api('GET', '/config/history/' + el.dataset.id);
