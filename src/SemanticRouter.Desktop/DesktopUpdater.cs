@@ -31,7 +31,8 @@ internal sealed class DesktopUpdater(
     TextWriter log,
     IReadOnlyList<string>? hostArguments = null,
     UpdateApply apply = UpdateApply.Default,
-    UpdatePublisher? publisher = null)
+    UpdatePublisher? publisher = null,
+    string? off = null)
 {
     /// <summary>The argument the updated app is started with to start the service again, then carry on as usual.</summary>
     public const string ResumeService = "--resume-service";
@@ -54,17 +55,18 @@ internal sealed class DesktopUpdater(
         {
             // An administrator set a policy that cannot be read: do not update past it.
             log.WriteLine($"Updates are off: {ex.Message}");
-            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings));
+            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings), off: "your organization's policy cannot be read");
         }
 
         (string? feed, string? off) = Feed(policy, environment);
         if (off is not null)
         {
             log.WriteLine($"Updates are off: {off}.");
-            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings));
+            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings), off: off);
         }
 
         UpdateManager? manager = null;
+        string? broken = null;
         try
         {
             manager = feed is not null
@@ -78,7 +80,7 @@ internal sealed class DesktopUpdater(
         catch (Exception ex) when (ex is IOException or InvalidOperationException or NotSupportedException or UnauthorizedAccessException)
         {
             log.WriteLine($"Updates are off: {ex.Message}");
-            manager = null;
+            (manager, broken) = (null, ex.Message);
         }
 
         return new DesktopUpdater(
@@ -87,7 +89,8 @@ internal sealed class DesktopUpdater(
             log,
             HostArgumentsOf(settings),
             policy.Apply,
-            UpdatePublisher.ForThisMachine(policy.Publisher));
+            UpdatePublisher.ForThisMachine(policy.Publisher),
+            broken);
     }
 
     /// <summary>
@@ -124,6 +127,18 @@ internal sealed class DesktopUpdater(
 
     /// <summary>Whether this app was installed (and so can update itself).</summary>
     public bool Installed => updates is not null;
+
+    /// <summary>
+    /// Why this app does not update itself although it may be installed: the policy turned updates off, its feed is
+    /// refused, or the updater could not start. <see langword="null"/> otherwise (installed, or a plain archive).
+    /// </summary>
+    public string? Off => off;
+
+    /// <summary>When the last check for an update got an answer, if one did in this run.</summary>
+    public DateTimeOffset? LastChecked { get; private set; }
+
+    /// <summary>Why the last check for an update got no answer; <see langword="null"/> when it did.</summary>
+    public string? CheckFailed { get; private set; }
 
     /// <summary>The installed version, when installed.</summary>
     public string? CurrentVersion => updates?.CurrentVersion;
@@ -163,6 +178,7 @@ internal sealed class DesktopUpdater(
         try
         {
             UpdateInfo? update = await updates.CheckAsync().ConfigureAwait(false);
+            (LastChecked, CheckFailed) = (DateTimeOffset.Now, null);
             string? version = update?.TargetFullRelease.Version.ToString();
             if (update is not null && version != _refused)
             {
@@ -182,6 +198,7 @@ internal sealed class DesktopUpdater(
         {
             // Offline, rate-limited by GitHub, or a feed without this channel: try again later.
             log.WriteLine($"{Now} Checking for updates failed: {ex.Message}");
+            CheckFailed = ex.Message;
         }
 
         return Available;

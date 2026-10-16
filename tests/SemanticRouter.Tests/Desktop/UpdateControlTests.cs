@@ -143,6 +143,52 @@ public sealed class UpdateControlTests : IDisposable
     }
 
     [Fact]
+    public async Task The_about_window_says_where_updates_stand_and_offers_what_can_be_done()
+    {
+        DateTimeOffset now = DateTimeOffset.Now;
+        var updates = new FakeUpdates { UpToDate = true };
+        var updater = new DesktopUpdater(updates, null, TextWriter.Null);
+
+        UpdateStatus.Of(updater, checking: false, downloading: false, checkAutomatically: true, now).Should()
+            .Match<UpdateStatus>(s => s.Headline == "Version 1.0.0 is installed." && s.CanCheck && !s.CanRestart && s.Installed && s.ApplyOnQuit && !s.ApplyOnQuitLocked);
+        UpdateStatus.Of(updater, checking: true, downloading: false, checkAutomatically: true, now).Should()
+            .Match<UpdateStatus>(s => s.Headline == "Checking for updates…" && !s.CanCheck);
+
+        await updater.CheckAsync();
+        UpdateStatus upToDate = UpdateStatus.Of(updater, false, false, checkAutomatically: false, now);
+        upToDate.Headline.Should().Be("Version 1.0.0 is up to date.");
+        upToDate.Detail.Should().StartWith("Last checked at ").And.EndWith("Automatic checks are off.");
+        upToDate.CheckAutomatically.Should().BeFalse();
+
+        // Offline: says why, and Check now tries again.
+        updates.CheckError = "No such host is known.";
+        await updater.CheckAsync();
+        UpdateStatus.Of(updater, false, false, true, now).Should()
+            .Match<UpdateStatus>(s => s.Headline == "Could not check for updates: No such host is known." && s.CanCheck);
+
+        // Found and downloaded: Restart to update, and no second check meanwhile.
+        (updates.CheckError, updates.UpToDate) = (null, false);
+        await updater.CheckAsync();
+        UpdateStatus ready = UpdateStatus.Of(updater, false, false, true, now);
+        (ready.Headline, ready.CanRestart, ready.CanCheck).Should().Be(("Version 1.0.1 is ready to install.", true, false));
+        ready.Detail.Should().Contain("when you quit");
+        UpdateStatus.Of(updater, false, downloading: true, true, now).Headline.Should().Be("Downloading version 1.0.1…");
+    }
+
+    [Fact]
+    public async Task The_about_window_offers_a_notify_only_update_and_says_why_updates_are_off()
+    {
+        var updater = new DesktopUpdater(new FakeUpdates(), null, TextWriter.Null, apply: UpdateApply.Notify);
+        await updater.CheckAsync();
+        UpdateStatus.Of(updater, false, false, true, DateTimeOffset.Now).Should()
+            .Match<UpdateStatus>(s => s.Headline == "Version 1.0.1 is available." && s.CanRestart && !s.ApplyOnQuit && s.ApplyOnQuitLocked);
+
+        UpdateStatus off = UpdateStatus.Of(new DesktopUpdater(null, null, TextWriter.Null, off: "turned off by your organization's policy"), false, false, true, DateTimeOffset.Now);
+        (off.Headline, off.Installed, off.CanCheck).Should().Be(("Updates are off: turned off by your organization's policy.", false, false));
+        UpdateStatus.Of(new DesktopUpdater(null, null, TextWriter.Null), false, false, true, DateTimeOffset.Now).Headline.Should().Contain("not installed with the installer");
+    }
+
+    [Fact]
     public async Task Without_a_publisher_in_the_policy_the_package_is_not_inspected()
     {
         var updates = new FakeUpdates { Package = null };
@@ -429,6 +475,12 @@ public sealed class UpdateControlTests : IDisposable
 
         public string? Package { get; set; }
 
+        /// <summary>The feed has nothing newer.</summary>
+        public bool UpToDate { get; set; }
+
+        /// <summary>Checking fails with this message (offline, rate-limited).</summary>
+        public string? CheckError { get; set; }
+
         public string? CurrentVersion => "1.0.0";
 
         public VelopackAsset? Pending => Downloaded ? _latest : null;
@@ -436,7 +488,9 @@ public sealed class UpdateControlTests : IDisposable
         public Task<UpdateInfo?> CheckAsync()
         {
             Calls.Add("check");
-            return Task.FromResult<UpdateInfo?>(new UpdateInfo(_latest, false));
+            return CheckError is { } error
+                ? Task.FromException<UpdateInfo?>(new HttpRequestException(error))
+                : Task.FromResult<UpdateInfo?>(UpToDate ? null : new UpdateInfo(_latest, false));
         }
 
         public Task DownloadAsync(UpdateInfo update, CancellationToken cancellationToken)

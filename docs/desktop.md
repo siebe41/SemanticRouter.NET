@@ -48,6 +48,8 @@ Independently of code signing, every installer, archive and update package has a
 
 An installed app updates itself from GitHub Releases. It looks a minute after it starts and then twice a day, and downloads a new version in the background (only the changes when it can). The tray menu then offers **Restart to update to …**; otherwise the update is applied the next time you quit the app. When the background service runs, it is stopped for the update and started again with the new version, with the same configuration directory and options. **Check for updates** in the tray menu turns the checks off (kept in `desktop.json`).
 
+**About SemanticRouter** (or **Check for updates now…** in the tray menu, which also checks at once) shows where updates stand: up to date and when it last checked, checking, a version ready to install or available, why a check or download failed, or why updates are off. Its **Check now** looks straight away, even with the automatic checks off; **Restart to update** and the two switches below are the tray menu's own.
+
 Untick **Install updates when quitting** to decide yourself: the app then only says a new version is available (in the tray menu, and once as a system notification) and downloads nothing until you choose **Restart to update to …**, which downloads it, applies it and starts the app again. Quitting never applies it.
 
 From a script: `SemanticRouter --update` downloads and applies an available update and exits (0 when up to date or updating, 1 when the update could not be applied).
@@ -94,9 +96,10 @@ The tray menu:
 | **Keep the router running in the background** | The background service on or off; see [below](#the-app-and-the-background-service). |
 | **Start at sign-in** | Shows the app in the tray whenever you sign in. The router itself starts at sign-in through the background service. |
 | **Check for updates** | Installed app only: whether it looks for updates. |
+| **Check for updates now…** | Installed app only: opens the Updates section of **About SemanticRouter** and checks at once. |
 | **Install updates when quitting** | Installed app only: whether a downloaded update is applied when you quit. Unticked, an update is only announced and applied when you choose **Restart to update**. Greyed out when your organization's policy makes updates notify-only. |
 | **Show the log**, **Show the configuration folder** | The router's log (`logs/semantic-router.log`) and its files. |
-| **About SemanticRouter** | The version, and links to the GitHub repository, the documentation, issues, releases and the licence. |
+| **About SemanticRouter** | The version, where [updates](#updates) stand (with **Check now**, **Restart to update** and the update switches), and links to the GitHub repository, the documentation, issues, releases and the licence. |
 | **Quit SemanticRouter** | Stops the app's router and quits. |
 
 When something [needs a decision](dashboard.md#digest-and-notifications), the app also shows a system notification, once per notice (Notification Center on macOS, `notify-send` on Linux, a toast on Windows). `Notifications:Enabled: false` in the router's configuration turns them off.

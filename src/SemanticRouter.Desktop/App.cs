@@ -29,6 +29,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private DesktopUpdater _updater = null!;
     private bool _restartForUpdate;
     private bool _downloadingUpdate;
+    private bool _checkingUpdates;
     private string? _announcedUpdate;
     private bool _switching;
     private WindowIcon _icon = null!;
@@ -53,6 +54,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private NativeMenuItem _needs = null!;
     private NativeMenuItem _update = null!;
     private NativeMenuItem _checkUpdates = null!;
+    private NativeMenuItem _checkUpdatesNow = null!;
     private NativeMenuItem _applyOnQuit = null!;
 
     public override void Initialize()
@@ -139,12 +141,12 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _update = new NativeMenuItem { IsVisible = false };
         _update.Click += (_, _) => _ = RestartToUpdateAsync();
         _checkUpdates = new NativeMenuItem("Check for updates") { ToggleType = MenuItemToggleType.CheckBox, IsVisible = _updater.Installed };
-        _checkUpdates.Click += (_, _) =>
+        _checkUpdates.Click += (_, _) => SetCheckForUpdates(!_preferences.CheckForUpdates);
+        _checkUpdatesNow = new NativeMenuItem("Check for updates now…") { IsVisible = _updater.Installed };
+        _checkUpdatesNow.Click += (_, _) =>
         {
-            _preferences = _preferences with { CheckForUpdates = !_preferences.CheckForUpdates };
-            _preferences.Save(_directory);
-            UpdateMenu();
-            _ = CheckForUpdatesAsync();
+            ShowAbout();
+            _ = CheckForUpdatesAsync(chosen: true);
         };
         _applyOnQuit = new NativeMenuItem(_updater.NotifyLocked ? "Install updates when quitting (off: your organization's policy)" : "Install updates when quitting")
         {
@@ -152,19 +154,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             IsVisible = _updater.Installed,
             IsEnabled = !_updater.NotifyLocked,
         };
-        _applyOnQuit.Click += (_, _) =>
-        {
-            if (_updater.NotifyLocked)
-            {
-                return;
-            }
-
-            _preferences = _preferences with { ApplyUpdatesOnQuit = !_preferences.ApplyUpdatesOnQuit };
-            _preferences.Save(_directory);
-            _updater.ApplyOnQuit = _preferences.ApplyUpdatesOnQuit;
-            UpdateMenu();
-            _ = CheckForUpdatesAsync();
-        };
+        _applyOnQuit.Click += (_, _) => SetApplyUpdatesOnQuit(!_preferences.ApplyUpdatesOnQuit);
         _status = new NativeMenuItem(_router.Status) { IsEnabled = false };
         _problem = new NativeMenuItem { IsEnabled = false, IsVisible = false };
         _restart = new NativeMenuItem("Restart router");
@@ -197,7 +187,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         {
             Icon = _icon,
             ToolTipText = "SemanticRouter",
-            Menu = [open, _needs, _update, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, _checkUpdates, _applyOnQuit, logs, configuration, new NativeMenuItemSeparator(), about, quit],
+            Menu = [open, _needs, _update, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, _checkUpdates, _checkUpdatesNow, _applyOnQuit, logs, configuration, new NativeMenuItemSeparator(), about, quit],
         };
         tray.Clicked += (_, _) => OpenDashboard();
         UpdateMenu();
@@ -245,6 +235,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _checkUpdates.IsChecked = _preferences.CheckForUpdates;
         _applyOnQuit.IsChecked = !_updater.NotifyOnly;
         _needs.IsVisible = _digest.NeedsLine is not null;
+        _about?.Updates.Show(UpdateStatus.Of(_updater, _checkingUpdates, _downloadingUpdate, _preferences.CheckForUpdates, DateTimeOffset.Now));
         if (_tray is not null)
         {
             _tray.ToolTipText = _digest.NeedsLine is { } needs ? "SemanticRouter: " + needs : "SemanticRouter";
@@ -292,17 +283,29 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     }
 
     /// <summary>
-    /// Looks for an update, when the app is installed and the preference allows, and downloads it unless updates are
-    /// only announced. Then a notification, once per version, when the person has to choose to update.
+    /// Looks for an update, when the app is installed and the preference allows (or the person chose Check now,
+    /// <paramref name="chosen"/>), and downloads it unless updates are only announced. Then a notification, once per
+    /// version, when the person has to choose to update.
     /// </summary>
-    private async Task CheckForUpdatesAsync()
+    private async Task CheckForUpdatesAsync(bool chosen = false)
     {
-        if (!_updater.Installed || !_preferences.CheckForUpdates || _updater.Offer is not null)
+        if (!_updater.Installed || _checkingUpdates || _downloadingUpdate || _updater.Offer is not null || !(chosen || _preferences.CheckForUpdates))
         {
             return;
         }
 
-        string? found = await _updater.CheckAsync();
+        _checkingUpdates = true;
+        UpdateMenu();
+        string? found;
+        try
+        {
+            found = await _updater.CheckAsync();
+        }
+        finally
+        {
+            _checkingUpdates = false;
+        }
+
         Dispatcher.UIThread.Post(() =>
         {
             if (_updater.Problem is { } problem)
@@ -313,7 +316,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             if (_updater.NotifyOnly && found is not null && found != _announcedUpdate)
             {
                 _announcedUpdate = found;
-                DesktopNotifier.Show($"SemanticRouter {found} is available", "Choose Restart to update in the tray menu to install it.");
+                DesktopNotifier.Show($"SemanticRouter {found} is available", "Choose Restart to update in the tray menu, or in About SemanticRouter, to install it.");
             }
 
             UpdateMenu();
@@ -355,6 +358,31 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         await QuitAsync();
     }
 
+    /// <summary>The "Check for updates" preference, from the tray menu or the About window; turned on, it checks at once.</summary>
+    private void SetCheckForUpdates(bool on)
+    {
+        _preferences = _preferences with { CheckForUpdates = on };
+        _preferences.Save(_directory);
+        UpdateMenu();
+        _ = CheckForUpdatesAsync();
+    }
+
+    /// <summary>The "Install updates when quitting" preference, unless the policy makes updates notify-only.</summary>
+    private void SetApplyUpdatesOnQuit(bool on)
+    {
+        if (_updater.NotifyLocked)
+        {
+            UpdateMenu();
+            return;
+        }
+
+        _preferences = _preferences with { ApplyUpdatesOnQuit = on };
+        _preferences.Save(_directory);
+        _updater.ApplyOnQuit = on;
+        UpdateMenu();
+        _ = CheckForUpdatesAsync();
+    }
+
     /// <summary>The preference, unless the app window cannot work on this machine.</summary>
     private DashboardSurface EffectiveSurface => Shell.WebViewAvailable ? _preferences.OpenDashboardIn : DashboardSurface.Browser;
 
@@ -393,6 +421,11 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             using Stream png = AssetLoader.Open(new Uri("avares://SemanticRouter/Assets/icon.png"));
             _about = new AboutWindow(_icon, new Avalonia.Media.Imaging.Bitmap(png));
             _about.Closed += (_, _) => _about = null;
+            _about.Updates.CheckRequested += () => _ = CheckForUpdatesAsync(chosen: true);
+            _about.Updates.RestartRequested += () => _ = RestartToUpdateAsync();
+            _about.Updates.CheckAutomaticallyChanged += SetCheckForUpdates;
+            _about.Updates.ApplyOnQuitChanged += SetApplyUpdatesOnQuit;
+            UpdateMenu();
         }
 
         _about.Show();
