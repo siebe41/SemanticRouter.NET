@@ -1,12 +1,14 @@
 /* Semantic Router dashboard: Usage page: tokens and cost by model, connector, route, client or profile, and budgets. */
-import { api, connectorNames, h, metricsOnly, state, toast, views } from './core.js';
+import { api, connectorNames, h, metricsOnly, state, views } from './core.js';
 import { pct } from './evaluate.js';
 import { render } from './shell.js';
 
 /* Usage: what each model, connector, route or client used and cost, and the budgets. */
-export async function loadUsage() {
+export async function loadUsage(auto) {
   // A change while a load is under way loads again when it finishes, so the last one wins.
   if (state.usage.loading) { state.usage.again = true; return; }
+  // After a failure the automatic refresh backs off (10 s, doubling to 5 min); Retry and a new window load at once.
+  if (auto && state.usage.error && Date.now() < state.usage.retryAt) return;
   state.usage.loading = true;
   state.usage.again = false;
   const days = { day: 1, week: 7, month: 30, '7d': 7, '30d': 30 }[state.usage.window] || 7;
@@ -17,7 +19,11 @@ export async function loadUsage() {
     ]);
     state.usage.data = usage;
     state.usage.feedback = feedback;
-  } catch (e) { toast(e.message, 'danger'); }
+    state.usage.error = null; state.usage.backoff = 0;
+  } catch (e) {
+    state.usage.backoff = Math.min(300000, (state.usage.backoff || 5000) * 2);
+    state.usage.error = e.message; state.usage.retryAt = Date.now() + state.usage.backoff;
+  }
   state.usage.loading = false;
   if (state.usage.again) { loadUsage(); return; }
   if (state.view === 'usage') render();
@@ -53,13 +59,19 @@ function feedbackCard(f) {
 
 views.usage = () => {
   const u = state.usage; const d = u.data;
-  if (!d) { loadUsage(); return '<div class="section-head"><h1>Usage</h1></div><div class="muted">Loading…</div>'; }
+  const failed = u.error ? `<div class="card section load-error">Couldn't load usage: ${h(u.error.replace(/\.$/, ''))}. <button class="btn small" data-action="usage-retry">Retry</button></div>` : '';
+  if (!d) {
+    // A failed load shows why and waits for Retry, instead of asking again on every render.
+    if (u.error) return `<div class="section-head"><h1>Usage</h1></div>${failed}`;
+    loadUsage(); return '<div class="section-head"><h1>Usage</h1></div><div class="muted">Loading…</div>';
+  }
   const t = d.totals; const max = Math.max(1e-9, ...d.groups.map((g) => g.totals.costUsd || 0)); const maxTok = Math.max(1, ...d.groups.map((g) => g.totals.inputTokens + g.totals.outputTokens + g.totals.cacheReadTokens + g.totals.cacheWriteTokens));
   const byCost = d.groups.some((g) => g.totals.costUsd > 0);
   const seg = (key, values) => `<span class="seg" role="group">${values.map(([v, label]) => `<button class="${u[key] === v ? 'on' : ''}" data-action="usage-set" data-key="${key}" data-value="${v}">${label}</button>`).join('')}</span>`;
   return `
     <div class="section-head"><h1>Usage</h1><span class="muted">Tokens the backends reported, and cost at the prices in the model catalog.</span><span class="spacer"></span>
       ${seg('window', [['day', 'Today'], ['week', 'This week'], ['month', 'This month'], ['7d', '7 days'], ['30d', '30 days']])}</div>
+    ${failed}
     <div class="grid cols-4 section">
       <div class="card stat"><span class="value">${int(t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens)}</span><span class="label">tokens in ${int(t.requests)} requests · ${int(t.inputTokens)} in · ${int(t.outputTokens)} out · ${int(t.cacheReadTokens)} cache read · ${int(t.cacheWriteTokens)} cache write · <span title="Prompt tokens served from a prompt cache">${hitRate(t)} cache hits</span></span></div>
       <div class="card stat"><span class="value">${usd(t.costUsd)}</span><span class="label">spent, at catalog prices (subscriptions and local models count as 0)</span></div>

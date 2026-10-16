@@ -1,10 +1,11 @@
 /* Semantic Router dashboard: Loading, the rail, tabs and top bar, themes, rendering and hash routing. */
 import { loadTrends } from './charts.js';
-import { $, $$, api, banner, h, isDirty, METRICS_VIEWS, metricsOnly, PREFIX, readOnly, SECTIONS, sectionOf, state, THEME_KEY, THEMES, views } from './core.js';
+import { $, $$, actionKey, api, banner, h, isDirty, METRICS_VIEWS, metricsOnly, plural, PREFIX, readOnly, SECTIONS, sectionOf, sourceLabel, state, THEME_KEY, THEMES, views, whenDate } from './core.js';
 import { loadDigest } from './digest.js';
+import { draftChanges, itemKeyForPath, rebase } from './draft.js';
 import { endpointPill } from './endpoints.js';
 import { loadTuning } from './learned.js';
-import { scheduleLive } from './live.js';
+import { activityHeld, scheduleLive, showNewEntries } from './live.js';
 import { graph, mounts, readPalette, unmount } from './memory.js';
 import { loadUsage } from './usage.js';
 
@@ -37,27 +38,100 @@ export function setConfig(envelope) {
   state.original = JSON.stringify(envelope.config);
   state.meta = { version: envelope.version, source: envelope.source, store: envelope.store, secretStore: envelope.secretStore, warning: envelope.warning, createdAt: envelope.createdAt };
   state.errors = null;
+  state.issues = null;
+  state.conflict = null;
 }
 
-export async function refreshStatus() {
+/*
+ * The running configuration changed (an utterance added, a learned change, a save or revert): take it, and keep the
+ * draft. Unapplied edits are moved onto the new configuration when they don't touch what changed; otherwise the draft
+ * stays as it is, on its old version, and the conflict notice says so. Returns 'replaced', 'rebased' or 'kept'.
+ */
+export function adoptConfig(envelope) {
+  if (!isDirty()) { setConfig(envelope); return 'replaced'; }
+  const r = rebase(JSON.parse(state.original), state.config, envelope.config);
+  if (r.ok) { setConfig(envelope); state.config = r.value; return 'rebased'; }
+  noteConflict({ currentVersion: envelope.version, at: envelope.createdAt });
+  return 'kept';
+}
+
+/* After signing in again: the draft from before goes back on top of what was loaded. */
+export function keepDraft(draft) {
+  if (state.meta.version === draft.version) { state.config = draft.config; return; }
+  const loaded = { version: state.meta.version, createdAt: state.meta.createdAt };
+  const r = rebase(JSON.parse(draft.original), draft.config, state.config);
+  if (r.ok) { state.config = r.value; return; }
+  state.config = draft.config; state.original = draft.original; state.meta.version = draft.version;
+  noteConflict({ currentVersion: loaded.version, at: loaded.createdAt });
+}
+
+/* The configuration changed under the draft: show the notice, with who changed it when the history says. */
+export function noteConflict(info) {
+  const before = state.conflict && state.conflict.currentVersion === info.currentVersion ? state.conflict : {};
+  state.conflict = { ...before, ...Object.fromEntries(Object.entries(info).filter(([, v]) => v !== undefined)), dismissed: false };
+  renderChrome();
+  if (info.actor) return;
+  api('GET', '/config/history?limit=1').then((r) => {
+    const v = r && r.versions && r.versions[0];
+    if (v && state.conflict && state.conflict.currentVersion === info.currentVersion && !state.conflict.actor) {
+      Object.assign(state.conflict, { actor: v.actor, at: v.timestamp, source: v.source });
+      renderChrome();
+    }
+  }).catch(() => { /* the notice works without it */ });
+}
+
+/*
+ * Someone else applied a configuration (another tab, the CLI, a learned change): with a clean draft, load it quietly;
+ * with unapplied edits, say so rather than letting Apply overwrite it unseen. Returns true when it reloaded.
+ */
+async function checkVersion() {
+  const s = state.status;
+  if (!s || metricsOnly() || s.version == null || state.meta.version == null || s.version <= state.meta.version) return false;
+  if (!isDirty()) { setConfig(await api('GET', '/config')); return true; }
+  if (!state.conflict || state.conflict.currentVersion !== s.version) noteConflict({ currentVersion: s.version, at: s.createdAt });
+  return false;
+}
+
+/* Is text selected on the page? A refresh then would drop the selection, so it waits. */
+export const selecting = () => {
+  const sel = window.getSelection && window.getSelection();
+  return !!(sel && !sel.isCollapsed && sel.rangeCount && $('#view').contains(sel.anchorNode));
+};
+
+/* The status only (while there are unapplied edits): the top bar stays current, the page is left alone. */
+export async function refreshChrome() {
+  try {
+    state.status = await api('GET', '/status');
+    if (await checkVersion()) render(); else renderChrome();
+  } catch { /* keep the last known state */ }
+}
+
+export async function refreshStatus(opts) {
+  const force = !!(opts && opts.force);
   try {
     if (metricsOnly()) {
       state.status = await api('GET', '/status');
-      if (state.view === 'overview') { await loadDigest(); state.trends.data = null; render(); } else { loadUsage(); renderChrome(); }
+      if (state.view === 'overview') { await loadDigest(); state.trends.data = null; render(); } else { loadUsage(true); renderChrome(); }
       return;
     }
     const [status, activity] = await Promise.all([api('GET', '/status'), api('GET', '/activity?limit=200')]);
+    const before = new Set(state.activity.map((e) => e.id));
     state.status = status;
     state.activity = activity.entries;
     state.feedback = activity.feedback || {};
+    const reloaded = await checkVersion();
     if (state.view === 'overview' || state.view === 'learned') await loadTuning();
     if (state.view === 'overview') await loadDigest();
     renderChrome();
     // Fresh trends in the background: the card keeps its last figures meanwhile, rather than shrinking to "Loading…"
     // and back, which made the page jump for anyone scrolled down.
-    if (state.view === 'overview') loadTrends();
-    if (state.view === 'usage') { loadUsage(); }
-    if (state.view === 'overview' || state.view === 'learned' || (state.view === 'activity' && !state.label)) render();
+    if (state.view === 'overview') loadTrends(true);
+    if (state.view === 'usage') { loadUsage(true); }
+    // The Activity table holds still while a label is being written or text is selected; it counts what arrived.
+    const held = state.view === 'activity' && !force && activityHeld();
+    if (held) { state.activityNew += state.activity.filter((e) => !before.has(e.id)).length; showNewEntries(); }
+    if (!force && selecting()) return;
+    if (reloaded || force || state.view === 'overview' || state.view === 'learned' || (state.view === 'activity' && !held)) render();
     else if (state.view === 'live') scheduleLive();
   } catch (e) { /* keep the last known state */ }
 }
@@ -65,23 +139,95 @@ export async function refreshStatus() {
 /* ---------------------------------------------------------------------------------------------
    Chrome (rail, tabs, top bar)
    --------------------------------------------------------------------------------------------- */
+
+/*
+ * Writes a chrome element only when what it shows changes: the status pill is a live region, and rewriting it every
+ * refresh made screen readers read it out every five seconds. A change in a tooltip alone is patched in place.
+ */
+const shown = {};
+function setHtml(el, html) {
+  if (!el || shown[el.id] === html) return;
+  const bare = (x) => x.replace(/ title="[^"]*"/g, '');
+  const same = shown[el.id] != null && bare(shown[el.id]) === bare(html);
+  shown[el.id] = html;
+  if (same) {
+    const t = document.createElement('template'); t.innerHTML = html;
+    const now = el.querySelectorAll('*'); const next = t.content.querySelectorAll('*');
+    if (now.length === next.length) {
+      now.forEach((x, i) => { const v = next[i].getAttribute('title'); if (v == null) x.removeAttribute('title'); else x.setAttribute('title', v); });
+      return;
+    }
+  }
+  el.innerHTML = html;
+}
+
+/* Overall health for the top bar's dot: red when requests cannot be answered, amber when degraded or warming up. */
+function health(s) {
+  const enabled = s.models.filter((m) => m.enabled).length;
+  const sv = s.service || {};
+  if (!enabled) return { tone: 'danger', short: '0 models', label: 'No model is enabled: requests cannot be answered' };
+  if (sv.state === 'failing') return { tone: 'danger', short: 'failing', label: sv.stateNote || 'Failing' };
+  if (sv.state === 'starting' || (!s.warmedUp && !s.warmUpError)) return { tone: 'warn', short: 'warming up', label: sv.stateNote || 'Warming up: embedding the routes' };
+  if (sv.state === 'degraded' || s.warmUpError) return { tone: 'warn', short: 'degraded', label: sv.stateNote || 'Degraded: the route index could not be embedded' };
+  return { tone: 'ok', short: '', label: 'Running' };
+}
+
+export function updateSaveBar() {
+  const show = isDirty() && !readOnly();
+  $('#save-bar').classList.toggle('hidden', !show);
+  if (!show) return;
+  const text = plural(draftChanges(), 'unapplied change');
+  const count = $('#change-count');
+  if (count.textContent !== text) count.textContent = text;
+}
+
+/* "Running configuration not saved": applied with Apply only (or by the API) and not written to the store. */
+function unsavedBar() {
+  const s = state.status;
+  const bar = $('#unsaved-bar');
+  const on = !!(s && s.unsaved === true && !metricsOnly());
+  bar.classList.toggle('hidden', !on);
+  if (!on) { setHtml(bar, ''); return; }
+  const can = !readOnly() && state.saveApi !== false;
+  const store = s.store || state.meta.store;
+  setHtml(bar, `<span class="unsaved-note" title="${h(`The running router uses changes that are not in ${store || 'the configuration store'}: a restart undoes them.`)}"><span class="dot warn" aria-hidden="true"></span> Running configuration not saved</span>` +
+    (can ? `<button class="btn small" type="button" data-action="config-save" title="${h(`Write the running configuration to ${store || 'the configuration store'}`)}">Save</button><button class="btn ghost small" type="button" data-action="config-revert" title="Go back to the saved configuration">Revert to saved</button>` : ''));
+}
+
+/* The configuration changed under the draft: what happened and the three ways on. */
+function conflictNotice() {
+  const c = state.conflict;
+  const el = $('#draft-notice');
+  const on = !!(c && !c.dismissed && isDirty() && !readOnly());
+  el.classList.toggle('hidden', !on);
+  if (!on) { setHtml(el, ''); return; }
+  const by = c.actor ? `by ${h(c.actor)}` : '';
+  const at = c.at ? `at ${h(whenDate(c.at))}` : '';
+  const via = c.source && !/^(Memory|Store|Configuration)$/.test(c.source) ? ` <span class="faint">(${h(c.source)})</span>` : '';
+  setHtml(el, `<div><b>Configuration changed ${[by, at].filter(Boolean).join(' ')}</b>${via}. Your draft started from version ${h(state.meta.version)}; the router now runs version ${h(c.currentVersion)}.</div>
+    <div class="row-actions"><button class="btn small danger" type="button" data-action="conflict-reload">Reload (lose your changes)</button><button class="btn small" type="button" data-action="conflict-compare">Compare</button><button class="btn small primary" type="button" data-action="conflict-apply">Apply mine anyway</button><button class="btn ghost small" type="button" data-action="conflict-dismiss" aria-label="Hide; Apply asks again" title="Hide; Apply asks again">×</button></div>`);
+}
+
 export function renderChrome() {
   const s = state.status;
   if (s) {
-    $('#brand-sub').textContent = `v${s.version} · ${s.source.toLowerCase()}${s.machine ? ' · ' + s.machine : ''}`;
+    const sub = `v${s.version} · ${sourceLabel(s.source)}${s.machine ? ' · ' + s.machine : ''}`;
+    if ($('#brand-sub').textContent !== sub) $('#brand-sub').textContent = sub;
     $('#brand-sub').title = s.machine ? `Running on ${s.machine}` : '';
-    $('#brand').title = `Semantic Router ${$('#brand-sub').textContent}`;
+    $('#brand').title = `Semantic Router ${sub}`;
     $('#lib-version').textContent = 'SemanticRouter ' + s.libraryVersion;
     const cooling = s.models.filter((m) => m.coolingDownUntil).length;
-    const warm = s.warmedUp ? 'ok' : (s.warmUpError ? 'danger' : 'warn');
     const now = endpointPill();
-    $('#status-pill').innerHTML =
-      `<span class="dot ${warm}"></span> <span class="pill-detail">${h(s.gateway.mode)} mode · ${s.models.filter((m) => m.enabled).length} models${now ? ' ·' : ''}</span>` +
+    const hl = health(s);
+    setHtml($('#status-pill'),
+      `<span class="dot ${hl.tone}" role="img" aria-label="${h('Health: ' + hl.label)}" title="${h(hl.label)}"></span>${hl.short ? ` <span class="pill-short">${h(hl.short)}</span>` : ''} <span class="pill-detail">${h(s.gateway.mode)} mode · ${plural(s.models.filter((m) => m.enabled).length, 'model')}${now ? ' ·' : ''}</span>` +
       (now ? ' ' + now : '') +
       (cooling ? ` · <span class="badge warn">${cooling} cooling down</span>` : '') +
-      (s.warmedUp ? '' : (s.warmUpError ? ` · <span class="badge danger" title="${h(s.warmUpError)}">embeddings failed</span>` : ' · <span class="badge info">warming up</span>'));
+      (s.warmedUp ? '' : (s.warmUpError ? ` · <span class="badge danger" title="${h(s.warmUpError)}">embeddings failed</span>` : ' · <span class="badge info">warming up</span>')));
   }
-  $('#save-bar').classList.toggle('hidden', !isDirty() || readOnly());
+  updateSaveBar();
+  unsavedBar();
+  conflictNotice();
   renderNav();
   const notes = [];
   const who = state.session.identity;
@@ -182,39 +328,175 @@ export function applyTheme(id) {
 /* ---------------------------------------------------------------------------------------------
    Rendering and routing
    --------------------------------------------------------------------------------------------- */
+
+/* The problems Validate or Apply found, each a link to its field when the router said which one. */
+function problemsCard() {
+  if (!state.errors) return '';
+  const issues = state.issues && state.issues.length ? state.issues : null;
+  const items = issues
+    ? issues.map((x, i) => `<li>${x.path || x.selector ? `<a href="#/${h(x.page || '')}" data-action="issue-go" data-index="${i}">${h(x.message)}</a>${x.path ? ` <span class="faint small mono">${h(x.path)}</span>` : ''}` : h(x.message)}</li>`)
+    : state.errors.map((e) => `<li>${h(e)}</li>`);
+  return `<div class="card section problems" id="problems"><h3 id="problems-title" tabindex="-1">Configuration problems</h3><ul class="errors">${items.join('')}</ul></div>`;
+}
+
+/* The input for a configuration path: data-bind, or data-path on the table rows and renamable names. */
+export function fieldFor(root, path) {
+  if (!path) return null;
+  const q = CSS.escape(path);
+  const direct = root.querySelector(`[data-bind="${q}"], [data-path="${q}"]`);
+  if (direct) return direct;
+  const [head, name, more] = path.split('.');
+  if (!more && head === 'Connectors') return root.querySelector(`[data-action-input="connector-rename"][data-name="${CSS.escape(name)}"]`);
+  if (!more && head === 'Profiles') return root.querySelector(`[data-action-input="profile-rename"][data-name="${CSS.escape(name)}"]`);
+  return null;
+}
+
+/* Opens the expandable item that holds an element (or a path's item), keeping that in state.open. */
+function openItem(root, el, path) {
+  const item = el ? el.closest('.item') : (itemKeyForPath(path) ? root.querySelector(`.item[data-key="${CSS.escape(itemKeyForPath(path))}"]`) : null);
+  if (!item || item.classList.contains('open')) return;
+  state.open.add(item.dataset.key);
+  item.classList.add('open');
+  const head = item.querySelector('.item-head');
+  if (head) head.setAttribute('aria-expanded', 'true');
+}
+
+/* Each problem next to its field: marked invalid, with the message linked by aria-describedby, its item opened. */
+function markIssues(root) {
+  (state.issues || []).forEach((x, i) => {
+    const el = x.selector ? root.querySelector(x.selector) : fieldFor(root, x.path);
+    if (!el) { if (x.path) openItem(root, null, x.path); return; }
+    openItem(root, el);
+    const marked = el.getAttribute('aria-invalid') === 'true'; // its page marked it already (a duplicate alias row)
+    el.dataset.issue = x.path || x.selector;
+    if (marked) return;
+    const id = 'issue-' + i;
+    el.setAttribute('aria-invalid', 'true');
+    el.setAttribute('aria-describedby', `${el.getAttribute('aria-describedby') || ''} ${id}`.trim());
+    const msg = document.createElement('span');
+    msg.className = 'field-error'; msg.id = id; msg.textContent = x.message;
+    (el.closest('.field, .check, td') || el.parentElement).appendChild(msg);
+  });
+}
+
+/* Read-only role: forms are shown, not editable; add, remove and other changes are hidden; spending is disabled. */
+const EDIT_ACTION = /(^|-)(add|remove|duplicate|customize|defaults|up|down|rollback|purge)$|^(alias-claude|secret-change|secret-clear|json-use|config-reset|config-save|config-revert|embeddings-threshold|eval-use-calibration|eval-save|reset-health|reliability-reset|memory-reset|sessions-revoke-all)$/;
+const SPEND_ACTION = /^(tester-send|tester-classify|profiles-compare|eval-run|eval-compare|embeddings-test|endpoint-check|discover|lineup-discover)$/;
+function readOnlyForms(root) {
+  if (!readOnly()) return;
+  $$('[data-bind], [data-action-input]', root).forEach((el) => { el.disabled = true; });
+  const json = $('#json-editor', root); if (json) json.readOnly = true; // still selectable, for copying
+  $$('[data-action]', root).forEach((el) => {
+    const a = el.dataset.action;
+    if (EDIT_ACTION.test(a)) el.classList.add('hidden');
+    else if (SPEND_ACTION.test(a) && !el.disabled) { el.disabled = true; el.title = 'Needs the admin token'; }
+  });
+}
+
+/* A button whose action is still running: disabled and marked busy, so it is not sent twice. */
+export function setBusy(el, on) {
+  if (on) {
+    el.setAttribute('aria-busy', 'true');
+    if ('disabled' in el && !el.disabled) { el.disabled = true; el.dataset.busyDisabled = '1'; }
+  } else {
+    el.removeAttribute('aria-busy');
+    if (el.dataset.busyDisabled) { el.disabled = false; delete el.dataset.busyDisabled; }
+  }
+}
+
+/* After a render: the focus a step asked for (a problem, a new item's name, the next item after a removal). */
+function placeFocus(root) {
+  const go = (el, select) => {
+    if (!el) return false;
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ block: 'center' });
+    if (select && el.select && /^(text|search|url)$/.test(el.type)) el.select();
+    return true;
+  };
+  if (state.focusPath) {
+    const issue = (state.issues || []).find((x) => (x.path || x.selector) === state.focusPath);
+    const el = issue && issue.selector ? root.querySelector(issue.selector) : fieldFor(root, state.focusPath);
+    state.focusPath = null;
+    if (go(el)) return true;
+  }
+  if (state.focusIssue) {
+    state.focusIssue = false;
+    const first = $$('[aria-invalid="true"]', root).find((el) => el.getClientRects().length);
+    if (go(first || $('#problems-title', root))) return true;
+  }
+  if (state.focusAfter) {
+    const selectors = state.focusAfter;
+    state.focusAfter = null;
+    for (const sel of selectors) {
+      let el = null;
+      try { el = root.querySelector(sel); } catch { /* not a selector */ }
+      if (el) {
+        if (el.matches('h1')) el.setAttribute('tabindex', '-1');
+        openItem(root, el.closest('.item-body') ? el : null);
+        return go(el, true);
+      }
+    }
+  }
+  return false;
+}
+
+/* The <details> open on the page, so a refresh does not fold them away ("Show as a table" on the Overview). */
+let lastView = null;
+const detailKeys = (root) => {
+  const seen = {};
+  return $$('details', root).map((d) => { const s = (d.querySelector('summary') || d).textContent.trim(); seen[s] = (seen[s] || 0) + 1; return s + '#' + seen[s]; });
+};
+
 export function render() {
   const staleTip = $('.chart-tip'); if (staleTip) staleTip.classList.add('hidden');
   const view = views[state.view] || views.overview;
   const root = $('#view');
   const typing = focusedField(root);
+  const openDetails = lastView === state.view ? new Set(detailKeys(root).filter((k, i) => $$('details', root)[i].open)) : null;
   unmount();
   if (!state.config || !state.status) { root.innerHTML = '<div class="muted">Loading…</div>'; return; }
+  if (state.view === 'activity') state.activityNew = 0;
   try {
-    root.innerHTML = (state.errors ? `<div class="card section" style="border-color:var(--danger)"><h3>Configuration problems</h3><ul class="errors">${state.errors.map((e) => `<li>${h(e)}</li>`).join('')}</ul></div>` : '') + view();
+    root.innerHTML = problemsCard() + view();
     if (mounts[state.view]) mounts[state.view]();
-    refocus(root, typing);
+    if (openDetails && openDetails.size) { const all = $$('details', root); detailKeys(root).forEach((k, i) => { if (openDetails.has(k)) all[i].open = true; }); }
+    markIssues(root);
+    readOnlyForms(root);
+    $$('[data-action]', root).forEach((el) => { if (state.busy.has(actionKey(el))) setBusy(el, true); });
+    if (!placeFocus(root)) refocus(root, typing);
   } catch (e) {
     root.innerHTML = `<div class="card"><h3>Could not render</h3><pre>${h(e.stack || e)}</pre></div>`;
   }
+  lastView = state.view;
   root.classList.toggle('wide', state.view === 'memory' || state.view === 'live');
+  root.classList.toggle('read-only', readOnly());
   renderChrome();
 }
 
 /*
  * A render replaces every element, and the status refresh renders the Overview every few seconds: without this, a
- * refresh took the focus from the field being typed in, and the rest of what was typed went nowhere.
+ * refresh took the focus from the field being typed in (or the button just used), and the rest of what was typed
+ * went nowhere.
  */
+const ACTION_KEYS = ['id', 'index', 'name', 'key', 'connector', 'model', 'window', 'value', 'type'];
 function focusedField(root) {
   const el = document.activeElement;
-  if (!el || !root.contains(el) || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return null;
-  const key = el.id ? `#${CSS.escape(el.id)}` : el.dataset.bind ? `[data-bind="${CSS.escape(el.dataset.bind)}"]` : null;
+  if (!el || el === root || !root.contains(el)) return null;
+  const attr = (name, value) => `[${name}="${CSS.escape(value)}"]`;
+  let key = null;
+  if (el.id) key = '#' + CSS.escape(el.id);
+  else if (el.dataset.bind) key = attr('data-bind', el.dataset.bind);
+  else if (el.dataset.state) key = attr('data-state', el.dataset.state);
+  else if (el.dataset.actionInput) key = attr('data-action-input', el.dataset.actionInput) + ['index', 'name'].filter((k) => el.dataset[k] != null).map((k) => attr('data-' + k, el.dataset[k])).join('');
+  else if (el.dataset.action) key = attr('data-action', el.dataset.action) + ACTION_KEYS.filter((k) => el.dataset[k] != null).map((k) => attr('data-' + k, el.dataset[k])).join('');
   if (!key) return null;
   let start = null; let end = null;
   try { start = el.selectionStart; end = el.selectionEnd; } catch { /* not a text field */ }
   return { key, start, end, scrollTop: el.scrollTop };
 }
 function refocus(root, field) {
-  const el = field && root.querySelector(field.key);
+  let el = null;
+  try { el = field && root.querySelector(field.key); } catch { /* a key that is no longer a valid selector */ }
   if (!el) return;
   el.focus({ preventScroll: true });
   try { if (field.start != null) el.setSelectionRange(field.start, field.end); } catch { /* not a text field */ }
@@ -227,5 +509,5 @@ export function route() {
   if (state.view === 'models') state.reliability = null; // fresh figures each visit
   if (state.view === 'audit') state.audit.entries = null;
   render();
-  window.scrollTo(0, 0);
+  if (!$('#view').contains(document.activeElement) || document.activeElement === $('#view')) window.scrollTo(0, 0);
 }
