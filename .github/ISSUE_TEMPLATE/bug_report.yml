@@ -8,6 +8,8 @@ body:
         Thanks for reporting. Search the open issues first in case it is already known.
 
         **Do not paste API keys, tokens, gateway keys or private prompt text.** Replace them with placeholders such as `<key>`. Security problems go through the Security tab ("Report a vulnerability"), not here.
+
+        From the dashboard, the **Feedback** page (or **Report** on a failed request on the **Activity** page) opens this form with the version, the operating system and the request's decision line filled in.
   - type: textarea
     id: what-happened
     attributes:
@@ -29,8 +31,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Version
-      description: Release, package version or commit.
+      label: Router version
+      description: In the dashboard's sidebar footer and on Overview → Service, or from `semantic-router --version`. For the NuGet packages, the package version; built from source, the commit.
       placeholder: e.g. 0.2.0, or main at abc1234
     validations:
       required: true
@@ -54,6 +56,12 @@ body:
       placeholder: e.g. Windows 11, macOS 15, Ubuntu 24.04
     validations:
       required: true
+  - type: textarea
+    id: activity
+    attributes:
+      label: The request's decision line
+      description: If it is about one request, its decision line from the dashboard's Activity entry (Report fills it in) or its `X-Prompt-Route-*` response headers.
+      render: text
   - type: textarea
     id: config
     attributes:
