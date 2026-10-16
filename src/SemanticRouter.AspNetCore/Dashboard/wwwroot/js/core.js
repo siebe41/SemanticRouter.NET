@@ -72,6 +72,19 @@ export const readOnly = () => state.session.role === 'ReadOnly' || state.session
 // The metrics role sees figures only (no prompts, configuration or activity): the Overview's counts and the Usage page.
 export const metricsOnly = () => state.session.role === 'Metrics';
 export const METRICS_VIEWS = ['overview', 'usage'];
+/*
+ * The rail's sections (index.html) and their pages, in tab order, with each page's tab label. A page keeps its own
+ * address (#/tiers, #/learned), so links from the tray, notices, webhooks and bookmarks need no section. Feedback is in
+ * no section: it sits at the foot of the rail.
+ */
+export const SECTIONS = [
+  { id: 'monitor', pages: [['overview', 'Overview'], ['live', 'Live'], ['activity', 'Activity'], ['usage', 'Usage'], ['memory', 'Memory']] },
+  { id: 'routing', pages: [['tiers', 'Tiers'], ['routes', 'Routes'], ['routing', 'Rules'], ['profiles', 'Profiles'], ['evaluate', 'Evaluate'], ['learned', 'Router learned']] },
+  { id: 'providers', pages: [['models', 'Models'], ['connectors', 'Connectors'], ['embeddings', 'Embeddings']] },
+  { id: 'gateway', pages: [['gateway', 'Settings'], ['clients', 'Connect clients']] },
+  { id: 'admin', pages: [['json', 'JSON'], ['audit', 'Audit log']] },
+];
+export const sectionOf = (view) => SECTIONS.find((s) => s.pages.some(([page]) => page === view));
 // Attributes for a button that spends embedding or API calls: the read-only role sees it disabled.
 export const adminOnly = (busy) => (readOnly() ? 'disabled title="Needs the admin token"' : busy ? 'disabled' : '');
 export const isReference = (v) => typeof v === 'string' && /\$\{(env|secret):[^}]+\}/i.test(v);
