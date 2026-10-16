@@ -13,7 +13,7 @@ hero:
   actions:
     - theme: brand
       text: Get started
-      link: /host
+      link: /overview#quick-start
     - theme: alt
       text: Watch the videos
       link: /videos
@@ -50,14 +50,22 @@ features:
 
 ## Try it
 
+With the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) installed:
+
 ```bash
 dotnet tool install -g SemanticRouter.Host
-semantic-router init
-semantic-router
+semantic-router init    # finds LM Studio, Ollama and the claude, codex and copilot CLIs
+semantic-router         # the dashboard is at http://localhost:5080/router
 ```
 
-Then point your tools at `http://localhost:5080`: [Connect your tools](../docs/clients.md) has the lines for Claude Code, Codex,
-the OpenAI SDKs and curl. [Install and run](../docs/host.md) covers the tool, the container and the background service, and
-the [desktop app](../docs/desktop.md) puts the router in your tray.
+Then run Claude Code through it, with the line the router prints (your context window included):
+
+```bash
+ANTHROPIC_BASE_URL=http://localhost:5080 ANTHROPIC_AUTH_TOKEN=semantic-router CLAUDE_CODE_AUTO_MODE_SERVER=0 claude --model semantic-router
+```
+
+No .NET? The [desktop app](../docs/desktop.md) puts the router in your tray, and its dashboard sets up your first model.
+[Connect your tools](../docs/clients.md) has the lines for Codex, the OpenAI SDKs and curl, and [Install and run](../docs/host.md)
+covers the background service and the container.
 
 ![The dashboard](../docs/images/dashboard.png)
