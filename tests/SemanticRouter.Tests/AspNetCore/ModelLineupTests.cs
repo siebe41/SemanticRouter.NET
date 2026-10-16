@@ -27,6 +27,10 @@ public sealed class ModelLineupTests : RouterHostTest
         lineup.Should().OnlyContain(e => e.Recommended && !e.Suggestion!.IsLocal && e.Suggestion.InputCostPerMillionTokens == 0 && e.Suggestion.ContextWindow == 200_000);
         lineup.Select(e => e.Suggestion!.Capabilities).Should().AllSatisfy(c => c.Should().Contain(["chat", "code", "reasoning", "tools"]).And.NotContain("vision"));
         lineup[3].Reason.Should().Contain("enable it if your plan includes");
+        lineup.Select(e => (e.Suggestion!.ApiInputCostPerMillionTokens, e.Suggestion.ApiOutputCostPerMillionTokens)).Should().Equal(
+            [(0.10m, 0.50m), (2m, 10m), (4m, 20m), (10m, 50m)], "a subscription's use is valued at the API price of the family's latest model");
+        lineup.Select(e => e.Suggestion!.ApiCacheReadCostPerMillionTokens).Should().Equal(
+            [0.01m, 0.20m, 0.20m, 0.25m], "cache reads are a tenth of input unless the price list says otherwise (Opus 5.5, Fable 5.1)");
     }
 
     [Fact]
@@ -49,6 +53,8 @@ public sealed class ModelLineupTests : RouterHostTest
         lineup[1].Suggestion.Should().Match<ModelDefinition>(m => m.Tier == 2 && m.InputCostPerMillionTokens == 1m && m.ContextWindow == 200_000);
         lineup[2].Suggestion.Should().Match<ModelDefinition>(m => m.Tier == 5 && m.Enabled && m.InputCostPerMillionTokens == 10m, "an API key that lists Fable can use it");
         lineup[0].Reason.Should().Contain("list price");
+        lineup.Select(e => (e.Suggestion!.CacheReadCostPerMillionTokens, e.Suggestion.CacheWriteCostPerMillionTokens)).Should().Equal(
+            [(0.20m, 5m), (0.1m, 1.25m), (0.25m, 12.5m)], "cached input is priced apart from input, or a long agent session costs ten times what it should");
     }
 
     [Fact]

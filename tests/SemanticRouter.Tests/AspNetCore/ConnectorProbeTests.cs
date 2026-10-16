@@ -98,6 +98,17 @@ public sealed class ConnectorProbeTests
     }
 
     [Fact]
+    public async Task Loaded_models_come_from_LM_Studio_or_Ollama_and_not_from_remote_servers()
+    {
+        (await ConnectorProbe.LoadedModelsAsync(LmStudio, new HttpClient(LocalServers.LmStudio(justInTime: true))))
+            .Should().BeEquivalentTo(["qwen/qwen3-8b"]);
+        (await ConnectorProbe.LoadedModelsAsync(new ConnectorOptions { BaseAddress = new Uri("http://localhost:11434") }, new HttpClient(LocalServers.Ollama())))
+            .Should().BeEquivalentTo(["llama3.2:latest"]);
+        (await ConnectorProbe.LoadedModelsAsync(new ConnectorOptions { BaseAddress = new Uri("https://api.openai.com/v1/") }, new HttpClient(LocalServers.Ollama())))
+            .Should().BeNull("only servers on this machine or the local network are asked");
+    }
+
+    [Fact]
     public async Task Ollama_reports_loaded_models_sizes_capabilities_and_loads_on_demand()
     {
         var connector = new ConnectorOptions { BaseAddress = new Uri("http://localhost:11434") };

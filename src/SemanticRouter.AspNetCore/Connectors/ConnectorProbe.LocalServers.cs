@@ -289,6 +289,47 @@ public static partial class ConnectorProbe
         }
     }
 
+    /// <summary>
+    /// Which models an LM Studio or Ollama server on this machine or the local network has in memory now: LM Studio's
+    /// <c>GET /api/v0/models</c>, else Ollama's <c>GET /api/ps</c>. Light enough to ask while routing.
+    /// <see langword="null"/>: the connector is not such a server, or it did not answer.
+    /// </summary>
+    /// <param name="connector">The connector's settings, with secret references already resolved.</param>
+    /// <param name="client">The client to send the requests with.</param>
+    /// <param name="cancellationToken">Cancels the requests.</param>
+    public static async Task<IReadOnlySet<string>?> LoadedModelsAsync(ConnectorOptions connector, HttpClient client, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connector);
+        ArgumentNullException.ThrowIfNull(client);
+        if (connector.Type != ConnectorType.OpenAICompatible || connector.BaseAddress is not { } baseAddress || !IsLocalAddress(baseAddress))
+        {
+            return null;
+        }
+
+        try
+        {
+            using (JsonDocument? lmStudio = await GetJsonAsync(client, connector, "/api/v0/models", cancellationToken).ConfigureAwait(false))
+            {
+                if (lmStudio is not null && lmStudio.RootElement.TryGetArray("data", out JsonElement data) && data.EnumerateArray().Any(m => m.GetString("state") is not null))
+                {
+                    return data.EnumerateArray()
+                        .Where(m => string.Equals(m.GetString("state"), "loaded", StringComparison.OrdinalIgnoreCase))
+                        .Select(m => m.GetString("id")).OfType<string>()
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                }
+            }
+
+            using JsonDocument? ollama = await GetJsonAsync(client, connector, "/api/ps", cancellationToken).ConfigureAwait(false);
+            return ollama is not null && ollama.RootElement.TryGetArray("models", out JsonElement running)
+                ? running.EnumerateArray().Select(m => m.GetString("model") ?? m.GetString("name")).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     private static async Task<JsonDocument?> GetJsonAsync(HttpClient client, ConnectorOptions connector, string path, CancellationToken cancellationToken)
     {
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(connector.BaseAddress!, path), connector);

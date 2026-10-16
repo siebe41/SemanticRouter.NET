@@ -51,7 +51,7 @@ The router handles what it can on its own and asks for attention only when a per
 
 - prompts routed and requests served;
 - the share served by local models;
-- cost, and the savings against `Usage:ReferenceModel` when it is set;
+- cost, the savings against `Usage:ReferenceModel` when it is set, and subscription use at API prices (not spent);
 - decisions raised a tier (complexity, an ambiguous match, a retry, the conversation's floor), degraded and failed requests;
 - signs a decision fell short ([feedback](routing-quality.md#feedback)) by kind;
 - the changes [automatic tuning](routing-quality.md#automatic-tuning) made, linked to the Router learned page, where each one can be undone.

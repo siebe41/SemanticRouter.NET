@@ -114,6 +114,8 @@ public sealed class UsageAndTelemetryTests : RouterHostTest
             {
                 o.Models.Add(Model("native", 5, costPerMillion: 10m, connector: "anthropic-native"));
                 o.Models.Add(Model("reference", 5, costPerMillion: 100m, connector: "anthropic-native") is { } r ? Disabled(r) : null!);
+                ModelDefinition subscription = o.Models.Single(m => m.Name == "claude-cli");
+                (subscription.ApiInputCostPerMillionTokens, subscription.ApiOutputCostPerMillionTokens) = (4m, 20m);
             },
             withCli: true);
         Services.GetRequiredService<RouterRuntimeProvider>().Current.Configuration.Usage.ReferenceModel = "reference";
@@ -137,6 +139,7 @@ public sealed class UsageAndTelemetryTests : RouterHostTest
         totals["cacheReadTokens"]!.GetValue<long>().Should().Be(4 + 4 + 100);
         totals["costUsd"]!.GetValue<decimal>().Should().Be(entries.Sum(e => e.CostUsd ?? 0));
         totals["referenceCostUsd"]!.GetValue<decimal>().Should().Be((15 + 15 + 127 + 15) * 100m / 1_000_000m, "every request priced at the reference model; it has no cache prices, so cache tokens cost its input price");
+        totals["subscriptionValueUsd"]!.GetValue<decimal>().Should().Be(((12 * 4m) + (3 * 20m)) / 1_000_000m, "the subscription's use at its API prices, apart from spend");
         usage["groups"]!.AsArray().Select(g => g!["key"]!.GetValue<string>()).Should().BeEquivalentTo("local", "cloud", "native", "claude-cli");
     }
 

@@ -1,0 +1,12 @@
+{
+  "voice": "af_heart",
+  "lines": {
+    "hook": "Most of what you ask an AI doesn't need the most expensive model. So why pay for it?",
+    "intro": "Semantic Router dot net sends every prompt to the cheapest model that can handle it. A local model, your subscription, or a paid API.",
+    "hello": "Ask Claude Code something simple, and a free local model answers. It never leaves your machine.",
+    "code": "A quick coding task? The local coder takes it.",
+    "hard": "But a hard debugging question goes to Claude, where your subscription is worth spending.",
+    "limit": "Hit your session limit, and you keep working on your local models. You don't change a thing.",
+    "end": "Semantic Router dot net. Open source, one command to install. Stop paying frontier prices for small prompts."
+  }
+}

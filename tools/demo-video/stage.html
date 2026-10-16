@@ -1,0 +1,326 @@
+<!doctype html>
+<!-- The demo video's stage: two real terminals (xterm.js, fed by record.js from real ptys), the router's live dashboard
+     in a browser window, captions, and the title and end cards. record.js drives it through window.stage. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SemanticRouter.NET demo</title>
+<link rel="stylesheet" href="/node_modules/@xterm/xterm/css/xterm.css">
+<style>
+  :root {
+    --bg: #111619; --bg-elevated: #181d21; --bg-sunken: #0c1013; --border: #283138; --border-strong: #37434c;
+    --text: #e8edf0; --text-muted: #94a3ac; --text-faint: #788892;
+    --accent: #228fa7; --accent-ink: #2bb0cc; --signal: #d08c34; --signal-ink: #e3a24f; --danger: #ea696e; --info: #899ca5;
+    --font-heading: "Inter", system-ui, sans-serif; --font-mono: "DejaVu Sans Mono", "Liberation Mono", monospace;
+  }
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; }
+  body { background: radial-gradient(1400px 800px at 50% 35%, #15222a 0%, var(--bg-sunken) 75%); font-family: var(--font-heading); color: var(--text); }
+
+  .win {
+    position: absolute; display: flex; flex-direction: column; overflow: hidden;
+    background: var(--bg-sunken); border: 1px solid var(--border-strong); border-radius: 12px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+    transition: left 800ms cubic-bezier(.2,.8,.2,1), top 800ms cubic-bezier(.2,.8,.2,1), width 800ms cubic-bezier(.2,.8,.2,1),
+      height 800ms cubic-bezier(.2,.8,.2,1), opacity 600ms ease, transform 800ms cubic-bezier(.2,.8,.2,1), filter 600ms ease;
+  }
+  .win .bar { flex: 0 0 38px; display: flex; align-items: center; gap: 8px; padding: 0 14px; background: #161c20; border-bottom: 1px solid var(--border); font-size: 14px; color: var(--text-muted); }
+  .win .bar i { width: 12px; height: 12px; border-radius: 50%; background: #3a454d; }
+  .win .bar span { flex: 1; text-align: center; margin-right: 52px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .win .bar .url { flex: 1; margin: 0 40px 0 12px; text-align: left; background: var(--bg-sunken); border: 1px solid var(--border); border-radius: 7px; padding: 4px 12px; font-family: var(--font-mono); font-size: 13px; }
+  .win .body { position: relative; flex: 1; overflow: hidden; }
+  .scaler { position: absolute; left: 0; top: 0; width: max-content; transform-origin: 0 0; transition: transform 800ms cubic-bezier(.2,.8,.2,1); }
+  .term .scaler { padding: 14px 16px; }
+  .xterm .xterm-viewport { overflow: hidden !important; background: transparent !important; }
+  iframe { border: 0; background: var(--bg); display: block; }
+  .off { opacity: 0; pointer-events: none; }
+  .behind { opacity: 0.35; transform: scale(0.97); filter: blur(1px); }
+
+  #caption {
+    position: absolute; z-index: 6; left: 24px; right: 24px; bottom: 22px; height: 112px; box-sizing: border-box; padding: 18px 28px;
+    background: rgba(12, 16, 19, 0.95); border: 1px solid var(--border-strong); border-radius: 14px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); transition: opacity 400ms ease, transform 400ms ease;
+  }
+  #caption.hidden { opacity: 0; transform: translateY(18px); }
+  #caption .headline { font-size: 32px; font-weight: 650; letter-spacing: -0.01em; }
+  #caption .sub { margin-top: 10px; font-family: var(--font-mono); font-size: 19px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity 300ms ease; }
+  #caption .sub.in { opacity: 1; }
+  #caption .local { color: var(--accent-ink); font-weight: 700; }
+  #caption .cloud { color: var(--signal-ink); font-weight: 700; }
+  #caption .fail { color: var(--danger); text-decoration: line-through; }
+  #caption .tag { display: inline-block; margin-left: 12px; padding: 1px 10px; border-radius: 6px; border: 1px solid var(--border-strong); color: var(--text); font-size: 16px; }
+  #caption .tag.local { border-color: var(--accent); }
+  #caption .tag.cloud { border-color: var(--signal); }
+
+  #card {
+    position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 30px;
+    background: radial-gradient(1200px 650px at 50% 40%, #16232a 0%, var(--bg-sunken) 72%); text-align: center; transition: opacity 800ms ease;
+  }
+  #card.hidden { opacity: 0; pointer-events: none; }
+  #card .brand { display: flex; align-items: center; gap: 26px; }
+  #card .brand svg { width: 96px; height: 96px; }
+  #card .name { font-size: 80px; font-weight: 700; letter-spacing: -0.025em; }
+  #card .name span { color: var(--accent); }
+  #card .tagline { font-size: 38px; font-weight: 500; line-height: 1.3; }
+  #card .row { display: flex; gap: 22px; }
+  #card .pill { padding: 20px 28px; border-radius: 14px; border: 1px solid var(--border-strong); background: var(--bg-elevated); min-width: 300px; text-align: left; }
+  #card .pill b { display: block; font-size: 25px; margin-bottom: 8px; }
+  #card .pill small { font-size: 18px; color: var(--text-muted); }
+  #card .pill.l { border-top: 4px solid var(--accent); } #card .pill.s { border-top: 4px solid var(--signal); } #card .pill.a { border-top: 4px solid var(--info); }
+  #card code { display: block; font-family: var(--font-mono); font-size: 30px; text-align: left; line-height: 1.6; background: var(--bg); border: 1px solid var(--border-strong); border-radius: 12px; padding: 22px 36px; }
+  #card code .p { color: var(--signal-ink); } #card code .c { color: var(--text-faint); }
+  #card .url { font-size: 32px; color: var(--accent-ink); font-weight: 600; }
+  #card .muted { font-size: 24px; color: var(--text-muted); }
+  #card .fade { opacity: 0; transform: translateY(14px); transition: opacity 700ms ease, transform 700ms ease; }
+  #card .fade.in { opacity: 1; transform: none; }
+  #card .kicker { font-size: 26px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--signal-ink); }
+  #card .chapter { display: flex; align-items: center; gap: 36px; text-align: left; }
+  #card .chapter .n { font-size: 150px; font-weight: 700; color: var(--accent); line-height: 1; }
+  #card .chapter .t { font-size: 64px; font-weight: 700; letter-spacing: -0.02em; }
+  #card .chapter .s { font-size: 28px; color: var(--text-muted); margin-top: 10px; }
+  #card .diagram { display: flex; align-items: center; gap: 22px; }
+  #card .diagram .node { position: relative; width: 300px; padding: 26px 24px; border-radius: 16px; border: 1px solid var(--border-strong); background: var(--bg-elevated); text-align: left; }
+  #card .diagram .node b { display: block; font-size: 28px; margin-bottom: 10px; }
+  #card .diagram .node small { display: block; font-size: 20px; color: var(--text-muted); line-height: 1.45; }
+  #card .diagram .q { border-top: 4px solid var(--accent); }
+  #card .diagram .model { border-top: 4px solid var(--signal); width: 260px; }
+  #card .diagram .prompt { width: 260px; }
+  #card .diagram .qn { position: absolute; top: -22px; left: 20px; width: 40px; height: 40px; border-radius: 50%; background: var(--accent); color: #0a1114; font-weight: 700; font-size: 22px; display: flex; align-items: center; justify-content: center; }
+  #card .diagram .ans { margin-top: 14px; font-family: var(--font-mono); font-size: 19px; color: var(--accent-ink); }
+  #card .diagram .arrow { font-size: 44px; color: var(--text-faint); }
+
+  /* The vertical (9:16) stage, stage.html?vertical: one window in the middle of the frame, a headline above it, the
+     routing decision and large word-by-word captions below it, all inside the area Shorts and Reels leave clear. */
+  html.v, html.v body { width: 1080px; height: 1920px; }
+  html.v body { background: radial-gradient(1000px 1400px at 50% 38%, #15222a 0%, var(--bg-sunken) 75%); }
+  #vtop, #vchip, #vsay { display: none; }
+  html.v #vtop, html.v #vchip, html.v #vsay { display: block; }
+  html.v #caption { display: none; }
+  #vtop { position: absolute; z-index: 6; top: 196px; left: 50px; right: 50px; text-align: center; }
+  #vtop .brand { font-size: 30px; font-weight: 600; color: var(--text-muted); letter-spacing: -0.01em; }
+  #vtop .brand b { color: var(--accent-ink); font-weight: 600; }
+  #vtop .headline { margin-top: 18px; font-size: 54px; line-height: 1.12; font-weight: 700; letter-spacing: -0.02em; min-height: 121px; transition: opacity 300ms ease; }
+  #vtop .headline.out { opacity: 0; }
+  #vchip { position: absolute; z-index: 6; top: 1262px; left: 40px; right: 40px; text-align: center; font-family: var(--font-mono); opacity: 0; transform: translateY(12px); transition: opacity 350ms ease, transform 350ms ease; }
+  #vchip.in { opacity: 1; transform: none; }
+  #vchip b { display: block; font-size: 36px; font-weight: 700; }
+  #vchip small { display: block; margin-top: 8px; font-size: 26px; color: var(--text-muted); }
+  #vchip .local { color: var(--accent-ink); } #vchip .cloud { color: var(--signal-ink); } #vchip .fail { color: var(--danger); text-decoration: line-through; font-weight: 400; }
+  #vsay { position: absolute; z-index: 11; top: 1392px; left: 60px; right: 60px; height: 150px; display: flex; align-items: center; justify-content: center; text-align: center;
+    font-size: 60px; line-height: 1.15; font-weight: 750; letter-spacing: -0.01em; color: #fff; text-shadow: 0 3px 0 #000, 0 0 18px rgba(0,0,0,.9); }
+  #vsay span { transition: color 120ms ease; }
+  #vsay span.on { color: var(--signal-ink); }
+  html.v #card { gap: 44px; padding: 0 60px; }
+  html.v #card .name { font-size: 76px; }
+  html.v #card .brand svg { width: 84px; height: 84px; }
+  html.v #card .tagline { font-size: 56px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; }
+  html.v #card .row { flex-direction: column; gap: 18px; width: 760px; }
+  html.v #card .pill b { font-size: 32px; } html.v #card .pill small { font-size: 24px; }
+  html.v #card code { font-size: 29px; padding: 22px 30px; }
+  html.v #card .url { font-size: 34px; } html.v #card .muted { font-size: 28px; }
+  /* The short's hook: a small prompt, the model it would go to, and the one it should. */
+  #card .bubble { font-family: var(--font-mono); font-size: 38px; padding: 22px 34px; border-radius: 16px; border: 1px solid var(--border-strong); background: var(--bg); }
+  #card .bubble .p { color: var(--signal-ink); }
+  #card .down { font-size: 48px; line-height: 1; color: var(--text-faint); }
+  #card .pick { width: 640px; padding: 22px 28px; border-radius: 16px; border: 1px solid var(--border-strong); background: var(--bg-elevated); }
+  #card .pick b { display: block; font-size: 40px; transition: color 300ms ease; }
+  #card .pick small { display: block; margin-top: 6px; font-size: 26px; color: var(--text-muted); }
+  #card .pick.cloud { border-top: 4px solid var(--signal); } #card .pick.local { border-top: 4px solid var(--accent); }
+  #card .pick.local b { color: var(--accent-ink); }
+  #card .pick.struck { opacity: 0.55; transition: opacity 400ms ease; }
+  #card .pick.struck b { text-decoration: line-through 4px var(--danger); }
+  #card > * { transition: opacity 250ms ease; }
+  #card.swap > * { opacity: 0 !important; }
+</style>
+</head>
+<body>
+  <div class="win term off" id="w-router"><div class="bar"><i></i><i></i><i></i><span>~/billing — bash</span></div><div class="body"><div class="scaler"><div id="t-router"></div></div></div></div>
+  <div class="win term off" id="w-claude"><div class="bar"><i></i><i></i><i></i><span>~/billing — claude</span></div><div class="body"><div class="scaler"><div id="t-claude"></div></div></div></div>
+  <div class="win off" id="w-dash"><div class="bar"><i></i><i></i><i></i><div class="url">localhost:5080/router/#/live</div></div><div class="body"><div class="scaler"><iframe id="dash" src="about:blank"></iframe></div></div></div>
+  <div id="caption" class="hidden"><div class="headline"></div><div class="sub"></div></div>
+  <div id="vtop"><div class="brand">SemanticRouter<b>.NET</b></div><div class="headline"></div></div>
+  <div id="vchip"></div>
+  <div id="vsay"></div>
+  <div id="card"></div>
+
+<script src="/node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script>
+  const logo = '<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="6" fill="#0c1013"/>'
+    + '<path d="M6 16h8l4-8 4 16 4-8h0" fill="none" stroke="#228fa7" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>'
+    + '<circle cx="26" cy="16" r="2.8" fill="#d08c34"/></svg>';
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const $ = (id) => document.getElementById(id);
+
+  const theme = {
+    background: 'rgba(0,0,0,0)', foreground: '#e8edf0', cursor: '#2bb0cc', cursorAccent: '#0c1013', selectionBackground: '#28485288',
+    black: '#1b2227', red: '#ea696e', green: '#a4d037', yellow: '#e3a24f', blue: '#4ea8de', magenta: '#c792ea', cyan: '#2bb0cc', white: '#d5dde2',
+    brightBlack: '#5c6b74', brightRed: '#ff8a8f', brightGreen: '#bfe85a', brightYellow: '#f5c06f', brightBlue: '#7cc4f2', brightMagenta: '#ddb3f5', brightCyan: '#5fd3ea', brightWhite: '#ffffff',
+  };
+  const terms = {};
+
+  // Window placement per layout: [left, top, width, height] or 'off' / 'behind'.
+  const layouts = {
+    blank:   { router: 'off', claude: 'off', dash: 'off' },
+    setup:   { router: [190, 50, 1540, 860], claude: 'off', dash: 'off' },
+    connect: { router: [190, 50, 1540, 860, 'behind'], claude: [300, 90, 1320, 820], dash: 'off' },
+    split:   { router: [190, 50, 1540, 860, 'off'], claude: [24, 24, 1010, 892], dash: [1058, 24, 838, 892, 1180] },
+    // The dashboard on its own, with Claude Code waiting off to the left.
+    dash:    { router: [190, 50, 1540, 860, 'off'], claude: [-1010, 24, 1010, 892, 'off'], dash: [24, 24, 1872, 892, 1440] },
+    // The same, drawn larger (the page is laid out 1200 px wide), for forms people should be able to read.
+    zoom:    { router: [190, 50, 1540, 860, 'off'], claude: [-1010, 24, 1010, 892, 'off'], dash: [24, 24, 1872, 892, 1200] },
+    // The vertical stage: Claude Code alone, full width.
+    vterm:   { router: 'off', claude: [30, 420, 1020, 818], dash: 'off' },
+  };
+  const vertical = new URLSearchParams(location.search).has('vertical');
+  if (vertical) document.documentElement.classList.add('v');
+
+  function place(win, spec) {
+    win.classList.toggle('off', spec === 'off' || spec[4] === 'off');
+    win.classList.toggle('behind', spec[4] === 'behind');
+    if (!Array.isArray(spec)) return;
+    const [left, top, width, height, pageWidth] = spec;
+    Object.assign(win.style, { left: left + 'px', top: top + 'px', width: width + 'px', height: height + 'px' });
+    const body = { w: width - 2, h: height - 40 };
+    const scaler = win.querySelector('.scaler');
+    if (win.id === 'w-dash') {
+      const logical = pageWidth || 1440;
+      const scale = body.w / logical;
+      const frame = $('dash');
+      frame.style.width = logical + 'px';
+      frame.style.height = Math.ceil(body.h / scale) + 'px';
+      scaler.style.transform = `scale(${scale})`;
+    } else {
+      const natural = { w: scaler.offsetWidth, h: scaler.offsetHeight };
+      const scale = Math.min(body.w / natural.w, body.h / natural.h);
+      scaler.style.transform = `scale(${scale})`;
+    }
+  }
+
+  window.stage = {
+    /** Creates the xterm for a shell; kit.js sizes the pty to match. */
+    terminal(id, cols, rows) {
+      const term = new Terminal({ cols, rows, fontFamily: 'DejaVu Sans Mono, monospace', fontSize: 16, lineHeight: 1.12, theme, allowTransparency: true, scrollback: 0, cursorBlink: false });
+      term.open($('t-' + id));
+      terms[id] = term;
+    },
+    write(id, data) { terms[id].write(data); },
+    screen(id) {
+      const b = terms[id].buffer.active; const lines = [];
+      for (let i = 0; i < terms[id].rows; i++) lines.push(b.getLine(b.viewportY + i)?.translateToString(true) ?? '');
+      return lines.join('\n');
+    },
+    layout(name) {
+      const l = layouts[name];
+      place($('w-router'), l.router); place($('w-claude'), l.claude); place($('w-dash'), l.dash);
+    },
+    dash(url) { $('dash').src = url; $('w-dash').querySelector('.url').textContent = url.replace(/^https?:\/\//, ''); },
+    /** The address bar only, for navigation inside the dashboard. */
+    url(url) { $('w-dash').querySelector('.url').textContent = url.replace(/^https?:\/\//, ''); },
+    async caption(headline, sub) {
+      if (vertical) {
+        const h = $('vtop').querySelector('.headline');
+        if (h.textContent !== headline) { h.classList.add('out'); await sleep(300); h.textContent = headline; h.classList.remove('out'); }
+        $('vchip').classList.remove('in');
+        if (sub) { await sleep(350); $('vchip').innerHTML = sub; $('vchip').classList.add('in'); }
+        return;
+      }
+      const c = $('caption');
+      c.querySelector('.headline').textContent = headline;
+      const s = c.querySelector('.sub'); s.classList.remove('in'); s.innerHTML = '';
+      c.classList.remove('hidden');
+      if (sub) { s.innerHTML = sub; await sleep(30); s.classList.add('in'); }
+    },
+    sub(html) {
+      if (vertical) { $('vchip').innerHTML = html; $('vchip').classList.add('in'); return; }
+      const s = $('caption').querySelector('.sub'); s.innerHTML = html; s.classList.add('in');
+    },
+    hideCaption() {
+      $('caption').classList.add('hidden');
+      $('vtop').querySelector('.headline').classList.add('out'); $('vchip').classList.remove('in');
+    },
+    /**
+     * Captions that follow the voice: phrases of a few words, [[words, [[start, end], ...]], ...] with times in seconds
+     * from now; each phrase shows from its first word until the next phrase, the word being spoken in colour.
+     */
+    speak(phrases) {
+      const box = $('vsay');
+      const t0 = performance.now();
+      const token = box.dataset.token = String(t0);
+      const at = (s, fn) => setTimeout(() => { if (box.dataset.token === token) fn(); }, Math.max(0, t0 + s * 1000 - performance.now()));
+      phrases.forEach(([words, times], p) => {
+        at(times[0][0], () => { box.dataset.phrase = `${token}:${p}`; box.innerHTML = words.map((w) => `<span>${w}</span>`).join(' '); });
+        words.forEach((_, i) => at(times[i][0], () => box.querySelectorAll('span').forEach((s, j) => s.classList.toggle('on', j === i))));
+        const next = phrases[p + 1];
+        const until = next ? Math.min(next[1][0][0], times[times.length - 1][1] + 0.6) : times[times.length - 1][1] + 0.5;
+        at(until, () => { if (box.dataset.phrase === `${token}:${p}`) box.innerHTML = ''; });
+      });
+    },
+    /** The opening card; a video can give its own tagline and kicker (e.g. "Deep dive"). */
+    async title(tagline = 'Every prompt goes to the cheapest model<br>that can answer it.', kicker = '', pills = true) {
+      $('card').innerHTML = `
+        ${kicker ? `<div class="kicker fade">${kicker}</div>` : ''}
+        <div class="brand">${logo}<div class="name">SemanticRouter<span>.NET</span></div></div>
+        <div class="tagline fade">${tagline}</div>
+        ${pills ? `
+        <div class="row">
+          <div class="pill l fade"><b>Local models</b><small>LM Studio · Ollama · vLLM</small></div>
+          <div class="pill s fade"><b>Your subscriptions</b><small>Claude Code · Copilot · Codex</small></div>
+          <div class="pill a fade"><b>Paid APIs</b><small>OpenAI · Anthropic · Gemini</small></div>
+        </div>` : ''}`;
+      $('card').classList.remove('hidden');
+      for (const el of $('card').querySelectorAll('.fade')) { await sleep(700); el.classList.add('in'); }
+    },
+    async end(next = '') {
+      $('card').innerHTML = `
+        <div class="brand">${logo}<div class="name">SemanticRouter<span>.NET</span></div></div>
+        ${next ? `<div class="muted fade">${next}</div>` : ''}
+        <code class="fade"><span class="p">$</span> dotnet tool install -g SemanticRouter.Host<br><span class="p">$</span> semantic-router init<br><span class="p">$</span> semantic-router</code>
+        <div class="url fade">github.com/siebe41/SemanticRouter.NET</div>
+        <div class="muted fade">Open source · MIT · .NET 10</div>`;
+      $('card').classList.remove('hidden');
+      for (const el of $('card').querySelectorAll('.fade')) { await sleep(900); el.classList.add('in'); }
+    },
+    hideCard() { $('card').classList.add('hidden'); },
+    /**
+     * A card of the video's own (a "{logo}" in it becomes the logo), shown with its .fade parts hidden until reveal()
+     * brings them in one at a time; a card already up fades out first.
+     */
+    async card(html) {
+      const c = $('card');
+      if (!c.classList.contains('hidden') && c.children.length) { c.classList.add('swap'); await sleep(260); }
+      c.innerHTML = html.replaceAll('{logo}', logo);
+      c.classList.remove('hidden');
+      c.getBoundingClientRect();
+      c.classList.remove('swap');
+    },
+    /** Fades in the n-th hidden part of the card (from 0). */
+    reveal(n) { $('card').querySelectorAll('.fade')[n]?.classList.add('in'); },
+    /** Adds a class to a part of the card, e.g. to strike it out. */
+    mark(selector, cls) { $('card').querySelector(selector)?.classList.add(cls); },
+
+    /** A full-screen chapter card: number and title. */
+    async chapter(n, title, sub = '') {
+      $('card').innerHTML = `<div class="chapter fade"><span class="n">${n}</span><div><div class="t">${title}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div></div>`;
+      $('card').classList.remove('hidden');
+      await sleep(250); $('card').querySelector('.fade').classList.add('in');
+    },
+
+    /** The two questions every request gets, as a diagram that builds up step by step. */
+    async diagram() {
+      $('card').innerHTML = `
+        <div class="diagram">
+          <div class="node prompt fade"><b>Prompt</b><small>“find the memory leak<br>in the cache service”</small></div>
+          <div class="arrow fade">→</div>
+          <div class="node q fade"><span class="qn">1</span><b>What does it need?</b><small>route · similarity<br>complexity · tools · images</small><div class="ans">tier 4 · code</div></div>
+          <div class="arrow fade">→</div>
+          <div class="node q fade"><span class="qn">2</span><b>Who should answer?</b><small>catalog · strategy<br>cooldowns · privacy</small><div class="ans">cheapest capable</div></div>
+          <div class="arrow fade">→</div>
+          <div class="node model fade"><b>claude-opus</b><small>tier 4 · Claude subscription</small></div>
+        </div>`;
+      $('card').classList.remove('hidden');
+      for (const el of $('card').querySelectorAll('.fade')) { await sleep(800); el.classList.add('in'); }
+    },
+  };
+  stage.layout('blank');
+</script>
+</body>
+</html>

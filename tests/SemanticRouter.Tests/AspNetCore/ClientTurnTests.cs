@@ -171,6 +171,20 @@ public sealed class ClientTurnTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_long_system_prompt_that_quotes_a_clients_wording_is_an_ordinary_request()
+    {
+        HttpClient client = await StartDispatchAsync();
+        ClassifyAs(tier: 4, route: "complex-code");
+        // Project docs an agent carries, which happen to describe Codex's compaction request.
+        string system = ClaudeCodeSystem + "\n\n# Project notes\n" + string.Concat(Enumerable.Repeat("The router forwards each request to the model the classifier picks. ", 40))
+            + "\nCodex's local compaction request (a \"context checkpoint compaction\" asking for a handoff summary for another LLM) is recognised.";
+
+        (string tier, string reason) = await RouteAsync(client, "/v1/messages", Anthropic(system, ("user", "the invoice job deadlocks under load, find the root cause")));
+
+        (tier, reason).Should().Be(("4", "SemanticMatch"));
+    }
+
+    [Fact]
     public async Task Ordinary_requests_for_a_title_or_a_summary_are_classified_as_usual()
     {
         HttpClient client = await StartDispatchAsync();

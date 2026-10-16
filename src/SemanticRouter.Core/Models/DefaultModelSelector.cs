@@ -16,16 +16,23 @@ public sealed class DefaultModelSelector : IModelSelector
     private readonly ModelSelectionOptions _options;
     private readonly IModelLatency? _latency;
     private readonly IModelCacheShare? _cache;
+    private readonly IModelResidency? _residency;
 
     /// <summary>Creates a selector.</summary>
     /// <param name="options">The selection settings.</param>
     /// <param name="latency">Recent time to first byte per model, for <see cref="SelectionStrategy.Fastest"/> and <see cref="SelectionStrategy.Balanced"/>.</param>
     /// <param name="cache">Recent prompt-cache shares per model and route, for cost estimates; without it, list prices.</param>
-    public DefaultModelSelector(ModelSelectionOptions? options = null, IModelLatency? latency = null, IModelCacheShare? cache = null)
+    /// <param name="residency">Which local models are loaded now, for <see cref="SelectionStrategy.CheapestCapable"/>.</param>
+    public DefaultModelSelector(
+        ModelSelectionOptions? options = null,
+        IModelLatency? latency = null,
+        IModelCacheShare? cache = null,
+        IModelResidency? residency = null)
     {
         _options = options ?? new ModelSelectionOptions();
         _latency = latency;
         _cache = cache;
+        _residency = residency;
     }
 
     /// <inheritdoc />
@@ -58,6 +65,8 @@ public sealed class DefaultModelSelector : IModelSelector
             (meets ? meeting : below).Add(candidate);
         }
 
+        // Whether a local model is loaded only matters when there are two to choose between.
+        IModelResidency? residency = meeting.Count(c => Spend(c) == Spending.Nothing) > 1 ? _residency : null;
         IEnumerable<ModelCandidate> ordered = (requirements.Strategy ?? _options.Strategy) switch
         {
             SelectionStrategy.MostCapable => meeting
@@ -70,7 +79,11 @@ public sealed class DefaultModelSelector : IModelSelector
                 .OrderBy(c => latency[c.Model] <= latency.Values.Min() * _options.BalancedLatencyFactor ? 0 : 1)
                 .ThenBy(c => c.EstimatedCost).ThenBy(c => latency[c.Model]).ThenBy(c => c.Model.Tier).ThenBy(c => c.Model.Priority),
             _ => meeting
-                .OrderBy(c => c.EstimatedCost).ThenBy(c => c.Model.Tier).ThenBy(c => c.Model.Priority),
+                .OrderBy(Spend)
+                .ThenBy(c => Spend(c) == Spending.Nothing && residency?.IsLoaded(c.Model) != true ? 1 : 0)
+                .ThenBy(c => c.EstimatedCost)
+                .ThenBy(c => Spend(c) == Spending.Nothing ? -c.Model.Tier : c.Model.Tier)
+                .ThenBy(c => c.Model.Priority),
         };
 
         var result = ordered.ToList();
@@ -82,6 +95,13 @@ public sealed class DefaultModelSelector : IModelSelector
 
         return result;
     }
+
+    /// <summary>
+    /// What a request to the model uses up, cheapest first: nothing (a free local model), quota (a free model elsewhere,
+    /// such as a subscription CLI, whose limit it draws down), or money.
+    /// </summary>
+    private static Spending Spend(ModelCandidate candidate) =>
+        candidate.EstimatedCost > 0 ? Spending.Money : candidate.Model.IsLocal ? Spending.Nothing : Spending.Quota;
 
     /// <summary>
     /// Each candidate's typical time to first byte; one without enough recent turns gets the median of the others, so
@@ -103,5 +123,12 @@ public sealed class DefaultModelSelector : IModelSelector
 
         TimeSpan typical = values.Length % 2 == 1 ? values[values.Length / 2] : (values[(values.Length / 2) - 1] + values[values.Length / 2]) / 2;
         return known.ToDictionary(k => k.Key, k => k.Value ?? typical);
+    }
+
+    private enum Spending
+    {
+        Nothing,
+        Quota,
+        Money,
     }
 }

@@ -1,0 +1,11 @@
+{
+  "lines": {
+    "title": "When your AI tools read your notes, where does that text go? The router can tell you, request by request.",
+    "map": "Point it at your notes: an Obsidian vault here, or Claude Code's own memory. It maps every note and every link, the way Obsidian's graph view does.",
+    "local": "Ask Claude Code about the billing migration, and it reads that note. A local model answers, so the note stays on this machine. The live page shows exactly that.",
+    "cloud": "Now ask Opus to review the plan, and the note goes along with the conversation. The map marks it: this note has been sent to the cloud.",
+    "secret": "We don't recommend putting secrets in your prompts. But if one slips in, and secret detection is on, the conversation automatically stays local, even if you ask for Opus.",
+    "audit": "And every request is on the record. The activity log shows which notes each request carried, and which ones a credential kept local.",
+    "end": "Semantic Router dot net. Know what leaves your machine. It's open source, and MIT licensed."
+  }
+}

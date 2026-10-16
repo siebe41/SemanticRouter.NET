@@ -38,7 +38,8 @@ Everything on this page can also be edited in the [dashboard](dashboard.md), wit
 - **Tiers** can be named under `SemanticRouter:Tiers` (`{ "Level": 4, "Name": "Frontier", "Description": "…" }`). Names are for people and the dashboard; routing compares the numbers.
 - **Costs** are *marginal* USD per million tokens:
   - Local models and flat-rate subscriptions are `0`. The router learns about quota exhaustion from the error messages and cools those models down.
-  - With `CheapestCapable`, `0`-cost models win whenever they qualify, and ties go to the lowest sufficient tier.
+  - A subscription can also carry the provider's API prices (`ApiInputCostPerMillionTokens`, `ApiOutputCostPerMillionTokens`): its use is then shown on the Usage page at those prices, apart from spend. See [observability](observability.md).
+  - With `CheapestCapable`, `0`-cost models win whenever they qualify. Local ones (`IsLocal`) come first, the ones loaded now before ones that would have to load (the router asks LM Studio and Ollama), then the most capable. A `0`-cost model that is not local, such as a subscription, uses up quota, so it comes next, lowest sufficient tier first.
   - To prefer one free option over another, use `Priority` (lower wins).
 - **ContextWindow** stops a request from going to a model that cannot hold it. Set it for local models in particular; it should match the context length you loaded the model with.
 - **IsLocal** marks models whose prompts stay on your machine. Only these can serve `LocalOnly` routes.

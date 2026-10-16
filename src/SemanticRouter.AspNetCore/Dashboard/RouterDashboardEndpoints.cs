@@ -440,7 +440,7 @@ public static partial class RouterDashboardEndpoints
                 since, until, grouping, usage.ReferenceModel, ledger.Total(since, until), ledger.Summarize(since, until, grouping, zone), budgets.Status(usage)), ApiJson);
         }).WithMetadata(DashboardMetricsMetadata.Instance);
 
-        api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, CancellationToken cancellationToken) =>
+        api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, IServiceProvider services, CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.Prompt))
             {
@@ -460,7 +460,7 @@ public static partial class RouterDashboardEndpoints
                 runtime, runtime.Router,
                 new PromptRoutingRequest { Prompt = request.Prompt, Strategy = choice.Strategy, RequestedModel = choice.RequestedModel, Profile = profile },
                 cancellationToken).ConfigureAwait(false);
-            return Results.Ok(PromptClassificationResponse.From(plan) with { Callout = callout });
+            return Results.Ok(PromptClassificationResponse.From(plan, services.GetService<IModelResidency>()) with { Callout = callout });
         }).WithMetadata(DashboardWriteMetadata.Instance).Audited("classified a prompt"); // classifying embeds the prompt, which can cost an embedding call
 
         api.MapPost("/health/reset", (IModelHealth health) =>

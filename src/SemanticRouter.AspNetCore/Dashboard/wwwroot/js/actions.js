@@ -6,6 +6,7 @@ import { loadTuning } from './learned.js';
 import { loadReliability } from './reliability.js';
 import { graph, loadMemory, updateMemorySide } from './memory.js';
 import { refreshStatus, render, setConfig } from './shell.js';
+import { loadUsage } from './usage.js';
 
 /* ---------------------------------------------------------------------------------------------
    Actions
@@ -74,7 +75,8 @@ export const actions = {
   },
   'memory-remove'(el) { state.config.Memory.Sources.splice(+el.dataset.index, 1); render(); },
   'trends-window'(el) { state.trends.window = el.dataset.window; state.trends.data = null; render(); },
-  'usage-set'(el) { state.usage[el.dataset.key] = el.dataset.value; state.usage.data = null; render(); },
+  // The figures on screen stay until the new ones arrive, so changing the window or the grouping doesn't blank the page.
+  'usage-set'(el) { state.usage[el.dataset.key] = el.dataset.value; render(); loadUsage(); },
   'budget-add'() { state.config.Usage = state.config.Usage || {}; (state.config.Usage.Budgets = state.config.Usage.Budgets || []).push({ Name: 'budget-' + (state.config.Usage.Budgets.length + 1), Model: null, Connector: null, Period: 'Day', MaxTokens: null, MaxCostUsd: 5 }); render(); },
   'budget-remove'(el) { state.config.Usage.Budgets.splice(+el.dataset.index, 1); render(); },
   async 'audit-load'() { state.audit.entries = null; await loadAudit(); },

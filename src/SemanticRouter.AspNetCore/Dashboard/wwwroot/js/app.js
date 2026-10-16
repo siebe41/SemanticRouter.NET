@@ -58,6 +58,7 @@ document.addEventListener('input', (ev) => {
     $('#save-bar').classList.toggle('hidden', !isDirty());
   }
   if (el.id === 'tester-prompt') state.tester.prompt = el.value;
+  if (el.id === 'tester-model') state.tester.model = el.value; // kept, so a refresh before Classify does not reset it
   if (el.id === 'memory-search') { state.memoryUi.search = el.value; if (graph) graph.redraw(); }
 });
 

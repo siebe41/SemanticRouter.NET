@@ -16,10 +16,53 @@ public class DefaultModelSelectorTests
         new DefaultModelSelector(options).RankCandidates(requirements, Catalog, available).Select(c => c.Model.Name).ToArray();
 
     [Fact]
-    public void Cheapest_capable_prefers_free_models_and_the_lowest_sufficient_tier()
+    public void Cheapest_capable_puts_local_models_first_then_subscriptions_then_paid_models()
     {
         Rank(new ModelRequirements { RequiredTier = 1 })
-            .Should().Equal("local-small", "local-coder", "claude-cli", "api-mini", "api-frontier");
+            .Should().Equal(["local-coder", "local-small", "claude-cli", "api-mini", "api-frontier"],
+                "a local model costs nothing, so the more capable one goes first; a subscription uses quota; an API costs money");
+    }
+
+    [Fact]
+    public void Cheapest_capable_prefers_a_loaded_local_model_to_a_more_capable_one_that_would_have_to_load()
+    {
+        var residency = new Residency(LocalSmall);
+
+        new DefaultModelSelector(residency: residency).RankCandidates(new ModelRequirements { RequiredTier = 1 }, Catalog)
+            .Select(c => c.Model.Name).Should().StartWith(["local-small", "local-coder"]);
+        residency.Loaded.Add(LocalCoder);
+        new DefaultModelSelector(residency: residency).RankCandidates(new ModelRequirements { RequiredTier = 1 }, Catalog)
+            .Select(c => c.Model.Name).Should().StartWith(["local-coder", "local-small"], "both are loaded, so the more capable one wins");
+    }
+
+    [Fact]
+    public void Cheapest_capable_uses_the_lowest_sufficient_subscription_tier_to_save_quota()
+    {
+        ModelDefinition sonnet = Model("claude-sonnet", 3, capabilities: "code");
+        ModelDefinition opus = Model("claude-opus", 4, capabilities: "code");
+
+        new DefaultModelSelector().RankCandidates(new ModelRequirements { RequiredTier = 3 }, [opus, ApiFrontier, sonnet, LocalCoder])
+            .Select(c => c.Model.Name).Should().Equal("claude-sonnet", "claude-opus", "api-frontier", "local-coder");
+    }
+
+    [Fact]
+    public void A_subscription_is_valued_at_its_api_prices_and_nothing_else_is()
+    {
+        ModelDefinition subscription = Model("claude-cli", 4);
+        (subscription.ApiInputCostPerMillionTokens, subscription.ApiOutputCostPerMillionTokens) = (4m, 20m);
+        ModelDefinition paid = Model("api", 4, costPerMillion: 4m);
+        paid.ApiInputCostPerMillionTokens = 4m;
+
+        subscription.ApiValue(1_000_000, 100_000, cacheReadTokens: 1_000_000).Should().Be(4m + 2m + 4m, "cache reads default to the API input price");
+        paid.ApiValue(1_000_000, 0).Should().Be(0m, "a model with a price is spend, not subscription value");
+        LocalSmall.ApiValue(1_000_000, 0).Should().Be(0m);
+    }
+
+    private sealed class Residency(params ModelDefinition[] loaded) : IModelResidency
+    {
+        public HashSet<ModelDefinition> Loaded { get; } = [.. loaded];
+
+        public bool? IsLoaded(ModelDefinition model) => model.IsLocal ? Loaded.Contains(model) : null;
     }
 
     [Fact]

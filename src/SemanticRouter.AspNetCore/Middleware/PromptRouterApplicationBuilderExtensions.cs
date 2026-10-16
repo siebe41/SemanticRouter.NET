@@ -56,7 +56,7 @@ public static class PromptRouterApplicationBuilderExtensions
                     ? await Callouts.RouteAsync(runtime.Current, router, routing, context.RequestAborted).ConfigureAwait(false)
                     : (await router.RouteAsync(routing, context.RequestAborted).ConfigureAwait(false), null);
 
-                return Results.Ok(PromptClassificationResponse.From(plan) with { Callout = callout });
+                return Results.Ok(PromptClassificationResponse.From(plan, context.RequestServices.GetService<IModelResidency>()) with { Callout = callout });
             })
             .WithName("ClassifyPrompt")
             .WithSummary("Routes a prompt and explains the decision without calling a model.")
@@ -171,10 +171,19 @@ public sealed record PromptClassificationResponse(
     public sealed record RouteCandidate(string Route, int Tier, float Similarity);
 
     /// <summary>A ranked model, in the order it would be tried.</summary>
-    public sealed record ModelChoice(string Model, string Connector, int Tier, decimal EstimatedCostUsd, bool MeetsRequiredTier);
+    /// <param name="Model">The catalog name.</param>
+    /// <param name="Connector">The connector that serves it.</param>
+    /// <param name="Tier">Its tier.</param>
+    /// <param name="EstimatedCostUsd">The estimated cost of this request on it.</param>
+    /// <param name="MeetsRequiredTier">Whether its tier is high enough.</param>
+    /// <param name="IsLocal">Whether prompts sent to it stay on infrastructure you control.</param>
+    /// <param name="Loaded">Whether a local model is loaded now (<see cref="IModelResidency"/>); <see langword="null"/>: unknown.</param>
+    public sealed record ModelChoice(string Model, string Connector, int Tier, decimal EstimatedCostUsd, bool MeetsRequiredTier, bool IsLocal = false, bool? Loaded = null);
 
     /// <summary>Projects a <see cref="RoutingPlan"/>.</summary>
-    public static PromptClassificationResponse From(RoutingPlan plan)
+    /// <param name="plan">The plan.</param>
+    /// <param name="residency">Which local models are loaded, to show with them.</param>
+    public static PromptClassificationResponse From(RoutingPlan plan, IModelResidency? residency = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         PromptClassificationResult result = plan.Classification;
@@ -188,7 +197,8 @@ public sealed record PromptClassificationResponse(
             Math.Round(result.Elapsed.TotalMilliseconds, 3),
             result.Complexity,
             result.TopScores.Select(s => new RouteCandidate(s.Route.Name, s.Route.Tier, s.Similarity)).ToArray(),
-            plan.Candidates.Select(c => new ModelChoice(c.Model.Name, c.Model.Connector, c.Model.Tier, c.EstimatedCost, c.MeetsRequiredTier)).ToArray(),
+            plan.Candidates.Select(c => new ModelChoice(
+                c.Model.Name, c.Model.Connector, c.Model.Tier, c.EstimatedCost, c.MeetsRequiredTier, c.Model.IsLocal, residency?.IsLoaded(c.Model))).ToArray(),
             plan.Requirements.Profile);
     }
 }

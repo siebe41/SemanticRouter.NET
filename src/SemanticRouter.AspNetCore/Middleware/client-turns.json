@@ -3,7 +3,8 @@
   // to the configuration file replaces entries by id, adds new ones, or turns one off with "enabled": false.
   // Patterns are .NET regular expressions, matched case-insensitively. Where they are matched depends on the kind:
   //   Warmup: the whole latest user message. Resumed: the start of a session's opening user message, on its first turn.
-  //   Title, Topic, Summary, CommandCheck: anywhere in the latest user message or the system prompt.
+  //   Title, Topic, Summary, CommandCheck: anywhere in the latest user message, or in the first 2,000 characters of the
+  //   system prompt (where a client's own side request puts its instructions).
   "version": 1,
   "turns": [
     {

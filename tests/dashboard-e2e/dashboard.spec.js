@@ -229,6 +229,19 @@ test('the prompt tester classifies and sends a prompt through the gateway', asyn
   await expect(page.locator('.tester')).toContainText('Hello from the stub backend.');
 });
 
+test('a status refresh does not interrupt typing in the prompt tester', async ({ page }) => {
+  await open(page, 'overview');
+  await page.locator('#tester-model').selectOption('auto:best');
+  await page.locator('#tester-prompt').click();
+  await page.keyboard.type('write a regex ');
+  // Wait for the next refresh to re-render the page: the field is then a new element.
+  await page.locator('#tester-prompt').evaluate((e) => { e.dataset.before = 'yes'; });
+  await page.waitForFunction(() => !document.getElementById('tester-prompt').dataset.before, null, { timeout: 15000 });
+  await page.keyboard.type('that matches email addresses');
+  await expect(page.locator('#tester-prompt')).toHaveValue('write a regex that matches email addresses');
+  await expect(page.locator('#tester-model')).toHaveValue('auto:best');
+});
+
 test('the endpoints card and the top bar show the host in use, its state and figures', async ({ page }) => {
   const stub = `127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`;
   await open(page, 'overview');
@@ -247,6 +260,20 @@ test('the endpoints card and the top bar show the host in use, its state and fig
   await row.locator('[data-action="endpoint-check"]').click();
   await expect(row).toContainText('passed');
   await expect(page.locator('#endpoints')).not.toContainText('sk-e2e-not-a-real-key');
+});
+
+test('changing the usage window or grouping keeps the figures until the new ones arrive', async ({ page }) => {
+  await open(page, 'usage');
+  await expect(page.locator('#view .card.stat').first()).toBeVisible();
+  await page.route(/\/router\/api\/usage\?/, async (route) => { await new Promise((r) => setTimeout(r, 700)); await route.continue(); });
+  const byRoute = page.waitForResponse(/\/router\/api\/usage\?window=day&by=route/);
+  await page.click('[data-action="usage-set"][data-key="window"][data-value="day"]');
+  await page.click('[data-action="usage-set"][data-key="by"][data-value="route"]');
+  expect(await page.locator('#view .card.stat').count(), 'the page blanked while loading').toBeGreaterThan(0);
+  await expect(page.locator('#view')).not.toContainText('Loading…');
+  await byRoute;
+  await expect(page.locator('#view h2', { hasText: 'By route' })).toBeVisible();
+  await expect(page.locator('[data-action="usage-set"][data-key="window"][data-value="day"]')).toHaveClass(/\bon\b/);
 });
 
 test('the service card shows where the router runs, the base URLs for clients and its health', async ({ page }) => {

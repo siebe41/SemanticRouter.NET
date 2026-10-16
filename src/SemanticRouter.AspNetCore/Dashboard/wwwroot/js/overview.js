@@ -102,7 +102,7 @@ export function renderClassification(r) {
       <span class="muted small">${num(r.elapsedMilliseconds, 1)} ms</span>
     </div>
     <div class="grid cols-2">
-      <div><h3>Models, in order</h3><ul class="candidates">${r.models.map((m, i) => `<li><span class="faint mono">${i + 1}.</span> <b>${h(m.model)}</b> <span class="tier">T${m.tier}</span> <span class="muted small">${h(m.connector)} · $${num(m.estimatedCostUsd, 5)}</span>${m.meetsRequiredTier ? '' : '<span class="badge warn">below tier</span>'}</li>`).join('') || '<li class="muted">no eligible model</li>'}</ul></div>
+      <div><h3>Models, in order</h3><ul class="candidates">${r.models.map((m, i) => `<li><span class="faint mono">${i + 1}.</span> <b>${h(m.model)}</b> <span class="tier">T${m.tier}</span> <span class="muted small">${h(m.connector)} · ${spend(m)}</span>${m.meetsRequiredTier ? '' : '<span class="badge warn">below tier</span>'}</li>`).join('') || '<li class="muted">no eligible model</li>'}</ul></div>
       <div><h3>Routes</h3><ul class="candidates">${r.routes.map((x) => `<li><b>${h(x.route)}</b> <span class="tier">T${x.tier}</span> <span class="muted small">${num(x.similarity, 3)}</span></li>`).join('') || '<li class="muted">no routes</li>'}</ul>
         <div class="small muted" style="margin-top:6px">signals: length ${num(r.complexity.lengthSignal, 2)} · code ${num(r.complexity.codeSignal, 2)} · structure ${num(r.complexity.structureSignal, 2)} · reasoning ${num(r.complexity.reasoningSignal, 2)} · ~${r.complexity.estimatedTokens} tokens</div></div>
     </div>`;
@@ -124,6 +124,14 @@ export function renderActivityTable(entries, actions) {
       ${actions ? `<td class="nowrap">${e.toolContinuation ? '' : `${readOnly() ? '' : `<button class="btn ghost small" data-action="label-open" data-id="${e.id}" title="Say which tier this prompt should have had">Label</button>`}<button class="btn ghost small" data-action="report-entry" data-id="${e.id}" title="${e.outcome === 'failed' ? 'Report this failure as a GitHub issue' : 'Report a misroute as a GitHub issue, with this decision filled in and the prompt left out'}">Report</button>`}</td>` : ''}
     </tr>`).join('')}
   </table></div>`;
+}
+
+/* What a model in the tester's list uses up: nothing (local, and whether it is loaded), quota (a free model elsewhere, such as a subscription), or money. */
+function spend(m) {
+  if (m.estimatedCostUsd > 0) return '$' + num(m.estimatedCostUsd, 5);
+  if (!m.isLocal) return '<span title="Free per request, but it uses up the subscription\'s quota">subscription</span>';
+  return m.loaded === true ? 'local · <span class="badge ok" title="In memory now: answers without waiting for a load">loaded</span>'
+    : m.loaded === false ? 'local · <span title="Not in memory: the first request waits for it to load">not loaded</span>' : 'local';
 }
 
 const FEEDBACK = {

@@ -7,8 +7,11 @@ namespace SemanticRouter;
 public enum SelectionStrategy
 {
     /// <summary>
-    /// The cheapest model that meets the required tier. Ties go to the <em>lowest</em> sufficient tier (keeping
-    /// premium subscription quota for prompts that need it), then to <see cref="ModelDefinition.Priority"/>. Default.
+    /// The cheapest model that meets the required tier. Free local models come first: one that is loaded now
+    /// (<see cref="IModelResidency"/>) before one that would have to load, then the most capable. Then free models that
+    /// are not local, such as subscription CLIs, whose quota each request uses: the <em>lowest</em> sufficient tier
+    /// first, keeping premium quota for prompts that need it. Then paid models, cheapest first. Remaining ties go to
+    /// <see cref="ModelDefinition.Priority"/>. Default.
     /// </summary>
     CheapestCapable = 0,
 

@@ -5,8 +5,10 @@ import { render } from './shell.js';
 
 /* Usage: what each model, connector, route or client used and cost, and the budgets. */
 export async function loadUsage() {
-  if (state.usage.loading) return;
+  // A change while a load is under way loads again when it finishes, so the last one wins.
+  if (state.usage.loading) { state.usage.again = true; return; }
   state.usage.loading = true;
+  state.usage.again = false;
   const days = { day: 1, week: 7, month: 30, '7d': 7, '30d': 30 }[state.usage.window] || 7;
   try {
     const [usage, feedback] = await Promise.all([
@@ -17,6 +19,7 @@ export async function loadUsage() {
     state.usage.feedback = feedback;
   } catch (e) { toast(e.message, 'danger'); }
   state.usage.loading = false;
+  if (state.usage.again) { loadUsage(); return; }
   if (state.view === 'usage') render();
 }
 export const usd = (v) => '$' + Number(v || 0).toFixed(v && Math.abs(v) < 1 ? 4 : 2);
@@ -58,16 +61,16 @@ views.usage = () => {
     <div class="section-head"><h1>Usage</h1><span class="muted">Tokens the backends reported, and cost at the prices in the model catalog.</span><span class="spacer"></span>
       ${seg('window', [['day', 'Today'], ['week', 'This week'], ['month', 'This month'], ['7d', '7 days'], ['30d', '30 days']])}</div>
     <div class="grid cols-4 section">
-      <div class="card stat"><span class="value">${int(t.requests)}</span><span class="label">requests with usage</span></div>
-      <div class="card stat"><span class="value">${int(t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens)}</span><span class="label">tokens · ${int(t.inputTokens)} in · ${int(t.outputTokens)} out · ${int(t.cacheReadTokens)} cache read · ${int(t.cacheWriteTokens)} cache write · <span title="Prompt tokens served from a prompt cache">${hitRate(t)} cache hits</span></span></div>
-      <div class="card stat"><span class="value">${usd(t.costUsd)}</span><span class="label">at catalog prices (subscriptions and local models count as 0)</span></div>
+      <div class="card stat"><span class="value">${int(t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens)}</span><span class="label">tokens in ${int(t.requests)} requests · ${int(t.inputTokens)} in · ${int(t.outputTokens)} out · ${int(t.cacheReadTokens)} cache read · ${int(t.cacheWriteTokens)} cache write · <span title="Prompt tokens served from a prompt cache">${hitRate(t)} cache hits</span></span></div>
+      <div class="card stat"><span class="value">${usd(t.costUsd)}</span><span class="label">spent, at catalog prices (subscriptions and local models count as 0)</span></div>
+      <div class="card stat"><span class="value">${usd(t.subscriptionValueUsd || 0)}</span><span class="label" title="Not spent: what the requests your subscriptions answered would have cost on the provider's API, for models with API prices set">subscription use at API prices · included in your plan</span></div>
       <div class="card stat"><span class="value">${d.referenceModel ? usd(t.referenceCostUsd - t.costUsd) : '–'}</span><span class="label">${d.referenceModel ? 'saved compared with sending everything to ' + h(d.referenceModel) : 'set Usage → reference model to estimate savings'}</span></div>
     </div>
     ${feedbackCard(u.feedback)}
     ${d.budgets.length ? `<div class="card section"><div class="card-head"><h2>Budgets</h2><span class="muted small">A spent budget's models are not tried until it resets.</span></div><table>${d.budgets.map(budgetRow).join('')}</table></div>` : ''}
     <div class="card section"><div class="card-head"><h2>By ${h(u.by)}</h2><span class="spacer"></span>${seg('by', [['model', 'Model'], ['connector', 'Connector'], ['route', 'Route'], ['client', 'Client'], ['profile', 'Profile'], ['location', 'Local or cloud'], ['day', 'Day']])}</div>
-      <table><tr><th>${h(u.by)}</th><th>Requests</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th title="Prompt tokens served from a prompt cache">Cache hits</th><th>Cost</th><th style="width:30%"></th></tr>
-      ${d.groups.map((g) => { const tk = g.totals.inputTokens + g.totals.outputTokens + g.totals.cacheReadTokens + g.totals.cacheWriteTokens; const share = byCost ? g.totals.costUsd / max : tk / maxTok; return `<tr><td>${h(g.key)}</td><td class="num">${int(g.totals.requests)}</td><td class="num">${int(g.totals.inputTokens)}</td><td class="num">${int(g.totals.outputTokens)}</td><td class="num">${int(g.totals.cacheReadTokens)}</td><td class="num">${int(g.totals.cacheWriteTokens)}</td><td class="num">${hitRate(g.totals)}</td><td class="num">${usd(g.totals.costUsd)}</td><td><div class="bar" title="${byCost ? 'share of cost' : 'share of tokens'}"><i style="width:${Math.round(share * 100)}%"></i></div></td></tr>`; }).join('') || '<tr><td colspan="9" class="muted small">Nothing recorded in this window. Usage appears once backends report tokens (streamed OpenAI pass-through replies only when the client asks for <code>stream_options.include_usage</code>).</td></tr>'}
+      <table><tr><th>${h(u.by)}</th><th>Requests</th><th>Input</th><th>Output</th><th>Cache read</th><th>Cache write</th><th title="Prompt tokens served from a prompt cache">Cache hits</th><th>Cost</th><th title="Subscription use at API prices: not spent">At API prices</th><th style="width:25%"></th></tr>
+      ${d.groups.map((g) => { const tk = g.totals.inputTokens + g.totals.outputTokens + g.totals.cacheReadTokens + g.totals.cacheWriteTokens; const share = byCost ? g.totals.costUsd / max : tk / maxTok; return `<tr><td>${h(g.key)}</td><td class="num">${int(g.totals.requests)}</td><td class="num">${int(g.totals.inputTokens)}</td><td class="num">${int(g.totals.outputTokens)}</td><td class="num">${int(g.totals.cacheReadTokens)}</td><td class="num">${int(g.totals.cacheWriteTokens)}</td><td class="num">${hitRate(g.totals)}</td><td class="num">${usd(g.totals.costUsd)}</td><td class="num">${g.totals.subscriptionValueUsd ? usd(g.totals.subscriptionValueUsd) : '–'}</td><td><div class="bar" title="${byCost ? 'share of cost' : 'share of tokens'}"><i style="width:${Math.round(share * 100)}%"></i></div></td></tr>`; }).join('') || '<tr><td colspan="10" class="muted small">Nothing recorded in this window. Usage appears once backends report tokens (streamed OpenAI pass-through replies only when the client asks for <code>stream_options.include_usage</code>).</td></tr>'}
       </table></div>
     ${metricsOnly() ? '' : `<div class="card section"><div class="card-head"><h2>Settings</h2><span class="muted small">Saved with the configuration.</span></div><div class="form-grid">
       <label class="field"><span class="name">Reference model</span><select data-bind="Usage.ReferenceModel" data-kind="nulltext"><option value="">(none)</option>${(state.config.Models || []).map((m) => `<option ${m.Name === (state.config.Usage || {}).ReferenceModel ? 'selected' : ''}>${h(m.Name)}</option>`).join('')}</select><span class="hint">Its prices are the yardstick for "saved".</span></label>

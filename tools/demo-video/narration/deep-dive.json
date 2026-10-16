@@ -1,0 +1,20 @@
+{
+  "lines": {
+    "title": "Let's take a closer look at how Semantic Router dot net decides where each prompt goes, and what happens when something goes wrong.",
+    "two-questions": "Every request comes down to two questions. First: what does this prompt actually need? That's a tier, plus things like code or tools. Second: which of your models is the cheapest one that can handle it?",
+    "routes": "The first answer comes from routes. A route is just a handful of example prompts, plus the tier that kind of request needs. You start with eight of them, from small talk at the bottom, up to debugging and agentic coding at the top.",
+    "tester": "When a prompt comes in, the router compares it with every example. This one is closest to complex code, so it needs tier four, and a model that can write code.",
+    "simple": "Now something smaller: a regular expression for email addresses. That's simple code, so tier two is plenty, and the local coder goes first.",
+    "complex": "Ask for the same thing, but add a list of things to reason through, and the complexity score goes up. Long prompts, code, structure, and phrases like step by step all push it higher. Past a threshold, the prompt moves up a tier.",
+    "tiers": "Your models sit on tiers too. This page shows which routes need each tier, and which models can serve it. If a tier has nothing that can serve it, you'll see it in red.",
+    "strategy": "Then a strategy ranks the models that qualify. The default is cheapest capable. Local models go first, and the most capable one that's already loaded wins, so nothing waits for a model to load. Then your subscriptions, lowest tier first, to save quota. Paid APIs come last. Switch to auto best, and the same prompt goes straight to your strongest model.",
+    "agents": "Coding agents send a lot more than prompts. Every Claude Code turn carries its tools, so only models that can call tools are in the running.",
+    "toolloop": "Here, the local model asks Claude Code to open a file. Claude Code runs the tool, and sends the result back. And the router hands that result to the same model that asked for it, so a turn never gets split between two models.",
+    "callout": "And you can always take over. Start a message with at opus, at local, or at tier two, and the router does exactly that.",
+    "privacy": "Some data should never leave your machine. Turn on secret detection, and once a conversation contains a credential, it stays local. Even if you've asked for Opus.",
+    "failover": "When a model goes down, or runs out of quota, it cools down, and the next one picks up the work. The endpoints table shows what's cooling down, and for how long.",
+    "activity": "Every decision explains itself. The activity log shows the route, the tier, and every model the request was sent to.",
+    "evaluate": "And the evaluate page runs a set of labelled prompts through your configuration. You'll see how often the router gets it right, and exactly where it gets it wrong, before you change anything.",
+    "end": "So that's how a prompt gets routed. Next time, we'll tune it for your own models. Semantic Router dot net is open source, and MIT licensed."
+  }
+}

@@ -59,10 +59,11 @@ public sealed class SqliteStateTests : IDisposable
         }
 
         var ledger = new SqliteUsageLedger(Open());
-        ledger.Record(new UsageRecord(_time.GetUtcNow(), "new", "c", null, null, false, 20, 10, 0, 0, 0.2m, 0.2m, "work"));
+        ledger.Record(new UsageRecord(_time.GetUtcNow(), "new", "c", null, null, false, 20, 10, 0, 0, 0.2m, 0.2m, "work", SubscriptionValueUsd: 0.5m));
 
         DateTimeOffset since = _time.GetUtcNow().AddHours(-1), until = _time.GetUtcNow().AddHours(1);
         ledger.Total(since, until).Requests.Should().Be(2, "the old row survives the migration");
+        ledger.Total(since, until).SubscriptionValueUsd.Should().Be(0.5m, "the old row has no subscription value");
         ledger.Total(since, until, profile: "work").InputTokens.Should().Be(20);
         ledger.Summarize(since, until, UsageGrouping.Profile).Select(g => g.Key).Should().BeEquivalentTo("work", "(no profile)");
         _logs.Messages.Should().NotContain(m => m.Contains("cannot be used", StringComparison.Ordinal));
@@ -359,7 +360,8 @@ public sealed class DurableStateHostTests : RouterHostTest
         Action<StateOptions>? state = null,
         Action<PromptRouterMiddlewareOptions>? middleware = null,
         Action<SemanticRouterOptions>? routing = null,
-        bool withCli = false) =>
+        bool withCli = false,
+        Action<IServiceCollection>? services = null) =>
         StartAsync(
             o =>
             {
@@ -377,6 +379,8 @@ public sealed class DurableStateHostTests : RouterHostTest
                 {
                     s.Configure(state);
                 }
+
+                services?.Invoke(s);
             });
 
     private static StringContent JsonBody(JsonNode node) => new(node.ToJsonString(), Encoding.UTF8, "application/json");
@@ -460,7 +464,9 @@ public sealed class DurableStateHostTests : RouterHostTest
                 judge.Model = "judge-32b";
                 o.Models.Add(judge);
             },
-            withCli: true);
+            withCli: true,
+            // The 32B judge is not loaded, so the small model answers and the judge loads only to grade.
+            services: s => s.AddSingleton<IModelResidency>(new NotLoaded("judge-32b")));
         var events = new StringBuilder();
         using var listening = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         using HttpResponseMessage stream = await off.GetAsync("/router/api/events", HttpCompletionOption.ResponseHeadersRead, listening.Token);
@@ -500,6 +506,11 @@ public sealed class DurableStateHostTests : RouterHostTest
         await listening.CancelAsync();
         await listener;
         Events().Should().Contain("\"grade\":2").And.Contain("exit code 1").And.NotContain("nightingale");
+    }
+
+    private sealed class NotLoaded(string model) : IModelResidency
+    {
+        public bool? IsLoaded(ModelDefinition candidate) => candidate.IsLocal ? candidate.Model != model : null;
     }
 
     private static HttpResponseMessage OpenAIReply(string content) => new(HttpStatusCode.OK)

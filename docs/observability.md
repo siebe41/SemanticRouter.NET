@@ -22,6 +22,14 @@ Every served request records the tokens the backend reported (input, output, pro
 
 Prices come from the catalog: `InputCostPerMillionTokens` and `OutputCostPerMillionTokens`, plus optional `CacheReadCostPerMillionTokens` and `CacheWriteCostPerMillionTokens` (default: the input price). Local models and flat-rate subscriptions are priced at 0.
 
+**Subscription value.** A subscription costs nothing per request, but each request uses up its quota. Give a subscription model the provider's pay-as-you-go prices, `ApiInputCostPerMillionTokens` and `ApiOutputCostPerMillionTokens` (plus optional `ApiCacheReadCostPerMillionTokens` and `ApiCacheWriteCostPerMillionTokens`, default: the API input price), and the Usage page shows its use at those prices: what the plan is worth to you. It is kept apart from spend: it never counts toward cost, budgets or routing. `semantic-router init` and the Models page's Discover fill these in for Claude's models (Claude Code and GitHub Copilot), from Anthropic's list prices.
+
+```jsonc
+{ "Name": "claude-opus", "Connector": "claude-cli", "Model": "opus", "Tier": 4,
+  "ApiInputCostPerMillionTokens": 4, "ApiOutputCostPerMillionTokens": 20,
+  "ApiCacheReadCostPerMillionTokens": 0.4, "ApiCacheWriteCostPerMillionTokens": 5 }
+```
+
 **Saved by routing.** Set `Usage:ReferenceModel` to a catalog model, which may be disabled. The dashboard then shows what each request would have cost at that model's prices, cache reads and writes at its cache prices, minus what it did cost. A cache discount is not counted as a saving: the reference model would have cached the conversation too.
 
 **Prompt-cache hits.** The Usage page shows cache reads and writes separately and a hit rate: cache reads as a share of all prompt tokens (input, cache reads and cache writes), overall and per group. Each activity entry shows its cached tokens.

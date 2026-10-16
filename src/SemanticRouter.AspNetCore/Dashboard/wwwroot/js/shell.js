@@ -1,4 +1,5 @@
 /* Semantic Router dashboard: Loading, the sidebar and top bar, themes, rendering and hash routing. */
+import { loadTrends } from './charts.js';
 import { $, $$, api, banner, h, isDirty, METRICS_VIEWS, metricsOnly, PREFIX, readOnly, state, THEME_KEY, THEMES, views } from './core.js';
 import { loadDigest } from './digest.js';
 import { endpointPill } from './endpoints.js';
@@ -52,7 +53,9 @@ export async function refreshStatus() {
     if (state.view === 'overview' || state.view === 'learned') await loadTuning();
     if (state.view === 'overview') await loadDigest();
     renderChrome();
-    if (state.view === 'overview') { state.trends.data = null; }
+    // Fresh trends in the background: the card keeps its last figures meanwhile, rather than shrinking to "Loading…"
+    // and back, which made the page jump for anyone scrolled down.
+    if (state.view === 'overview') loadTrends();
     if (state.view === 'usage') { loadUsage(); }
     if (state.view === 'overview' || state.view === 'learned' || (state.view === 'activity' && !state.label)) render();
     else if (state.view === 'live') scheduleLive();
@@ -147,16 +150,39 @@ export function render() {
   const staleTip = $('.chart-tip'); if (staleTip) staleTip.classList.add('hidden');
   const view = views[state.view] || views.overview;
   const root = $('#view');
+  const typing = focusedField(root);
   unmount();
   if (!state.config || !state.status) { root.innerHTML = '<div class="muted">Loading…</div>'; return; }
   try {
     root.innerHTML = (state.errors ? `<div class="card section" style="border-color:var(--danger)"><h3>Configuration problems</h3><ul class="errors">${state.errors.map((e) => `<li>${h(e)}</li>`).join('')}</ul></div>` : '') + view();
     if (mounts[state.view]) mounts[state.view]();
+    refocus(root, typing);
   } catch (e) {
     root.innerHTML = `<div class="card"><h3>Could not render</h3><pre>${h(e.stack || e)}</pre></div>`;
   }
   root.classList.toggle('wide', state.view === 'memory' || state.view === 'live');
   renderChrome();
+}
+
+/*
+ * A render replaces every element, and the status refresh renders the Overview every few seconds: without this, a
+ * refresh took the focus from the field being typed in, and the rest of what was typed went nowhere.
+ */
+function focusedField(root) {
+  const el = document.activeElement;
+  if (!el || !root.contains(el) || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return null;
+  const key = el.id ? `#${CSS.escape(el.id)}` : el.dataset.bind ? `[data-bind="${CSS.escape(el.dataset.bind)}"]` : null;
+  if (!key) return null;
+  let start = null; let end = null;
+  try { start = el.selectionStart; end = el.selectionEnd; } catch { /* not a text field */ }
+  return { key, start, end, scrollTop: el.scrollTop };
+}
+function refocus(root, field) {
+  const el = field && root.querySelector(field.key);
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  try { if (field.start != null) el.setSelectionRange(field.start, field.end); } catch { /* not a text field */ }
+  el.scrollTop = field.scrollTop;
 }
 
 export function route() {

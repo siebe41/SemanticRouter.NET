@@ -146,7 +146,7 @@ Eligible models that meet the required tier are ordered by the strategy:
 
 | Strategy | Order | Use it when |
 |---|---|---|
-| `CheapestCapable` *(default)* | estimated cost ↑, then tier ↑, then `Priority` ↑ | you want the cheapest model that is good enough. Ties between free options (local models, flat-rate subscriptions) go to the **lowest sufficient tier**, saving premium quota for prompts that need it. |
+| `CheapestCapable` *(default)* | free local models (loaded ones first, then tier ↓), then free remote models such as subscriptions (tier ↑), then paid models (cost ↑, then tier ↑); then `Priority` ↑ | you want the cheapest model that is good enough. A local model costs nothing, so the most capable one that is already loaded answers, and nothing waits for a model to load. A subscription costs quota, so it comes after local models and its **lowest sufficient tier** goes first, saving premium quota for prompts that need it. |
 | `MostCapable` | tier ↓, then cost ↑ | quality matters more than cost |
 | `Priority` | your `Priority` ↑, then cost ↑ | you want explicit control |
 | `Fastest` | typical time to first byte ↑, then cost ↑ | waiting matters more than cost |
