@@ -340,3 +340,54 @@ test('Usage right-aligns its figures and Memory without sources offers one set o
   await expect(page.locator('[data-action="memory-refresh"]')).toHaveCount(0);
   await expect(page.locator('[data-action="memory-add"][data-type="Markdown"]')).toHaveCount(1);
 });
+
+// The desktop app's window: its web view gives the page invokeCSharpAction(...), and the app hands the page its update
+// state (DesktopBridge in SemanticRouter.Desktop). Here a stand-in records what the page sends.
+const desktopState = (state) => window.dispatchEvent(new CustomEvent('semantic-router-desktop', { detail: (window.semanticRouterDesktop = state) }));
+
+test('in a browser there is no update banner and no About entry', async ({ page }) => {
+  await open(page, 'overview');
+  await page.locator('#more-toggle').click();
+  await expect(page.locator('#theme-select')).toBeVisible();
+  await expect(page.locator('#desktop-about')).toBeHidden();
+  await expect(page.locator('#update-banner')).toBeHidden();
+});
+
+test('in the desktop app the dashboard opens About and offers an update until Not now', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.sent = [];
+    window.invokeCSharpAction = (body) => window.sent.push(JSON.parse(body).action);
+  });
+  const sent = () => page.evaluate(() => window.sent);
+  await open(page, 'overview');
+  expect(await sent()).toEqual(['ready']);
+  const banner = page.locator('#update-banner');
+  await expect(banner).toBeHidden();
+
+  await page.locator('#more-toggle').click();
+  await page.locator('#desktop-about').click();
+  expect(await sent()).toEqual(['ready', 'about']);
+
+  const ready = { offer: '0.6.0', downloading: false, headline: 'Version 0.6.0 is ready to install.', detail: 'It is installed when you quit the app, or now with Restart to update.', canRestart: true };
+  await page.evaluate(desktopState, ready);
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('Version 0.6.0 is ready to install.');
+  await banner.getByRole('button', { name: 'Restart to update' }).click();
+  expect(await sent()).toEqual(['ready', 'about', 'restart-to-update']);
+
+  // Downloading for Restart to update: said, with nothing to press.
+  await page.evaluate(desktopState, { ...ready, downloading: true, headline: 'Downloading version 0.6.0…', detail: null, canRestart: false });
+  await expect(banner).toContainText('Downloading version 0.6.0…');
+  await expect(banner.getByRole('button')).toHaveCount(0);
+
+  // Not now: gone for this version, also after a reload, and back for the next one.
+  await page.evaluate(desktopState, ready);
+  await banner.getByRole('button', { name: 'Not now' }).click();
+  await expect(banner).toBeHidden();
+  await page.addInitScript((state) => { window.semanticRouterDesktop = state; }, ready);
+  await page.reload();
+  await expect(page.locator('#view h1').first()).toBeVisible();
+  await expect(banner).toBeHidden();
+  await page.evaluate(desktopState, { ...ready, offer: '0.7.0', headline: 'Version 0.7.0 is ready to install.' });
+  await expect(banner).toContainText('Version 0.7.0');
+});

@@ -29,6 +29,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Dashboard: Activity has a search box, and a click (or Enter) on a row opens the whole decision.
 - Dashboard: Router learned has a small Settings form for the common `Tuning` options.
 - Dashboard: Routes can be set to follow the conversation (`FollowsConversation`).
+- Desktop app: the dashboard in the app window has an update banner when an update is ready, available or downloading (**Restart to update**, **Not now**), and **About SemanticRouter** under **More**. On macOS the app menu has **About SemanticRouter** and **Check for Updates…**.
 
 ### Changed
 
