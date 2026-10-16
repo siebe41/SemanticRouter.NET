@@ -10,20 +10,37 @@ const named = (list) => list.every((x) => isObject(x) && typeof x.Name === 'stri
 const nameKey = (x) => x.Name.trim().toLowerCase();
 
 /*
+ * Lists that are sets: their order means nothing, so entries added on both sides combine. Every other list of plain
+ * values (CLI Arguments, say) is a sequence, and changing it on both sides is a conflict.
+ */
+const SET_LISTS = new Set(['Utterances', 'RequiredCapabilities', 'Capabilities', 'AllowedModels', 'DeniedModels', 'AllowedConnectors',
+  'DeniedConnectors', 'Exclude', 'Extensions', 'AllowedHosts', 'ForwardHeaders', 'QuotaErrorPatterns', 'RemoveEnvironmentVariables',
+  'InjectedTags', 'Patterns', 'Clients', 'Projects', 'ToolsInclude', 'ToolsExclude', 'PathPrefixes', 'AnthropicPathPrefixes',
+  'ResponsesPathPrefixes', 'ReasoningKeywords']);
+/* Maps whose key order matters: the first model alias whose glob matches wins. */
+const ORDERED_MAPS = new Set(['ModelAliases']);
+
+/*
  * Three-way merge of the draft onto a configuration that changed under it: base is what the draft started from, mine
  * the draft, theirs the new running configuration. Changes on different settings combine; the same setting changed
- * both ways is a conflict. Lists of names (utterances, capabilities) merge as sets; lists of named items (routes,
- * models, memory sources) by name. Returns { ok, value }.
+ * both ways is a conflict. Set lists (above) merge as sets; lists of named items (routes, models, memory sources) by
+ * name. Order is a change too: a list of named items or an ordered map that one side reordered and the other side
+ * changed is a conflict, not a silent pick. key is the property name the values sit under. Returns { ok, value }.
  */
 const CONFLICT = Symbol('conflict');
-function merge(base, mine, theirs) {
+function merge(base, mine, theirs, key) {
   if (same(mine, base)) return theirs;
   if (same(theirs, base) || same(mine, theirs)) return mine;
   if (isObject(mine) && isObject(theirs)) {
     const b = isObject(base) ? base : {};
+    if (ORDERED_MAPS.has(key)) {
+      const rows = (map) => Object.entries(map).map(([Name, Value]) => ({ Name, Value }));
+      const r = mergeNamed(rows(b), rows(mine), rows(theirs), true);
+      return r === CONFLICT ? CONFLICT : Object.fromEntries(r.map((x) => [x.Name, x.Value]));
+    }
     const out = {};
     for (const k of [...new Set([...Object.keys(theirs), ...Object.keys(mine)])]) {
-      const r = merge(b[k], mine[k], theirs[k]);
+      const r = merge(b[k], mine[k], theirs[k], k);
       if (r === CONFLICT) return CONFLICT;
       if (r !== undefined) out[k] = r;
     }
@@ -32,18 +49,26 @@ function merge(base, mine, theirs) {
   if (Array.isArray(mine) && Array.isArray(theirs)) {
     const b = Array.isArray(base) ? base : [];
     if ([...b, ...mine, ...theirs].every(primitive)) {
+      if (!SET_LISTS.has(key)) return CONFLICT;
       const removed = b.filter((x) => !mine.includes(x));
       const added = mine.filter((x) => !b.includes(x) && !theirs.includes(x));
       return theirs.filter((x) => !removed.includes(x)).concat(added);
     }
-    if (named(b) && named(mine) && named(theirs)) return mergeNamed(b, mine, theirs);
+    if (named(b) && named(mine) && named(theirs)) return mergeNamed(b, mine, theirs, false);
   }
   return CONFLICT;
 }
-function mergeNamed(base, mine, theirs) {
+/*
+ * Named items merged by name. Both sides changed the list (merge checked that), so a reorder on either side is a
+ * conflict. strict (an ordered map): items added on both sides are a conflict too, as nobody said which goes first.
+ */
+function mergeNamed(base, mine, theirs, strict) {
   const index = (list) => { const m = new Map(); for (const x of list) { if (m.has(nameKey(x))) return null; m.set(nameKey(x), x); } return m; };
   const b = index(base); const m = index(mine); const t = index(theirs);
   if (!b || !m || !t) return CONFLICT;
+  const order = (list) => JSON.stringify(list.map(nameKey).filter((k) => b.has(k) && m.has(k) && t.has(k)));
+  if (order(mine) !== order(base) || order(theirs) !== order(base)) return CONFLICT;
+  if (strict && mine.some((x) => !b.has(nameKey(x))) && theirs.some((x) => !b.has(nameKey(x)))) return CONFLICT;
   const out = [];
   for (const x of theirs) {
     const k = nameKey(x);
@@ -60,7 +85,13 @@ function mergeNamed(base, mine, theirs) {
     const x = mine[i]; const k = nameKey(x);
     if (t.has(k)) continue;
     if (b.has(k)) { if (!same(x, b.get(k))) return CONFLICT; continue; } // they removed it: fine unless I changed it
-    out.splice(Math.min(i, out.length), 0, x); // I added (or renamed) it: near where it was
+    // I added (or renamed) it: right after the item it follows in the draft, so an alias keeps its place in the order.
+    let at = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      const p = out.findIndex((y) => nameKey(y) === nameKey(mine[j]));
+      if (p >= 0) { at = p + 1; break; }
+    }
+    out.splice(at, 0, x);
   }
   return out;
 }
@@ -70,19 +101,25 @@ export function rebase(base, mine, theirs) {
 }
 
 /*
- * How many settings the draft changes: a list of names counts once, a named item added or removed counts once, and
- * a renamed one (no match by name, but in the same place) counts as the settings changed in it.
+ * How many settings the draft changes: a list of names counts once, a named item added or removed counts once, a
+ * renamed one (no match by name, but in the same place) counts as the settings changed in it, and a new order of the
+ * named items or of an ordered map (model aliases) counts once.
  */
 export function countChanges(base, draft) {
-  const count = (b, m) => {
+  // The order of the names both lists have: a difference is one change.
+  const reordered = (b, m) => { const both = (x, y) => x.filter((k) => y.includes(k)); return JSON.stringify(both(b, m)) !== JSON.stringify(both(m, b)) ? 1 : 0; };
+  const count = (b, m, key) => {
     if (same(b, m)) return 0;
-    if (isObject(b) && isObject(m)) return [...new Set([...Object.keys(b), ...Object.keys(m)])].reduce((n, k) => n + count(b[k], m[k]), 0);
+    if (isObject(b) && isObject(m)) {
+      const n = [...new Set([...Object.keys(b), ...Object.keys(m)])].reduce((sum, k) => sum + count(b[k], m[k], k), 0);
+      return n + (ORDERED_MAPS.has(key) ? reordered(Object.keys(b), Object.keys(m)) : 0);
+    }
     const unique = (list) => new Set(list.map(nameKey)).size === list.length;
     if (Array.isArray(b) && Array.isArray(m) && !b.every(primitive) && named(b) && named(m) && unique(b) && unique(m)) {
       const inDraft = new Map(m.map((x) => [nameKey(x), x]));
       const inBase = new Set(b.map(nameKey));
       const gone = new Map();
-      let n = 0;
+      let n = reordered(b.map(nameKey), m.map(nameKey));
       b.forEach((x, i) => { if (inDraft.has(nameKey(x))) n += count(x, inDraft.get(nameKey(x))); else gone.set(i, x); });
       m.forEach((y, i) => {
         if (inBase.has(nameKey(y))) return;

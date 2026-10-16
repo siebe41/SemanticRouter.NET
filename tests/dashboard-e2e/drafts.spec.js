@@ -420,6 +420,52 @@ test('a draft moves onto a changed configuration unless both changed the same se
   expect(r.renamed).toBe(1);
 });
 
+test('a draft rebase counts order as a change and merges only lists that are sets', async ({ page }) => {
+  await open(page, 'overview');
+  const r = await page.evaluate(async () => {
+    const { rebase, countChanges } = await import('/router/js/draft.js');
+    const base = {
+      Middleware: { ModelAliases: { '*opus*': 'family:opus', '*': 'auto:cheapest' } },
+      Connectors: { cli: { Arguments: ['-p', '--verbose'] } },
+      Routes: [{ Name: 'a', Utterances: ['x'] }, { Name: 'b', Utterances: [] }],
+    };
+    const copy = () => JSON.parse(JSON.stringify(base));
+    const out = {};
+    // Model aliases: the first matching glob wins, so a reorder against an added alias is a conflict.
+    let mine = copy(); let theirs = copy();
+    mine.Middleware.ModelAliases = { '*': 'auto:cheapest', '*opus*': 'family:opus' };
+    theirs.Middleware.ModelAliases['*haiku*'] = 'family:haiku';
+    out.aliasReorder = rebase(base, mine, theirs).ok;
+    out.aliasCount = countChanges(base, mine);
+    // An alias added on one side and a value changed on the other combine, the new alias keeping its place.
+    mine = copy(); theirs = copy();
+    mine.Middleware.ModelAliases = { '*sonnet*': 'family:sonnet', '*opus*': 'family:opus', '*': 'auto:cheapest' };
+    theirs.Middleware.ModelAliases['*'] = 'local-small';
+    const both = rebase(base, mine, theirs);
+    out.aliasCombined = both.ok ? Object.entries(both.value.Middleware.ModelAliases) : null;
+    // CLI arguments are a sequence: changed on both sides is a conflict.
+    mine = copy(); theirs = copy();
+    mine.Connectors.cli.Arguments.push('--model'); theirs.Connectors.cli.Arguments.push('--quiet');
+    out.arguments = rebase(base, mine, theirs).ok;
+    // Utterances are a set: added on both sides, both stay.
+    mine = copy(); theirs = copy();
+    mine.Routes[0].Utterances.push('mine'); theirs.Routes[0].Utterances.push('theirs');
+    const utterances = rebase(base, mine, theirs);
+    out.utterances = utterances.ok ? utterances.value.Routes[0].Utterances : null;
+    // Routes reordered against a change in one of them: a conflict.
+    mine = copy(); theirs = copy();
+    mine.Routes.reverse(); theirs.Routes[0].Utterances.push('theirs');
+    out.routeReorder = rebase(base, mine, theirs).ok;
+    return out;
+  });
+  expect(r.aliasReorder).toBe(false);
+  expect(r.aliasCount).toBe(1);
+  expect(r.aliasCombined).toEqual([['*sonnet*', 'family:sonnet'], ['*opus*', 'family:opus'], ['*', 'local-small']]);
+  expect(r.arguments).toBe(false);
+  expect(r.utterances).toEqual(['x', 'theirs', 'mine']);
+  expect(r.routeReorder).toBe(false);
+});
+
 test('signing in again keeps the draft', async ({ page }) => {
   await open(page, 'routes');
   await page.locator('.item-head', { hasText: 'smalltalk' }).click();
