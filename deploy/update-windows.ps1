@@ -155,15 +155,33 @@ try {
         Invoke-Checked 'dotnet pack' {
             dotnet pack src/SemanticRouter.Host -c Release -o $artifacts "-p:Version=$version" --nologo
         }
+        # The tool comes from this folder only, through a NuGet.config of its own: the repository's nuget.config maps
+        # every package to nuget.org, and the SDK refuses --add-source next to package source mapping.
+        $nugetConfig = Join-Path $artifacts 'NuGet.config'
+        $source = [System.Security.SecurityElement]::Escape($artifacts)
+        Set-Content -Path $nugetConfig -Encoding UTF8 -Value @"
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="local" value="$source" />
+  </packageSources>
+  <packageSourceMapping>
+    <packageSource key="local">
+      <package pattern="*" />
+    </packageSource>
+  </packageSourceMapping>
+</configuration>
+"@
         # --allow-downgrade: always take this build, even over a higher version installed earlier (say, by hand).
         if (Test-ToolInstalled) {
             Invoke-Checked 'dotnet tool update' {
-                dotnet tool update --global SemanticRouter.Host --add-source $artifacts --version $version --allow-downgrade
+                dotnet tool update --global SemanticRouter.Host --configfile $nugetConfig --version $version --allow-downgrade
             }
         }
         else {
             Invoke-Checked 'dotnet tool install' {
-                dotnet tool install --global SemanticRouter.Host --add-source $artifacts --version $version
+                dotnet tool install --global SemanticRouter.Host --configfile $nugetConfig --version $version
             }
         }
         $router = Get-SemanticRouter
