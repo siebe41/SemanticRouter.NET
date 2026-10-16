@@ -1,6 +1,6 @@
-/* Semantic Router dashboard: Loading, the sidebar and top bar, themes, rendering and hash routing. */
+/* Semantic Router dashboard: Loading, the rail, tabs and top bar, themes, rendering and hash routing. */
 import { loadTrends } from './charts.js';
-import { $, $$, api, banner, h, isDirty, METRICS_VIEWS, metricsOnly, PREFIX, readOnly, state, THEME_KEY, THEMES, views } from './core.js';
+import { $, $$, api, banner, h, isDirty, METRICS_VIEWS, metricsOnly, PREFIX, readOnly, SECTIONS, sectionOf, state, THEME_KEY, THEMES, views } from './core.js';
 import { loadDigest } from './digest.js';
 import { endpointPill } from './endpoints.js';
 import { loadTuning } from './learned.js';
@@ -63,13 +63,14 @@ export async function refreshStatus() {
 }
 
 /* ---------------------------------------------------------------------------------------------
-   Chrome (sidebar, top bar)
+   Chrome (rail, tabs, top bar)
    --------------------------------------------------------------------------------------------- */
 export function renderChrome() {
   const s = state.status;
   if (s) {
     $('#brand-sub').textContent = `v${s.version} · ${s.source.toLowerCase()}${s.machine ? ' · ' + s.machine : ''}`;
     $('#brand-sub').title = s.machine ? `Running on ${s.machine}` : '';
+    $('#brand').title = `Semantic Router ${$('#brand-sub').textContent}`;
     $('#lib-version').textContent = 'SemanticRouter ' + s.libraryVersion;
     const cooling = s.models.filter((m) => m.coolingDownUntil).length;
     const warm = s.warmedUp ? 'ok' : (s.warmUpError ? 'danger' : 'warn');
@@ -81,8 +82,7 @@ export function renderChrome() {
       (s.warmedUp ? '' : (s.warmUpError ? ` · <span class="badge danger" title="${h(s.warmUpError)}">embeddings failed</span>` : ' · <span class="badge info">warming up</span>'));
   }
   $('#save-bar').classList.toggle('hidden', !isDirty() || readOnly());
-  $$('#nav a, #nav .nav-group').forEach((el) => el.classList.toggle('hidden', metricsOnly() && !METRICS_VIEWS.includes(el.dataset.view)));
-  $$('#nav a').forEach((a) => { const on = a.dataset.view === state.view; a.classList.toggle('active', on); if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
+  renderNav();
   const notes = [];
   const who = state.session.identity;
   if (metricsOnly()) notes.push(`${who && !/ token$|^this machine$/.test(who) ? `Signed in as <b>${h(who)}</b> with the <b>metrics</b> role` : 'Signed in with the <b>metrics</b> token'}: you see figures only, not prompts, activity or the configuration.`);
@@ -93,6 +93,42 @@ export function renderChrome() {
   if (notes.length) banner(notes.join('<br>'), 'warn'); else banner(null);
   const signOut = $('#sign-out');
   if (signOut) signOut.classList.toggle('hidden', !state.session.role || !state.session.tokenRequired);
+}
+
+/*
+ * The rail marks the current page's section and links each section to the page last open in it; the tab strip lists
+ * the current section's pages. The strip is rebuilt only when what it shows changes: the status refresh calls this every
+ * few seconds, and a rebuild would take the focus from a tab.
+ */
+const lastPage = {};
+let tabsKey = null;
+function renderNav() {
+  const section = sectionOf(state.view);
+  if (section) lastPage[section.id] = state.view;
+  const visible = (page) => !metricsOnly() || METRICS_VIEWS.includes(page);
+  $$('#nav a').forEach((a) => {
+    const s = SECTIONS.find((x) => x.id === a.dataset.section);
+    const pages = s.pages.map(([page]) => page).filter(visible);
+    const on = s === section;
+    a.classList.toggle('hidden', !pages.length);
+    a.setAttribute('href', `#/${pages.includes(lastPage[s.id]) ? lastPage[s.id] : pages[0] || s.pages[0][0]}`);
+    a.classList.toggle('active', on);
+    if (on) a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current');
+  });
+  const feedback = $('#sidebar a[data-view="feedback"]');
+  feedback.classList.toggle('hidden', !visible('feedback'));
+  feedback.classList.toggle('active', state.view === 'feedback');
+  if (state.view === 'feedback') feedback.setAttribute('aria-current', 'page'); else feedback.removeAttribute('aria-current');
+  const tabs = section ? section.pages.filter(([page]) => visible(page)) : [];
+  const key = tabs.map(([page]) => page).join() + '|' + state.view;
+  if (key === tabsKey) return;
+  tabsKey = key;
+  const strip = $('#tabs');
+  strip.classList.toggle('hidden', !tabs.length);
+  strip.innerHTML = tabs.map(([page, label]) => `<a href="#/${page}" data-view="${page}"${page === state.view ? ' class="active" aria-current="page"' : ''}>${h(label)}</a>`).join('');
+  // On a narrow window the strip scrolls sideways: bring the current tab into view.
+  const current = $('a.active', strip);
+  if (current) strip.scrollLeft = Math.max(0, current.offsetLeft - strip.offsetLeft - (strip.clientWidth - current.offsetWidth) / 2);
 }
 
 let themeList = THEMES.map((t) => ({ ...t, builtIn: true, missingTokens: [], contrastIssues: [] }));

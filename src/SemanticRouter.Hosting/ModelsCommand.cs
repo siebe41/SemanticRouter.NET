@@ -53,7 +53,7 @@ internal static class ModelsCommand
             await output.WriteLineAsync($"Tiers come from the model-family table ({families}) where a family is known, else from the size or name.").ConfigureAwait(false);
         }
 
-        await output.WriteLineAsync("Add models on the dashboard: Models → Discover models fills in these suggestions, and every field can be changed before adding.").ConfigureAwait(false);
+        await output.WriteLineAsync("Add models on the dashboard: Providers → Models → Discover models fills in these suggestions, and every field can be changed before adding.").ConfigureAwait(false);
         return 0;
     }
 

@@ -49,7 +49,7 @@ export ANTHROPIC_CUSTOM_HEADERS="X-Router-Project: acme-payments"
 
 **Conversations.** Claude Code sends `x-claude-code-session-id` on every request; the router uses it, with the client and the first user message, to recognise the conversation across turns ([conversation routing](routing-quality.md#conversations)).
 
-**A configuration from an earlier `init`** has `"*opus*": "family:opus"`. Now that Claude Code's default model is Opus, that sends every turn to Opus (`X-Prompt-Route-Reason: ModelOverride`): nothing is routed. The router does not rewrite your configuration. Change it on the dashboard under **Gateway → Model aliases** (**Add Claude Code defaults** sets these), or in `semantic-router.json`:
+**A configuration from an earlier `init`** has `"*opus*": "family:opus"`. Now that Claude Code's default model is Opus, that sends every turn to Opus (`X-Prompt-Route-Reason: ModelOverride`): nothing is routed. The router does not rewrite your configuration. Change it on the dashboard under **Gateway → Settings → Model aliases** (**Add Claude Code defaults** sets these), or in `semantic-router.json`:
 
 ```json
 "ModelAliases": {

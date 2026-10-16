@@ -12,57 +12,49 @@
   <a class="skip-link" href="#view">Skip to content</a>
   <div class="app">
     <aside class="sidebar" id="sidebar" aria-label="Router">
-      <div class="brand">
+      <a class="brand" id="brand" href="#/overview" aria-label="Semantic Router: Overview">
         <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="6" fill="var(--brand-mark-bg)"/><path d="M6 16h8l4-8 4 16 4-8h0" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/><circle cx="26" cy="16" r="2.8" fill="var(--signal)"/></svg>
-        <div>
-          <div class="brand-name">Semantic Router</div>
-          <div class="brand-sub" id="brand-sub">loading…</div>
-        </div>
-      </div>
-      <nav id="nav" aria-label="Pages">
-        <a href="#/overview" data-view="overview">Overview</a>
-        <a href="#/live" data-view="live">Live</a>
-        <a href="#/activity" data-view="activity">Activity</a>
-        <a href="#/memory" data-view="memory">Memory</a>
-        <a href="#/usage" data-view="usage">Usage</a>
-        <a href="#/learned" data-view="learned">Router learned</a>
-        <div class="nav-group">Configuration</div>
-        <a href="#/tiers" data-view="tiers">Tiers</a>
-        <a href="#/routes" data-view="routes">Routes</a>
-        <a href="#/evaluate" data-view="evaluate">Evaluate</a>
-        <a href="#/models" data-view="models">Models</a>
-        <a href="#/connectors" data-view="connectors">Connectors</a>
-        <a href="#/routing" data-view="routing">Routing rules</a>
-        <a href="#/profiles" data-view="profiles">Profiles</a>
-        <a href="#/embeddings" data-view="embeddings">Embeddings</a>
-        <a href="#/gateway" data-view="gateway">Gateway</a>
-        <div class="nav-group">Use it</div>
-        <a href="#/clients" data-view="clients">Connect clients</a>
-        <a href="#/json" data-view="json">JSON</a>
-        <a href="#/audit" data-view="audit">Audit log</a>
-        <a href="#/feedback" data-view="feedback">Feedback</a>
+        <span class="brand-label">Semantic Router</span>
+      </a>
+      <nav id="nav" aria-label="Sections">
+        <a href="#/overview" data-section="monitor"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg><span>Monitor</span></a>
+        <a href="#/tiers" data-section="routing"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M6 12h4a4 4 0 0 0 4-4M14 12h2"/></svg><span>Routing</span></a>
+        <a href="#/models" data-section="providers"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><path d="M8 7h.01M8 17h.01"/></svg><span>Providers</span></a>
+        <a href="#/gateway" data-section="gateway"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M7 20V5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v15"/><path d="M11 12h6M14 9l3 3-3 3"/></svg><span>Gateway</span></a>
+        <a href="#/json" data-section="admin"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg><span>Admin</span></a>
       </nav>
       <div class="sidebar-footer">
-        <label class="theme-picker">
-          <span>Theme</span>
-          <select id="theme-select" aria-label="Theme"></select>
-        </label>
-        <a class="muted small" id="lib-version" href="https://github.com/siebe41/SemanticRouter.NET" target="_blank" rel="noopener" title="SemanticRouter on GitHub"></a>
-        <button class="btn ghost small hidden" id="sign-out" type="button">Sign out</button>
+        <a href="#/feedback" data-view="feedback"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg><span>Feedback</span></a>
+        <button type="button" id="more-toggle" class="rail-button" aria-expanded="false" aria-controls="more"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg><span>More</span></button>
+        <div id="more" class="more hidden" role="group" aria-label="Router, theme and session">
+          <div>
+            <div class="brand-name">Semantic Router</div>
+            <div class="brand-sub" id="brand-sub">loading…</div>
+          </div>
+          <label class="theme-picker">
+            <span>Theme</span>
+            <select id="theme-select" aria-label="Theme"></select>
+          </label>
+          <a class="muted small" id="lib-version" href="https://github.com/siebe41/SemanticRouter.NET" target="_blank" rel="noopener" title="SemanticRouter on GitHub"></a>
+          <button class="btn ghost small hidden" id="sign-out" type="button">Sign out</button>
+        </div>
       </div>
     </aside>
     <div class="content">
       <header class="topbar">
-        <button id="nav-toggle" class="btn ghost nav-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Show navigation"><span aria-hidden="true">☰</span></button>
-        <div id="status-pill" class="pill" role="status">…</div>
-        <div class="spacer"></div>
-        <div id="save-bar" class="save-bar hidden">
-          <span class="dirty-note">Unapplied changes</span>
-          <button class="btn" data-action="validate">Validate</button>
-          <button class="btn" data-action="apply" title="Apply to the running router without saving">Apply</button>
-          <button class="btn primary" data-action="apply-save" title="Apply and write to the configuration store">Apply &amp; save</button>
-          <button class="btn ghost" data-action="discard">Discard</button>
+        <div class="topbar-row">
+          <button id="nav-toggle" class="btn ghost nav-toggle" type="button" aria-controls="sidebar" aria-expanded="false" aria-label="Show navigation"><span aria-hidden="true">☰</span></button>
+          <div id="status-pill" class="pill" role="status">…</div>
+          <div class="spacer"></div>
+          <div id="save-bar" class="save-bar hidden">
+            <span class="dirty-note">Unapplied changes</span>
+            <button class="btn" data-action="validate">Validate</button>
+            <button class="btn" data-action="apply" title="Apply to the running router without saving">Apply</button>
+            <button class="btn primary" data-action="apply-save" title="Apply and write to the configuration store">Apply &amp; save</button>
+            <button class="btn ghost" data-action="discard">Discard</button>
+          </div>
         </div>
+        <nav id="tabs" class="tabs hidden" aria-label="Pages"></nav>
       </header>
       <div id="banner" class="banner hidden" role="alert"></div>
       <main id="view" class="view" tabindex="-1"></main>

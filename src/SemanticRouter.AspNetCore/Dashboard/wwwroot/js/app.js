@@ -123,16 +123,26 @@ function setNavOpen(open) {
   if (open) { const current = $('#nav a.active') || $('#nav a'); if (current) current.focus(); }
 }
 $('#nav-toggle').addEventListener('click', () => setNavOpen(!document.body.classList.contains('nav-open')));
+// More, at the foot of the rail: the router's version, the theme picker and Sign out.
+const moreOpen = () => !$('#more').classList.contains('hidden');
+function setMoreOpen(open) {
+  $('#more').classList.toggle('hidden', !open);
+  $('#more-toggle').setAttribute('aria-expanded', String(open));
+}
+$('#more-toggle').addEventListener('click', () => setMoreOpen(!moreOpen()));
 document.addEventListener('click', (ev) => {
+  if (moreOpen() && !ev.target.closest('#more') && !ev.target.closest('#more-toggle')) setMoreOpen(false);
   if (document.body.classList.contains('nav-open') && !ev.target.closest('#sidebar') && !ev.target.closest('#nav-toggle')) setNavOpen(false);
 });
 window.addEventListener('hashchange', () => {
   route();
+  setMoreOpen(false);
   if (document.body.classList.contains('nav-open')) setNavOpen(false);
   $('#view').focus({ preventScroll: true });
 });
-// Keyboard: Enter or Space operates the expandable item headers (role="button"); Escape closes the drawer.
+// Keyboard: Enter or Space operates the expandable item headers (role="button"); Escape closes More, then the drawer.
 document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && moreOpen()) { setMoreOpen(false); $('#more-toggle').focus(); return; }
   if (ev.key === 'Escape' && document.body.classList.contains('nav-open')) { setNavOpen(false); $('#nav-toggle').focus(); return; }
   const el = ev.target;
   if ((ev.key === 'Enter' || ev.key === ' ') && el.getAttribute && el.getAttribute('role') === 'button' && el.dataset.action && ev.target === ev.currentTarget.activeElement) {

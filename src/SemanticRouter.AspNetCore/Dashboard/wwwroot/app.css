@@ -170,8 +170,8 @@ pre code { background: none; padding: 0; }
 .right { text-align: right; }
 .nowrap { white-space: nowrap; }
 
-/* Layout */
-.app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+/* Layout: a narrow rail of sections on the left; the current section's pages are tabs under the top bar. */
+.app { display: grid; grid-template-columns: 76px 1fr; min-height: 100vh; }
 .sidebar {
   background: var(--bg-sunken);
   border-right: 1px solid var(--border);
@@ -180,36 +180,67 @@ pre code { background: none; padding: 0; }
   position: sticky;
   top: 0;
   height: 100vh;
+  z-index: 20;
 }
-.brand { display: flex; gap: 10px; align-items: center; padding: 16px 16px 12px; }
+.brand { display: flex; gap: 10px; align-items: center; justify-content: center; padding: 14px 0 10px; color: var(--text); flex: none; }
+.brand:hover { text-decoration: none; }
+.brand-label { display: none; font-family: var(--font-heading); font-weight: 600; font-size: 14px; }
 .brand-name { font-family: var(--font-heading); font-weight: 600; font-size: 14px; }
 .brand-sub { font-size: 11px; color: var(--text-muted); }
-nav { display: flex; flex-direction: column; padding: 4px 8px; gap: 1px; flex: 1; overflow: auto; }
-nav a {
-  color: var(--text-muted);
-  padding: 7px 10px;
+#nav { display: flex; flex-direction: column; padding: 4px 6px; gap: 2px; flex: 1; overflow: auto; }
+#nav a, .sidebar-footer > a, .sidebar-footer > .rail-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 2px 8px;
+  border: 0;
   border-radius: var(--radius);
-  font-size: 13px;
+  background: none;
+  color: var(--text-muted);
+  font: 500 11px/1.15 var(--font-heading);
+  text-align: center;
+  cursor: pointer;
+  width: 100%;
 }
-nav a:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
-nav a.active { background: var(--accent-soft); color: var(--text); font-weight: 500; box-shadow: inset 2px 0 0 var(--accent); }
-.nav-group { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); padding: 14px 10px 4px; }
-.sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+#nav a:hover, .sidebar-footer > a:hover, .sidebar-footer > .rail-button:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
+#nav a.active, .sidebar-footer > a.active { background: var(--accent-soft); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+.sidebar-footer .rail-button[aria-expanded="true"] { background: var(--bg-hover); color: var(--text); }
+.icon { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.sidebar-footer { position: relative; padding: 6px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+/* More: a panel beside the rail with the version, the theme picker and Sign out. */
+.more {
+  position: absolute;
+  left: calc(100% + 8px);
+  bottom: 6px;
+  width: 260px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+.more .btn { align-self: flex-start; }
 .theme-picker { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-muted); }
-.theme-picker select { width: 128px; }
+.theme-picker select { width: 150px; }
 .content { display: flex; flex-direction: column; min-width: 0; }
 .topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
   position: sticky;
   top: 0;
   z-index: 5;
-  min-height: 52px;
 }
+.topbar-row { display: flex; align-items: center; gap: 12px; padding: 10px 24px; min-height: 52px; }
+/* The current section's pages. One line: on a narrow window it scrolls sideways rather than wrapping. */
+.tabs { display: flex; gap: 2px; padding: 0 16px; margin-top: -4px; overflow-x: auto; scrollbar-width: thin; }
+.tabs a { flex: none; padding: 7px 10px 9px; color: var(--text-muted); font: 500 13px/1.2 var(--font-heading); border-bottom: 2px solid transparent; white-space: nowrap; }
+.tabs a:hover { color: var(--text); text-decoration: none; }
+.tabs a.active { color: var(--text); border-bottom-color: var(--accent); }
+.tabs a:focus-visible { outline-offset: -2px; }
 .view { padding: 22px 24px 60px; max-width: 1240px; width: 100%; }
 .banner { padding: 10px 24px; font-size: 13px; border-bottom: 1px solid var(--border); background: var(--warn-soft); }
 .banner.danger { background: var(--danger-soft); }
@@ -259,7 +290,15 @@ nav a.active { background: var(--accent-soft); color: var(--text); font-weight: 
   .sidebar { position: fixed; inset: 0 auto 0 0; width: min(280px, 85vw); z-index: 50; transform: translateX(-100%); visibility: hidden; transition: transform 0.2s, visibility 0.2s; box-shadow: var(--shadow); }
   body.nav-open .sidebar { transform: none; visibility: visible; }
   body.nav-open::after { content: ""; position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 40; }
-  .topbar { padding: 8px 12px; flex-wrap: wrap; }
+  /* In the drawer the rail has room for its labels beside the icons. */
+  .brand { justify-content: flex-start; padding: 16px; }
+  .brand-label { display: inline; }
+  #nav { padding: 4px 8px; }
+  #nav a, .sidebar-footer > a, .sidebar-footer > .rail-button { flex-direction: row; gap: 12px; padding: 10px 12px; font-size: 14px; text-align: left; }
+  .sidebar-footer { padding: 8px; }
+  .more { left: 8px; right: 8px; bottom: calc(100% + 6px); width: auto; }
+  .topbar-row { padding: 8px 12px; flex-wrap: wrap; }
+  .tabs { padding: 0 6px; }
   /* Keep the top bar to one line: the endpoint in use matters more than the mode and model count. */
   #status-pill .pill-detail { display: none; }
 }

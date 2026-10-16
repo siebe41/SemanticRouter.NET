@@ -14,6 +14,16 @@ builder.Services
 
 ## Pages
 
+The rail on the left has five sections, and the current section's pages are tabs under the top bar. A section opens on the tab last open in it. Every page keeps its own address (`#/learned`, `#/connectors`), so links from the tray, notices, webhooks and bookmarks go straight to the right tab. **Feedback** and **More** (the router's version, the theme picker and **Sign out**) sit at the foot of the rail.
+
+| Section | Tabs |
+|---|---|
+| **Monitor** | Overview, Live, Activity, Usage, Memory |
+| **Routing** | Tiers, Routes, Rules, Profiles, Evaluate, Router learned |
+| **Providers** | Models, Connectors, Embeddings |
+| **Gateway** | Settings, Connect clients |
+| **Admin** | JSON, Audit log |
+
 | Page | What it does |
 |---|---|
 | **Overview** | Counters, every model with its tier and health (ready, cooling down, disabled), the runtime (configuration version and source, store, embeddings state with the route index's size and warm-up time, classification-cache hit rate, gateway paths), served-by and required-tier charts, and **Try a prompt**: classify without calling a model (a leading callout such as `@opus` applies, shown as a badge), or send it through the gateway for real. |
@@ -32,10 +42,10 @@ builder.Services
 | **Evaluate** | Runs the evaluation set through the configuration: accuracy, too-low and too-high counts, accuracy per tier, a confusion matrix, the misrouted prompts with their scores, a threshold sweep with recommended values, route health, and a comparison with another embedding model. See [routing-quality.md](routing-quality.md). |
 | **Models** | The catalog, grouped by connector with each group's tiers at a glance: connector, provider model id (with **Discover**, which suggests the connector's model ids), tier, capabilities, context window, costs, priority, active hours, local flag, enabled. Next to a model's list price, its effective input price once its recent turns show how much it reads from the prompt cache (e.g. "$0.57 input per M with cache (90% cached)"): the price cost estimates and model trials use. `GET api/status` has it per model as `effectiveInputCostPerMillionTokens`, with the shares as `cacheShare`. **Discover models** on a connector lists everything it offers (load state, size, context, which models are already in the catalog) with a suggested name, tier and capabilities for each; tick the ones you want, adjust them, and **Add selected** puts them in the draft. See [Model lineups](providers.md#model-lineups-several-models-per-provider). |
 | **Connectors** | HTTP (OpenAI-compatible or Anthropic): base address, path, API key, headers, forwarded headers, timeout. CLI: preset, executable, extra arguments, tool calling (with streaming and repair switches), quota patterns, environment, concurrency and queue limit. Copilot: the CLI the SDK runs, its home directory, concurrency, queue limit. **Discover models** lists what the connector offers, as on the Models page. |
-| **Routing rules** | Similarity threshold, fallback tier, ambiguity margin, scoring strategy, complexity short-circuit, complexity → tier rules, selection strategy and failover, cooldowns, the time zone for model active hours, complexity heuristic weights and keywords. |
+| **Routing rules** (the **Rules** tab) | Similarity threshold, fallback tier, ambiguity margin, scoring strategy, complexity short-circuit, complexity → tier rules, selection strategy and failover, cooldowns, the time zone for model active hours, complexity heuristic weights and keywords. |
 | **Profiles** | Routing profiles (allowed and denied models and connectors, tier floor and cap, strategy, local-only), how a request picks one (headers, client mappings, rules), virtual models, and the content signals that keep a conversation local. **What would each profile do?** routes one prompt under every profile side by side. See [routing-profiles.md](routing-profiles.md). |
 | **Embeddings** | Provider (Hashing, Onnx in-process, or an OpenAI-compatible server), model, endpoint, batch size, timeout, warm-up, and a probe that embeds a sentence with the applied provider. For ONNX models it shows the suggested threshold and can apply it. |
-| **Gateway** | Mode (Dispatch or Annotate), OpenAI, Anthropic and Responses path prefixes, model aliases (with **Add Claude Code defaults**), tool-turn pinning, system-reminder stripping, body limit, response headers, fail-open, message selection, gateway keys, [rate limits](#rate-limits), and stored prompts (`State:StorePrompts`, retention, **Delete all activity**). |
+| **Gateway** (the **Settings** tab) | Mode (Dispatch or Annotate), OpenAI, Anthropic and Responses path prefixes, model aliases (with **Add Claude Code defaults**), tool-turn pinning, system-reminder stripping, body limit, response headers, fail-open, message selection, gateway keys, [rate limits](#rate-limits), and stored prompts (`State:StorePrompts`, retention, **Delete all activity**). |
 | **Connect clients** | Ready-to-paste snippets for Claude Code, OpenAI SDKs, Codex CLI and curl, filled in with the router's address. |
 | **JSON** | The whole document as text (the same shape as the `SemanticRouter` section of `appsettings.json`): edit, download, compare with the application baseline, reset. **History** lists every applied version (when, what applied it, who), diffs any of them against the draft and rolls back to it. |
 | **Audit log** | Admin only. Every change made through the dashboard or admin API, sign-ins and sign-outs: when, who (the user your proxy signed in, `admin token`, `read-only token`, `metrics token` or `this machine`), from which address, what, the request and its status. **Download JSON Lines** exports it; **Sign out every session** ends every dashboard session ([Sessions](#sessions)). See [Audit log](#audit-log). |
@@ -143,7 +153,7 @@ All under the dashboard prefix, JSON in and out. Who may call it is described in
 | `GET api/config/history/{id}` | That version's document (masked). |
 | `POST api/config/history/{id}/rollback` | Apply and save that version; recorded as a `rollback`. |
 | `GET api/activity?limit=100&after=<id>` | Recent routing activity. Entries carry `sentTo` (the models a request was sent to, failed attempts included) and `memory` (notes found in it); `feedback` maps entry ids to the [feedback](routing-quality.md#feedback) they received. |
-| `DELETE api/activity?since=&until=` | Delete activity and its prompt previews for good: everything, or the range given (**Gateway → Stored prompts → Delete all activity**). See [host.md](host.md#what-the-router-stores). Admin role only. |
+| `DELETE api/activity?since=&until=` | Delete activity and its prompt previews for good: everything, or the range given (**Gateway → Settings → Stored prompts → Delete all activity**). See [host.md](host.md#what-the-router-stores). Admin role only. |
 | `GET api/feedback?limit=200` | Recent feedback about routing decisions, newest first. |
 | `GET api/feedback/summary?days=7` | Decisions and feedback per route and per model, with the share that received feedback. |
 | `GET api/tuning`, `POST api/tuning/run`, `POST api/tuning/changes/{id}/undo` … | [Automatic tuning](routing-quality.md#automatic-tuning): what the router learned, why, and undo. |
@@ -308,7 +318,7 @@ Budgets stop spending once a period's limit is reached, but an agent stuck in a 
 }
 ```
 
-An entry is named after a gateway client (a name from `GatewayKeys`). `*` covers every client without its own entry, including clients that send no key, which are counted per address. A request is charged its estimated input tokens when it is admitted and the rest once the reply's usage is known. It is admitted while the client is under both limits. A client over a limit gets `429` with `Retry-After` (the seconds until enough of its last minute has passed) in its protocol's error format: Anthropic `rate_limit_error`, OpenAI Responses `rate_limit_exceeded`, a problem document for chat completions. The request reaches no model and shows in Activity as **rate limited**, with the limit it hit. The **Gateway** page edits the limits and lists each client's requests and tokens in the last minute and how often it was turned away. Without entries, clients on other machines are still limited to `RemoteRequestsPerMinute` (120) each, shown as `remote default`; 0 turns that off. Clients on this machine are not limited unless an entry covers them. Counts are kept in memory, so a restart starts them again; changing a limit takes effect at once.
+An entry is named after a gateway client (a name from `GatewayKeys`). `*` covers every client without its own entry, including clients that send no key, which are counted per address. A request is charged its estimated input tokens when it is admitted and the rest once the reply's usage is known. It is admitted while the client is under both limits. A client over a limit gets `429` with `Retry-After` (the seconds until enough of its last minute has passed) in its protocol's error format: Anthropic `rate_limit_error`, OpenAI Responses `rate_limit_exceeded`, a problem document for chat completions. The request reaches no model and shows in Activity as **rate limited**, with the limit it hit. **Gateway → Settings** edits the limits and lists each client's requests and tokens in the last minute and how often it was turned away. Without entries, clients on other machines are still limited to `RemoteRequestsPerMinute` (120) each, shown as `remote default`; 0 turns that off. Clients on this machine are not limited unless an entry covers them. Counts are kept in memory, so a restart starts them again; changing a limit takes effect at once.
 
 ## Themes
 
@@ -318,7 +328,7 @@ Every built-in theme meets WCAG AA (4.5:1) for body and small text. That include
 
 ### Adding a theme without rebuilding
 
-Drop a token file into the **themes directory**: `themes/` next to the configuration file (for the tool, next to `semantic-router.json`), or `Dashboard:ThemesDirectory`. After a reload the theme appears in the picker under **Theme files**. Nothing is rebuilt or restarted.
+Drop a token file into the **themes directory**: `themes/` next to the configuration file (for the tool, next to `semantic-router.json`), or `Dashboard:ThemesDirectory`. After a reload the theme appears in the picker (under **More** at the foot of the rail) under **Theme files**. Nothing is rebuilt or restarted.
 
 ```css
 /* themes/ocean.css: the file name is the theme id (lower-case letters, digits and dashes). */
@@ -359,9 +369,9 @@ To add a built-in theme instead, add a token block to `app.css` and `{ id, name 
 
 ## Accessibility
 
-- **Structure.** Landmarks: a navigation with the pages, a main region, and a skip link to it. The current page is marked `aria-current`, and every form control has a label (the end-to-end tests fail when one loses it).
+- **Structure.** Landmarks: a navigation with the sections (the rail), one with the current section's pages (the tabs), a main region, and a skip link to it. The current section and page are marked `aria-current`, and every form control has a label (the end-to-end tests fail when one loses it).
 - **Keyboard.** Everything works from the keyboard, and focus is always visible. Expandable items (routes, models, connectors, profiles, memory sources) are buttons that open with Enter or Space. After navigation, focus moves to the page content.
-- **Small screens.** Below 720 px the navigation becomes a drawer behind a menu button. Escape closes it.
+- **Small screens.** Below 720 px the rail becomes a drawer behind a menu button, with each section's name beside its icon, and the tabs scroll sideways. Escape closes the drawer, and the **More** panel.
 - **Motion.** `prefers-reduced-motion` turns off transitions, the router graph's flowing edges and the memory map's pulses.
 
 ## Testing the dashboard
@@ -370,7 +380,7 @@ To add a built-in theme instead, add a token block to `app.css` and `{ id, name 
 - visits every page, failing on any script or console error and on any control without an accessible name;
 - edits and applies a route, adds a model, renames a connector (its models follow), and checks that validation errors appear and that discard restores the configuration;
 - runs the prompt tester, switches themes and checks the choice is remembered, and picks up a theme file dropped in at run time;
-- checks keyboard operation, the phone navigation and contrast;
+- checks the rail and its tabs (every page keeps its address, and the rail fits a small window without scrolling), keyboard operation, the phone navigation and contrast;
 - compares screenshots of the three built-in themes at desktop and phone widths.
 
 ```bash

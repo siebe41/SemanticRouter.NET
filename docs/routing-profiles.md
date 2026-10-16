@@ -117,7 +117,7 @@ A model with `ActiveHours` is only tried inside that daily window. The window ca
 
 ## Seeing it
 
-- **Dashboard → Profiles** edits the profiles, the rules, the virtual models, client mappings and the content signals. **What would each profile do?** routes one prompt under every profile side by side, without calling a model. It uses the applied configuration.
+- **Routing → Profiles** on the dashboard edits the profiles, the rules, the virtual models, client mappings and the content signals. **What would each profile do?** routes one prompt under every profile side by side, without calling a model. It uses the applied configuration.
 - **Response headers:** `X-Prompt-Route-Profile` and `X-Prompt-Route-Local-Only`.
 - **Activity:** each entry shows its profile, project and the signals that kept it local, and the filter can show one profile's requests.
 - **Admin API:** `POST api/classify` takes `{ "prompt": "…", "profile": "work" }` and returns the plan under that profile, with `requiredTier` after the profile's floor and ceiling.

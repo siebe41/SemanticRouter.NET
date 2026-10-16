@@ -8,6 +8,10 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 - Desktop app: an Updates section in **About SemanticRouter**, and **Check for updates now…** in the tray menu. It shows whether the app is up to date and when it last checked, an update that is downloading, ready or available, and why a check failed or updates are off. It has **Check now**, **Restart to update** and the two update switches.
 
+### Changed
+
+- Dashboard: the 19-link sidebar, which no longer fit a laptop screen or the desktop app's default window, is a narrow rail of five sections (Monitor, Routing, Providers, Gateway, Admin) with each section's pages as tabs under the top bar. Routing rules is the **Rules** tab and the gateway page the **Settings** tab. Feedback sits at the foot of the rail, and the version, theme picker and **Sign out** moved under **More**. Every page keeps its address, so existing links and bookmarks still work.
+
 ## [0.3.0] - 2026-10-16
 
 ### Security

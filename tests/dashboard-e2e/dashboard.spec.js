@@ -8,6 +8,14 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'sem
   .replace(/__STUB__/g, `http://127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`));
 
 const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'json', 'audit', 'feedback'];
+// The rail's sections and the tabs each one shows, in order (SECTIONS in js/core.js).
+const SECTIONS = {
+  Monitor: ['Overview', 'Live', 'Activity', 'Usage', 'Memory'],
+  Routing: ['Tiers', 'Routes', 'Rules', 'Profiles', 'Evaluate', 'Router learned'],
+  Providers: ['Models', 'Connectors', 'Embeddings'],
+  Gateway: ['Settings', 'Connect clients'],
+  Admin: ['JSON', 'Audit log'],
+};
 const THEMES = ['machine-dark', 'machine-light', 'terminal'];
 
 // Every test fails if the page throws or logs an error (a Content-Security-Policy violation is one), or asks any host
@@ -38,6 +46,12 @@ async function open(page, view) {
   await expect(page.locator('#view h1').first()).toBeVisible();
 }
 
+/** Picks a theme in the picker, which sits in the More panel at the foot of the rail. */
+async function pickTheme(page, theme) {
+  if (await page.locator('#more').isHidden()) await page.locator('#more-toggle').click();
+  await page.selectOption('#theme-select', theme);
+}
+
 async function expandAll(page) {
   const closed = page.locator('.item-head[aria-expanded="false"]');
   for (let i = 0; i < 50 && await closed.count() > 0; i++) await closed.first().click();
@@ -66,6 +80,8 @@ test('every page renders, has a heading and labels every control', async ({ page
   const unlabelled = {};
   for (const view of PAGES) {
     await open(page, view);
+    // Every page but Feedback (at the foot of the rail) is one tab of a section.
+    if (view !== 'feedback') await expect(page.locator(`#tabs a[data-view="${view}"]`)).toHaveAttribute('aria-current', 'page');
     await expandAll(page);
     const found = await unnamedControls(page);
     if (found.length) unlabelled[view] = found;
@@ -91,10 +107,12 @@ test('a metrics user sees only the figures and never asks for prompts or the con
   page.on('request', (r) => { const u = new URL(r.url()); if (u.pathname.startsWith('/router/api/')) asked.push(u.pathname); });
   await open(page, 'routes');
   await expect(page.locator('#view h1')).toHaveText('Overview');
-  await expect(page.locator('#nav a:visible')).toHaveText(['Overview', 'Usage']);
+  await expect(page.locator('#nav a:visible')).toHaveText(['Monitor']);
+  await expect(page.locator('#tabs a:visible')).toHaveText(['Overview', 'Usage']);
+  await expect(page.locator('#sidebar a[data-view="feedback"]')).toBeHidden();
   await expect(page.locator('#banner')).toContainText('metrics');
   await expect(page.locator('#view')).not.toContainText('Try a prompt');
-  await page.locator('#nav a', { hasText: 'Usage' }).click();
+  await page.locator('#tabs a', { hasText: 'Usage' }).click();
   await expect(page.locator('#view h1')).toHaveText('Usage');
   await expect(page.locator('#view')).not.toContainText('Reference model');
   expect(asked.filter((p) => /\/(config|activity|events|tuning|memory|audit)$/.test(p))).toEqual([]);
@@ -102,13 +120,75 @@ test('a metrics user sees only the figures and never asks for prompts or the con
 
 test('the page has landmarks, a skip link and marks the current page', async ({ page }) => {
   await open(page, 'routes');
+  await expect(page.locator('nav[aria-label="Sections"]')).toBeVisible();
   await expect(page.locator('nav[aria-label="Pages"]')).toBeVisible();
   await expect(page.locator('main#view')).toBeVisible();
-  await expect(page.locator('#nav a[aria-current="page"]')).toHaveText('Routes');
+  await expect(page.locator('#nav a[aria-current="true"]')).toHaveText('Routing');
+  await expect(page.locator('#tabs a[aria-current="page"]')).toHaveText('Routes');
   await page.keyboard.press('Tab');
   await expect(page.locator('.skip-link')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('main#view')).toBeFocused();
+});
+
+test('the rail groups the pages into sections, each with its pages as tabs', async ({ page }) => {
+  await open(page, 'overview');
+  await expect(page.locator('#nav a')).toHaveText(Object.keys(SECTIONS));
+  for (const [section, tabs] of Object.entries(SECTIONS)) {
+    await page.locator('#nav a', { hasText: section }).click();
+    await expect(page.locator('#nav a[aria-current="true"]')).toHaveText(section);
+    await expect(page.locator('#tabs a')).toHaveText(tabs);
+    await expect(page.locator('#tabs a[aria-current="page"]')).toHaveText(tabs[0]);
+  }
+  // A section reopens on the tab last open in it.
+  await page.locator('#nav a', { hasText: 'Routing' }).click();
+  await page.locator('#tabs a', { hasText: 'Profiles' }).click();
+  await expect(page.locator('#view h1').first()).toHaveText('Profiles');
+  await page.locator('#nav a', { hasText: 'Monitor' }).click();
+  await page.locator('#nav a', { hasText: 'Routing' }).click();
+  await expect(page.locator('#tabs a[aria-current="page"]')).toHaveText('Profiles');
+  // Feedback is in no section: no tabs.
+  await page.locator('#sidebar a[data-view="feedback"]').click();
+  await expect(page.locator('#view h1')).toHaveText('Feedback');
+  await expect(page.locator('#tabs')).toBeHidden();
+  await expect(page.locator('#nav a[aria-current]')).toHaveCount(0);
+});
+
+test('every page keeps its address, so links from the tray, notices and webhooks still work', async ({ page }) => {
+  for (const [view, section, tab] of [['learned', 'Routing', 'Router learned'], ['connectors', 'Providers', 'Connectors'], ['routing', 'Routing', 'Rules'], ['clients', 'Gateway', 'Connect clients']]) {
+    await open(page, view);
+    await expect(page.locator('#nav a[aria-current="true"]')).toHaveText(section);
+    await expect(page.locator('#tabs a[aria-current="page"]')).toHaveText(tab);
+  }
+});
+
+test('the rail fits a small window without scrolling', async ({ page }) => {
+  // The desktop app on a 1366 × 768 laptop leaves about 620 px for the page.
+  await page.setViewportSize({ width: 1280, height: 600 });
+  await open(page, 'overview');
+  const nav = page.locator('#nav');
+  expect(await nav.evaluate((el) => el.scrollHeight - el.clientHeight), 'the rail scrolls').toBeLessThanOrEqual(0);
+  await expect(page.locator('#nav a').last()).toBeInViewport();
+  await expect(page.locator('#more-toggle')).toBeInViewport();
+});
+
+test('More shows the version and the theme picker, and closes on Escape or a click elsewhere', async ({ page }) => {
+  await open(page, 'overview');
+  const toggle = page.locator('#more-toggle');
+  await expect(page.locator('#more')).toBeHidden();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('#lib-version')).toContainText('SemanticRouter');
+  await expect(page.locator('#brand-sub')).not.toHaveText('loading…');
+  await expect(page.locator('#theme-select')).toBeVisible();
+  expect(await unnamedControls(page), 'every control in More has an accessible name').toEqual([]);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#more')).toBeHidden();
+  await expect(toggle).toBeFocused();
+  await toggle.click();
+  await page.locator('#view h1').first().click();
+  await expect(page.locator('#more')).toBeHidden();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
 });
 
 test('expandable items work with the keyboard and show focus', async ({ page }) => {
@@ -123,7 +203,7 @@ test('expandable items work with the keyboard and show focus', async ({ page }) 
   await expect(head).toHaveAttribute('aria-expanded', 'false');
   // Keyboard focus is visible: an outline, in every theme.
   for (const theme of THEMES) {
-    await page.selectOption('#theme-select', theme);
+    await pickTheme(page, theme);
     await head.focus();
     await page.keyboard.press('Shift+Tab');
     await page.keyboard.press('Tab');
@@ -182,7 +262,7 @@ test('renaming a connector renames it in the models that use it', async ({ page,
   await open(page, 'connectors');
   await page.locator('.item-head', { hasText: 'local' }).first().click();
   await page.locator('.item.open input[data-action-input="connector-rename"]').fill('lmstudio');
-  await page.locator('#nav a[data-view="models"]').click();
+  await page.locator('#tabs a[data-view="models"]').click();
   await expect(page.locator('.item', { hasText: 'local-small' })).toContainText('via lmstudio');
   await page.locator('#save-bar [data-action="apply"]').click();
   await expect(page.locator('#toast')).toContainText('Applied');
@@ -306,7 +386,7 @@ test('router learned runs tuning, pauses and resumes learning', async ({ page })
 test('the theme picker switches themes and remembers the choice', async ({ page }) => {
   await open(page, 'overview');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'machine-dark');
-  await page.selectOption('#theme-select', 'machine-light');
+  await pickTheme(page, 'machine-light');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'machine-light');
   const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
   expect(background).toBe('rgb(255, 255, 255)');
@@ -328,7 +408,7 @@ test('a theme file dropped into the themes directory appears after a reload', as
   try {
     await open(page, 'overview');
     await expect(page.locator('#theme-select option[value="dropped-in"]')).toHaveText('Dropped In');
-    await page.selectOption('#theme-select', 'dropped-in');
+    await pickTheme(page, 'dropped-in');
     await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(32, 32, 32)');
     await expect(page.locator('#theme-select option[value="half-done"]')).toContainText('⚠');
   } finally {
@@ -443,13 +523,21 @@ test.describe('on a phone', () => {
     await toggle.click();
     await expect(page.locator('#nav')).toBeVisible();
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await page.locator('#nav a[data-view="routes"]').click();
-    await expect(page.locator('#view h1')).toHaveText('Routes');
+    await page.locator('#nav a', { hasText: 'Routing' }).click();
+    await expect(page.locator('#view h1').first()).toHaveText('Tiers');
     await expect(page.locator('#nav')).toBeHidden();
+    await page.locator('#tabs a', { hasText: 'Routes' }).click();
+    await expect(page.locator('#view h1')).toHaveText('Routes');
     await toggle.click();
     await page.keyboard.press('Escape');
     await expect(page.locator('#nav')).toBeHidden();
     await expect(toggle).toBeFocused();
+  });
+
+  test('the tabs scroll sideways inside their strip and show the current one', async ({ page }) => {
+    await open(page, 'learned');
+    expect(await sideways(page), 'horizontal overflow').toBeLessThanOrEqual(0);
+    await expect(page.locator('#tabs a[aria-current="page"]')).toBeInViewport({ ratio: 1 });
   });
 });
 
