@@ -24,7 +24,9 @@ def words(text):
     # Numbers come back as digits (".87", "tier 4"): read them out the way the narration spells them.
     text = re.sub(r"(?<=\d)\.(?=\d)|(?<![\w])\.(?=\d)", " point ", text)
     text = re.sub(r"\d", lambda m: f" {DIGITS[int(m.group())]} ", text).replace("labeled", "labelled")
-    return re.sub(r"[^a-z' ]", " ", text).replace(" in to ", " into ").split()
+    # The voice says Claude from the spelling "Klaud" (tts.py), which speech to text writes as it hears it.
+    said = re.sub(r"[^a-z' ]", " ", text).replace(" in to ", " into ").split()
+    return ["claude" if w in ("klaud", "claud", "clod", "clawed") else w for w in said]
 
 
 def repeats(said, max_len=6):
