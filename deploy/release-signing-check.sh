@@ -11,6 +11,8 @@ set -euo pipefail
 
 failed=false
 output="${GITHUB_OUTPUT:-/dev/null}"
+# A variable typed into the settings page can carry stray spaces or capitals: `True ` means true too.
+allow_unsigned="$(tr -d '[:space:]' <<<"${ALLOW_UNSIGNED_RELEASE:-}" | tr '[:upper:]' '[:lower:]')"
 summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
 {
   echo "## Code signing"
@@ -32,7 +34,7 @@ for platform in windows macos; do
   elif [ ${#present[@]} -gt 0 ]; then
     echo "::error::$name signing is only partly set up. Missing: ${missing[*]}. Set them, or remove the others (docs/desktop.md#signing)."
     failed=true state=partial line="**failed**: signing only partly set up, missing ${missing[*]}"
-  elif [ "${ALLOW_UNSIGNED_RELEASE:-}" = true ]; then
+  elif [ "$allow_unsigned" = true ]; then
     echo "::warning::The $name installers will be unsigned: no signing secrets are set and ALLOW_UNSIGNED_RELEASE is true."
     state=unsigned line="**unsigned**: no signing secrets, and ALLOW_UNSIGNED_RELEASE is true"
   else

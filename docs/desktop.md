@@ -32,11 +32,11 @@ Signing is required. The release's first job checks, for each platform, whether 
 | Each platform's settings | What the release does |
 |---|---|
 | All set | Signs that platform's installers, and checks the signature (and on macOS the notarization ticket) before uploading them. A signature that does not check out fails the release. |
-| None set, and the variable `ALLOW_UNSIGNED_RELEASE` is `true` | Publishes that platform's installers unsigned, with a warning. |
+| None set, and the variable `ALLOW_UNSIGNED_RELEASE` is `true` (spaces and capitals are ignored) | Publishes that platform's installers unsigned, with a warning. |
 | None set, `ALLOW_UNSIGNED_RELEASE` not set (or anything but `true`) | Fails before anything is published, naming the platform. |
 | Some set, some not | Fails before anything is published, naming the missing settings. `ALLOW_UNSIGNED_RELEASE` does not change this. |
 
-Until the certificates exist, set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true` (Settings > Secrets and variables > Actions > Variables), or every release fails at its first job. Delete it once both platforms sign, so that a lost secret stops a release instead of publishing unsigned installers. The run's summary has a **Code signing** table, and each installer job adds a line per installer saying whether it was signed. The Linux AppImage and the archives are never code-signed.
+Until the certificates exist, set the variable `ALLOW_UNSIGNED_RELEASE` to `true` (in the `release` environment, Settings > Environments > release, or for the repository, Settings > Secrets and variables > Actions > Variables), or every release fails at its first job. Delete it once both platforms sign, so that a lost secret stops a release instead of publishing unsigned installers. The run's summary has a **Code signing** table, and each installer job adds a line per installer saying whether it was signed. The Linux AppImage and the archives are never code-signed.
 
 The app is built in jobs that hold no secret and can only read the repository (`installer-build`, `desktop-build`): `deploy/publish-desktop.sh` publishes it on each installer's own OS. The signing jobs download that build and run no `dotnet build` or `publish`, so no package's build code runs next to a signing credential; they only install vpk, which packs, signs and uploads. The macOS job imports the certificates into a temporary keychain and stores a `notarytool` profile, and vpk signs, notarizes and staples the app and the `.pkg`.
 
