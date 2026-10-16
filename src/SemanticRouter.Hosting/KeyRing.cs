@@ -41,12 +41,16 @@ internal sealed partial class KeyRing
     public const string CertificateKeySetting = Section + ":CertificateKey";
     public const string CertificatePasswordSetting = Section + ":CertificatePassword";
 
-    private KeyRing(string? directory, bool customDirectory, KeyRingProtection protection, X509Certificate2? certificate)
+    /// <summary>The file the key ring decrypts: <c>semantic-router.secrets.json</c> in the configuration directory.</summary>
+    private readonly string _secretsFile;
+
+    private KeyRing(string? directory, bool customDirectory, KeyRingProtection protection, X509Certificate2? certificate, string secretsFile)
     {
         Directory = directory;
         CustomDirectory = customDirectory;
         Protection = protection;
         Certificate = certificate;
+        _secretsFile = secretsFile;
     }
 
     /// <summary>The folder that holds the keys; <see langword="null"/> for <see cref="KeyRingProtection.Fallback"/>.</summary>
@@ -115,7 +119,7 @@ internal sealed partial class KeyRing
             }
         }
 
-        var keyRing = new KeyRing(directory, custom, protection, certificate);
+        var keyRing = new KeyRing(directory, custom, protection, certificate, Path.Combine(configurationDirectory, "semantic-router.secrets.json"));
         dataProtection.Services.AddSingleton(keyRing);
         return keyRing;
     }
@@ -181,6 +185,23 @@ internal sealed partial class KeyRing
         return true;
     }
 
+    /// <summary>
+    /// Whether the secrets file holds any secret, i.e. whether an unencrypted key ring has anything to give away. A file
+    /// that cannot be read counts as holding some.
+    /// </summary>
+    public bool ProtectsSecrets()
+    {
+        try
+        {
+            string text = File.Exists(_secretsFile) ? File.ReadAllText(_secretsFile) : string.Empty;
+            return !string.IsNullOrWhiteSpace(text) && System.Text.Json.Nodes.JsonNode.Parse(text) is not System.Text.Json.Nodes.JsonObject { Count: 0 };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>What <c>doctor</c> reports: where the keys are, how they are protected, and older unencrypted keys.</summary>
     public IEnumerable<RouterCheck> Checks()
     {
@@ -190,9 +211,12 @@ internal sealed partial class KeyRing
             KeyRingProtection.Dpapi => new RouterCheck("key ring", RouterCheckStatus.Ok, $"{where}encrypted with DPAPI for this Windows account."),
             KeyRingProtection.Certificate => new RouterCheck("key ring", RouterCheckStatus.Ok,
                 $"{where}encrypted to certificate {Certificate!.Subject} (thumbprint {Certificate.Thumbprint}, valid until {Certificate.NotAfter.ToUniversalTime():yyyy-MM-dd})."),
-            KeyRingProtection.FilePermissions => new RouterCheck("key ring", RouterCheckStatus.Warning,
+            KeyRingProtection.FilePermissions when ProtectsSecrets() => new RouterCheck("key ring", RouterCheckStatus.Warning,
                 $"{where}not encrypted: only its owner-only file permissions protect it, so a backup holding it and the secrets file can decrypt the secrets. " +
-                $"Set {CertificateSetting} to encrypt it (see docs/host.md#the-key-ring)."),
+                $"Set {CertificateSetting} to encrypt it (see {SiteLinks.KeyRing})."),
+            KeyRingProtection.FilePermissions => new RouterCheck("key ring", RouterCheckStatus.Ok,
+                $"{where}not encrypted, which is fine while the secrets file holds no key. Before you type an API key into the dashboard, " +
+                $"set {CertificateSetting} to encrypt it, or keep the key in the environment instead (see {SiteLinks.KeyRing})."),
             _ => new RouterCheck("key ring", RouterCheckStatus.Warning,
                 "no user profile is loaded, so ASP.NET Core keeps the keys in the registry (HKLM, DPAPI for the machine) or only in memory. " +
                 $"Set {HostSettings.KeysVariable} to a folder, or run the router as a signed-in user."),
@@ -283,10 +307,10 @@ internal sealed partial class KeyRing
 
     private static bool IsThumbprint(string value) => value.Length == 40 && value.All(Uri.IsHexDigit);
 
-    /// <summary>Logs, once per start, what <c>doctor</c> would warn about.</summary>
+    /// <summary>Logs, once per start, what <c>doctor</c> would warn about: an unencrypted key ring only once it protects a secret.</summary>
     public void LogAtStart(ILogger logger, bool replacedKey)
     {
-        if (Protection == KeyRingProtection.FilePermissions)
+        if (Protection == KeyRingProtection.FilePermissions && ProtectsSecrets())
         {
             LogNotEncrypted(logger, Directory!, CertificateSetting);
         }

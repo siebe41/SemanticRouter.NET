@@ -302,6 +302,12 @@ public sealed class ServiceTests : IDisposable
             output.ToString().Should().Contain("address already in use").And.Contain("semantic-router service status");
         }
 
+        // Started again on the same directory and address: it is this router, so say so and where its dashboard is.
+        var again = new StringWriter();
+        (await RouterHost.RunAsync(settings, again, b => b.Logging.ClearProviders())).Should().Be(RouterHost.AddressInUseExitCode);
+        again.ToString().Should().Contain($"already running for this configuration (process {Environment.ProcessId}")
+            .And.Contain(RouterHost.LocalAddress(instance.Urls[0]) + "/router").And.NotContain("   at ");
+
         // Windows routers stop when asked through their event; elsewhere the service manager sends SIGTERM.
         if (OperatingSystem.IsWindows())
         {
