@@ -114,6 +114,25 @@ test('with no model enabled, the Overview walks through setup: connector, models
   await expect(page.locator('#setup')).toHaveCount(0);
 });
 
+test('a tool found on this machine comes first, once, and the other presets fold away', async ({ page, request }) => {
+  expect((await request.put('/router/api/config?persist=false', { data: empty })).ok()).toBeTruthy();
+  const claude = { id: 'claude-code', title: 'Claude Code', kind: 'cli', detail: 'Signed in', consent: 'Uses your Claude subscription.', connector: { name: 'claude-cli', settings: { Type: 'Cli', Preset: 'ClaudeCode' } }, models: [] };
+  const presetClaude = { ...claude, detail: 'Your Claude subscription through the claude CLI' };
+  await page.route('**/router/api/setup', (r) => r.fulfill({ json: { ...SETUP, detected: [claude], presets: [...SETUP.presets, presetClaude] } }));
+  await open(page, 'overview');
+  const card = page.locator('#setup');
+  await expect(card.locator('.choice b', { hasText: /^Claude Code$/ })).toHaveCount(1);
+  await expect(card.locator('.choice', { hasText: 'Claude Code' })).toContainText('found');
+  const others = card.locator('details.advanced', { has: page.locator('summary', { hasText: 'Other providers (2)' }) });
+  await expect(others).not.toHaveAttribute('open', '');
+  await expect(card.locator('.choice b', { hasText: /^LM Studio$/ })).toBeHidden();
+  await others.locator('summary').click();
+  await expect(card.locator('.choice b', { hasText: /^LM Studio$/ })).toBeVisible();
+  // The empty Connectors page lists everything unfolded, still without the duplicate.
+  await open(page, 'connectors');
+  await expect(page.locator('#view .empty-state .choice')).toHaveText([/Claude Code/, /LM Studio/, /OpenAI/, /Blank connector/]);
+});
+
 test('the setup card lists the router\'s own presets, and a gateway refusal says where to fix it', async ({ page, request }) => {
   expects4xx.add(page); // the gateway refuses the Send with a 400
   const setup = await request.get('/router/api/setup');
@@ -122,6 +141,9 @@ test('the setup card lists the router\'s own presets, and a gateway refusal says
   await open(page, 'overview');
   const card = page.locator('#setup');
   await expect(card.locator('h2')).toHaveText('Set up SemanticRouter');
+  // On a machine where a CLI was found, the other presets are folded under "Other providers".
+  const others = card.locator('details.advanced > summary', { hasText: 'Other providers' });
+  if (await others.count()) await others.click();
   await expect(card.locator('.choice b', { hasText: /^LM Studio$/ })).toBeVisible();
   await expect(card.locator('.choice b', { hasText: /^OpenAI$/ })).toBeVisible();
   // The banner leaves "no model is enabled" to the card here.

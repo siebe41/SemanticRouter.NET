@@ -2,7 +2,7 @@
    behind Add connector), and discovering a connector's models from the draft. */
 import { lineupPanel } from './config.js';
 import { $, api, h, isDirty, lineupFor, readOnly, state, toast } from './core.js';
-import { closeSection, openAttr } from './fields.js';
+import { advanced, closeSection, openAttr } from './fields.js';
 import { plural } from './labels.js';
 import { pageActions } from './page-actions.js';
 import { render } from './shell.js';
@@ -75,13 +75,24 @@ function choice(c, detected) {
   </li>`;
 }
 
-/* Detected tools first, then the presets. With blank, the last entry adds an empty connector to fill in by hand. */
+/*
+ * Detected tools first, then the presets. With blank, the last entry adds an empty connector to fill in by hand. A
+ * preset for something already detected is left out (Claude Code found and Claude Code the preset are the same thing),
+ * and in the setup card, when something was found, the other presets fold away: the list was ten entries long, and
+ * pushed steps 2 and 3 off the screen.
+ */
 export function presetList(blank) {
   const s = setup();
   if (!s.data) { loadSetup(); return '<p class="muted small">Looking for providers on this machine…</p>'; }
-  const detected = s.data.detected || []; const presets = s.data.presets || [];
-  return `<ul class="choices">${detected.map((c) => choice(c, true)).join('')}${presets.map((c) => choice(c, false)).join('')}
-    ${blank ? `<li class="choice"><div class="choice-text"><b>Blank connector</b><div class="small muted">Any OpenAI-compatible server, the Anthropic API or a CLI, set up by hand.</div></div><button class="btn small" data-action="connector-add">Add</button></li>` : ''}</ul>
+  const detected = s.data.detected || [];
+  const found = (p) => detected.some((d) => d.id === p.id || (d.id === 'copilot-cli' && p.id === 'copilot'));
+  const presets = (s.data.presets || []).filter((p) => !found(p));
+  const blankEntry = blank ? `<li class="choice"><div class="choice-text"><b>Blank connector</b><div class="small muted">Any OpenAI-compatible server, the Anthropic API or a CLI, set up by hand.</div></div><button class="btn small" data-action="connector-add">Add</button></li>` : '';
+  const others = `<ul class="choices">${presets.map((c) => choice(c, false)).join('')}${blankEntry}</ul>`;
+  const list = detected.length && !blank
+    ? `<ul class="choices">${detected.map((c) => choice(c, true)).join('')}</ul>${presets.length ? advanced('setup-other-providers', `Other providers (${presets.length})`, others) : ''}`
+    : `<ul class="choices">${detected.map((c) => choice(c, true)).join('')}${presets.map((c) => choice(c, false)).join('')}${blankEntry}</ul>`;
+  return `${list}
     ${s.error || s.data.detectionProblem ? `<p class="small muted">Couldn't look for everything on this machine: ${h(s.error || s.data.detectionProblem)}</p>` : ''}`;
 }
 
