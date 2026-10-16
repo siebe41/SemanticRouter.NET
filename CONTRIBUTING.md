@@ -35,6 +35,15 @@ Every pull request runs CI ([`.github/workflows/ci.yml`](.github/workflows/ci.ym
 - **Add tests** for behaviour you change. Tests must not need the network, a model or a vendor CLI; the existing tests show how to use `TestServer` and the stand-in CLI in `tests/SemanticRouter.FakeCli`.
 - **Update the documentation** (README or `docs/`) when you change configuration, endpoints or behaviour.
 
+## Changelog
+
+[CHANGELOG.md](CHANGELOG.md) lists every user-visible change. If your pull request changes what someone using the packages, the tool, the container image or the desktop app sees (a setting, an endpoint, a default, a fix to behaviour they could notice, a security fix), add one line under **Unreleased**, in the right group:
+
+- **Security** for anything that changes what can be read, reached or run, or by whom;
+- **Added**, **Changed** or **Fixed** for the rest.
+
+Write what changed for the user, not how, and end the line with the pull request number, e.g. `(#123)`. Internal refactoring, tests, CI and documentation-only changes need no line. When a release is cut, the maintainer renames **Unreleased** to the version and its date.
+
 ## Never commit keys
 
 Do not commit API keys, tokens or a saved configuration file that contains them, not even in a test or a sample. Keep keys in user-secrets (`dotnet user-secrets set "SemanticRouter:Connectors:openai:ApiKey" "<key>"`), environment variables (`SemanticRouter__Connectors__openai__ApiKey`), or write a reference in the configuration (`"${env:OPENAI_API_KEY}"`). In tests, use obviously fake values.
