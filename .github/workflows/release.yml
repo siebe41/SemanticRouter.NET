@@ -1,9 +1,9 @@
 name: Release
 
-# Push a tag such as v0.2.0 to publish the NuGet packages (library, ASP.NET Core integration and the
-# `semantic-router` dotnet tool), the container image (ghcr.io/<owner>/semantic-router) and the desktop app
-# (self-contained downloads for Windows, macOS and Linux, and the installers with their update feeds, attached to the
-# GitHub release).
+# Run "Cut a release" (cut-release.yml) under Actions, or push a tag such as v0.2.0 as the repository owner, to publish
+# the NuGet packages (library, ASP.NET Core integration and the `semantic-router` dotnet tool), the container image
+# (ghcr.io/<owner>/semantic-router) and the desktop app (self-contained downloads for Windows, macOS and Linux, and the
+# installers with their update feeds, attached to the GitHub release). Only the repository owner can release.
 #
 # Every release can be verified (docs/releases.md): the image is signed with keyless cosign and carries provenance and
 # SBOM attestations; every release asset, the NuGet packages included, has a build provenance attestation and a line in
@@ -18,9 +18,10 @@ on:
     tags: [ 'v*' ]
 
 # Read-only by default; each job that publishes, signs or attests asks for the extra permissions it needs (id-token and
-# attestations only in image-sign and checksums, the jobs that build nothing). Every publishing job runs
-# in the `release` environment, so the repository owner can require an approval (and restrict it to v* tags) under
-# Settings > Environments. Publishing to nuget.org needs the `NUGET_USER` variable there (see the nuget job).
+# attestations only in image-sign and checksums, the jobs that build nothing). Every publishing job runs in the `release`
+# environment, so the repository owner can require an approval under Settings > Environments (and restrict it to `main`
+# and v* tags: cut-release.yml runs there from main). Publishing to nuget.org needs the `NUGET_USER` variable there (see
+# the nuget job).
 permissions:
   contents: read
 
@@ -40,6 +41,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Only the repository owner releases: a v* tag pushed by anyone else publishes nothing, since every other job needs
+      # this one. The "Cut a release" workflow (cut-release.yml) creates the tag with the owner's token, so its tag is the
+      # owner's too.
+      - name: The repository owner released it
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          if [ "$ACTOR" != "$OWNER" ] || [ "$TRIGGERING_ACTOR" != "$OWNER" ]; then
+            echo "::error::Only $OWNER can release: $GITHUB_REF_NAME was pushed by $ACTOR (triggered by $TRIGGERING_ACTOR)."
+            exit 1
+          fi
+
       # Releases are built from reviewed code only: a tag on a commit that is not on main publishes nothing, since every
       # other job needs this one.
       - name: The tag is on main
@@ -49,10 +64,9 @@ jobs:
             exit 1
           fi
 
-      # Code signing is required, and checked here so that a release without it publishes nothing. Each platform's
-      # signing is complete (signed), absent (fails, unless ALLOW_UNSIGNED_RELEASE is `true`: unsigned) or partial
-      # (always fails: the installer job would stop half-way, after the packages are on nuget.org). Only whether each
-      # secret is set reaches this job, as true or false, never its value.
+      # Code signing is required, and checked here so that a release without it publishes nothing (the script says how
+      # each platform's state is decided; cut-release.yml runs the same check before it tags). Only whether each secret
+      # is set reaches this job, as true or false, never its value.
       - name: Code signing
         id: signing
         env:
@@ -73,46 +87,7 @@ jobs:
             APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID != '' }}
             APPLE_SIGN_APP_IDENTITY=${{ vars.APPLE_SIGN_APP_IDENTITY != '' }}
             APPLE_SIGN_INSTALL_IDENTITY=${{ vars.APPLE_SIGN_INSTALL_IDENTITY != '' }}
-        run: |
-          failed=false
-          {
-            echo "## Code signing"
-            echo
-            echo "| | |"
-            echo "|---|---|"
-          } >> "$GITHUB_STEP_SUMMARY"
-          for platform in windows macos; do
-            case "$platform" in
-              windows) name=Windows settings="$WINDOWS" how="Azure Trusted Signing" ;;
-              macos) name=macOS settings="$MACOS" how="Developer ID, notarized" ;;
-            esac
-            present=() missing=()
-            for pair in $settings; do
-              if [ "${pair#*=}" = true ]; then present+=("${pair%%=*}"); else missing+=("${pair%%=*}"); fi
-            done
-            if [ ${#missing[@]} -eq 0 ]; then
-              state=signed line="**signed** ($how)"
-            elif [ ${#present[@]} -gt 0 ]; then
-              echo "::error::$name signing is only partly set up. Missing: ${missing[*]}. Set them, or remove the others (docs/desktop.md#signing)."
-              failed=true state=partial line="**failed**: signing only partly set up, missing ${missing[*]}"
-            elif [ "$ALLOW_UNSIGNED_RELEASE" = true ]; then
-              echo "::warning::The $name installers will be unsigned: no signing secrets are set and ALLOW_UNSIGNED_RELEASE is true."
-              state=unsigned line="**unsigned**: no signing secrets, and ALLOW_UNSIGNED_RELEASE is true"
-            else
-              echo "::error::No $name signing secrets are set. Add them (docs/desktop.md#signing), or set the variable ALLOW_UNSIGNED_RELEASE to true to publish unsigned installers."
-              failed=true state=missing line="**failed**: no signing secrets, and ALLOW_UNSIGNED_RELEASE is not true"
-            fi
-            echo "$platform=$state" >> "$GITHUB_OUTPUT"
-            echo "| $name installers | $line |" >> "$GITHUB_STEP_SUMMARY"
-          done
-          {
-            echo "| Linux AppImage, archives (.zip, .tar.gz) | not code-signed |"
-            echo "| Container image | signed with keyless cosign |"
-            echo "| Every asset | build provenance attestation and SHA256SUMS |"
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$failed" = true ]; then
-            exit 1
-          fi
+        run: deploy/release-signing-check.sh
 
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
@@ -405,10 +380,27 @@ jobs:
           name: desktop
           path: artifacts
 
+      # The release notes are the version's section of CHANGELOG.md at the tag (or its Unreleased section, when that was
+      # not renamed before the release), followed by GitHub's list of merged pull requests.
+      - name: Release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh api -H "Accept: application/vnd.github.raw" "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$GITHUB_REF_NAME" > CHANGELOG.md \
+            || : > CHANGELOG.md
+          section() {
+            awk -v heading="## [$1]" 'index($0, heading) == 1 { found = 1; next } found && /^## \[/ { exit } found' CHANGELOG.md
+          }
+          notes="$(section "$version")"
+          if [ -z "$(tr -d '[:space:]' <<<"$notes")" ]; then
+            notes="$(section Unreleased)"
+          fi
+          printf '%s\n' "$notes" > notes.md
+
       - name: Attach to the release
         run: |
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --verify-tag
+            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
+              --notes-file notes.md --generate-notes --verify-tag
           gh release upload "$GITHUB_REF_NAME" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
 
   # The app each installer packages, published on the installer's own OS (as before the split), without secrets. Tar

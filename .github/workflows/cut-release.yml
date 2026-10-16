@@ -1,0 +1,148 @@
+name: Cut a release
+
+# Actions > Cut a release > Run workflow, on main, with the version (e.g. 0.3.0): checks the release can go ahead, then
+# creates the tag v<version> on main's latest commit, which starts the release workflow (release.yml). That workflow
+# builds, signs and publishes everything and creates the GitHub release; follow it under Actions.
+#
+# Only the repository owner can cut a release. This workflow refuses anyone else, and so does release.yml, which also
+# checks who created the tag. The tag is created with the owner's own token (the RELEASE_TAG_TOKEN secret): a tag
+# created with the workflow's GITHUB_TOKEN would not start release.yml, and would not be the owner's.
+# docs/releases.md#cutting-a-release says how to create the token.
+run-name: Cut release v${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, without the v (e.g. 0.3.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+# One release at a time.
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    # The same environment as the publishing jobs: its required reviewer approves this run too, and the signing secrets
+    # and RELEASE_TAG_TOKEN can be kept there.
+    environment: release
+    env:
+      VERSION: ${{ inputs.version }}
+      OWNER: ${{ github.repository_owner }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Only the repository owner, from main
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          if [ "$ACTOR" != "$OWNER" ] || [ "$TRIGGERING_ACTOR" != "$OWNER" ]; then
+            echo "::error::Only $OWNER can cut a release; this run was started by $TRIGGERING_ACTOR."
+            exit 1
+          fi
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::Run this workflow on main (it was run on $GITHUB_REF): a release is built from main's latest commit."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The version
+        run: |
+          if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::'$VERSION' is not a version like 0.3.0 (three numbers, no v, no suffix)."
+            exit 1
+          fi
+          tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v" --jq '.[].ref' | sed 's|^refs/tags/v||')"
+          if grep -qxF "$VERSION" <<<"$tags"; then
+            echo "::error::v$VERSION already exists. Pick the next version."
+            exit 1
+          fi
+          latest="$(grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"$tags" | sort -V | tail -n 1 || true)"
+          if [ -n "$latest" ] && [ "$(printf '%s\n%s\n' "$latest" "$VERSION" | sort -V | tail -n 1)" != "$VERSION" ]; then
+            echo "::error::v$VERSION is older than the latest release, v$latest."
+            exit 1
+          fi
+          echo "Releasing v$VERSION from $GITHUB_SHA (latest release: ${latest:-none})."
+
+      # CI must have passed on this exact commit: release.yml runs the tests again, but not the installers, the
+      # container image or the dashboard end-to-end tests.
+      - name: CI passed on this commit
+        run: |
+          runs="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --json status,conclusion --limit 20)"
+          if jq -e 'any(.[]; .status == "completed" and .conclusion == "success")' <<<"$runs" >/dev/null; then
+            exit 0
+          fi
+          if jq -e 'any(.[]; .status != "completed")' <<<"$runs" >/dev/null; then
+            echo "::error::CI is still running on $GITHUB_SHA. Run this again once it has passed."
+          else
+            echo "::error::CI has not passed on $GITHUB_SHA (main's latest commit). Fix main, or wait for its CI, then run this again."
+          fi
+          exit 1
+
+      # The same check as release.yml's first job, so a release that would fail on signing never gets a tag.
+      - name: Code signing
+        env:
+          ALLOW_UNSIGNED_RELEASE: ${{ vars.ALLOW_UNSIGNED_RELEASE }}
+          WINDOWS: >-
+            AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID != '' }}
+            AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID != '' }}
+            AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET != '' }}
+            AZURE_SIGNING_ENDPOINT=${{ vars.AZURE_SIGNING_ENDPOINT != '' }}
+            AZURE_SIGNING_ACCOUNT=${{ vars.AZURE_SIGNING_ACCOUNT != '' }}
+            AZURE_SIGNING_PROFILE=${{ vars.AZURE_SIGNING_PROFILE != '' }}
+          MACOS: >-
+            APPLE_BUILD_CERTIFICATE_BASE64=${{ secrets.APPLE_BUILD_CERTIFICATE_BASE64 != '' }}
+            APPLE_INSTALLER_CERTIFICATE_BASE64=${{ secrets.APPLE_INSTALLER_CERTIFICATE_BASE64 != '' }}
+            APPLE_P12_PASSWORD=${{ secrets.APPLE_P12_PASSWORD != '' }}
+            APPLE_ID=${{ secrets.APPLE_ID != '' }}
+            APPLE_APP_PASSWORD=${{ secrets.APPLE_APP_PASSWORD != '' }}
+            APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID != '' }}
+            APPLE_SIGN_APP_IDENTITY=${{ vars.APPLE_SIGN_APP_IDENTITY != '' }}
+            APPLE_SIGN_INSTALL_IDENTITY=${{ vars.APPLE_SIGN_INSTALL_IDENTITY != '' }}
+        run: deploy/release-signing-check.sh
+
+      - name: NuGet publishing is set up
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER }}
+        run: |
+          if [ -z "$NUGET_USER" ]; then
+            echo "::error::Set the NUGET_USER variable (the nuget.org profile that owns the Trusted Publishing policy) under Settings > Environments > release; the release would fail without it."
+            exit 1
+          fi
+
+      - name: Release notes
+        run: |
+          if grep -q "^## \[$VERSION\]" CHANGELOG.md; then
+            echo "Release notes: the $VERSION section of CHANGELOG.md." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::notice::CHANGELOG.md has no $VERSION section, so the release notes are its Unreleased section. Rename Unreleased to [$VERSION] in a pull request first to keep the changelog in step."
+            echo "Release notes: the Unreleased section of CHANGELOG.md (no $VERSION section)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # Through the API, with the owner's token: that tag push starts release.yml as the owner.
+      - name: Tag v${{ inputs.version }}
+        env:
+          RELEASE_TAG_TOKEN: ${{ secrets.RELEASE_TAG_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TAG_TOKEN" ]; then
+            echo "::error::Set the RELEASE_TAG_TOKEN secret: a fine-grained token of yours with Contents read and write on this repository (docs/releases.md#cutting-a-release)."
+            exit 1
+          fi
+          GH_TOKEN="$RELEASE_TAG_TOKEN" gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/v$VERSION" -f sha="$GITHUB_SHA" >/dev/null
+          {
+            echo "Tagged **v$VERSION** at \`$GITHUB_SHA\`."
+            echo
+            echo "The release workflow is starting: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/workflows/release.yml"
+            echo "When it finishes, the release is at $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/v$VERSION"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -33,6 +33,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Added
 
+- A "Cut a release" workflow (Actions > Cut a release): the repository owner enters a version, it checks CI, code signing and NuGet publishing, tags `main`, and the release workflow publishes everything with the CHANGELOG section as the release notes. Only the owner can release, by this workflow or a pushed tag. See [docs/releases.md](docs/releases.md#cutting-a-release).
 - Cache-aware stickiness: a conversation stays on the model with the warm prompt cache when that is cheaper than moving, and returns to it after a failover (`Middleware:Conversation:CacheLifetime`). (#137)
 - Prompt-cache markers on Anthropic requests translated from OpenAI or Responses clients (`Connectors:{name}:PromptCaching`, `CacheTtl`). (#139)
 - Cache reads and writes per activity entry, and a cache hit rate on the Usage page. (#113)

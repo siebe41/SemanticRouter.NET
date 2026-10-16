@@ -81,6 +81,33 @@ The SBOMs are [CycloneDX](https://cyclonedx.org/) JSON, generated with [Syft](ht
 
 [`deploy/third-party-notices.cs`](../deploy/third-party-notices.cs) writes it at publish time from the build's `*.deps.json` and each package's `.nuspec` and licence files in the NuGet cache, without network access. The same packages always give the same file. The container's Ubuntu and ASP.NET Core base layers come from Microsoft's image, with their own licence files.
 
+## Cutting a release
+
+For the maintainer. A release is published by one workflow run, which only the repository owner can start:
+
+1. **Optional:** rename **Unreleased** in [CHANGELOG.md](../CHANGELOG.md) to `[<version>] - <date>` in a pull request, and merge it. The release notes are that section; without it, they are the Unreleased section.
+2. Wait for CI to pass on `main`'s latest commit.
+3. **Actions > Cut a release > Run workflow**, on `main`, with the version (`0.3.0`: three numbers, no `v`).
+4. Approve the `release` environment when asked (if it requires a reviewer), once for this run and once for the release run it starts.
+
+[`cut-release.yml`](../.github/workflows/cut-release.yml) refuses to tag when:
+- it wasn't started by the owner, or not from `main`;
+- the version isn't a new `X.Y.Z` above the latest release;
+- CI hasn't passed on that commit;
+- code signing or NuGet publishing isn't set up (the same checks the release makes, so a release that would fail never gets a tag).
+
+Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag starts [`release.yml`](../.github/workflows/release.yml), which builds, tests, signs and publishes everything, creates the GitHub release with its notes, and attaches the assets and `SHA256SUMS`. Follow it under **Actions > Release**. It also refuses a tag that someone other than the owner pushed.
+
+**One-time setup:**
+- **A token to create the tag.** A tag created with a workflow's own token does not start another workflow, and wouldn't be the owner's, so the tag is created with a token of yours.
+  - Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) for this repository only, with **Contents: Read and write** and nothing else.
+  - Store it as the secret `RELEASE_TAG_TOKEN` in the `release` environment (**Settings > Environments > release > Environment secrets**).
+  - When it expires, "Cut a release" fails at its last step, before anything is tagged; replace the secret and run it again.
+- **The `release` environment:**
+  - If you limit its deployment branches and tags, allow both `main` (where "Cut a release" runs) and `v*` tags (where the release runs).
+  - Add yourself as a required reviewer to approve each release before anything is published.
+- **`NUGET_USER`** and the signing settings, or `ALLOW_UNSIGNED_RELEASE`, as described in [Code signing](#code-signing) and [desktop.md](desktop.md#signing).
+
 ## Code signing
 
 Windows SmartScreen and macOS Gatekeeper check a publisher's code signature, not these attestations. Provenance shows where a file came from; it does not stop the warnings on first start.
