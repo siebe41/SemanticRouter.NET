@@ -37,13 +37,20 @@ def repeats(said, max_len=6):
     return found
 
 
-def transcribe(audio16k):
+def transcribe(audio16k, hint=HINT):
     """Speech to text for 16 kHz mono float32 audio."""
     global _model
     if _model is None:
         from faster_whisper import WhisperModel
         _model = WhisperModel("small.en", device="cpu", compute_type="int8")
-    return " ".join(s.text.strip() for s in _model.transcribe(audio16k, initial_prompt=HINT)[0])
+    return " ".join(s.text.strip() for s in _model.transcribe(audio16k, initial_prompt=hint)[0])
+
+
+def says_claude(audio16k, text):
+    """Whether every "Claude" in the line is said right. The voice sometimes says "Clahd", which speech to text without
+    the hint (which would steer it to the name) writes as "clod"."""
+    want = len(re.findall(r"\bClaude\b", text))
+    return not want or len(re.findall(r"\bclaude\b", transcribe(audio16k, hint=None).lower())) >= want
 
 
 def check(text, heard):
@@ -69,8 +76,11 @@ if __name__ == "__main__":
         lines = json.load(f)["lines"]
     failed = 0
     for key, text in lines.items():
-        heard = transcribe(load16k(os.path.join(voice, f"{key}.wav")))
+        audio = load16k(os.path.join(voice, f"{key}.wav"))
+        heard = transcribe(audio)
         ok, missing, doubled, extra = check(text, heard)
+        if not says_claude(audio, text):
+            ok, missing = False, missing + ["Claude (said Clahd)"]
         failed += not ok
         print(f"{'ok   ' if ok else 'CHECK'} {key:10} missing={missing} doubled={doubled} extra={extra}\n      heard: {heard}")
     sys.exit(1 if failed else 0)

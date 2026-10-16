@@ -104,6 +104,8 @@ if engine == "chatterbox":
         """Lower is better; a take that drops or repeats words is never chosen over one that doesn't."""
         a16, f0, voiced, loud = voicing(audio)
         ok, missing, doubled, extra = check_narration.check(text, check_narration.transcribe(a16.astype(np.float32)))
+        if not check_narration.says_claude(a16.astype(np.float32), text):
+            ok, missing = False, missing + ["Claude (said Clahd)"]
         bursts, run = 0, 0
         for v, l in zip(voiced, loud):  # loud, unvoiced stretches of 200 ms or more: breaths, clicks, hiss
             run = run + 1 if (not v and l > 0.06) else 0
