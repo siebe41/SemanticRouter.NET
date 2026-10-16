@@ -36,6 +36,13 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private DashboardWindow? _window;
     private AboutWindow? _about;
     private bool _openWhenReady;
+
+    // The page to open when the router is ready: Overview, with its setup, on the first start (no configuration yet).
+    private string? _openPage;
+
+    // Whether the router serves requests with no enabled model, and whether that was announced since it last had one.
+    private bool _noModel;
+    private bool _noModelAnnounced;
     private bool _quitting;
     private TrayDigest _digest = TrayDigest.None;
     private DateTimeOffset _digestChecked;
@@ -52,6 +59,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private NativeMenuItem _learned = null!;
     private NativeMenuItem _week = null!;
     private NativeMenuItem _needs = null!;
+    private NativeMenuItem _setUp = null!;
     private NativeMenuItem _update = null!;
     private NativeMenuItem _checkUpdates = null!;
     private NativeMenuItem _checkUpdatesNow = null!;
@@ -116,6 +124,13 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         }
 
         _openWhenReady = !options.Background;
+        if (!File.Exists(options.Host.ConfigurationFile))
+        {
+            // Nothing is set up yet: the dashboard opens where the setup is, and that is announcement enough.
+            _openPage = "#/overview";
+            _noModelAnnounced = _openWhenReady;
+        }
+
         if (!options.Background && !_preferences.Welcomed)
         {
             _ = WelcomeAsync();
@@ -138,6 +153,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _week.Click += (_, _) => OpenDashboard("#/overview");
         _needs = new NativeMenuItem { IsVisible = false };
         _needs.Click += (_, _) => OpenDashboard(_digest.NeedsLink);
+        _setUp = new NativeMenuItem("No model is enabled yet: set one up…") { IsVisible = false };
+        _setUp.Click += (_, _) => OpenDashboard("#/overview");
         _update = new NativeMenuItem { IsVisible = false };
         _update.Click += (_, _) => _ = RestartToUpdateAsync();
         _checkUpdates = new NativeMenuItem("Check for updates") { ToggleType = MenuItemToggleType.CheckBox, IsVisible = _updater.Installed };
@@ -187,7 +204,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         {
             Icon = _icon,
             ToolTipText = "SemanticRouter",
-            Menu = [open, _needs, _update, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, _checkUpdates, _checkUpdatesNow, _applyOnQuit, logs, configuration, new NativeMenuItemSeparator(), about, quit],
+            Menu = [open, _setUp, _needs, _update, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, _checkUpdates, _checkUpdatesNow, _applyOnQuit, logs, configuration, new NativeMenuItemSeparator(), about, quit],
         };
         tray.Clicked += (_, _) => OpenDashboard();
         UpdateMenu();
@@ -200,7 +217,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         if (_router.State is RouterState.Hosting or RouterState.Attached && _openWhenReady)
         {
             _openWhenReady = false;
-            OpenDashboard();
+            OpenDashboard(_openPage);
+            _openPage = null;
         }
         else if (_router.State == RouterState.Failed && _openWhenReady)
         {
@@ -212,7 +230,10 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
 
     private void UpdateMenu()
     {
-        _status.Header = _switching ? "Switching the router over…" : _router.Status;
+        // "Running on …" alone would suggest it is ready to use; without a model it answers nothing.
+        bool noModel = _noModel && _router.Url is not null;
+        _status.Header = _switching ? "Switching the router over…" : TrayDigest.StatusLine(_router.Status, noModel);
+        _setUp.IsVisible = noModel;
         bool serviceOn = _service.IsOn;
         _restart.IsEnabled = !_switching
             && (_router.State is RouterState.Hosting or RouterState.Stopped or RouterState.Failed || (_router.State == RouterState.Attached && serviceOn));
@@ -238,7 +259,9 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _about?.Updates.Show(UpdateStatus.Of(_updater, _checkingUpdates, _downloadingUpdate, _preferences.CheckForUpdates, DateTimeOffset.Now));
         if (_tray is not null)
         {
-            _tray.ToolTipText = _digest.NeedsLine is { } needs ? "SemanticRouter: " + needs : "SemanticRouter";
+            _tray.ToolTipText = _digest.NeedsLine is { } needs ? "SemanticRouter: " + needs
+                : noModel ? "SemanticRouter: no model is enabled yet"
+                : "SemanticRouter";
         }
     }
 
@@ -255,6 +278,21 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         }
 
         _digestChecked = now;
+        bool? noModel;
+        try
+        {
+            noModel = TrayDigest.NoModelEnabled(await Http.GetStringAsync(new Uri(url + "/router/api/status")).ConfigureAwait(false));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            noModel = null;
+        }
+
+        if (noModel is { } none)
+        {
+            Dispatcher.UIThread.Post(() => ShowNoModel(none));
+        }
+
         TrayDigest digest;
         try
         {
@@ -280,6 +318,26 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             _digest = digest;
             UpdateMenu();
         });
+    }
+
+    /// <summary>
+    /// Follows whether the router has an enabled model: without one the menu says so and offers the setup, and a
+    /// notification says it once, until a model is enabled (and again if none is later).
+    /// </summary>
+    private void ShowNoModel(bool none)
+    {
+        _noModel = none;
+        if (!none)
+        {
+            _noModelAnnounced = false;
+        }
+        else if (!_noModelAnnounced)
+        {
+            _noModelAnnounced = true;
+            DesktopNotifier.Show("SemanticRouter has no model yet", "It cannot answer prompts until you add one. The tray menu opens the setup on the dashboard.");
+        }
+
+        UpdateMenu();
     }
 
     /// <summary>
