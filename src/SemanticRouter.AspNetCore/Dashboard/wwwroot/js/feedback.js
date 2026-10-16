@@ -1,7 +1,9 @@
 /* Semantic Router dashboard: Feedback page: a bug, a misrouted prompt or an idea, opened as a pre-filled GitHub issue. */
 import { tierOptions } from './config.js';
-import { h, num, state, toast, views, when } from './core.js';
+import { h, num, state, toast, views } from './core.js';
+import { reasonLabel, stamp } from './labels.js';
 import { isLocalModel } from './live.js';
+import { pageActions } from './page-actions.js';
 import { render } from './shell.js';
 
 export const REPOSITORY = 'https://github.com/siebe41/SemanticRouter.NET';
@@ -125,7 +127,7 @@ export function usePreview() {
   render();
 }
 
-const entryLabel = (e) => `#${e.id} · ${when(e.timestamp)} · T${e.tier} ${e.reason}${e.route ? ' ' + e.route : ''} → ${e.servedBy || e.plannedModel || 'no model'}`;
+const entryLabel = (e) => `#${e.id} · ${stamp(e.timestamp)} · T${e.tier} ${reasonLabel(e.reason)}${e.route ? ' ' + e.route : ''} → ${e.servedBy || e.plannedModel || 'no model'}`;
 
 views.feedback = () => {
   if (!state.report) state.report = blankReport();
@@ -168,10 +170,11 @@ views.feedback = () => {
     <p class="faint small">Security problems go through <a href="${SECURITY_REPORT}" target="_blank" rel="noopener">private reporting</a>, never a public issue. All issues: <a href="${REPOSITORY}/issues" target="_blank" rel="noopener">github.com/siebe41/SemanticRouter.NET/issues</a>.</p>`;
 };
 
-export const reportActions = {
+// The dispatcher in app.js reads every page's handlers through this name (see page-actions.js).
+export const reportActions = Object.assign(pageActions, {
   'report-entry'(el) { const e = state.activity.find((x) => String(x.id) === el.dataset.id); if (e) reportEntry(e); },
   'report-open'() { openIssue(); },
   'report-preview'() { usePreview(); },
   'report-copy'() { const e = entryFor(state.report); if (e) navigator.clipboard.writeText(decisionLine(e)).then(() => toast('Copied.', 'ok')); },
   'report-reset'() { state.report = blankReport(); render(); },
-};
+});
