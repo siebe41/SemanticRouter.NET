@@ -15,16 +15,31 @@ internal sealed record DecisionRecord(long EntryId, int Tier, string? Route, str
 /// <summary>
 /// Remembers which decision answered each recent prompt, per client, for retry escalation
 /// (<see cref="RetryEscalationOptions"/>) and retry feedback. Keys are a hash of the client and the prompt: no prompt
-/// text is kept. In memory only.
+/// text is kept. In memory only, and bounded: answers older than the retry window go, and beyond
+/// <see cref="MaxEntries"/> the oldest go first.
 /// </summary>
 internal sealed class RetryTracker
 {
+    /// <summary>The most answers remembered: about 5 MB.</summary>
+    public const int MaxEntries = 16_384;
+
     private const int PruneAbove = 2048;
 
     private readonly ConcurrentDictionary<string, (DateTimeOffset At, DecisionRecord Decision)> _answered = new(StringComparer.Ordinal);
     private readonly TimeProvider _time;
+    private readonly TrackerPruning _pruning;
 
-    public RetryTracker(TimeProvider? time = null) => _time = time ?? TimeProvider.System;
+    public RetryTracker(TimeProvider? time = null)
+    {
+        _time = time ?? TimeProvider.System;
+        _pruning = new TrackerPruning(MaxEntries, PruneAbove, _time);
+    }
+
+    /// <summary>Answers remembered now.</summary>
+    internal int Count => _answered.Count;
+
+    /// <summary>The pruning, for tests of its cost.</summary>
+    internal TrackerPruning Pruning => _pruning;
 
     /// <summary>The decision that answered <paramref name="prompt"/> within <paramref name="window"/>, or <see langword="null"/> when this is not a retry.</summary>
     public DecisionRecord? Previous(string client, string prompt, TimeSpan window) =>
@@ -41,18 +56,8 @@ internal sealed class RetryTracker
     /// <summary>Records the decision that answered <paramref name="prompt"/>.</summary>
     public void Answered(string client, string prompt, DecisionRecord decision, TimeSpan window)
     {
-        DateTimeOffset now = _time.GetUtcNow();
-        _answered[Key(client, prompt)] = (now, decision);
-        if (_answered.Count > PruneAbove)
-        {
-            foreach ((string key, (DateTimeOffset at, DecisionRecord _)) in _answered)
-            {
-                if (now - at > window)
-                {
-                    _answered.TryRemove(key, out _);
-                }
-            }
-        }
+        _answered[Key(client, prompt)] = (_time.GetUtcNow(), decision);
+        _pruning.Written(_answered, answered => answered.At, window);
     }
 
     private static string Key(string client, string prompt) =>
