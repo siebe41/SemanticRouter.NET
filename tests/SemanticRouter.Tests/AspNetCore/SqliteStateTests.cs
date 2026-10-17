@@ -17,21 +17,43 @@ public sealed class SqliteStateTests : IDisposable
     private readonly string _directory = Directory.CreateTempSubdirectory("router-state").FullName;
     private readonly ManualTimeProvider _time = new();
     private readonly CapturingLoggerProvider _logs = new();
+    private readonly List<SqliteRouterDatabase> _opened = [];
 
     public void Dispose()
     {
+        foreach (SqliteRouterDatabase database in _opened)
+        {
+            database.Dispose();
+        }
+
         SqliteFiles.Release(_directory);
         Directory.Delete(_directory, recursive: true);
     }
 
     private string DbPath => Path.Combine(_directory, "state.db");
 
+    /// <summary>
+    /// Another router on the file, or this one after a restart. What the earlier ones wrote is saved first: each saves
+    /// in the background, and a restart (stopping saves what waits) or another router a moment later would find it.
+    /// </summary>
     private SqliteRouterDatabase Open(Action<SqliteStateOptions>? configure = null)
     {
+        Settle();
         var options = new SqliteStateOptions { Path = DbPath };
         configure?.Invoke(options);
         using var factory = LoggerFactory.Create(b => b.AddProvider(_logs));
-        return new SqliteRouterDatabase(Microsoft.Extensions.Options.Options.Create(options), factory.CreateLogger<SqliteRouterDatabase>(), _time);
+        var database = new SqliteRouterDatabase(Microsoft.Extensions.Options.Options.Create(options), factory.CreateLogger<SqliteRouterDatabase>(), _time);
+        _opened.Add(database);
+        return database;
+    }
+
+    /// <summary>Waits until every database opened here has saved what it was given.</summary>
+    private void Settle()
+    {
+        foreach (SqliteRouterDatabase database in _opened)
+        {
+            database.WaitForWrites();
+        }
     }
 
     private static readonly ModelSelectionOptions Selection = new() { QuotaCooldown = TimeSpan.FromMinutes(15), FailureCooldown = TimeSpan.FromSeconds(30) };
@@ -214,11 +236,13 @@ public sealed class SqliteStateTests : IDisposable
         var b = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(Open()));
 
         a.ReportFailure(claude, ModelFailureKind.QuotaExceeded);
+        Settle();
         b.IsAvailable(claude).Should().BeTrue("b has not refreshed yet");
         _time.Advance(TimeSpan.FromSeconds(6));
         b.IsAvailable(claude).Should().BeFalse();
 
         a.ReportSuccess(claude);
+        Settle();
         _time.Advance(TimeSpan.FromSeconds(6));
         b.IsAvailable(claude).Should().BeTrue("a success elsewhere ends the cooldown here too");
     }
@@ -307,6 +331,7 @@ public sealed class SqliteStateTests : IDisposable
     {
         var store = new SqliteActivityStore(Open());
         store.Append(new RoutingActivityEntry { Id = 1, Timestamp = _time.GetUtcNow(), PromptPreview = "purge-me 3f9d: the board minutes" });
+        Settle();
 
         // Another reader of the file (the dashboard, a second router) in the middle of a read: its snapshot pins the
         // write-ahead log, which still holds the page with the preview, so the log cannot be emptied until it is done.
@@ -472,6 +497,33 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void Writes_do_not_wait_for_a_file_another_router_holds_and_are_saved_once_it_lets_go()
+    {
+        SqliteRouterDatabase database = Open(o => o.BusyTimeout = TimeSpan.FromSeconds(10));
+        var ledger = new SqliteUsageLedger(database);
+        var activity = new SqliteActivityStore(database);
+        var holder = new SqliteConnection($"Data Source={DbPath};Pooling=False");
+        holder.Open();
+        SqliteTransaction held = holder.BeginTransaction(); // another router in the middle of a write
+
+        var timer = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < 100; i++)
+        {
+            ledger.Record(new UsageRecord(_time.GetUtcNow(), "cloud", "c", null, null, false, 10, 10, 0, 0, 0.25m, 0.25m));
+            activity.Append(new RoutingActivityEntry { Id = i + 1, Timestamp = _time.GetUtcNow(), PromptPreview = "p" + i });
+        }
+
+        timer.Stop();
+        held.Commit();
+        holder.Dispose();
+
+        timer.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2), "requests used to wait up to the busy timeout for each write");
+        activity.Recent(1000).Should().HaveCount(100, "reading waits for this router's writes");
+        ledger.Total(Since, Until).Requests.Should().Be(100);
+        database.Dropped.Should().Be(0);
+    }
+
+    [Fact]
     public void A_locked_database_degrades_to_memory_without_throwing()
     {
         SqliteRouterDatabase database = Open(o => o.BusyTimeout = TimeSpan.FromSeconds(1));
@@ -487,7 +539,10 @@ public sealed class SqliteStateTests : IDisposable
         tracker.ReportFailure(Model("claude", 4), ModelFailureKind.QuotaExceeded);
 
         tracker.IsAvailable(Model("claude", 4)).Should().BeFalse();
+        database.WaitForWrites();
         _logs.All.Should().Contain("saving a cooldown failed").And.Contain("continuing in memory");
+        database.Dropped.Should().Be(1, "the cooldown could not be saved");
+        database.Problem.Should().Contain("1 write(s)").And.Contain("lost");
     }
 
     [Fact]
@@ -660,11 +715,13 @@ public sealed class SqliteStateTests : IDisposable
         a.Total(Since, Until, connector: "c").Requests.Should().Be(0);
 
         b.Record(Request());
+        Settle();
         a.Total(Since, Until, connector: "c").Requests.Should().Be(0, "within the refresh interval");
         _time.Advance(SqliteUsageLedger.RefreshInterval);
         a.Total(Since, Until, connector: "c").Should().Match<UsageTotals>(t => t.Requests == 1 && t.CostUsd == 0.25m);
 
         b.Record(Request());
+        Settle();
         a.Record(Request());
         a.Total(Since, Until, connector: "c").Requests.Should().Be(3, "a row it did not write came before its own, so it reads the rows it missed");
         b.Total(Since, Until, connector: "c").CostUsd.Should().Be(0.75m);

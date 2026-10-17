@@ -20,16 +20,25 @@ public interface IWarmCacheStore
     void Forget(string conversation, string? model = null);
 }
 
-/// <summary>In-memory <see cref="IWarmCacheStore"/>; expired entries are pruned as it grows.</summary>
+/// <summary>
+/// In-memory <see cref="IWarmCacheStore"/>, bounded: expired entries are pruned as it grows, and beyond 32,768
+/// conversations the ones whose caches expire first go.
+/// </summary>
 public sealed class WarmCacheStore : IWarmCacheStore
 {
     private const int PruneAbove = 4096;
+    private const int MaxConversations = 32_768;
 
     private readonly ConcurrentDictionary<string, WarmCache[]> _caches = new(StringComparer.Ordinal);
     private readonly TimeProvider _time;
+    private readonly TrackerPruning _pruning;
 
     /// <summary>Creates an empty store.</summary>
-    public WarmCacheStore(TimeProvider? time = null) => _time = time ?? TimeProvider.System;
+    public WarmCacheStore(TimeProvider? time = null)
+    {
+        _time = time ?? TimeProvider.System;
+        _pruning = new TrackerPruning(MaxConversations, PruneAbove, _time);
+    }
 
     /// <inheritdoc />
     public IReadOnlyList<WarmCache> Lookup(string conversation) =>
@@ -43,42 +52,32 @@ public sealed class WarmCacheStore : IWarmCacheStore
             conversation,
             _ => [cache],
             (_, caches) => [.. caches.Where(c => !Same(c, cache.Model)), cache]);
-        Prune();
+
+        // Kept while any of its caches is warm: past the latest expiry the conversation goes.
+        _pruning.Written(_caches, caches => caches.Max(c => c.ExpiresAt), TimeSpan.Zero);
     }
 
     /// <inheritdoc />
-    public void Forget(string conversation, string? model = null)
+    public void Forget(string conversation, string? model = null) => Remove(conversation, model);
+
+    /// <summary>Like <see cref="Forget"/>; returns whether there was anything to forget.</summary>
+    internal bool Remove(string conversation, string? model = null)
     {
         if (model is null)
         {
-            _caches.TryRemove(conversation, out _);
-            return;
+            return _caches.TryRemove(conversation, out _);
         }
 
         if (_caches.TryGetValue(conversation, out WarmCache[]? caches) && caches.Any(c => Same(c, model)))
         {
             _caches[conversation] = [.. caches.Where(c => !Same(c, model))];
+            return true;
         }
+
+        return false;
     }
 
     private static bool Same(WarmCache cache, string model) => string.Equals(cache.Model, model, StringComparison.OrdinalIgnoreCase);
-
-    private void Prune()
-    {
-        if (_caches.Count <= PruneAbove)
-        {
-            return;
-        }
-
-        DateTimeOffset now = _time.GetUtcNow();
-        foreach ((string key, WarmCache[] caches) in _caches)
-        {
-            if (caches.All(c => c.ExpiresAt <= now))
-            {
-                _caches.TryRemove(key, out _);
-            }
-        }
-    }
 }
 
 /// <summary>How long the prompt cache entries a turn writes live, when the router can tell.</summary>

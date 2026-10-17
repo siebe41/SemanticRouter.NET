@@ -578,6 +578,16 @@ Classifying a prompt is one embedding plus a dot product per utterance. Measured
 
 An embedding server adds a network round trip and its own inference time to every prompt. A prompt the cache has seen recently costs no embedding at all.
 
+### Gateway overhead
+
+What the router itself adds, with no model behind it: the `semantic-router` tool with its SQLite state, in front of a stub backend that answers at once, with Hashing embeddings and a different short prompt on every request (not streamed). Measured on a 4 vCPU Linux container where the load generator, the stub and the router share the cores, so compare the rows with each other, not with production throughput. Reproduce with `dotnet build -c Release`, then `dotnet run -c Release --no-build --project benchmarks/SemanticRouter.Benchmarks -- gateway`; `--memory-state` measures the same with the state in memory, `--soak 300` watches for drift and `--faults` checks failover, cooldowns, stalls, dropped connections, cancelled requests and two routers on one database. CI runs the short version on every pull request and the soak and faults nightly.
+
+| Clients | Requests/s | Total time p50 / p95 / p99 | State in memory: requests/s, p99 |
+|---|---|---|---|
+| 1 | 1,037 | 0.8 / 1.7 / 2.9 ms | 1,224, 2.3 ms |
+| 8 | 6,124 | 1.1 / 2.3 / 5.7 ms | 8,256, 4.5 ms |
+| 32 | 7,847 | 3.5 / 7.5 / 12.7 ms | 10,583, 11.4 ms |
+
 ## Production guidance
 
 - **Use a real embedding model.** The hashing provider only captures shared words. `Onnx` runs one inside the router with no server; an OpenAI-compatible server (LM Studio, Ollama) works too.

@@ -117,6 +117,7 @@ Failed attempts are marked with error status. HTTP backends receive `traceparent
 | `semantic_router.cooldowns` | {cooldown} | `model`, `kind` |
 | `semantic_router.failovers` | {failover} | `model` (the one that failed), `kind` |
 | `semantic_router.budget.skips` | {skip} | `budget`, `model` |
+| `semantic_router.state.dropped_writes` | {write} | State writes the database refused or could not take in time (a locked or full disk): they are lost. The dashboard says so too. |
 | `semantic_router.cli.active` | {process} | `connector` |
 | `semantic_router.cli.queued` | {request} | `connector` (waiting for `MaxConcurrency`) |
 
