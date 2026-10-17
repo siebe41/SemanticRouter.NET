@@ -107,7 +107,7 @@ Labels on the Evaluate page improve routing only when someone adds them. The rou
 
 | Feedback | Noticed when | About |
 |---|---|---|
-| **Retried** | The same client sends the same prompt again within `RetryEscalation:Window` (2 minutes) of the answer, whether or not retry escalation is on. The router remembers the latest 16,384 answers for this. | The answer. |
+| **Retried** | The same client sends the same prompt again in the same conversation within `RetryEscalation:Window` (2 minutes) of the answer, before the conversation moved on, whether or not retry escalation is on. Only the first repeat counts: a prompt sent again and again is a script or a monitor. The same prompt in another conversation, and a short follow-up said again ("continue"), are not retries. The router remembers the latest 16,384 answers for this. | The answer. |
 | **Corrected** | The next message in the conversation reads as a correction: "that's wrong", "no, I meant…", "it still doesn't compile", "you forgot…", "try again", or a short message saying it is still failing, in English, Dutch, German, French or Spanish. A short follow-up in other words or another language is compared by meaning ([below](#corrections-in-other-words)). | The previous turn. |
 | **Overridden** | The next message chooses a model or tier with a [callout](clients.md#telling-the-router-what-you-want). | The previous turn. |
 | **Tool errors** | Tool results come back marked as errors on two tool turns in a row (the Anthropic protocol carries the flag), or the model writes malformed tool calls. | The turn running the task, or the turn itself. |
@@ -226,7 +226,8 @@ When a client sends the same prompt again shortly after it was answered, the ans
 "Middleware": { "RetryEscalation": { "Enabled": true, "Window": "00:02:00" } }
 ```
 
-- The router keeps a hash of the client and the prompt, in memory, never the prompt text.
+- A retry is the same prompt from the same client in the same conversation, before another turn of it was answered; a short follow-up (up to `Conversation:ShortFollowUpLength` characters) after the first turn is not one. A prompt that keeps coming back escalates each time, but gives feedback only once.
+- The router keeps a hash of the client, the conversation and the prompt, in memory, never the prompt text.
 - Requests that carry tool results (tool loops resend the same user message) and requests for a specific catalog model are never escalated.
 - A prompt answered by the highest-tier enabled model is not escalated further.
 
