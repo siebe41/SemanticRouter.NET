@@ -12,6 +12,9 @@ internal enum DesktopPageAction
     /// <summary>Open the About window.</summary>
     About,
 
+    /// <summary>Open the Settings window.</summary>
+    Settings,
+
     /// <summary>Restart to update, as in the tray menu.</summary>
     RestartToUpdate,
 }
@@ -59,6 +62,7 @@ internal static class DesktopBridge
                 {
                     "ready" => DesktopPageAction.Ready,
                     "about" => DesktopPageAction.About,
+                    "settings" => DesktopPageAction.Settings,
                     "restart-to-update" => DesktopPageAction.RestartToUpdate,
                     _ => null,
                 }

@@ -182,11 +182,46 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
             return true;
         });
 
-    /// <summary>Checkpoints the write-ahead log into the database and truncates it. Skipped quietly while another connection reads.</summary>
-    public static void TruncateLog(SqliteConnection connection)
+    /// <summary>
+    /// Checkpoints the write-ahead log into the database and truncates it. While another connection is still reading,
+    /// its snapshot pins the log and SQLite gives up at once (it reports busy rather than waiting): with
+    /// <paramref name="wait"/>, the checkpoint is tried again until the log is empty or that time has passed. Returns
+    /// whether the log was emptied.
+    /// </summary>
+    public static bool TruncateLog(SqliteConnection connection, TimeSpan wait = default)
     {
-        using SqliteCommand checkpoint = Command(connection, "PRAGMA wal_checkpoint(TRUNCATE);");
-        checkpoint.ExecuteNonQuery();
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        while (true)
+        {
+            using (SqliteCommand checkpoint = Command(connection, "PRAGMA wal_checkpoint(TRUNCATE);"))
+            using (SqliteDataReader result = checkpoint.ExecuteReader())
+            {
+                // One row: busy (1 when a reader or writer kept it from completing), then the log's frame counts.
+                if (!result.Read() || result.GetInt64(0) == 0)
+                {
+                    return true;
+                }
+            }
+
+            if (System.Diagnostics.Stopwatch.GetElapsedTime(started) >= wait)
+            {
+                return false;
+            }
+
+            Thread.Sleep(20);
+        }
+    }
+
+    /// <summary>
+    /// Empties the write-ahead log after a purge, so what was deleted is in neither file: waits up to the busy timeout
+    /// for readers to finish, and says so in the log when one did not.
+    /// </summary>
+    public void EmptyLogAfterPurge(SqliteConnection connection, string what)
+    {
+        if (!TruncateLog(connection, Options.BusyTimeout))
+        {
+            LogLogNotEmptied(_logger, what, Location, Options.BusyTimeout.TotalSeconds);
+        }
     }
 
     public static SqliteCommand Command(SqliteConnection connection, string sql, params (string Name, object? Value)[] parameters)
@@ -376,6 +411,9 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Router state database: {What} failed for {Path} ({Error}); continuing in memory.")]
     private static partial void LogOperationFailed(ILogger logger, string what, string path, string error);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Router state database: after {What}, {Path}-wal could not be emptied within {Seconds} s because another connection kept reading; what was deleted stays in that file until the next checkpoint.")]
+    private static partial void LogLogNotEmptied(ILogger logger, string what, string path, double seconds);
 }
 
 /// <summary>Cooldowns with absolute expiry, so a restart during a quota cooldown keeps the model cooling down.</summary>
@@ -794,13 +832,13 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
             }
 
             // secure_delete zeroes what this delete freed; VACUUM rewrites the file without free pages left by deletes
-            // from before it was on, and the log is emptied last.
+            // from before it was on, and the log is emptied last, once no reader still holds it.
             using (SqliteCommand vacuum = SqliteRouterDatabase.Command(connection, "VACUUM;"))
             {
                 vacuum.ExecuteNonQuery();
             }
 
-            SqliteRouterDatabase.TruncateLog(connection);
+            database.EmptyLogAfterPurge(connection, "purging activity");
             return removed;
         });
 }

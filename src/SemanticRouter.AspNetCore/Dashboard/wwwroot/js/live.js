@@ -1,6 +1,6 @@
 /* Semantic Router dashboard: Live stream (server-sent events) and the Live page. */
 import { H, W } from './charts.js';
-import { $, API, h, num, state, views, when } from './core.js';
+import { $, API, h, num, scrollRegions, state, views, when } from './core.js';
 import { graph, palette, updateMemorySide, updateMemorySummary } from './memory.js';
 import { render, selecting } from './shell.js';
 
@@ -153,6 +153,7 @@ export function updateLive() {
   $('#live-graph').innerHTML = routerGraph();
   $('#live-feed').innerHTML = liveFeed();
   $('#live-memory').innerHTML = liveMemory();
+  scrollRegions($('#view'));
 }
 
 export function routerGraph() {

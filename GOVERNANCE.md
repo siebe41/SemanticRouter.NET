@@ -8,29 +8,29 @@ SemanticRouter.NET is a small project with one maintainer. This page says who de
 |---|---|
 | [@siebe41](https://github.com/siebe41) | Owner and maintainer: reviews and merges changes, cuts releases, handles security reports, holds the repository settings, the signing credentials and the nuget.org packages. |
 
-A second maintainer is wanted, so that a change can be reviewed by someone other than its author, and so that the project does not stop when one person is away. Maintainers are invited by the owner after sustained merged work; the steps up to that are in [CONTRIBUTING.md](CONTRIBUTING.md#roles-and-how-to-become-a-collaborator). A second maintainer gets the **Write** role, a line in `CODEOWNERS`, and is added as a reviewer of the `release` environment. Merge rights (code owner) and release rights (environment reviewer, tag creation) are separate and are granted separately.
+A second maintainer is wanted, so that a change can be reviewed by someone other than its author, and so that the project does not stop when one person is away. Maintainers are invited by the owner after sustained merged work; the steps up to that are in [Roles and how to become a collaborator](CONTRIBUTING.md#roles-and-how-to-become-a-collaborator). A second maintainer gets the **Write** role, a line in `CODEOWNERS`, and is added as a reviewer of the `release` environment. Merge rights (code owner) and release rights (environment reviewer, tag creation) are separate and are granted separately.
 
 ## How decisions are made
 
 - **Day to day:** through pull requests. A change merges when a code owner approves it and CI passes.
-- **Larger changes** (a new connector type, a change to defaults, anything that breaks configuration or an API): an issue first, so the approach is agreed before the code is written. Planned work and its reasons are in [docs/roadmap.md](docs/roadmap.md).
+- **Larger changes** (a new connector type, a change to defaults, anything that breaks configuration or an API): an issue first, so the approach is agreed before the code is written. Planned work and its reasons are in the [roadmap](docs/roadmap.md).
 - **Disagreements** are discussed in the issue or pull request. With one maintainer, the maintainer decides and writes down why. With more than one, the maintainers aim for agreement; if they cannot agree, the owner decides.
-- **Security reports** are handled privately, as in [SECURITY.md](SECURITY.md), and are not discussed in public until the fix is released.
+- **Security reports** are handled privately, as in the [security policy](SECURITY.md), and are not discussed in public until the fix is released.
 
 ## Code owners
 
-[`.github/CODEOWNERS`](.github/CODEOWNERS) names who must approve a change to `main`. Today that is the owner for every path. The `protect-main` ruleset ([CONTRIBUTING.md](CONTRIBUTING.md#branch-and-tag-rulesets)) requires a code owner's approval with no bypass, so once it is applied as recorded, the owner's own pull requests need a second code owner. Until there is one, the owner merges their own changes after CI passes. <!-- owner: confirm how your own pull requests merge until there is a second code owner -->
+[`.github/CODEOWNERS`](.github/CODEOWNERS) names who must approve a change to `main`. Today that is the owner for every path. The `protect-main` ruleset ([Branch and tag rulesets](CONTRIBUTING.md#branch-and-tag-rulesets)) requires a code owner's approval with no bypass, so once it is applied as recorded, the owner's own pull requests need a second code owner. Until there is one, the owner merges their own changes after CI passes. <!-- owner: confirm how your own pull requests merge until there is a second code owner -->
 
 ## Releases
 
 - **Who can release:** under the recorded rulesets, only repository administrators can create a `v*` tag, and nobody can move or delete one (`create-release-tags`, `protect-release-tags`). Every publishing job of the [release workflow](.github/workflows/release.yml) runs in the `release` environment, whose required reviewer approves it: today the owner. <!-- owner: confirm the release environment's reviewers -->
 - **What a release is built from:** a tag on a commit that is on `main`; the workflow refuses any other tag, and publishes nothing before the tests pass.
-- **How a release is cut:** rename **Unreleased** in [CHANGELOG.md](CHANGELOG.md) to the version and date in a pull request and merge it. Then run **Actions > Cut a release** on `main` with the version, and approve the `release` environment ([docs/releases.md](docs/releases.md#cutting-a-release)). Only the repository owner can run it, and the release workflow refuses a `v*` tag pushed by anyone else. The Windows and macOS installers must be code-signed, or the release fails unless `ALLOW_UNSIGNED_RELEASE` is set ([docs/releases.md](docs/releases.md#code-signing)).
-- **Versions:** [Semantic Versioning](https://semver.org/). Which versions get security fixes is in [SECURITY.md](SECURITY.md#supported-versions).
+- **How a release is cut:** rename **Unreleased** in the [changelog](CHANGELOG.md) to the version and date in a pull request and merge it. Then run **Actions > Cut a release** on `main` with the version, and approve the `release` environment ([Cutting a release](docs/releases.md#cutting-a-release)). Only the repository owner can run it, and the release workflow refuses a `v*` tag pushed by anyone else. The Windows and macOS installers must be code-signed, or the release fails unless `ALLOW_UNSIGNED_RELEASE` is set ([Code signing](docs/releases.md#code-signing)).
+- **Versions:** [Semantic Versioning](https://semver.org/). Which versions get security fixes is in [Supported versions](SECURITY.md#supported-versions).
 
 ## Security response
 
-The owner receives and handles vulnerability reports, with the targets in [SECURITY.md](SECURITY.md#response-targets). A second maintainer, once there is one, is added to the repository's security advisories and covers reports when the owner is away.
+The owner receives and handles vulnerability reports, with the targets in [Response targets](SECURITY.md#response-targets). A second maintainer, once there is one, is added to the repository's security advisories and covers reports when the owner is away.
 
 ## If the maintainer is not available
 

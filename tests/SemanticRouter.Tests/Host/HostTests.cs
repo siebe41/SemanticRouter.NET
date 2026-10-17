@@ -43,7 +43,19 @@ public sealed class HostTests : IDisposable
         HostSettings.Parse(["models"], _ => null).Connector.Should().BeNull();
         HostSettings.Parse(["init", "--yes"], _ => null).Should().Match<HostSettings>(s => s.Yes && !s.NoCli);
         HostSettings.Parse(["init", "-y", "--no-cli"], _ => null).Should().Match<HostSettings>(s => s.Yes && s.NoCli);
-        HostSettings.Parse(["init"], _ => null).Should().Match<HostSettings>(s => !s.Yes && !s.NoCli);
+        HostSettings.Parse(["init"], _ => null).Should().Match<HostSettings>(s => !s.Yes && !s.NoCli && s.EnableCli == null);
+    }
+
+    [Fact]
+    public void Enable_cli_takes_a_comma_separated_list_of_known_clis()
+    {
+        HostSettings.Parse(["init", "--enable-cli", "claude,codex"], _ => null).EnableCli!.Should().BeEquivalentTo("claude", "codex");
+        HostSettings.Parse(["init", "--enable-cli=Codex", "--enable-cli", " copilot "], _ => null).EnableCli!.Should().BeEquivalentTo("codex", "copilot");
+        HostSettings.Parse(["init", "--enable-cli", "claude,gemini"], _ => null).Error.Should().Be("Unknown CLI 'gemini' for --enable-cli. Use claude, codex, copilot.");
+        HostSettings.Parse(["init", "--enable-cli"], _ => null).Error.Should().Contain("--enable-cli needs the CLIs to enable");
+        HostSettings.Parse(["init", "--enable-cli", "--force"], _ => null).Error.Should().Contain("--enable-cli needs the CLIs to enable", "an option is not a list of CLIs");
+        HostSettings.Parse(["init", "--enable-cli=,"], _ => null).Error.Should().Contain("--enable-cli needs the CLIs to enable");
+        HostSettings.Parse(["init", "--enable-cli", "claude"], _ => null).Error.Should().BeNull();
     }
 
     [Fact]
@@ -225,7 +237,7 @@ public sealed class HostTests : IDisposable
         written.Connectors["claude-cli"].ToolCalling.Should().Be(CliToolCalling.Prompted);
         written.Models.Where(m => m.Connector == "claude-cli" && m.Tier < 5).Should().OnlyContain(m => m.Enabled == enabled, scenario);
         written.Models.Single(m => m.Connector == "codex-cli").Enabled.Should().Be(enabled, scenario);
-        written.Models.Where(m => m.Connector == "copilot-cli").Should().OnlyContain(m => !m.Enabled, "Copilot is never enabled by init");
+        written.Models.Where(m => m.Connector == "copilot-cli").Should().OnlyContain(m => !m.Enabled, "Copilot is enabled by init only when --enable-cli names it");
         written.Models.Single(m => m.Connector == "claude-cli" && m.Tier == 5).Enabled.Should().BeFalse("init never enables Claude's top tier");
 
         string report = output.ToString();
@@ -234,7 +246,10 @@ public sealed class HostTests : IDisposable
             report.Should().NotContain("Enable claude", "without a terminal init asks nothing");
             if (!enabled)
             {
-                report.Should().Contain("claude, codex: init asks before enabling").And.Contain("whatever account").And.Contain(SiteLinks.WorkUse).And.Contain("--force --yes");
+                report.Should().Contain("claude, codex: init asks before enabling").And.Contain("whatever account").And.Contain(SiteLinks.WorkUse)
+                    .And.Contain("init --force --enable-cli claude,codex");
+                report.Should().Contain("No terminal to ask on (input or output is redirected), so claude and codex will be added disabled. " +
+                                        "To choose without one, run init with --yes (every CLI found), --enable-cli claude,codex (only those you name) or --no-cli (none).");
             }
         }
         else
@@ -249,6 +264,49 @@ public sealed class HostTests : IDisposable
             report.Should().Contain("all disabled").And.Contain(answers is null ? "no terminal to ask on" : "you did not say yes").And.Contain("No model is enabled")
                 .And.Contain("http://localhost:5080/router#/overview").And.NotContain("claude --model", "there is no model to start Claude Code against");
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Init_enables_just_the_clis_named_in_enable_cli_without_asking(bool withYes)
+    {
+        string[] args = withYes ? ["init", "--yes", "--enable-cli", "claude,copilot"] : ["init", "--enable-cli", "claude,copilot"];
+        string bin = Directory.CreateDirectory(Path.Combine(_directory, "bin")).FullName;
+        foreach (string cli in new[] { "claude", "codex", "copilot" })
+        {
+            File.WriteAllText(Path.Combine(bin, cli), string.Empty);
+        }
+
+        var handler = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("Connection refused"));
+        var output = new StringWriter();
+
+        (await InitCommand.RunAsync(Settings(args), new InitProbes(new HttpClient(handler), bin, Windows: false), output, new StringReader("y\ny\n")))
+            .Should().Be(0, output.ToString());
+
+        RouterConfiguration written = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+        written.Models.Where(m => m.Connector == "claude-cli" && m.Tier < 5).Should().OnlyContain(m => m.Enabled);
+        written.Models.Single(m => m.Connector == "codex-cli").Enabled.Should().BeFalse("codex was not named, and --enable-cli wins over --yes");
+        written.Models.Single(m => m.Connector == "copilot-cli").Enabled.Should().BeTrue("naming Copilot is the yes it otherwise never gets");
+        string report = output.ToString();
+        report.Should().NotContain("Enable claude", "--enable-cli asks nothing, even at a terminal").And.NotContain("No terminal to ask on");
+        report.Should().Contain("codex: ").And.Contain("(not named in --enable-cli)");
+    }
+
+    [Fact]
+    public async Task Init_says_when_a_cli_named_in_enable_cli_is_not_on_this_machine()
+    {
+        string bin = Directory.CreateDirectory(Path.Combine(_directory, "bin")).FullName;
+        File.WriteAllText(Path.Combine(bin, "claude"), string.Empty);
+        var handler = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("Connection refused"));
+        var output = new StringWriter();
+
+        (await InitCommand.RunAsync(Settings("init", "--enable-cli", "claude,codex"), new InitProbes(new HttpClient(handler), bin, Windows: false), output))
+            .Should().Be(0, output.ToString());
+
+        RouterConfiguration written = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+        written.Connectors.Keys.Should().Contain("claude-cli").And.NotContain("codex-cli");
+        output.ToString().Should().Contain("codex: not found on PATH, so --enable-cli could not enable it.");
     }
 
     [Theory]
@@ -496,6 +554,7 @@ public sealed class HostTests : IDisposable
         report.Should().Contain("Tiers come from the model-family table (built-in v1)");
         report.Should().MatchRegex(@"text-embedding-nomic-embed-text-v1.5\s+embedding");
         report.Should().Contain("claude-cli (Cli)").And.Contain("+ claude-opus T4");
+        report.Should().MatchRegex(@"\n\s+why: \S", "each suggestion's reason follows on its own line, in words rather than an arrow glyph");
         one.ToString().Should().Contain("claude-cli").And.NotContain("lmstudio");
         unknown.ToString().Should().Contain("'nope' is not configured");
     }

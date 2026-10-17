@@ -215,6 +215,7 @@ public sealed class UpdateControlTests : IDisposable
     [Theory]
     [InlineData("{\"action\":\"ready\"}", "Ready")]
     [InlineData("{\"action\":\"about\"}", "About")]
+    [InlineData("{\"action\":\"settings\"}", "Settings")]
     [InlineData("{\"action\":\"restart-to-update\"}", "RestartToUpdate")]
     [InlineData("{\"action\":\"quit\"}", null)]
     [InlineData("{\"action\":1}", null)]
@@ -224,6 +225,16 @@ public sealed class UpdateControlTests : IDisposable
     [InlineData(null, null)]
     public void The_app_does_only_what_the_dashboard_may_ask_of_it(string? body, string? expected) =>
         (DesktopBridge.Parse(body)?.ToString()).Should().Be(expected);
+
+    [Theory]
+    [InlineData("notify-send 0.8.3", true)]
+    [InlineData("notify-send 0.7.10\n", true)]
+    [InlineData("notify-send 0.7.9", false)]
+    [InlineData("notify-send 0.7.8-1ubuntu1", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void A_click_on_a_linux_notification_is_asked_for_only_where_notify_send_has_actions(string? version, bool supported) =>
+        DesktopNotifier.SupportsActions(version).Should().Be(supported, "older notify-send rejects --action and shows nothing");
 
     [Fact]
     public async Task Without_a_publisher_in_the_policy_the_package_is_not_inspected()
@@ -438,10 +449,10 @@ public sealed class UpdateControlTests : IDisposable
     public void Doctor_says_what_the_policy_does_to_desktop_updates()
     {
         EgressList.Updates(MachinePolicy.None).Should().Be(
-            "desktop app updates: api.github.com, github.com and objects.githubusercontent.com (only the installed desktop app; untick Check for updates in its tray menu to turn this off).");
+            "desktop app updates: api.github.com, github.com and objects.githubusercontent.com (only the installed desktop app; untick Check for updates automatically in its tray menu to turn this off).");
         EgressList.Updates(MachinePolicy.FromJson("""{"Updates":{"Mode":"Off","Apply":"Notify"}}""")).Should().Be("desktop app updates: off (your organization's policy).");
         EgressList.Updates(MachinePolicy.FromJson("""{"Updates":{"Mode":"Feed","Feed":"https://updates.corp.example/router","Apply":"Notify","Publisher":"A1B2C3D4E5"}}""")).Should().Be(
-            "desktop app updates: updates.corp.example (your organization's feed) (only the installed desktop app; applied only when the person chooses to; applied only when signed by A1B2C3D4E5; untick Check for updates in its tray menu to turn this off).");
+            "desktop app updates: updates.corp.example (your organization's feed) (only the installed desktop app; applied only when the person chooses to; applied only when signed by A1B2C3D4E5; untick Check for updates automatically in its tray menu to turn this off).");
     }
 
     private static readonly X509Certificate2 Contoso = Certificate("CN=Contoso Ltd, O=Contoso Ltd, C=US");

@@ -80,7 +80,7 @@ The order follows dependencies: install and trust first, then visibility (which 
 |---|---|---|
 | [#10](https://github.com/siebe41/SemanticRouter.NET/issues/10) | Responses API front door; verify Codex CLI | Includes correcting the Codex docs with what is true. |
 | [#12](https://github.com/siebe41/SemanticRouter.NET/issues/12) | Extended thinking, prompt caching and structured output across protocols | Biggest quality gap for Claude Code on non-Anthropic backends. |
-| [#11](https://github.com/siebe41/SemanticRouter.NET/issues/11) | Lower latency and quota cost of prompted CLI turns | Any session-reuse change must be checked against [TERMS.md](TERMS.md) first. |
+| [#11](https://github.com/siebe41/SemanticRouter.NET/issues/11) | Lower latency and quota cost of prompted CLI turns | Any session-reuse change must be checked against [Subscription CLI terms](TERMS.md) first. |
 | [#17](https://github.com/siebe41/SemanticRouter.NET/issues/17) | GitHub Copilot SDK connector | The vendor-supported path that the CLI preset only approximates. |
 
 ### 5. Always on
@@ -88,7 +88,7 @@ The order follows dependencies: install and trust first, then visibility (which 
 | Issue | Goal | Notes |
 |---|---|---|
 | — | Background service per user (`semantic-router service`) | Done: systemd user unit, launchd agent, Windows sign-in entry. |
-| — | Desktop app: tray or menu-bar icon, the dashboard in a native window or the browser, start at sign-in | Done ([desktop.md](desktop.md)): wraps the existing dashboard in the platform web view (WebView2, WKWebView, WebKitGTK, WPE) and hosts the router in-process or uses the running service. The app can also own the background service (`SemanticRouter --headless`), offered on first start. Installers ([#50](https://github.com/siebe41/SemanticRouter.NET/issues/50)): a per-user Windows `Setup.exe`, a macOS `.pkg` and a Linux AppImage with built-in updates, install, update and uninstall exercised on Windows in CI. Signing is built ([#64](https://github.com/siebe41/SemanticRouter.NET/issues/64)); a first signed release waits for certificates ([#102](https://github.com/siebe41/SemanticRouter.NET/issues/102)). |
+| — | Desktop app: tray or menu-bar icon, the dashboard in a native window or the browser, start at sign-in | Done ([Desktop app](desktop.md)): wraps the existing dashboard in the platform web view (WebView2, WKWebView, WebKitGTK, WPE) and hosts the router in-process or uses the running service. The app can also own the background service (`SemanticRouter --headless`), offered on first start. Installers ([#50](https://github.com/siebe41/SemanticRouter.NET/issues/50)): a per-user Windows `Setup.exe`, a macOS `.pkg` and a Linux AppImage with built-in updates, install, update and uninstall exercised on Windows in CI. Signing is built ([#64](https://github.com/siebe41/SemanticRouter.NET/issues/64)); a first signed release waits for certificates ([#102](https://github.com/siebe41/SemanticRouter.NET/issues/102)). |
 
 ### 6. Set it and forget it
 
@@ -113,17 +113,17 @@ Tracked in [#62](https://github.com/siebe41/SemanticRouter.NET/issues/62).
 | Issue | Goal | Notes |
 |---|---|---|
 | [#63](https://github.com/siebe41/SemanticRouter.NET/issues/63) | First release, with the installers exercised on macOS and Linux | Done: CI installs and updates on Windows, macOS and Linux; released as [v0.1.0](https://github.com/siebe41/SemanticRouter.NET/releases/tag/v0.1.0). |
-| [#64](https://github.com/siebe41/SemanticRouter.NET/issues/64) | Sign the Windows installer and notarize the macOS app | Done: the release workflow signs when the secrets are set ([desktop.md](desktop.md#signing)). |
+| [#64](https://github.com/siebe41/SemanticRouter.NET/issues/64) | Sign the Windows installer and notarize the macOS app | Done: the release workflow signs when the secrets are set ([Signing the desktop app](desktop.md#signing)). |
 | [#65](https://github.com/siebe41/SemanticRouter.NET/issues/65) | Keep incident counts and the judge's daily count across restarts | Done with the SQLite state. |
 | [#66](https://github.com/siebe41/SemanticRouter.NET/issues/66) | Linux autostart icon when the app runs from an AppImage | Done. |
-| [#67](https://github.com/siebe41/SemanticRouter.NET/issues/67) | Recognise corrections in any language | Done: phrases in five languages, and a comparison by meaning for the rest ([routing-quality.md](routing-quality.md#corrections-in-other-words)). |
-| [#68](https://github.com/siebe41/SemanticRouter.NET/issues/68) | Measure how often the judge agrees with hand labels | Done: judge agreement on the Evaluate page and `GET api/judge/agreement`; it scales the judge's weight in tuning ([routing-quality.md](routing-quality.md#the-judge)). |
-| [#69](https://github.com/siebe41/SemanticRouter.NET/issues/69) | Learn the cheapest good-enough model per route | Done: trials of a cheaper model per route, kept or dropped on feedback ([routing-quality.md](routing-quality.md#cheaper-models-per-route)). |
+| [#67](https://github.com/siebe41/SemanticRouter.NET/issues/67) | Recognise corrections in any language | Done: phrases in five languages, and a comparison by meaning for the rest ([Corrections in other words](routing-quality.md#corrections-in-other-words)). |
+| [#68](https://github.com/siebe41/SemanticRouter.NET/issues/68) | Measure how often the judge agrees with hand labels | Done: judge agreement on the Evaluate page and `GET api/judge/agreement`; it scales the judge's weight in tuning ([The judge](routing-quality.md#the-judge)). |
+| [#69](https://github.com/siebe41/SemanticRouter.NET/issues/69) | Learn the cheapest good-enough model per route | Done: trials of a cheaper model per route, kept or dropped on feedback ([Cheaper models per route](routing-quality.md#cheaper-models-per-route)). |
 | [#70](https://github.com/siebe41/SemanticRouter.NET/issues/70) | Latency as a model selection factor | Done: `Fastest` and `Balanced` strategies (`auto:fastest`, `auto:balanced`) from each model's recent time to first byte; the reason shows on the Activity page ([README](../README.md#step-2-choosing-a-model)). |
-| [#71](https://github.com/siebe41/SemanticRouter.NET/issues/71) | Send the digest and notices to a webhook | Done: JSON, Slack-compatible and ntfy webhooks ([dashboard.md](dashboard.md#digest-and-notifications)). |
-| [#72](https://github.com/siebe41/SemanticRouter.NET/issues/72) | Client side-request wording as an updatable data file | Done: `client-turns.json`, overridable next to the configuration ([clients.md](clients.md)). |
-| [#73](https://github.com/siebe41/SemanticRouter.NET/issues/73) | Fuzz tests for protocol translation | Done: `ProtocolFuzzTests` in CI with a fixed seed; longer runs by hand ([CONTRIBUTING.md](../CONTRIBUTING.md#building-and-testing)). |
-| [#74](https://github.com/siebe41/SemanticRouter.NET/issues/74) | Per-client rate limit for gateway keys | Done: `Middleware:RateLimits` ([dashboard.md](dashboard.md#rate-limits)). |
+| [#71](https://github.com/siebe41/SemanticRouter.NET/issues/71) | Send the digest and notices to a webhook | Done: JSON, Slack-compatible and ntfy webhooks ([Digest and notifications](dashboard.md#digest-and-notifications)). |
+| [#72](https://github.com/siebe41/SemanticRouter.NET/issues/72) | Client side-request wording as an updatable data file | Done: `client-turns.json`, overridable next to the configuration ([Connect your tools](clients.md)). |
+| [#73](https://github.com/siebe41/SemanticRouter.NET/issues/73) | Fuzz tests for protocol translation | Done: `ProtocolFuzzTests` in CI with a fixed seed; longer runs by hand ([Building and testing](../CONTRIBUTING.md#building-and-testing)). |
+| [#74](https://github.com/siebe41/SemanticRouter.NET/issues/74) | Per-client rate limit for gateway keys | Done: `Middleware:RateLimits` ([Rate limits](dashboard.md#rate-limits)). |
 
 ### 8. Keep prompt caches working
 
@@ -131,9 +131,9 @@ Tracked in [#92](https://github.com/siebe41/SemanticRouter.NET/issues/92). Cache
 
 | Issue | Goal | Notes |
 |---|---|---|
-| [#93](https://github.com/siebe41/SemanticRouter.NET/issues/93) | Get the prompt-cache numbers right | Done: streamed and CLI cache counts, `prompt_cache_key`, cache prices in "saved by routing", a hit rate on the Usage page ([observability.md](observability.md)). |
-| [#94](https://github.com/siebe41/SemanticRouter.NET/issues/94) | Cache-aware stickiness | Done: stays on the model with the warm cache when moving costs more, above the required tier too, and returns to it after a failover; the reason is on the Activity page ([routing-quality.md](routing-quality.md#conversations)). |
-| [#95](https://github.com/siebe41/SemanticRouter.NET/issues/95) | Cache markers on translated Anthropic requests | Done: OpenAI and Codex clients routed to an `Anthropic` connector use its cache (`PromptCaching`, `CacheTtl`; [providers.md](providers.md#prompt-caching-on-translated-requests)). |
+| [#93](https://github.com/siebe41/SemanticRouter.NET/issues/93) | Get the prompt-cache numbers right | Done: streamed and CLI cache counts, `prompt_cache_key`, cache prices in "saved by routing", a hit rate on the Usage page ([Usage, budgets and observability](observability.md)). |
+| [#94](https://github.com/siebe41/SemanticRouter.NET/issues/94) | Cache-aware stickiness | Done: stays on the model with the warm cache when moving costs more, above the required tier too, and returns to it after a failover; the reason is on the Activity page ([Conversations](routing-quality.md#conversations)). |
+| [#95](https://github.com/siebe41/SemanticRouter.NET/issues/95) | Cache markers on translated Anthropic requests | Done: OpenAI and Codex clients routed to an `Anthropic` connector use its cache (`PromptCaching`, `CacheTtl`; [Prompt caching on translated requests](providers.md#prompt-caching-on-translated-requests)). |
 | [#96](https://github.com/siebe41/SemanticRouter.NET/issues/96) | Cache-aware cost estimates | Done: ranking and per-route model trials price the share of input each model reads from its cache; the Models page shows the effective input price ([README](../README.md#step-2-choosing-a-model)). |
 
 ### 9. Safe to install at work
@@ -143,18 +143,18 @@ Tracked in [#98](https://github.com/siebe41/SemanticRouter.NET/issues/98): what 
 | Issue | Goal | Notes |
 |---|---|---|
 | [#99](https://github.com/siebe41/SemanticRouter.NET/issues/99) | Move to .NET 10 (LTS) | Done. |
-| [#100](https://github.com/siebe41/SemanticRouter.NET/issues/100) | Machine-wide policy that the user's configuration cannot override | Done: registry, managed preferences or `/etc/semantic-router/policy.json`; `init` and `doctor` follow it ([enterprise.md](enterprise.md)). |
-| [#101](https://github.com/siebe41/SemanticRouter.NET/issues/101) | Subscription CLI connectors in a work setting | Done: `init` asks before enabling each CLI; "Using it at work" in [TERMS.md](TERMS.md#using-it-at-work). |
-| [#102](https://github.com/siebe41/SemanticRouter.NET/issues/102) | Signed, verifiable releases | Provenance attestations, CycloneDX SBOMs, `SHA256SUMS`, a cosign-signed image and third-party notices ([releases.md](releases.md)). The signing pipeline is ready; not yet done: signing certificates and a first signed release. |
-| [#103](https://github.com/siebe41/SemanticRouter.NET/issues/103) | Desktop updates under administrator control | Done: off, an internal feed, notify-only and a publisher check by policy ([desktop.md](desktop.md#managed-deployment)). Not yet done: per-machine installer packages (MSI, `.pkg`). |
-| [#104](https://github.com/siebe41/SemanticRouter.NET/issues/104) | Release pipeline and repository protections | Builds hold no signing secret, locked restores, a pinned SDK band, CodeQL and Scorecard, and ruleset records ([CONTRIBUTING.md](../CONTRIBUTING.md#branch-and-tag-rulesets)). Not yet done: applying the rulesets, and a second maintainer to approve the owner's changes. |
+| [#100](https://github.com/siebe41/SemanticRouter.NET/issues/100) | Machine-wide policy that the user's configuration cannot override | Done: registry, managed preferences or `/etc/semantic-router/policy.json`; `init` and `doctor` follow it ([Machine-wide policy](enterprise.md)). |
+| [#101](https://github.com/siebe41/SemanticRouter.NET/issues/101) | Subscription CLI connectors in a work setting | Done: `init` asks before enabling each CLI; "Using it at work" in [Using it at work](TERMS.md#using-it-at-work). |
+| [#102](https://github.com/siebe41/SemanticRouter.NET/issues/102) | Signed, verifiable releases | Provenance attestations, CycloneDX SBOMs, `SHA256SUMS`, a cosign-signed image and third-party notices ([Verifying a release](releases.md)). The signing pipeline is ready; not yet done: signing certificates and a first signed release. |
+| [#103](https://github.com/siebe41/SemanticRouter.NET/issues/103) | Desktop updates under administrator control | Done: off, an internal feed, notify-only and a publisher check by policy ([Managed deployment](desktop.md#managed-deployment)). Not yet done: per-machine installer packages (MSI, `.pkg`). |
+| [#104](https://github.com/siebe41/SemanticRouter.NET/issues/104) | Release pipeline and repository protections | Builds hold no signing secret, locked restores, a pinned SDK band, CodeQL and Scorecard, and ruleset records ([Branch and tag rulesets](../CONTRIBUTING.md#branch-and-tag-rulesets)). Not yet done: applying the rulesets, and a second maintainer to approve the owner's changes. |
 | [#105](https://github.com/siebe41/SemanticRouter.NET/issues/105) | Container image and dependency hygiene | Digest-pinned chiseled base images, `.dockerignore`, Dependabot for Docker and npm, and a weekly check that asks for a patch release when the published image has fixable vulnerabilities or an older base. |
-| [#106](https://github.com/siebe41/SemanticRouter.NET/issues/106) | Support policy, a working security contact and a second maintainer | [SECURITY.md](../SECURITY.md) states the supported versions, the scope and draft response targets, and [GOVERNANCE.md](../GOVERNANCE.md) who decides and who can release. Not yet done: private vulnerability reporting turned on, the targets and succession confirmed, and a second maintainer or code owner. |
-| [#107](https://github.com/siebe41/SemanticRouter.NET/issues/107) | Prompt data at rest | Done: `State:StorePrompts` (`Redacted` by default, or `Off`), retention in configuration, purge with `secure_delete`, hashed project labels, no prompt data in webhooks, and a key ring encrypted at rest ([host.md](host.md#what-the-router-stores), [The key ring](host.md#the-key-ring)). |
-| [#108](https://github.com/siebe41/SemanticRouter.NET/issues/108) | Dashboard identity, roles and an audit trail | Users and roles from a signing-in reverse proxy (`TrustedIdentityHeader`), a read-only role that cannot spend, a metrics role that never sees prompt text, session expiry, sign-out that ends the session on the server, sign-in throttling, and an audit log ([dashboard.md](dashboard.md#roles)). |
-| [#109](https://github.com/siebe41/SemanticRouter.NET/issues/109) | Safe defaults when the gateway is reachable from the network | Done: other machines are refused until gateway keys are set ([host.md](host.md#listening-beyond-this-machine)). |
-| [#110](https://github.com/siebe41/SemanticRouter.NET/issues/110) | No outbound traffic you didn't ask for | Done: bundled fonts and a Content-Security-Policy, quiet vendor CLIs, `Network:CaBundle`, offline mode, and egress listed in `doctor` and [network.md](network.md). |
-| [#111](https://github.com/siebe41/SemanticRouter.NET/issues/111) | Make prompted tool calls harder to forge | A per-run fence label, copied calls refused, prompted calls marked in Activity, and a `Strict` parsing mode ([providers.md](providers.md#forged-tool-calls)). Not yet done: measuring `Strict` with the real CLIs (the tool-call benchmark in providers.md) before making it the default. |
+| [#106](https://github.com/siebe41/SemanticRouter.NET/issues/106) | Support policy, a working security contact and a second maintainer | The [security policy](../SECURITY.md) states the supported versions, the scope and draft response targets, and [Governance](../GOVERNANCE.md) who decides and who can release. Not yet done: private vulnerability reporting turned on, the targets and succession confirmed, and a second maintainer or code owner. |
+| [#107](https://github.com/siebe41/SemanticRouter.NET/issues/107) | Prompt data at rest | Done: `State:StorePrompts` (`Redacted` by default, or `Off`), retention in configuration, purge with `secure_delete`, hashed project labels, no prompt data in webhooks, and a key ring encrypted at rest ([What the router stores](host.md#what-the-router-stores), [The key ring](host.md#the-key-ring)). |
+| [#108](https://github.com/siebe41/SemanticRouter.NET/issues/108) | Dashboard identity, roles and an audit trail | Users and roles from a signing-in reverse proxy (`TrustedIdentityHeader`), a read-only role that cannot spend, a metrics role that never sees prompt text, session expiry, sign-out that ends the session on the server, sign-in throttling, and an audit log ([Dashboard roles](dashboard.md#roles)). |
+| [#109](https://github.com/siebe41/SemanticRouter.NET/issues/109) | Safe defaults when the gateway is reachable from the network | Done: other machines are refused until gateway keys are set ([Listening beyond this machine](host.md#listening-beyond-this-machine)). |
+| [#110](https://github.com/siebe41/SemanticRouter.NET/issues/110) | No outbound traffic you didn't ask for | Done: bundled fonts and a Content-Security-Policy, quiet vendor CLIs, `Network:CaBundle`, offline mode, and egress listed in `doctor` and [Network traffic](network.md). |
+| [#111](https://github.com/siebe41/SemanticRouter.NET/issues/111) | Make prompted tool calls harder to forge | A per-run fence label, copied calls refused, prompted calls marked in Activity, and a `Strict` parsing mode ([Forged tool calls](providers.md#forged-tool-calls)). Not yet done: measuring `Strict` with the real CLIs (the tool-call benchmark in providers.md) before making it the default. |
 
 ### Continuous
 
@@ -175,7 +175,7 @@ These constrain every item above.
 
 ## Not planned
 
-- Serving other people from a personal subscription login, or any hosted multi-user service built on one. Use API-key connectors for anything shared (see [TERMS.md](TERMS.md)).
+- Serving other people from a personal subscription login, or any hosted multi-user service built on one. Use API-key connectors for anything shared (see [Subscription CLI terms](TERMS.md)).
 - Relaying, caching or "refreshing" vendor OAuth tokens or session files.
 - Reimplementing a vendor CLI's agent loop. The client runs its own tools; the router chooses the model.
 - Training or fine-tuning models. Routing stays embedding-plus-heuristics, tunable from the dashboard.

@@ -68,4 +68,4 @@ No .NET? The [desktop app](../docs/desktop.md) puts the router in your tray, and
 [Connect your tools](../docs/clients.md) has the lines for Codex, the OpenAI SDKs and curl, and [Install and run](../docs/host.md)
 covers the background service and the container.
 
-![The dashboard](../docs/images/dashboard.png)
+![The dashboard's Overview: this week 43 prompts routed, 53% served locally, $0.11 spent; a table of six models with their tiers, from two local LM Studio models on tiers 1 and 2 to Claude Sonnet and Opus on tiers 4 and 5; and recent activity, where a prompt matched the deep-reasoning route and went to Claude Sonnet](../docs/images/dashboard.png)

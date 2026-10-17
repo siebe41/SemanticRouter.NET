@@ -209,6 +209,52 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public async Task A_purge_empties_the_log_once_a_reader_that_held_it_has_finished()
+    {
+        var store = new SqliteActivityStore(Open());
+        store.Append(new RoutingActivityEntry { Id = 1, Timestamp = _time.GetUtcNow(), PromptPreview = "purge-me 3f9d: the board minutes" });
+
+        // Another reader of the file (the dashboard, a second router) in the middle of a read: its snapshot pins the
+        // write-ahead log, which still holds the page with the preview, so the log cannot be emptied until it is done.
+        using var reader = new SqliteConnection($"Data Source={DbPath};Pooling=False");
+        reader.Open();
+        using SqliteTransaction read = reader.BeginTransaction(deferred: true);
+        using (SqliteCommand count = reader.CreateCommand())
+        {
+            count.Transaction = read;
+            count.CommandText = "SELECT count(*) FROM activity;";
+            ((long)count.ExecuteScalar()!).Should().Be(1);
+        }
+
+        Task<int> purge = Task.Run(() => store.Purge(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1)));
+        await Task.Delay(300);
+        read.Commit();
+
+        (await purge).Should().Be(1);
+        string files = string.Concat(Directory.GetFiles(_directory, "state.db*").Select(DurableStateHostTests.ReadWhileOpen));
+        files.Should().NotContain("purge-me 3f9d", "the purge waits for the reader, then empties the log");
+    }
+
+    [Fact]
+    public void A_purge_says_so_when_a_reader_keeps_the_log_past_the_busy_timeout()
+    {
+        var store = new SqliteActivityStore(Open(o => o.BusyTimeout = TimeSpan.FromMilliseconds(200)));
+        store.Append(new RoutingActivityEntry { Id = 1, Timestamp = _time.GetUtcNow(), PromptPreview = "kept by a reader" });
+        using var reader = new SqliteConnection($"Data Source={DbPath};Pooling=False");
+        reader.Open();
+        using SqliteTransaction read = reader.BeginTransaction(deferred: true);
+        using (SqliteCommand count = reader.CreateCommand())
+        {
+            count.Transaction = read;
+            count.CommandText = "SELECT count(*) FROM activity;";
+            count.ExecuteScalar();
+        }
+
+        store.Purge(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1)).Should().Be(1, "the rows are gone even when the log is not emptied yet");
+        _logs.Messages.Should().Contain(m => m.Contains("could not be emptied", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void History_keeps_exact_documents_newest_first_and_is_capped()
     {
         var history = new SqliteConfigurationHistory(Open(o => o.HistoryMaxEntries = 2));
@@ -404,7 +450,7 @@ public sealed class DurableStateHostTests : RouterHostTest
     /// Reads a file the router may be writing. On macOS the shared lock .NET takes when opening a file conflicts with
     /// the lock SQLite holds while it writes, so a read that lands during a write is tried again.
     /// </summary>
-    private static string ReadWhileOpen(string file)
+    internal static string ReadWhileOpen(string file)
     {
         for (int attempt = 1; ; attempt++)
         {

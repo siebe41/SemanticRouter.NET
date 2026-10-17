@@ -8,7 +8,7 @@ The router has three front doors, so almost any tool can use it without changing
 | Anthropic Messages | `POST /v1/messages`, `POST /v1/messages/count_tokens` | **Claude Code**, the Anthropic SDKs, anything built on them |
 | OpenAI Responses | `POST /v1/responses` | **Codex CLI**, the OpenAI Agents SDK, `client.responses.create` |
 
-> **What has been tested.** Claude Code 2.1.293 (a streaming, tool-using session through a stub OpenAI-compatible backend, and through the real `claude` CLI as a prompted-tools backend), Codex CLI 0.161.0 (a streaming session that ran a shell command and a namespaced tool through a stub OpenAI-compatible backend) and curl. The other tools below speak standard OpenAI chat completions and should work, but have not been exercised individually. [docs/roadmap.md](roadmap.md) tracks the gaps.
+> **What has been tested.** Claude Code 2.1.293 (a streaming, tool-using session through a stub OpenAI-compatible backend, and through the real `claude` CLI as a prompted-tools backend), Codex CLI 0.161.0 (a streaming session that ran a shell command and a namespaced tool through a stub OpenAI-compatible backend) and curl. The other tools below speak standard OpenAI chat completions and should work, but have not been exercised individually. The [roadmap](roadmap.md) tracks the gaps.
 
 Whatever the client speaks, every backend can answer: the router translates requests and replies between the protocols, including streaming, images, tool calls, reasoning and structured output, and passes bodies through untouched when the backend speaks the client's protocol. What a backend cannot carry is listed in the `X-Prompt-Route-Dropped` response header (see the [compatibility table](providers.md#what-survives-translation)).
 
@@ -180,7 +180,7 @@ Any backend can answer. The router maps Codex's items and tools onto the backend
 - **Custom tools.** Codex's free-form tools (such as `exec`) become a function with one `input` string, with the grammar quoted in the description. Calls come back as `custom_tool_call` items.
 - **Reasoning.** `reasoning.effort` becomes `reasoning_effort` or an Anthropic `thinking` budget on models that declare `reasoning`. Backend reasoning comes back as a reasoning summary.
 - **Hosted tools.** Codex declares `web_search` on most turns. Only a `Responses` connector (OpenAI's API) runs it. Other backends answer without it, and the response says `X-Prompt-Route-Dropped: web_search`.
-- **Prompt cache.** OpenAI's API caches Codex's prompt by itself, and `prompt_cache_key` goes along to OpenAI backends. On an `Anthropic` connector the router marks the request for Anthropic's cache, so later turns read the conversation from it ([providers.md](providers.md#prompt-caching-on-translated-requests)).
+- **Prompt cache.** OpenAI's API caches Codex's prompt by itself, and `prompt_cache_key` goes along to OpenAI backends. On an `Anthropic` connector the router marks the request for Anthropic's cache, so later turns read the conversation from it ([Prompt caching on translated requests](providers.md#prompt-caching-on-translated-requests)).
 - **Server-side state.** `previous_response_id`, encrypted reasoning items and `/v1/responses/{id}` lookups only work against OpenAI itself. Codex sends `store: false` and the full history on every turn, so it does not need them. Remote compaction (`/v1/responses/compact`) is not routed: Codex falls back to compacting locally. Its local compaction request (a "context checkpoint compaction" asking for a handoff summary) is recognised and goes to tier 1, like Claude Code's.
 
 Codex's turns carry tools, so the same rules as for Claude Code apply: models need `tools`, and tool-result turns stay on the model that issued the calls. Without metadata for the model name `auto`, Codex prints "Model metadata for `auto` not found" and uses defaults. That is harmless. To silence it, alias a known OpenAI name in `ModelAliases` (`"gpt-*": "auto"`) and set `model` to that name.
@@ -211,6 +211,6 @@ curl -s http://localhost:5080/semantic-router/classify -H 'Content-Type: applica
 
 ## Keep it local
 
-Subscription CLI connectors only answer loopback clients (`AllowRemoteClients: false`), and the dashboard's admin API does too unless a dashboard token is configured (see [dashboard.md](dashboard.md#access-and-security)). Bind the router to `localhost` when it fronts your personal subscriptions; see [TERMS.md](TERMS.md).
+Subscription CLI connectors only answer loopback clients (`AllowRemoteClients: false`), and the dashboard's admin API does too unless a dashboard token is configured (see [Access and security](dashboard.md#access-and-security)). Bind the router to `localhost` when it fronts your personal subscriptions; see [Subscription CLI terms](TERMS.md).
 
 If you do share the router (with API-key and local models only), set `Middleware:GatewayKeys` so each client presents its own key; other machines are refused until you do: `ANTHROPIC_AUTH_TOKEN=<key>` for Claude Code, `OPENAI_API_KEY=<key>` for OpenAI clients. The router compares the key and records the client's name in Activity; it never forwards it.

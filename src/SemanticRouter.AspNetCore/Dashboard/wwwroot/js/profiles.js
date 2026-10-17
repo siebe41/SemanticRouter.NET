@@ -61,7 +61,7 @@ views.profiles = () => {
         <label class="field wide"><span class="name">Gateway client → profile (client=profile, one per line)</span><textarea data-bind="Middleware.ClientProfiles" data-kind="kv" rows="2" placeholder="laptop=private">${h(kv(m.ClientProfiles))}</textarea><span class="hint">Clients are the names under <a href="#/gateway">Gateway keys</a>. A client cannot leave its profile.</span></label>
       </div>
       <h3 style="margin-top:12px">Rules</h3>
-      ${names.length ? `<div class="table-wrap"><table><tr><th>Profile</th><th>Clients</th><th>Projects (globs)</th><th>Offers a tool</th><th>Offers none of</th><th></th></tr>
+      ${names.length ? `<div class="table-wrap"><table><tr><th>Profile</th><th>Clients</th><th>Projects (globs)</th><th>Offers a tool</th><th>Offers none of</th><th><span class="visually-hidden">Actions</span></th></tr>
         ${rules.map((r, i) => `<tr><td><select aria-label="Profile" data-bind="Middleware.ProfileRules.${i}.Profile">${profileOptions(r.Profile)}</select></td>
           <td><input type="text" aria-label="Clients" data-bind="Middleware.ProfileRules.${i}.Clients" data-kind="csv" value="${h((r.Clients || []).join(', '))}" placeholder="any"></td>
           <td><input type="text" aria-label="Projects" data-bind="Middleware.ProfileRules.${i}.Projects" data-kind="csv" value="${h((r.Projects || []).join(', '))}" placeholder="any"></td>
@@ -77,7 +77,7 @@ views.profiles = () => {
     </div>
 
     <div class="card section"><div class="card-head"><h2>Virtual models</h2><span class="muted small">Model names clients can pick (listed by <code>/v1/models</code>). <code>auto@profile</code> works for every profile too.</span></div>
-      <div class="table-wrap"><table><tr><th>Name</th><th>Profile</th><th>Strategy</th><th>Description</th><th></th></tr>
+      <div class="table-wrap"><table><tr><th>Name</th><th>Profile</th><th>Strategy</th><th>Description</th><th><span class="visually-hidden">Actions</span></th></tr>
         ${virtuals.map(([n, v]) => `<tr><td><input type="text" aria-label="Virtual model name" data-action-input="virtual-rename" data-name="${h(n)}" value="${h(n)}"></td>
           <td><select aria-label="Profile of ${h(n)}" data-bind="Middleware.VirtualModels.${n}.Profile" data-kind="nulltext">${profileOptions(v.Profile, '(none)')}</select></td>
           <td><select aria-label="Strategy of ${h(n)}" data-bind="Middleware.VirtualModels.${n}.Strategy" data-kind="nulltext">${STRATEGY_OPTIONS(v.Strategy)}</select></td>

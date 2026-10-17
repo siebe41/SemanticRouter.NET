@@ -20,7 +20,7 @@ views.tiers = () => {
       <div class="card-head"><h2>Ladder</h2><span class="spacer"></span>
         ${list ? '<button class="btn small" data-action="tiers-defaults" title="Go back to the built-in ladder">Use defaults</button>' : '<span class="muted small">Using the built-in ladder.</span> <button class="btn small" data-action="tiers-customize">Customize</button>'}
         ${list ? '<button class="btn small" data-action="tier-add">Add tier</button>' : ''}</div>
-      ${list ? `<div class="table-wrap"><table><tr><th style="width:80px">Level</th><th style="width:220px">Name</th><th>Description</th><th></th></tr>
+      ${list ? `<div class="table-wrap"><table><tr><th style="width:80px">Level</th><th style="width:220px">Name</th><th>Description</th><th><span class="visually-hidden">Actions</span></th></tr>
         ${list.map((t, i) => `<tr>
           <td><input type="number" min="0" step="1" aria-label="Level" data-bind="Tiers.${i}.Level" data-kind="number" value="${t.Level}"></td>
           <td><input type="text" aria-label="Name of tier ${h(t.Level)}" data-bind="Tiers.${i}.Name" value="${h(t.Name)}"></td>
@@ -87,15 +87,15 @@ const modelItem = (m, i) => {
   const names = connectorNames();
   const conn = state.config.Connectors[m.Connector];
   const free = !(m.InputCostPerMillionTokens > 0 || m.OutputCostPerMillionTokens > 0);
+  // The enabled box sits beside the header, not in it: a control inside the header's button is not reachable as itself.
   return `<div class="item ${state.open.has(key) ? 'open' : ''} ${m.Enabled === false ? 'disabled' : ''}" data-key="${key}">
-    <div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
+    <div class="item-bar"><div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
       <span class="chev">▶</span><span class="title">${h(m.Name || '(unnamed)')}</span>
       <span class="meta">${tierChip(m.Tier)}<span class="mono">${h(m.Model || '')}</span><span>via ${h(m.Connector)}${conn ? ` <span class="faint">(${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? '/' + h(conn.Preset || 'Custom') : ''})</span>` : ' <span class="badge danger">unknown connector</span>'}</span>
       ${m.IsLocal ? '<span class="badge info">local</span>' : ''}${reliabilityBadges(m.Name)}${!free ? `<span class="badge">$${m.InputCostPerMillionTokens}/$${m.OutputCostPerMillionTokens} per M</span>${effectiveCostBadge(m)}` : m.IsLocal ? '<span class="badge ok">free</span>'
         : !conn || conn.Type === 'Cli' || conn.Type === 'Copilot' ? `<span class="badge" title="Free per request, but it uses up the plan's quota${m.ApiInputCostPerMillionTokens != null ? '; its use is valued at the API price on Usage' : ''}">subscription${m.ApiInputCostPerMillionTokens != null ? ` · API $${m.ApiInputCostPerMillionTokens}/$${m.ApiOutputCostPerMillionTokens ?? 0}` : ''}</span>`
         : '<span class="badge warn" title="Costs nothing as far as the router knows, so it ranks like a subscription: set its prices">no price set</span>'}${(m.Capabilities || []).map((c) => `<span class="badge">${h(c)}</span>`).join('')}</span>
-      <span class="spacer"></span><label class="check" data-no-action><input type="checkbox" data-bind="Models.${i}.Enabled" data-kind="bool" ${m.Enabled !== false ? 'checked' : ''}> enabled</label>
-    </div>
+    </div><label class="check item-switch"><input type="checkbox" data-bind="Models.${i}.Enabled" data-kind="bool" aria-label="${h(`${m.Name || 'This model'} enabled`)}" ${m.Enabled !== false ? 'checked' : ''}> enabled</label></div>
     <div class="item-body"><div class="form-grid">
       <label class="field"><span class="name">Name</span><input type="text" data-bind="Models.${i}.Name" value="${h(m.Name)}"><span class="hint">Clients can request it directly as <code>model</code>.</span></label>
       <label class="field"><span class="name">Connector</span><select data-bind="Models.${i}.Connector">${names.map((n) => `<option ${n === m.Connector ? 'selected' : ''}>${h(n)}</option>`).join('')}${names.includes(m.Connector) ? '' : `<option selected>${h(m.Connector)}</option>`}</select></label>
@@ -273,7 +273,7 @@ views.routing = () => {
 
     <div class="card section"><div class="card-head"><h2>Complexity → tier</h2><span class="spacer"></span>${rules ? '<button class="btn small" data-action="rule-add">Add rule</button><button class="btn small" data-action="rules-defaults" title="Go back to the built-in rules">Use defaults</button>' : '<span class="muted small">Using the built-in rules: 0.45 → T2, 0.65 → T3, 0.85 → T4.</span> <button class="btn small" data-action="rules-customize">Customize</button>'}</div>
       <p class="small muted">A long, code-heavy or reasoning-heavy prompt is raised to at least this tier, whatever route it matched.</p>
-      ${rules ? (rules.length ? `<div class="table-wrap"><table><tr><th>Min score</th><th>Tier</th><th></th></tr>${rules.map((r, i) => `<tr><td><input type="number" step="0.01" min="0" max="1" aria-label="Minimum complexity score" data-bind="ComplexityTiers.${i}.MinScore" data-kind="float" value="${r.MinScore}"></td><td><select aria-label="Tier" data-bind="ComplexityTiers.${i}.Tier" data-kind="number">${tierOptions(r.Tier)}</select></td><td><button class="btn danger small" data-action="rule-remove" data-index="${i}">Remove</button></td></tr>`).join('')}</table></div>` : '<div class="muted small">No rules: complexity never raises the tier.</div>') : ''}
+      ${rules ? (rules.length ? `<div class="table-wrap"><table><tr><th>Min score</th><th>Tier</th><th><span class="visually-hidden">Actions</span></th></tr>${rules.map((r, i) => `<tr><td><input type="number" step="0.01" min="0" max="1" aria-label="Minimum complexity score" data-bind="ComplexityTiers.${i}.MinScore" data-kind="float" value="${r.MinScore}"></td><td><select aria-label="Tier" data-bind="ComplexityTiers.${i}.Tier" data-kind="number">${tierOptions(r.Tier)}</select></td><td><button class="btn danger small" data-action="rule-remove" data-index="${i}">Remove</button></td></tr>`).join('')}</table></div>` : '<div class="muted small">No rules: complexity never raises the tier.</div>') : ''}
     </div>
 
     <div class="card section"><div class="card-head"><h2>Model selection and failover</h2></div><div class="form-grid">
@@ -378,7 +378,7 @@ const aliasesCard = () => {
   const problems = rowProblems(rows, 'alias');
   const globs = rows.filter((r) => r.key.includes('*')).length;
   return `<div class="card section"><div class="card-head"><h2>Model aliases</h2><span class="muted small">Map the names clients send to routing aliases or catalog models. A name without <code>*</code> is matched exactly, before the globs; among the globs the first match wins, so order them from specific to general. Claude Code sends its default Opus name whether or not you chose Opus, so route Claude names as <code>auto</code>.</span><span class="spacer"></span><button class="btn small" data-action="alias-add">Add alias</button><button class="btn small" data-action="alias-claude">Add Claude Code defaults</button></div>
-      <div class="table-wrap"><table><tr><th>Client model (glob)</th><th>Routes as</th><th>${globs > 1 ? 'Order' : ''}</th><th></th></tr>
+      <div class="table-wrap"><table><tr><th>Client model (glob)</th><th>Routes as</th><th>${globs > 1 ? 'Order' : '<span class="visually-hidden">Order</span>'}</th><th><span class="visually-hidden">Actions</span></th></tr>
         ${rows.map((r, i) => `<tr><td>${rowName(`aria-label="Client model" data-action-input="alias-key" data-index="${i}" data-row="alias-${i}" data-path="Middleware.ModelAliases.${h(r.key.trim())}"`, r.key, problems.get(i), `alias-problem-${i}`)}</td>
           <td><input type="text" aria-label="${h(`Routes ${r.key || 'this name'} as`)}" data-action-input="alias-value" data-index="${i}" value="${h(r.value)}" list="alias-targets"></td>
           <td class="nowrap">${globs > 1 && r.key.includes('*') ? `<button class="btn ghost small" data-action="alias-up" data-index="${i}" aria-label="${h(`Move ${r.key} up`)}" title="Move up: matched earlier" ${i === 0 ? 'disabled' : ''}>↑</button><button class="btn ghost small" data-action="alias-down" data-index="${i}" aria-label="${h(`Move ${r.key} down`)}" title="Move down: matched later" ${i === rows.length - 1 ? 'disabled' : ''}>↓</button>` : ''}</td>
@@ -410,7 +410,7 @@ const rateLimitsCard = (m) => {
   const num = (v) => (v == null ? '' : v);
   const used = (used, max) => (max ? `${Number(used).toLocaleString()} / ${Number(max).toLocaleString()}` : Number(used).toLocaleString());
   return `<div class="card section"><div class="card-head"><h2>Rate limits</h2><span class="muted small">Per gateway client, over a sliding minute. A client over its limit gets a 429 with <code>Retry-After</code>. <code>*</code> covers every client without its own limit, and clients without a key by address.</span><span class="spacer"></span><button class="btn small" data-action="ratelimit-add">Add limit</button></div>
-      <div class="table-wrap"><table><tr><th>Client</th><th>Requests per minute</th><th>Tokens per minute</th><th></th></tr>
+      <div class="table-wrap"><table><tr><th>Client</th><th>Requests per minute</th><th>Tokens per minute</th><th><span class="visually-hidden">Actions</span></th></tr>
         ${limits.map((r, i) => { const k = r.key.trim(); const v = r.value || {}; return `<tr><td>${rowName(`aria-label="Client" data-action-input="ratelimit-key" data-index="${i}" data-row="limit-${i}" data-path="Middleware.RateLimits.${h(k)}" list="ratelimit-clients"`, r.key, problems.get(i), `limit-problem-${i}`)}</td><td><input type="number" min="1" aria-label="Requests per minute for ${h(k)}" data-action-input="ratelimit-rpm" data-index="${i}" data-path="Middleware.RateLimits.${h(k)}.RequestsPerMinute" value="${num(v.RequestsPerMinute)}" placeholder="no limit"></td><td><input type="number" min="1" aria-label="Tokens per minute for ${h(k)}" data-action-input="ratelimit-tpm" data-index="${i}" data-path="Middleware.RateLimits.${h(k)}.TokensPerMinute" value="${num(v.TokensPerMinute)}" placeholder="no limit"></td><td><button class="btn ghost small" data-action="ratelimit-remove" data-index="${i}" aria-label="${h(`Remove the limit for ${k || 'this row'}`)}">remove</button></td></tr>`; }).join('') || '<tr><td colspan="4" class="muted small">No rate limits.</td></tr>'}
       </table></div>
       <div class="form-grid"><label class="field"><span class="name">Default for other machines (requests per minute)</span><input type="number" min="0" data-bind="Middleware.RemoteRequestsPerMinute" data-kind="number" value="${m.RemoteRequestsPerMinute ?? 120}"><span class="hint">Each client on another machine that no entry above covers. 0 turns it off.</span></label></div>
@@ -495,7 +495,7 @@ export const historyCard = () => {
   const hs = state.history;
   if (!hs.versions) return `<div class="card section"><div class="card-head"><h2>History</h2><span class="spacer"></span><button class="btn small" data-action="history-load">Show applied versions</button></div></div>`;
   return `<div class="card section"><div class="card-head"><h2>History</h2><span class="muted small">Every applied configuration. Compare one with the draft, or roll back to it (applied and saved).</span><span class="spacer"></span><button class="btn ghost small" data-action="history-load">Refresh</button></div>
-    <div class="table-wrap"><table><tr><th>Version</th><th>When</th><th>What</th><th>Who</th><th></th></tr>
+    <div class="table-wrap"><table><tr><th>Version</th><th>When</th><th>What</th><th>Who</th><th><span class="visually-hidden">Actions</span></th></tr>
       ${hs.versions.map((v) => `<tr><td class="mono">${v.id}</td><td class="nowrap">${h(fullStamp(v.timestamp))}</td><td>${h(v.source)}${v.note ? ' <span class="faint small">' + h(v.note) + '</span>' : ''}</td><td class="small">${h(v.actor || '')}</td>
         <td class="row-actions"><button class="btn small" data-action="history-diff" data-id="${v.id}">Compare with draft</button>${readOnly() ? '' : `<button class="btn ghost small" data-action="history-rollback" data-id="${v.id}">Roll back</button>`}</td></tr>`).join('') || '<tr><td colspan="5" class="muted small">Nothing applied yet.</td></tr>'}
     </table></div>

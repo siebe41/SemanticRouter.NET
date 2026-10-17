@@ -11,11 +11,11 @@ Only the latest minor release gets security fixes. A fix goes to `main` and ship
 | The latest minor release, newest patch (NuGet packages, `semantic-router` tool, container image, desktop app) | yes |
 | Older minor releases, and older patches of the latest one | no |
 
-The security fixes in each release are listed under **Security** in [CHANGELOG.md](CHANGELOG.md).
+The security fixes in each release are listed under **Security** in the [changelog](CHANGELOG.md).
 
 ## Verifying a release
 
-Every release asset has a build provenance attestation and a line in `SHA256SUMS`; the container image is signed with keyless cosign and has provenance and SBOM attestations. CycloneDX SBOMs and `THIRD-PARTY-NOTICES.txt` are attached to each release. [docs/releases.md](docs/releases.md) has the commands (`gh attestation verify`, `sha256sum -c SHA256SUMS`, `cosign verify`). A file or image that fails these checks did not come from this repository's release workflow; please report where you got it.
+Every release asset has a build provenance attestation and a line in `SHA256SUMS`; the container image is signed with keyless cosign and has provenance and SBOM attestations. CycloneDX SBOMs and `THIRD-PARTY-NOTICES.txt` are attached to each release. [Verifying a release](docs/releases.md) has the commands (`gh attestation verify`, `sha256sum -c SHA256SUMS`, `cosign verify`). A file or image that fails these checks did not come from this repository's release workflow; please report where you got it.
 
 ## Reporting a vulnerability
 
@@ -32,7 +32,7 @@ Replies come in the advisory. Once a fix is released, the advisory is published,
 ## Response targets
 
 <!-- owner: confirm these numbers -->
-The project has one maintainer ([GOVERNANCE.md](GOVERNANCE.md)), so these are targets, not guarantees. Business days are Monday to Friday, excluding public holidays.
+The project has one maintainer ([Governance](GOVERNANCE.md)), so these are targets, not guarantees. Business days are Monday to Friday, excluding public holidays.
 
 | Step | Target |
 |---|---|
@@ -48,12 +48,12 @@ Severity follows [CVSS](https://www.first.org/cvss/). When a fix takes longer th
 The router sits between your clients and models you pay for, holds the keys for them, and can start your signed-in vendor CLIs. Reports about these parts are in scope:
 
 - **Credential handling.** Connector API keys, header values, embedding keys, CLI environment variables and dashboard tokens: a key that reaches the browser (it should be masked as `***`), a log, an activity entry, an error detail, a relayed upstream error or a backend it was not configured for.
-- **Secret references and the secret file.** `${env:…}` and `${secret:…}` resolution, and `UseSecretFile()` (values encrypted with ASP.NET Core Data Protection into `{config name}.secrets.json`): a typed key written to the configuration file in plain text while a secret store is registered, a secret file that can be decrypted without the user's data-protection keys, or keys written unencrypted while DPAPI or `DataProtection:Certificate` applies ([docs/host.md](docs/host.md#the-key-ring) says when they are not encrypted).
-- **Dashboard and admin API access control.** Loopback-only by default, the `Host` header check that guards against DNS rebinding, `AdminToken`, `ReadOnlyToken` and `MetricsToken` (including the session cookie, and signing out, which must end the session on the server), the same-origin check on writes, and `TrustedIdentityHeader` (which must only be believed from a known proxy): any way to read the configuration, change routing or apply a configuration without the access these settings require, to act under another user's name, or for the `Metrics` role to see prompt or reply text, utterances, the configuration or memory. See [docs/dashboard.md](docs/dashboard.md#access-and-security).
+- **Secret references and the secret file.** `${env:…}` and `${secret:…}` resolution, and `UseSecretFile()` (values encrypted with ASP.NET Core Data Protection into `{config name}.secrets.json`): a typed key written to the configuration file in plain text while a secret store is registered, a secret file that can be decrypted without the user's data-protection keys, or keys written unencrypted while DPAPI or `DataProtection:Certificate` applies ([The key ring](docs/host.md#the-key-ring) says when they are not encrypted).
+- **Dashboard and admin API access control.** Loopback-only by default, the `Host` header check that guards against DNS rebinding, `AdminToken`, `ReadOnlyToken` and `MetricsToken` (including the session cookie, and signing out, which must end the session on the server), the same-origin check on writes, and `TrustedIdentityHeader` (which must only be believed from a known proxy): any way to read the configuration, change routing or apply a configuration without the access these settings require, to act under another user's name, or for the `Metrics` role to see prompt or reply text, utterances, the configuration or memory. See [Access and security](docs/dashboard.md#access-and-security).
 - **The audit log.** A change through the dashboard or admin API that is not recorded, a record naming the wrong actor, or a request body, token or prompt text that ends up in it.
 - **Gateway keys.** `Middleware:GatewayKeys`: a remote request served without a valid key, a key that is logged or forwarded to a backend, or a timing difference that reveals a key.
 - **CLI connector process spawning.** Subscription CLI connectors start `claude`, `copilot` or `codex` as child processes with an argument list, a scrubbed environment and an empty working directory in a parent only the user can write to, and refuse `.cmd` shims. Prompt text that becomes extra arguments or shell commands, an API key or other variable leaking into the child, or a remote client reaching a CLI connector while `AllowRemoteClients` is off.
-- **Prompted tool calls.** With `ToolCalling: Prompted` a CLI connector reads tool calls out of the model's text, and the client runs them. Text in a tool result that becomes a call by being repeated (word for word or reformatted), a tool result that can pose as a turn of the transcript, a run's fence token that reaches the client or can be predicted, or, with `PromptedToolParsing: Strict`, a call accepted without the run's label, after which the reply goes on, or to a tool the request does not have. See [docs/providers.md](docs/providers.md#forged-tool-calls) for what each mode accepts.
+- **Prompted tool calls.** With `ToolCalling: Prompted` a CLI connector reads tool calls out of the model's text, and the client runs them. Text in a tool result that becomes a call by being repeated (word for word or reformatted), a tool result that can pose as a turn of the transcript, a run's fence token that reaches the client or can be predicted, or, with `PromptedToolParsing: Strict`, a call accepted without the run's label, after which the reply goes on, or to a tool the request does not have. See [Forged tool calls](docs/providers.md#forged-tool-calls) for what each mode accepts.
 - **The LocalOnly guarantee.** A route, routing profile or `LocalOnlyWhen` signal marked local-only must only be served by models marked `IsLocal`, including on failover. A local-only prompt that reaches a non-local model is a security issue.
 - **Stored prompts.** The activity log and the SQLite state database (`semantic-router.db`) hold prompt previews, with credentials masked unless `State:StorePrompts` is `On`; the evaluation set export leaves local-only prompts out unless asked. A way to read these without dashboard access, prompt text stored with `StorePrompts: Off`, or purged activity that can still be read from the database files is in scope.
 
@@ -62,7 +62,7 @@ Out of scope:
 - Vulnerabilities in the vendor CLIs, model servers or cloud APIs themselves; report those to the vendor.
 - What a model says, or a prompt injection that only changes a model's answer. This includes a model that an injected instruction talks into making a tool call of its own: the client's permission settings decide whether it runs.
 - Setups the documentation describes as trusted, such as `AllowUnauthenticatedRemoteClients: true` without an authenticating proxy, or keys written in plain text to `appsettings.json`.
-- Questions about whether using a subscription CLI through the router fits a vendor's terms. These are not security issues; see [docs/TERMS.md](docs/TERMS.md) and open a normal issue if something there is wrong or out of date.
+- Questions about whether using a subscription CLI through the router fits a vendor's terms. These are not security issues; see [Subscription CLI terms](docs/TERMS.md) and open a normal issue if something there is wrong or out of date.
 
 ## If a key was exposed
 

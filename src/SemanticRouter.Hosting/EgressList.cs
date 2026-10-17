@@ -91,7 +91,7 @@ internal static class EgressList
             : UpdateHosts;
         string applied = updates.Apply == UpdateApply.Notify ? "; applied only when the person chooses to" : string.Empty;
         string signed = updates.Publisher is { } publisher ? $"; applied only when signed by {publisher}" : string.Empty;
-        return $"desktop app updates: {from} (only the installed desktop app{applied}{signed}; untick Check for updates in its tray menu to turn this off).";
+        return $"desktop app updates: {from} (only the installed desktop app{applied}{signed}; untick Check for updates automatically in its tray menu to turn this off).";
     }
 
     private static string Vendor(CliPreset preset) => preset switch

@@ -158,7 +158,7 @@ views.feedback = () => {
           <div class="wide small faint">Issues are public. Never paste keys, file contents or private text.${e && e.promptPreview ? ` <button class="btn ghost small" type="button" data-action="report-preview">Use the stored preview</button>` : ''}</div>` : ''}
       </div>
       ${leakedLocal(e) ? `<div class="card" role="alert" style="margin-top:12px;border-color:var(--danger)">This prompt was marked local-only but answered by <b>${h(e.servedBy)}</b>, which is not a local model. That is a security problem: <a href="${SECURITY_REPORT}" target="_blank" rel="noopener">report it privately</a> instead of in a public issue.</div>` : ''}
-      ${filled.length ? `<h3 style="margin-top:14px">Filled in for you</h3>
+      ${filled.length ? `<h2 style="margin-top:14px;font-size:14px">Filled in for you</h2>
         <table class="small">${filled.map(([k, v]) => `<tr><th class="nowrap">${h(k)}</th><td><pre class="mono" style="margin:0;white-space:pre-wrap">${h(v)}</pre></td></tr>`).join('')}</table>
         <p class="faint small">${r.kind === 'misroute' ? 'No prompt text, project or memory notes. ' : ''}GitHub asks the rest (how you run it, the client) on the form.</p>` : ''}
       <div class="inline" style="margin-top:12px">

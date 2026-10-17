@@ -28,9 +28,9 @@
   --border-strong: #37434c;
   --text: #e8edf0;
   --text-muted: #94a3ac;
-  --text-faint: #788892;
+  --text-faint: #819099;
   --accent: #228fa7;
-  --accent-ink: #2291a9;
+  --accent-ink: #249ab3;
   --accent-contrast: #0a1114;
   --accent-soft: rgba(34, 143, 167, 0.2);
   --signal: #d08c34;
@@ -42,11 +42,11 @@
   /* Chart series, validated as a categorical pair against --bg-elevated (lightness, chroma, colour-blind separation). */
   --series-1: #2b9fc0;
   --series-2: #c97a1e;
-  --warn: #d08c34;
+  --warn: #d59748;
   --warn-soft: rgba(208, 140, 52, 0.18);
-  --danger: #ea696e;
+  --danger: #ec767a;
   --danger-soft: rgba(229, 72, 77, 0.16);
-  --info: #899ca5;
+  --info: #92a4ac;
   --info-soft: rgba(115, 138, 148, 0.18);
   --brand-mark-bg: #0c1013;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.25);
@@ -78,15 +78,15 @@
   --signal-ink: #916022;
   --signal-soft: rgba(208, 140, 52, 0.22);
   --signal-contrast: #14100a;
-  --ok: #417210;
+  --ok: #3f6e0f;
   --ok-soft: rgba(164, 208, 55, 0.28);
   --series-1: #1a8aa8;
   --series-2: #b9651a;
   --warn: #8a530c;
   --warn-soft: rgba(208, 140, 52, 0.2);
-  --danger: #c2272c;
+  --danger: #b8252a;
   --danger-soft: rgba(229, 72, 77, 0.13);
-  --info: #4e6670;
+  --info: #4b636c;
   --info-soft: rgba(115, 138, 148, 0.18);
   --brand-mark-bg: #121a1e;
   --shadow: 0 1px 2px rgba(18, 26, 30, 0.08), 0 8px 24px rgba(18, 26, 30, 0.08);
@@ -105,7 +105,7 @@
   --border-strong: #2f452f;
   --text: #d8f0d8;
   --text-muted: #7fa27f;
-  --text-faint: #628562;
+  --text-faint: #668b66;
   --accent: #5cff8d;
   --accent-ink: #5cff8d;
   --accent-contrast: #050705;
@@ -149,6 +149,9 @@ h3 { font-size: 14px; }
 p { margin: 0 0 10px; }
 a { color: var(--accent-ink); text-decoration: none; }
 a:hover { text-decoration: underline; }
+/* Links in the page's text are underlined, so they are told apart without relying on colour (WCAG 1.4.1). Navigation,
+   tabs, buttons, badges, chips and cards are links that look like what they are. */
+.content a:not(.btn, .badge, .note-chip, .mem-card, .endpoint-now, .tabs a) { text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
 code, pre, .mono { font-family: var(--font-mono); font-size: 12.5px; }
 pre {
   background: var(--bg-sunken);
@@ -417,6 +420,11 @@ label.check { display: inline-flex; align-items: center; gap: 8px; font-size: 13
 /* Editable list items (routes, models, connectors) */
 .item { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elevated); margin-bottom: 10px; }
 .item-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; }
+/* A header with a control of its own (a model's enabled box) beside it: the header takes the rest of the row. */
+.item-bar { display: flex; align-items: center; }
+.item-bar > .item-head { flex: 1; min-width: 0; }
+.item-switch { flex: none; padding: 8px 14px 8px 6px; }
+.item-switch input { width: 18px; height: 18px; margin: 3px; }
 .item-head .title { font-family: var(--font-heading); font-weight: 600; }
 .item-head .meta { color: var(--text-muted); font-size: 12.5px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .item-head .chev { color: var(--text-faint); transition: transform 0.15s; }

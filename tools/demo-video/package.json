@@ -3,7 +3,8 @@
   "private": true,
   "description": "Records the SemanticRouter.NET demo video. See README.md.",
   "scripts": {
-    "record": "node record.js"
+    "record": "node record.js",
+    "test": "node --test captions.test.js"
   },
   "dependencies": {
     "@xterm/xterm": "5.5.0",

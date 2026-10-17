@@ -11,7 +11,7 @@ import { data as videos } from './videos.data.js';
 
 Each video is recorded from a script against the real router, its dashboard and Claude Code. Only the models are
 stand-ins, so every routing decision, cooldown and figure on screen is the router's own. The captions follow the
-narration.
+narration, and under each video is a transcript: the narration, and the figures shown on screen that it doesn't say.
 
 <VideoList :videos="videos" />
 

@@ -1,4 +1,4 @@
-/* Semantic Router dashboard: In the desktop app's window: the update banner and About SemanticRouter. */
+/* Semantic Router dashboard: In the desktop app's window: the update banner, App settings and About SemanticRouter. */
 // The app's web view gives the page invokeCSharpAction(...) to send it messages, and hands the page its state as
 // window.semanticRouterDesktop plus a 'semantic-router-desktop' event (DesktopBridge in the desktop app). In a browser
 // there is no bridge, and none of this shows.
@@ -42,9 +42,11 @@ function show(s) {
 }
 
 if (bridge()) {
-  const about = $('#desktop-about');
-  about.classList.remove('hidden');
-  about.addEventListener('click', () => send('about'));
+  for (const [id, action] of [['#desktop-settings', 'settings'], ['#desktop-about', 'about']]) {
+    const button = $(id);
+    button.classList.remove('hidden');
+    button.addEventListener('click', () => send(action));
+  }
   $('#update-banner').addEventListener('click', (ev) => {
     const el = ev.target.closest('[data-desktop]');
     if (!el) return;

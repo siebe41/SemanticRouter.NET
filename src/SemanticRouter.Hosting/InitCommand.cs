@@ -20,12 +20,17 @@ internal sealed record InitProbes(HttpClient Http, string? SearchPath, bool Wind
 
 /// <summary>
 /// Whether <c>init</c> turns on the subscription CLIs it finds. Each one answers with whatever account that CLI is signed
-/// in to, which may be a personal plan, so it is enabled only on an explicit yes: <c>--yes</c>, or an answer at the terminal.
+/// in to, which may be a personal plan, so it is enabled only on an explicit yes: <c>--yes</c>, its name in
+/// <c>--enable-cli</c>, or an answer at the terminal.
 /// </summary>
 /// <param name="Yes"><c>--yes</c>: enable them without asking.</param>
 /// <param name="Input">The terminal to ask on; <see langword="null"/> when there is none (input or output redirected).</param>
 /// <param name="Output">Where the questions are written.</param>
-internal sealed record CliConsent(bool Yes, TextReader? Input, TextWriter Output)
+/// <param name="Named">
+/// <c>--enable-cli</c>: enable just these, without asking; <see langword="null"/> when not given. It wins over
+/// <c>--yes</c>, as the narrower choice.
+/// </param>
+internal sealed record CliConsent(bool Yes, TextReader? Input, TextWriter Output, IReadOnlySet<string>? Named = null)
 {
     /// <summary>Which of the CLIs found (executable and path) to enable. Anything but <c>y</c> or <c>yes</c> means no.</summary>
     /// <param name="found">The CLIs to ask about.</param>
@@ -33,14 +38,29 @@ internal sealed record CliConsent(bool Yes, TextReader? Input, TextWriter Output
     /// <param name="cancellationToken">Cancels the questions.</param>
     public async Task<IReadOnlySet<string>> AskAsync(IReadOnlyList<(string Executable, string Path)> found, bool nothingElse, CancellationToken cancellationToken)
     {
+        if (Named is not null)
+        {
+            return found.Select(f => f.Executable).Where(Named.Contains).ToHashSet();
+        }
+
         if (Yes)
         {
             return found.Select(f => f.Executable).ToHashSet();
         }
 
         var enabled = new HashSet<string>();
-        if (Input is null || found.Count == 0)
+        if (found.Count == 0)
         {
+            return enabled;
+        }
+
+        if (Input is null)
+        {
+            // Said here, where the questions would have been, so a script's log shows why nothing was enabled.
+            string names = string.Join(",", found.Select(f => f.Executable));
+            await Output.WriteLineAsync(
+                $"No terminal to ask on (input or output is redirected), so {string.Join(" and ", found.Select(f => f.Executable))} will be added disabled. " +
+                $"To choose without one, run init with --yes (every CLI found), --enable-cli {names} (only those you name) or --no-cli (none).").ConfigureAwait(false);
             return enabled;
         }
 
@@ -105,7 +125,7 @@ internal static class InitCommand
         {
             // A model-family table in the configuration directory (from an earlier setup) is used here too.
             ModelFamilyTable families = ModelFamilyTable.Load(ModelFamilyTable.FileNextTo(settings.ConfigurationFile));
-            CliConsent? cli = settings.NoCli ? null : new CliConsent(settings.Yes, input, output);
+            CliConsent? cli = settings.NoCli ? null : new CliConsent(settings.Yes, input, output, settings.EnableCli);
             await DetectAsync(document, probes, notes, cli, cancellationToken, families).ConfigureAwait(false);
         }
 
@@ -269,6 +289,7 @@ internal static class InitCommand
             ("copilot", "copilot-cli", CliPreset.GitHubCopilot, 2, false),
         ];
         var found = new List<(string Executable, string Connector, CliPreset Preset, int MaxConcurrency, bool Ask, string Path)>();
+        var explained = new HashSet<string>(StringComparer.Ordinal);
         foreach ((string executable, string connector, CliPreset preset, int maxConcurrency, bool ask) in clis)
         {
             CliExecutableLookup lookup = CliExecutableLocator.Find(executable, probes.SearchPath, probes.Windows);
@@ -276,6 +297,7 @@ internal static class InitCommand
             {
                 // Not added, not asked about: the router would turn it off at start-up anyway.
                 notes.Add($"{executable}: found at {lookup.Path}, but not added: {blocked}.");
+                explained.Add(executable);
                 continue;
             }
 
@@ -286,7 +308,14 @@ internal static class InitCommand
             else if (lookup.ScriptPath is not null)
             {
                 notes.Add($"{executable}: only a script wrapper was found ({lookup.ScriptPath}); install the native {executable}.exe to use it.");
+                explained.Add(executable);
             }
+        }
+
+        // A CLI named in --enable-cli that is not on this machine: said, rather than silently left out.
+        foreach (string missing in cli.Named?.Where(n => !explained.Contains(n) && !found.Any(f => f.Executable == n)) ?? [])
+        {
+            notes.Add($"{missing}: not found on PATH, so --enable-cli could not enable it.");
         }
 
         // Whether the CLIs are all there is: then saying no leaves the router with nothing to answer, and the question says so.
@@ -294,20 +323,23 @@ internal static class InitCommand
         IReadOnlySet<string> yes = await cli.AskAsync(found.Where(f => f.Ask).Select(f => (f.Executable, f.Path)).ToArray(), nothingElse, cancellationToken).ConfigureAwait(false);
         foreach ((string executable, string connector, CliPreset preset, int maxConcurrency, bool ask, string path) in found)
         {
-            // Why a CLI is added disabled, and how to turn it on.
-            string? off = !ask ? "(it spends your plan's premium requests); enable it on the dashboard"
+            // Why a CLI is added disabled, and how to turn it on. Copilot is never asked about, but naming it enables it.
+            string? off = cli.Named?.Contains(executable) == true ? null
+                : !ask ? "(it spends your plan's premium requests); enable it on the dashboard"
                 : yes.Contains(executable) ? null
+                : cli.Named is not null ? "(not named in --enable-cli); enable it on the dashboard when you want it"
                 : cli.Input is null ? "(there was no terminal to ask on)"
                 : "(you did not say yes); enable it on the dashboard when you want it";
             AddCli(document, notes, executable, path, connector, preset, maxConcurrency, off);
         }
 
-        string[] unasked = cli.Input is null && !cli.Yes ? found.Where(f => f.Ask).Select(f => f.Executable).ToArray() : [];
+        string[] unasked = cli.Input is null && !cli.Yes && cli.Named is null ? found.Where(f => f.Ask).Select(f => f.Executable).ToArray() : [];
         if (unasked.Length > 0)
         {
             notes.Add($"{string.Join(", ", unasked)}: init asks before enabling a subscription CLI, because it answers on whatever account that CLI is signed in to, " +
                       $"which may be a personal plan (at work, see {SiteLinks.WorkUse}). " +
-                      $"Enable {(unasked.Length == 1 ? "it" : "them")} on the dashboard, or run `semantic-router init --force --yes` to enable {(unasked.Length == 1 ? "it" : "them")} without asking.");
+                      $"Enable {(unasked.Length == 1 ? "it" : "them")} on the dashboard, or run `semantic-router init --force --enable-cli {string.Join(",", unasked)}` " +
+                      $"to enable {(unasked.Length == 1 ? "it" : "them")} without asking.");
         }
     }
 

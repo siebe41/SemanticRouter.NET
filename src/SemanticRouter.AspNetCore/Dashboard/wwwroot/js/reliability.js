@@ -26,7 +26,7 @@ export function reliabilityCard() {
   return `<details class="card section reliability" data-open-key="reliability" ${judged ? 'open' : ''}><summary><h2>Reliability</h2>${judged ? '' : '<span class="muted small">too few turns to judge yet</span>'}</summary>
     <div class="card-head" style="margin-top:8px"><span class="muted small">How often each model's turns drew feedback (retried, corrected, tool errors, empty replies), per route and with tools${r.enabled ? `. A model clearly worse than the others at some work is left out of it for a while, then tried again.` : '. Leaving unreliable models out is off (<span class="mono">Middleware:Reliability</span>).'}</span></div>
     <div class="table-wrap"><table>
-      <tr><th>Model</th><th>Work</th><th class="num">Turns</th><th class="num">With feedback</th><th class="num">Others</th><th></th></tr>
+      <tr><th>Model</th><th>Work</th><th class="num">Turns</th><th class="num">With feedback</th><th class="num">Others</th><th><span class="visually-hidden">Status</span></th></tr>
       ${rows.map((m) => `<tr>
         <td><b>${h(m.model)}</b></td>
         <td class="small">${h(work(m))}</td>

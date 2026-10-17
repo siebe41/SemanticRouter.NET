@@ -33,7 +33,7 @@ internal sealed class AboutWindow : Window
         var close = new Button { Content = "Close", HorizontalAlignment = HorizontalAlignment.Right, IsDefault = true, IsCancel = true };
         close.Click += (_, _) => Close();
 
-        Content = new StackPanel
+        Content = Accessible.FitToScreen(this, new StackPanel
         {
             Margin = new Thickness(28, 24),
             Spacing = 10,
@@ -45,14 +45,14 @@ internal sealed class AboutWindow : Window
                     Spacing = 16,
                     Children =
                     {
-                        new Image { Source = logo, Width = 64, Height = 64 },
+                        Accessible.Decorative(new Image { Source = logo, Width = 64, Height = 64 }),
                         new StackPanel
                         {
                             VerticalAlignment = VerticalAlignment.Center,
                             Children =
                             {
-                                new TextBlock { Text = "SemanticRouter", FontSize = 22, FontWeight = FontWeight.SemiBold },
-                                new SelectableTextBlock { Text = $"Version {RouterHost.Version}", Opacity = 0.75 },
+                                Accessible.Heading(new TextBlock { Text = "SemanticRouter", FontSize = 22, FontWeight = FontWeight.SemiBold }, 1),
+                                new SelectableTextBlock { Text = $"Version {RouterHost.Version}", Opacity = Accessible.SecondaryOpacity },
                             },
                         },
                     },
@@ -65,32 +65,24 @@ internal sealed class AboutWindow : Window
                 },
                 Updates,
                 new Separator { Margin = new Thickness(0, 6) },
-                Link("GitHub repository", ProjectLinks.Repository),
-                Link("Documentation", ProjectLinks.Documentation),
-                Link("Report an issue or suggest an idea", ProjectLinks.Issues),
-                Link("Releases and downloads", ProjectLinks.Releases),
+                Accessible.Link("GitHub repository", ProjectLinks.Repository),
+                Accessible.Link("Documentation", ProjectLinks.Documentation),
+                Accessible.Link("Report an issue or suggest an idea", ProjectLinks.Issues),
+                Accessible.Link("Releases and downloads", ProjectLinks.Releases),
                 new TextBlock
                 {
                     Text = "Open source under the MIT licence. The connectors drive third-party services under those services' own terms.",
                     TextWrapping = TextWrapping.Wrap,
                     FontSize = 12,
-                    Opacity = 0.75,
+                    Opacity = Accessible.SecondaryOpacity,
                     Margin = new Thickness(0, 6, 0, 0),
                 },
-                Link("MIT licence", ProjectLinks.License),
+                Accessible.Link("MIT licence", ProjectLinks.License),
                 close,
             },
-        };
+        });
     }
 
     /// <summary>Where updates stand, and the choices about them.</summary>
     public UpdatesSection Updates { get; } = new();
-
-    private static HyperlinkButton Link(string text, string url)
-    {
-        var link = new HyperlinkButton { Content = text, Padding = new Thickness(0, 2) };
-        ToolTip.SetTip(link, url);
-        link.Click += (_, _) => Shell.Open(url);
-        return link;
-    }
 }

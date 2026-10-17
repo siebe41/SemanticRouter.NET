@@ -30,6 +30,10 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Dashboard: Router learned has a small Settings form for the common `Tuning` options.
 - Dashboard: Routes can be set to follow the conversation (`FollowsConversation`).
 - Desktop app: the dashboard in the app window has an update banner when an update is ready, available or downloading (**Restart to update**, **Not now**), and **About SemanticRouter** under **More**. On macOS the app menu has **About SemanticRouter** and **Check for Updates…**.
+- Desktop app: a **Settings** window with everything the tray menu sets or does (the router's status and problems, **Restart router**, the background service, start at sign-in, where the dashboard opens, the log and the configuration folder), opened from the tray, from **App settings** under **More** on the dashboard in the app window, and from the macOS app menu (⌘,). Nothing needs the tray icon any more.
+- Desktop app: on Linux (libnotify 0.7.10 or later) a click on a notification opens what it is about. A failure you caused (the background service, a restart, an update download) is also a notification.
+- `semantic-router init --enable-cli claude,codex` enables just the subscription CLIs named, without asking; the others found are added disabled. Without a terminal, `init` now says that it skipped the questions and how to choose (`--yes`, `--enable-cli`, `--no-cli`).
+- Documentation site: each video has a transcript (its narration, plus figures shown on screen that the narration doesn't say), a link to its captions file, and a download link that names the video. The build fails when a video is published without captions, unless `site/videos.json` marks it `"speech": false`.
 
 ### Changed
 
@@ -63,6 +67,8 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Dashboard: capabilities, allowed/denied models and connectors are picked from lists; time zones have suggestions; a budget covers one model, connector or profile picked with **Covers**, and a new budget is valid.
 - Dashboard: routing reasons, configuration sources and settings are in plain words, with the raw value in a tooltip; one format for money, counts, dates and tiers ("T2 · Coding"); consistent Remove, Use defaults and Download buttons.
 - Dashboard: Label starts with no tier picked and warns when it is the tier the prompt was routed to.
+- Desktop app: the tray's **Check for updates** is now **Check for updates automatically**, next to **Check for updates now…**.
+- Dashboard: links in running text are underlined, and a few theme colours are slightly stronger so status badges, faint text and links keep 4.5:1 on every surface, hovered rows included. A theme file is now checked against `--bg-hover` too.
 
 ### Fixed
 
@@ -83,6 +89,10 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Dashboard: Usage right-aligns its figures and folds an empty Feedback card to one line.
 - Dashboard: a failed prompt-tester Send or a plan with no eligible model says why and where to fix it.
 - Dashboard: Memory without sources no longer shows Fit, Rescan and Clear sharing, nor two sets of add buttons; Evaluate with an empty set says what to do on the page itself.
+- Deleting activity (`DELETE api/activity`, **Delete all activity**) could leave the deleted prompt previews in `state.db-wal` when another connection was reading the database at that moment (the dashboard, a second router on the same file). It now waits up to the busy timeout for the reader to finish before emptying the log, and logs a warning when it cannot.
+- Dashboard accessibility (WCAG 2.2 AA, now checked with axe-core on every page, theme and width in CI): tables and the Live feed that scroll can be reached and scrolled from the keyboard; a model's **enabled** box is no longer inside its header's button and is big enough to hit; table columns without a visible heading have one for screen readers; the Feedback page's headings are in order; the charts are named with their figures; the Trends and Usage segmented buttons say which is pressed.
+- Desktop app accessibility: the About, welcome and new Settings windows have headings, links that read as links, a logo hidden as decoration, and explanations read with their checkboxes; the update status and the router's problems are announced when they change; the focus moves to **Restart to update** after **Check now** finds one; the welcome window closes with Escape; the windows scroll instead of running off a short screen with large text; secondary text keeps full strength under high contrast; opening the dashboard window puts the focus in the page.
+- Documentation site: the brand buttons' white text has at least 4.5:1 contrast in both themes, including on hover. The screenshots' alt text describes what they show (the memory map's colours included), the Mermaid diagrams have accessible titles and descriptions, links show page or section names instead of file names, and `semantic-router models` writes "why:" instead of an arrow glyph.
 
 ## [0.4.0] - 2026-10-16
 

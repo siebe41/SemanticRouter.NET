@@ -7,7 +7,7 @@ The router can read the notes you and your AI tools keep (an Obsidian vault, Cla
 
 That answers the question a router like this raises: when Claude Code reads your memory files, or a chat tool injects "things it remembers about you", does that text stay on your machine or go to a cloud model?
 
-![The memory map](images/memory-map.png)
+![The Memory page: 34 notes from two sources drawn as a graph of linked dots, coloured by sharing. Orange dots are notes whose text was sent to the cloud (14), grey dots with an orange ring notes only mentioned to the cloud (4), teal dots notes that went only to local models (6), and grey dots notes never sent. Beside the graph, a Most shared list starts with CLAUDE.md, sent to the cloud 9 times](images/memory-map.png)
 
 ## Set it up
 
@@ -83,7 +83,7 @@ Limits worth knowing:
 
 ## API
 
-All under the dashboard prefix, see [dashboard.md](dashboard.md#admin-api).
+All under the dashboard prefix, see [Admin API](dashboard.md#admin-api).
 
 | Method and path | Purpose |
 |---|---|

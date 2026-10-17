@@ -33,7 +33,7 @@ internal sealed partial class ThemeCatalog(string? directory)
 
     /// <summary>The text tokens checked against the surfaces they are drawn on.</summary>
     private static readonly string[] TextTokens = ["--text", "--text-muted", "--text-faint", "--accent-ink", "--signal-ink", "--warn", "--danger", "--ok", "--info"];
-    private static readonly string[] Surfaces = ["--bg", "--bg-elevated", "--bg-sunken"];
+    private static readonly string[] Surfaces = ["--bg", "--bg-elevated", "--bg-sunken", "--bg-hover"];
 
     private static readonly Lazy<string> Stylesheet = new(() =>
     {
@@ -107,7 +107,11 @@ internal sealed partial class ThemeCatalog(string? directory)
             pairs.AddRange(Surfaces.Select(s => (text, s, (string?)null)));
         }
 
-        pairs.AddRange([("--ok", "--bg-elevated", "--ok-soft"), ("--warn", "--bg-elevated", "--warn-soft"), ("--danger", "--bg-elevated", "--danger-soft"), ("--info", "--bg-elevated", "--info-soft")]);
+        // Badges sit on every surface: cards, the sunken setup choices and table headers, and hovered rows.
+        foreach (string status in (string[])["--ok", "--warn", "--danger", "--info"])
+        {
+            pairs.AddRange(Surfaces.Select(surface => (status, surface, (string?)(status + "-soft"))));
+        }
         pairs.AddRange([("--accent-contrast", "--accent", null), ("--signal-contrast", "--signal", null)]);
 
         var issues = new List<ThemeContrastIssue>();

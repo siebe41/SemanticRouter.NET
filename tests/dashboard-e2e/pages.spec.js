@@ -350,6 +350,7 @@ test('in a browser there is no update banner and no About entry', async ({ page 
   await page.locator('#more-toggle').click();
   await expect(page.locator('#theme-select')).toBeVisible();
   await expect(page.locator('#desktop-about')).toBeHidden();
+  await expect(page.locator('#desktop-settings')).toBeHidden();
   await expect(page.locator('#update-banner')).toBeHidden();
 });
 
@@ -367,13 +368,16 @@ test('in the desktop app the dashboard opens About and offers an update until No
   await page.locator('#more-toggle').click();
   await page.locator('#desktop-about').click();
   expect(await sent()).toEqual(['ready', 'about']);
+  if (await page.locator('#more').isHidden()) await page.locator('#more-toggle').click();
+  await page.locator('#desktop-settings').click();
+  expect(await sent()).toEqual(['ready', 'about', 'settings']);
 
   const ready = { offer: '0.6.0', downloading: false, headline: 'Version 0.6.0 is ready to install.', detail: 'It is installed when you quit the app, or now with Restart to update.', canRestart: true };
   await page.evaluate(desktopState, ready);
   await expect(banner).toBeVisible();
   await expect(banner).toContainText('Version 0.6.0 is ready to install.');
   await banner.getByRole('button', { name: 'Restart to update' }).click();
-  expect(await sent()).toEqual(['ready', 'about', 'restart-to-update']);
+  expect(await sent()).toEqual(['ready', 'about', 'settings', 'restart-to-update']);
 
   // Downloading for Restart to update: said, with nothing to press.
   await page.evaluate(desktopState, { ...ready, downloading: true, headline: 'Downloading version 0.6.0…', detail: null, canRestart: false });

@@ -41,7 +41,9 @@ export function requestsChart(series, span) {
     return (x.requests ? `<rect class="bar-mark" x="${xpos}" y="${PAD.t + ih - hgt}" width="${w}" height="${hgt}" rx="${Math.min(4, w / 2)}"/>` : '') +
       `<rect class="hit" x="${PAD.l + i * bw}" y="${PAD.t}" width="${bw}" height="${ih}" data-tip="${h(tip)}"/>`;
   }).join('');
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Requests per interval">${axes(max, (v) => String(Math.round(v)), b, span)}${bars}</svg>`;
+  const total = b.reduce((n, x) => n + x.requests, 0); const busiest = Math.max(0, ...b.map((x) => x.requests));
+  const label = `Requests per interval: ${total} in all, at most ${busiest} in one interval. The figures are under Show as a table.`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${h(label)}">${axes(max, (v) => String(Math.round(v)), b, span)}${bars}</svg>`;
 }
 
 export function latencyChart(series, span) {
@@ -52,7 +54,9 @@ export function latencyChart(series, span) {
   const last = (key) => { for (let i = b.length - 1; i >= 0; i--) if (b[i][key] != null) return [i, b[i][key]]; return null; };
   const endLabel = (key, cls, name) => { const l = last(key); if (!l) return ''; const [px, py] = pt(l[0], l[1]); return `<circle class="dot-${cls}" cx="${px}" cy="${py}" r="4"/><text class="end-label" x="${px + 8}" y="${py + (cls === 1 ? 10 : -4)}">${name} ${h(fmtMs(l[1]))}</text>`; };
   const hits = b.map((x, i) => `<rect class="hit" x="${PAD.l + i * bw}" y="${PAD.t}" width="${bw}" height="${ih}" data-tip="${h(`${fmtTime(x.start, span)}\np50 ${fmtMs(x.p50Milliseconds)} · p95 ${fmtMs(x.p95Milliseconds)}`)}"/>`).join('');
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Latency p50 and p95">${axes(max, fmtMs, b, span)}<path class="line-2" d="${path('p95Milliseconds')}"/><path class="line-1" d="${path('p50Milliseconds')}"/>${endLabel('p95Milliseconds', 2, 'p95')}${endLabel('p50Milliseconds', 1, 'p50')}${hits}</svg>`;
+  const p50 = last('p50Milliseconds'); const p95 = last('p95Milliseconds');
+  const label = `Latency, p50 and p95${p50 && p95 ? `: latest p50 ${fmtMs(p50[1])}, p95 ${fmtMs(p95[1])}` : ''}. The figures are under Show as a table.`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${h(label)}">${axes(max, fmtMs, b, span)}<path class="line-2" d="${path('p95Milliseconds')}"/><path class="line-1" d="${path('p50Milliseconds')}"/>${endLabel('p95Milliseconds', 2, 'p95')}${endLabel('p50Milliseconds', 1, 'p50')}${hits}</svg>`;
 }
 
 export async function loadTrends(auto) {
@@ -77,7 +81,7 @@ export const trendsCard = () => {
   const failed = t.error ? `<div class="small load-error">Couldn't load trends: ${h(t.error.replace(/\.$/, ''))}. <button class="btn small" data-action="trends-retry">Retry</button></div>` : '';
   if (!s && t.error) return `<div class="card section"><div class="card-head"><h2>Trends</h2></div>${failed}</div>`;
   if (!s) { loadTrends(); return '<div class="card section"><div class="card-head"><h2>Trends</h2></div><div class="muted small">Loading…</div></div>'; }
-  const seg = ['1h', '24h', '7d', '30d'].map((w) => `<button class="${w === t.window ? 'on' : ''}" data-action="trends-window" data-window="${w}">${w}</button>`).join('');
+  const seg = ['1h', '24h', '7d', '30d'].map((w) => `<button class="${w === t.window ? 'on' : ''}" aria-pressed="${w === t.window}" data-action="trends-window" data-window="${w}">${w}</button>`).join('');
   const rows = s.buckets.filter((b) => b.requests).map((b) => `<tr><td>${h(fmtTime(b.start, t.window))}</td><td class="num">${b.requests}</td><td class="num">${b.served}</td><td class="num">${b.failed}</td><td class="num">${h(fmtMs(b.p50Milliseconds))}</td><td class="num">${h(fmtMs(b.p95Milliseconds))}</td></tr>`).join('');
   return `<div class="card section"><div class="card-head"><h2>Trends</h2><span class="muted small">${s.requests} requests · p50 ${h(fmtMs(s.p50Milliseconds))} · p95 ${h(fmtMs(s.p95Milliseconds))} · p99 ${h(fmtMs(s.p99Milliseconds))}</span><span class="spacer"></span><span class="seg" role="group" aria-label="Window">${seg}</span></div>
     ${failed}
