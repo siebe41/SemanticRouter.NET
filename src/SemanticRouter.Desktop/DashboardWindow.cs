@@ -39,6 +39,7 @@ internal sealed class DashboardWindow : Window
         PositionChanged += (_, _) => TrackNormalBounds();
         Resized += (_, _) => TrackNormalBounds();
 
+        WebViewProfile.ClearHttpCache(dataDirectory, log);
         _view = new NativeWebView { Source = home };
         _view.EnvironmentRequested += (_, e) =>
         {

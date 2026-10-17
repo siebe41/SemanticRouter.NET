@@ -55,7 +55,7 @@ public sealed class ActionableMessagesTests : IDisposable
         Func<Task> download = () => OnnxModelDownloader.EnsureAsync(model, _directory, new HttpClient(handler));
 
         (await download.Should().ThrowAsync<HttpRequestException>()).Which.Message.Should()
-            .Contain("Could not download model.onnx from huggingface.co (Connection refused (proxy.corp:3128))")
+            .Contain("Could not download model.onnx from huggingface.co and its CDN (*.hf.co) (Connection refused (proxy.corp:3128))")
             .And.Contain("HTTPS_PROXY").And.Contain("SemanticRouter:Network:CaBundle")
             .And.Contain(Path.Combine(_directory, model.Name, "model.onnx")).And.Contain(model.ModelSha256);
     }

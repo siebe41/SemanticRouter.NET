@@ -77,8 +77,11 @@ public static class SqliteStateBuilderExtensions
 /// The shared database: schema, connections and failure handling. Every operation degrades to a fallback value when
 /// the database is unavailable, so routing never fails because of state storage.
 /// </summary>
-internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStorageHealth
+internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStorageHealth, IDisposable
 {
+    /// <summary>How often everything past its retention is deleted, besides at start-up and when retention changes.</summary>
+    internal static readonly TimeSpan PruneInterval = TimeSpan.FromHours(1);
+
     // 2: usage.profile (routing profiles). 3: usage.subscription_value (subscriptions at API prices). 4: usage.id, so a
     // row keeps its number through VACUUM and the running budget totals read only the rows added since, and the costs
     // also in whole picodollars, so SQL adds them up exactly. Older files are migrated in place, after a copy of the
@@ -98,7 +101,12 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     private readonly string _connectionString;
     private readonly int _busyTimeoutSeconds;
     private readonly ILogger _logger;
+    private readonly ITimer? _pruning;
     private long _lastWarningTicks;
+
+    // A checkpoint that could not empty the write-ahead log (another connection was reading): tried again after the next
+    // operation, so what was deleted does not wait for the next prune to leave the log.
+    private volatile bool _logOwed;
 
     public SqliteRouterDatabase(IOptions<SqliteStateOptions> options, ILogger<SqliteRouterDatabase> logger, TimeProvider? time = null)
     {
@@ -128,6 +136,11 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
                 string backup = BackupFile(path, version);
                 LogMigrated(_logger, path, version, SchemaVersion, backup);
             }
+
+            // Retention must not depend on traffic: a router that serves a few requests a day, or is restarted every
+            // evening, still loses what is past it.
+            Prune();
+            _pruning = Time.CreateTimer(_ => Prune(), null, PruneInterval, PruneInterval);
         }
         catch (NewerSchemaException ex)
         {
@@ -218,8 +231,57 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     /// <summary>Oldest audit log entries kept: <c>State:Retention:AuditDays</c>, or <see cref="SqliteStateOptions.AuditRetention"/>.</summary>
     public TimeSpan AuditRetention => _retention.AuditDays is int days ? TimeSpan.FromDays(days) : Options.AuditRetention;
 
-    /// <summary>Takes the retention of the configuration just applied; records past it go at the next prune.</summary>
-    public void Apply(StateRetentionOptions retention) => _retention = retention ?? new StateRetentionOptions();
+    /// <summary>Takes the retention of the configuration just applied, and deletes what is past it.</summary>
+    public void Apply(StateRetentionOptions retention)
+    {
+        _retention = retention ?? new StateRetentionOptions();
+        Prune();
+    }
+
+    /// <summary>
+    /// Deletes every row past its retention (activity by age and count, feedback, usage and the audit log by age,
+    /// configuration versions by count, and expired affinity, warm caches and cooldowns), then empties the write-ahead
+    /// log so the deleted prompt previews are in neither file. Runs at start-up, when retention changes and every
+    /// <see cref="PruneInterval"/>, whatever the traffic. Returns how many rows it deleted.
+    /// </summary>
+    public int Prune() => Run("deleting state past its retention", 0, connection =>
+    {
+        DateTimeOffset now = Time.GetUtcNow();
+        long before = TotalChanges(connection);
+        using (SqliteCommand command = Command(
+            connection,
+            "DELETE FROM activity WHERE timestamp_ticks < $activity;" +
+            "DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY id DESC LIMIT $entries);" +
+            "DELETE FROM feedback WHERE timestamp_ticks < $activity;" +
+            "DELETE FROM usage WHERE timestamp_ticks < $usage;" +
+            "DELETE FROM audit WHERE timestamp_ticks < $audit;" +
+            "DELETE FROM config_history WHERE id NOT IN (SELECT id FROM config_history ORDER BY id DESC LIMIT $versions);" +
+            "DELETE FROM affinity WHERE created_ticks < $affinity;" +
+            "DELETE FROM warm_caches WHERE expires_ticks <= $now;" +
+            "DELETE FROM cooldowns WHERE until_ticks <= $now;",
+            ("$activity", (now - ActivityMaxAge).UtcTicks), ("$entries", ActivityMaxEntries), ("$usage", (now - UsageRetention).UtcTicks),
+            ("$audit", (now - AuditRetention).UtcTicks), ("$versions", HistoryMaxEntries),
+            ("$affinity", (now - Options.AffinityWindow).UtcTicks), ("$now", now.UtcTicks)))
+        {
+            command.ExecuteNonQuery();
+        }
+
+        int deleted = (int)(TotalChanges(connection) - before);
+        if (deleted > 0)
+        {
+            EmptyLog(connection);
+        }
+
+        return deleted;
+    });
+
+    private static long TotalChanges(SqliteConnection connection)
+    {
+        using SqliteCommand command = Command(connection, "SELECT total_changes();");
+        return (long)command.ExecuteScalar()!;
+    }
+
+    public void Dispose() => _pruning?.Dispose();
 
     public TimeProvider Time { get; }
 
@@ -242,7 +304,20 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         try
         {
             using SqliteConnection connection = Open();
-            return operation(connection);
+            T result = operation(connection);
+            if (_logOwed)
+            {
+                try
+                {
+                    EmptyLog(connection);
+                }
+                catch (SqliteException)
+                {
+                    // Tried again after the next operation; this one succeeded.
+                }
+            }
+
+            return result;
         }
         catch (Exception ex) when (ex is SqliteException or InvalidOperationException or JsonException)
         {
@@ -296,15 +371,30 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     }
 
     /// <summary>
-    /// Empties the write-ahead log after a purge, so what was deleted is in neither file: waits up to the busy timeout
-    /// for readers to finish, and says so in the log when one did not.
+    /// Empties the write-ahead log after rows were deleted, without waiting. When another connection keeps it, it is
+    /// tried again after the next operation. Returns whether the log was emptied.
     /// </summary>
-    public void EmptyLogAfterPurge(SqliteConnection connection, string what)
+    public bool EmptyLog(SqliteConnection connection, TimeSpan wait = default)
     {
-        if (!TruncateLog(connection, Options.BusyTimeout))
+        bool emptied = TruncateLog(connection, wait);
+        _logOwed = !emptied;
+        return emptied;
+    }
+
+    /// <summary>
+    /// Empties the write-ahead log after a purge, so what was deleted is in neither file: waits up to the busy timeout
+    /// for readers to finish, and says so in the log when one did not (it is then tried again after the next
+    /// operation). Returns whether the log was emptied.
+    /// </summary>
+    public bool EmptyLogAfterPurge(SqliteConnection connection, string what)
+    {
+        if (EmptyLog(connection, Options.BusyTimeout))
         {
-            LogLogNotEmptied(_logger, what, Location, Options.BusyTimeout.TotalSeconds);
+            return true;
         }
+
+        LogLogNotEmptied(_logger, what, Location, Options.BusyTimeout.TotalSeconds);
+        return false;
     }
 
     /// <summary>
@@ -650,7 +740,7 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     [LoggerMessage(Level = LogLevel.Warning, Message = "Router state database: {What} failed for {Path} ({Error}); continuing in memory.")]
     private static partial void LogOperationFailed(ILogger logger, string what, string path, string error);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Router state database: after {What}, {Path}-wal could not be emptied within {Seconds} s because another connection kept reading; what was deleted stays in that file until the next checkpoint.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Router state database: after {What}, {Path}-wal could not be emptied within {Seconds} s because another connection kept reading; what was deleted stays in that file until the next checkpoint, after the next write or read.")]
     private static partial void LogLogNotEmptied(ILogger logger, string what, string path, double seconds);
 }
 
@@ -856,9 +946,11 @@ internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRout
             if (prune)
             {
                 using SqliteCommand old = SqliteRouterDatabase.Command(
-                    connection, "DELETE FROM feedback WHERE timestamp_ticks < $oldest;",
-                    ("$oldest", (database.Time.GetUtcNow() - database.ActivityMaxAge).UtcTicks));
-                old.ExecuteNonQuery();
+                    connection, "DELETE FROM feedback WHERE timestamp_ticks < $oldest;", ("$oldest", Oldest()));
+                if (old.ExecuteNonQuery() > 0)
+                {
+                    database.EmptyLog(connection);
+                }
             }
         });
     }
@@ -866,11 +958,30 @@ internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRout
     public long ReserveIds(int count) => database.ReserveIds("feedback", count);
 
     public IReadOnlyList<RoutingFeedback> Recent(int limit) => Read(
-        "SELECT item FROM feedback ORDER BY id DESC LIMIT $limit;", ("$limit", Math.Max(0, limit)));
+        "SELECT item FROM feedback WHERE timestamp_ticks >= $oldest ORDER BY id DESC LIMIT $limit;", ("$oldest", Oldest()), ("$limit", Math.Max(0, limit)));
 
+    // Past the retention is as good as deleted, even before the next prune deletes it.
     public IReadOnlyList<RoutingFeedback> Between(DateTimeOffset since, DateTimeOffset until, int limit) => Read(
-        "SELECT item FROM feedback WHERE timestamp_ticks >= $since AND timestamp_ticks < $until ORDER BY id LIMIT $limit;",
-        ("$since", since.UtcTicks), ("$until", until.UtcTicks), ("$limit", Math.Max(0, limit)));
+        "SELECT item FROM feedback WHERE timestamp_ticks >= max($since, $oldest) AND timestamp_ticks < $until ORDER BY id LIMIT $limit;",
+        ("$since", since.UtcTicks), ("$oldest", Oldest()), ("$until", until.UtcTicks), ("$limit", Math.Max(0, limit)));
+
+    public void Remove(IReadOnlyCollection<long> entryIds)
+    {
+        ArgumentNullException.ThrowIfNull(entryIds);
+        if (entryIds.Count == 0)
+        {
+            return;
+        }
+
+        database.Run("deleting feedback about deleted activity", connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection, "DELETE FROM feedback WHERE entry_id IN (SELECT value FROM json_each($ids));", ("$ids", JsonSerializer.Serialize(entryIds)));
+            command.ExecuteNonQuery();
+        });
+    }
+
+    private long Oldest() => (database.Time.GetUtcNow() - database.ActivityMaxAge).UtcTicks;
 
     private IReadOnlyList<RoutingFeedback> Read(string sql, params (string Name, object? Value)[] parameters) =>
         database.Run<IReadOnlyList<RoutingFeedback>>("reading feedback", [], connection =>
@@ -1041,13 +1152,16 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
             return entries;
         });
 
+    // Past the retention is as good as deleted (and Recent hides it), even before the next prune deletes it: the
+    // export, the feedback summary and tuning never see it.
     public IReadOnlyList<RoutingActivityEntry> Between(DateTimeOffset since, DateTimeOffset until, int limit) =>
         database.Run<IReadOnlyList<RoutingActivityEntry>>("reading activity", [], connection =>
         {
             var entries = new List<RoutingActivityEntry>();
             using SqliteCommand command = SqliteRouterDatabase.Command(
-                connection, "SELECT entry FROM activity WHERE timestamp_ticks >= $since AND timestamp_ticks < $until ORDER BY id LIMIT $limit;",
-                ("$since", since.UtcTicks), ("$until", until.UtcTicks), ("$limit", Math.Max(0, limit)));
+                connection, "SELECT entry FROM activity WHERE timestamp_ticks >= max($since, $oldest) AND timestamp_ticks < $until ORDER BY id LIMIT $limit;",
+                ("$since", since.UtcTicks), ("$oldest", (database.Time.GetUtcNow() - database.ActivityMaxAge).UtcTicks), ("$until", until.UtcTicks),
+                ("$limit", Math.Max(0, limit)));
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
             {
@@ -1072,11 +1186,30 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
         }
 
         // The write-ahead log still holds the pages as they were before; move them into the file and empty it.
-        SqliteRouterDatabase.TruncateLog(connection);
+        database.EmptyLog(connection);
     }
 
-    public int Purge(DateTimeOffset since, DateTimeOffset until) =>
-        database.Run("purging activity", 0, connection =>
+    public IReadOnlyList<long> IdsBetween(DateTimeOffset since, DateTimeOffset until) =>
+        database.Run<IReadOnlyList<long>>("reading activity", [], connection =>
+        {
+            var ids = new List<long>();
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection, "SELECT id FROM activity WHERE timestamp_ticks >= $since AND timestamp_ticks < $until;",
+                ("$since", since.UtcTicks), ("$until", until.UtcTicks));
+            using SqliteDataReader reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                ids.Add(reader.GetInt64(0));
+            }
+
+            return ids;
+        });
+
+    public int Purge(DateTimeOffset since, DateTimeOffset until) => PurgeWithResult(since, until).Removed;
+
+    // A database that is not in use holds nothing to purge; one that fails during the purge may still hold it.
+    public ActivityPurgeResult PurgeWithResult(DateTimeOffset since, DateTimeOffset until) => !database.Available ? new ActivityPurgeResult(0) :
+        database.Run("purging activity", new ActivityPurgeResult(0, Complete: false), connection =>
         {
             int removed;
             using (SqliteCommand command = SqliteRouterDatabase.Command(
@@ -1093,8 +1226,7 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
                 vacuum.ExecuteNonQuery();
             }
 
-            database.EmptyLogAfterPurge(connection, "purging activity");
-            return removed;
+            return new ActivityPurgeResult(removed, database.EmptyLogAfterPurge(connection, "purging activity"));
         });
 }
 

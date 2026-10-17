@@ -320,32 +320,100 @@ public sealed class SqliteStateTests : IDisposable
             ((long)count.ExecuteScalar()!).Should().Be(1);
         }
 
-        Task<int> purge = Task.Run(() => store.Purge(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1)));
+        Task<ActivityPurgeResult> purge = Task.Run(() => store.PurgeWithResult(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1)));
         await Task.Delay(300);
         read.Commit();
 
-        (await purge).Should().Be(1);
+        (await purge).Should().Be(new ActivityPurgeResult(1, Complete: true));
         string files = DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db");
         files.Should().NotContain("purge-me 3f9d", "the purge waits for the reader, then empties the log");
     }
 
     [Fact]
-    public void A_purge_says_so_when_a_reader_keeps_the_log_past_the_busy_timeout()
+    public void A_purge_says_so_when_a_reader_keeps_the_log_past_the_busy_timeout_and_empties_it_after_the_next_operation()
     {
         var store = new SqliteActivityStore(Open(o => o.BusyTimeout = TimeSpan.FromMilliseconds(200)));
-        store.Append(new RoutingActivityEntry { Id = 1, Timestamp = _time.GetUtcNow(), PromptPreview = "kept by a reader" });
-        using var reader = new SqliteConnection($"Data Source={DbPath};Pooling=False");
-        reader.Open();
-        using SqliteTransaction read = reader.BeginTransaction(deferred: true);
-        using (SqliteCommand count = reader.CreateCommand())
+        store.Append(new RoutingActivityEntry { Id = 1, Timestamp = _time.GetUtcNow(), PromptPreview = "kept by a reader 81c2" });
+        using (var reader = new SqliteConnection($"Data Source={DbPath};Pooling=False"))
         {
-            count.Transaction = read;
-            count.CommandText = "SELECT count(*) FROM activity;";
-            count.ExecuteScalar();
+            reader.Open();
+            using SqliteTransaction read = reader.BeginTransaction(deferred: true);
+            using (SqliteCommand count = reader.CreateCommand())
+            {
+                count.Transaction = read;
+                count.CommandText = "SELECT count(*) FROM activity;";
+                count.ExecuteScalar();
+            }
+
+            store.PurgeWithResult(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1))
+                .Should().Be(new ActivityPurgeResult(1, Complete: false), "the rows are gone, but the log still holds them");
+            _logs.Messages.Should().Contain(m => m.Contains("could not be emptied", StringComparison.Ordinal));
+            read.Commit();
         }
 
-        store.Purge(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1)).Should().Be(1, "the rows are gone even when the log is not emptied yet");
-        _logs.Messages.Should().Contain(m => m.Contains("could not be emptied", StringComparison.Ordinal));
+        store.Recent(1).Should().BeEmpty();
+        string files = DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db");
+        files.Should().NotContain("kept by a reader 81c2", "the checkpoint owed is made after the next operation");
+    }
+
+    [Fact]
+    public void Retention_is_enforced_without_traffic_at_start_up_and_when_it_changes()
+    {
+        SqliteRouterDatabase database = Open(o => o.ActivityMaxAge = TimeSpan.FromDays(1));
+        var activity = new SqliteActivityStore(database);
+        var feedback = new SqliteFeedbackStore(database);
+        var usage = new SqliteUsageLedger(database);
+        var audit = new SqliteAuditLog(database);
+        for (int i = 1; i <= 5; i++)
+        {
+            activity.Append(new RoutingActivityEntry { Id = i, Timestamp = _time.GetUtcNow(), PromptPreview = "aged-out 5e7a " + i });
+            feedback.Add(new RoutingFeedback { Id = i, Timestamp = _time.GetUtcNow(), EntryId = i, Kind = FeedbackKind.Judged, Detail = "graded 1/5 by judge: aged-out 5e7a" });
+        }
+
+        usage.Record(new UsageRecord(_time.GetUtcNow(), "aged-out-usage-5e7a", "c", null, null, false, 1, 1, 0, 0, 0m, 0m));
+        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "aged-out-auditor-5e7a", null, "PUT", "/router/api/config", null, 200, "changed"));
+
+        // Past retention but not pruned yet: already left out of every read, the export's included.
+        _time.Advance(TimeSpan.FromDays(40));
+        activity.Between(DateTimeOffset.MinValue, DateTimeOffset.MaxValue, 1000).Should().BeEmpty();
+        activity.Recent(1000).Should().BeEmpty();
+        feedback.Between(DateTimeOffset.MinValue, DateTimeOffset.MaxValue, 1000).Should().BeEmpty();
+        feedback.Recent(1000).Should().BeEmpty();
+        Files().Should().Contain("aged-out 5e7a");
+
+        // Fewer than 100 writes since: a restart deletes it all the same.
+        database.Dispose();
+        SqliteRouterDatabase restarted = Open(o =>
+        {
+            o.ActivityMaxAge = TimeSpan.FromDays(1);
+            o.UsageRetention = TimeSpan.FromDays(30);
+            o.AuditRetention = TimeSpan.FromDays(30);
+        });
+        new SqliteActivityStore(restarted).Append(new RoutingActivityEntry { Id = 6, Timestamp = _time.GetUtcNow(), PromptPreview = "fresh" });
+
+        string files = Files();
+        files.Should().NotContain("aged-out 5e7a").And.NotContain("aged-out-usage-5e7a").And.NotContain("aged-out-auditor-5e7a");
+
+        // A shorter retention applied to a running router takes effect at once.
+        _time.Advance(TimeSpan.FromDays(3));
+        restarted.Apply(new StateRetentionOptions { ActivityDays = 2 });
+        Files().Should().NotContain("fresh");
+        restarted.Dispose();
+
+        string Files() => DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db");
+    }
+
+    [Fact]
+    public void Feedback_about_purged_entries_is_deleted_from_the_store()
+    {
+        var feedback = new SqliteFeedbackStore(Open());
+        feedback.Add(new RoutingFeedback { Id = 1, Timestamp = _time.GetUtcNow(), EntryId = 10, Kind = FeedbackKind.Judged });
+        feedback.Add(new RoutingFeedback { Id = 2, Timestamp = _time.GetUtcNow(), EntryId = 11, Kind = FeedbackKind.Retried });
+        feedback.Add(new RoutingFeedback { Id = 3, Timestamp = _time.GetUtcNow(), EntryId = 12, Kind = FeedbackKind.Retried });
+
+        feedback.Remove([10, 12]);
+
+        feedback.Recent(10).Select(f => f.EntryId).Should().Equal(11);
     }
 
     [Fact]
@@ -985,6 +1053,130 @@ public sealed class DurableStateHostTests : RouterHostTest
         JsonNode.Parse(await purge.Content.ReadAsStringAsync())!["removed"]!.GetValue<int>().Should().Be(2);
         JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray().Should().BeEmpty();
         DatabaseFiles().Should().NotContain("purge-me 7a1c");
+    }
+
+    [Fact]
+    public async Task The_export_leaves_out_activity_past_the_retention_before_it_is_pruned()
+    {
+        HttpClient client = await StartDurableAsync(o =>
+        {
+            o.StorePrompts = PromptStorage.On;
+            o.Retention.ActivityDays = 7;
+        });
+        _ = Services.GetRequiredService<RouterRuntimeProvider>().Current;
+        Services.GetRequiredService<IRoutingActivityStore>().Append(
+            new RoutingActivityEntry { Id = 900, Timestamp = DateTimeOffset.UtcNow.AddDays(-40), PromptPreview = "aged-out 2b8e", Outcome = "served" });
+
+        string export = await client.GetStringAsync("/router/api/activity/export?format=jsonl&prompts=true&since=2000-01-01T00:00:00Z");
+
+        export.Should().NotContain("aged-out 2b8e");
+    }
+
+    [Fact]
+    public async Task Deleting_activity_deletes_the_judges_reasons_learned_examples_and_connector_errors_from_its_prompts()
+    {
+        LocalHttp = new StubHttpMessageHandler((_, body) => OpenAIReply(
+            body.Contains("\"model\":\"judge-32b\"", StringComparison.Ordinal)
+                ? """{"grade": 2, "reason": "the purge-marker 4c1d figures are wrong"}"""
+                : "Revenue rose."));
+        Cli = FakeCliProcessRunner.Failing(1, stdout: ClaudeStream.Error("I cannot share the purge-marker 4c1d numbers"), stderr: "aborted");
+        HttpClient client = await StartDurableAsync(
+            o => o.StorePrompts = PromptStorage.On,
+            middleware: o => (o.Judge.Enabled, o.Judge.Model, o.Judge.SampleRate) = (true, "judge", 1),
+            routing: o =>
+            {
+                ModelDefinition judge = Model("judge", 3, local: true, connector: "lmstudio");
+                judge.Model = "judge-32b";
+                o.Models.Add(judge);
+            },
+            withCli: true,
+            services: s => s.AddSingleton<IModelResidency>(new NotLoaded("judge-32b")));
+
+        await client.PostAsync("/v1/chat/completions", Chat("the purge-marker 4c1d quarterly numbers"));
+        await Services.GetRequiredService<AnswerJudge>().WhenIdleAsync(TimeSpan.FromSeconds(10));
+        await client.PostAsync("/v1/chat/completions", JsonBody(new JsonObject
+        {
+            ["model"] = "claude-cli",
+            ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = "the numbers again" }),
+        }));
+        await WaitForStoredActivityAsync(2);
+
+        // A learned change made from that feedback, quoting the prompt as its evidence.
+        ITuningStore tuning = Services.GetRequiredService<ITuningStore>();
+        tuning.Save(new TuningChange
+        {
+            Id = 1,
+            Timestamp = DateTimeOffset.UtcNow,
+            Kind = TuningChangeKind.DefaultThreshold,
+            OldValue = 0.75f,
+            NewValue = 0.73f,
+            Why = "At 0.73, 1 labelled prompt routes to the tier it needs that does not now (1 from feedback: judged), e.g. \"the purge-marker 4c1d quarterly numbers\"; none would route lower than they need.",
+            Examples = ["the purge-marker 4c1d quarterly numbers"],
+            State = TuningChangeState.Suggested,
+        });
+        Services.GetRequiredService<RoutingFeedbackLog>().Recent().Should().ContainSingle().Which.Detail.Should().Contain("purge-marker 4c1d");
+        Services.GetRequiredService<ConnectorIncidents>().Failing().Should().ContainSingle().Which.Detail.Should().Contain("purge-marker 4c1d");
+        DatabaseFiles().Should().Contain("purge-marker 4c1d");
+
+        JsonNode purge = JsonNode.Parse(await (await client.DeleteAsync("/router/api/activity")).Content.ReadAsStringAsync())!;
+
+        purge["removed"]!.GetValue<int>().Should().Be(2);
+        purge["complete"]!.GetValue<bool>().Should().BeTrue();
+        Services.GetRequiredService<RoutingFeedbackLog>().Recent().Should().BeEmpty();
+        TuningChange scrubbed = tuning.Changes().Single();
+        scrubbed.Examples.Should().BeEmpty();
+        scrubbed.Why.Should().Be("At 0.73, 1 labelled prompt routes to the tier it needs that does not now (1 from feedback: judged); none would route lower than they need.");
+        Services.GetRequiredService<ConnectorIncidents>().Failing().Should().ContainSingle().Which.Detail.Should().BeNull("it still fails, without the message");
+        DatabaseFiles().Should().NotContain("purge-marker 4c1d");
+    }
+
+    [Fact]
+    public async Task A_request_still_running_or_waiting_for_the_judge_when_activity_is_deleted_is_not_stored_again()
+    {
+        using var answer = new ManualResetEventSlim();
+        using var grade = new ManualResetEventSlim();
+        LocalHttp = new StubHttpMessageHandler((_, body) =>
+        {
+            bool judging = body.Contains("\"model\":\"judge-32b\"", StringComparison.Ordinal);
+            (judging ? grade : answer).Wait(TimeSpan.FromSeconds(20));
+            return OpenAIReply(judging ? """{"grade": 1, "reason": "inflight-marker 9e0f is wrong"}""" : "Done.");
+        });
+        HttpClient client = await StartDurableAsync(
+            o => o.StorePrompts = PromptStorage.On,
+            middleware: o => (o.Judge.Enabled, o.Judge.Model, o.Judge.SampleRate) = (true, "judge", 1),
+            routing: o =>
+            {
+                ModelDefinition judge = Model("judge", 3, local: true, connector: "lmstudio");
+                judge.Model = "judge-32b";
+                o.Models.Add(judge);
+            },
+            services: s => s.AddSingleton<IModelResidency>(new NotLoaded("judge-32b")));
+        RoutingActivityLog activity = Services.GetRequiredService<RoutingActivityLog>();
+        IRoutingActivityStore store = Services.GetRequiredService<IRoutingActivityStore>();
+
+        // The first request is answered and waits for the judge; the second is still waiting for its answer.
+        answer.Set();
+        await client.PostAsync("/v1/chat/completions", Chat("judged inflight-marker 9e0f the layoffs list"));
+        await WaitForStoredActivityAsync(1);
+        answer.Reset();
+        Task<HttpResponseMessage> running = client.PostAsync("/v1/chat/completions", Chat("running inflight-marker 9e0f the layoffs list"));
+        for (int i = 0; i < 500 && activity.Recent(10).Count < 2; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        activity.Recent(10).Should().HaveCount(2);
+        (await client.DeleteAsync("/router/api/activity")).StatusCode.Should().Be(HttpStatusCode.OK);
+        answer.Set();
+        grade.Set();
+        (await running).StatusCode.Should().Be(HttpStatusCode.OK);
+        await Services.GetRequiredService<AnswerJudge>().WhenIdleAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(200);
+
+        store.Recent(10).Should().BeEmpty();
+        activity.Recent(10).Should().BeEmpty();
+        Services.GetRequiredService<RoutingFeedbackLog>().Recent().Should().BeEmpty();
+        DatabaseFiles().Should().NotContain("inflight-marker 9e0f");
     }
 
     [Fact]

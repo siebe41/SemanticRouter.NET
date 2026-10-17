@@ -1,4 +1,5 @@
 {
+  "TemplateVersion": 2,
   "Connectors": {
     "local": { "Type": "OpenAICompatible", "BaseAddress": "__STUB__" },
     "cloud": { "Type": "OpenAICompatible", "BaseAddress": "__STUB__", "ApiKey": "sk-e2e-not-a-real-key-0000" }

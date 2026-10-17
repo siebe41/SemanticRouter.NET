@@ -126,7 +126,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             {
                 // Expected operational failures (server down, timeout): one line, no stack trace.
                 string error = ex is OperationCanceledException ? "timed out" : _redactor.Redact(ex.Message);
-                LogUpstreamFailure(_logger, Name, message.RequestUri!, error);
+                LogUpstreamFailure(_logger, Name, AddressDisplay.Show(message.RequestUri)!, error);
                 return ConnectorResult.Failed(
                     ModelFailureKind.Unavailable,
                     ex is OperationCanceledException ? "timed out" : $"unreachable ({error})");
@@ -164,7 +164,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             }
 
             context.Response.StatusCode = StatusCodes.Status200OK;
-            LogUpstreamFailure(_logger, Name, message.RequestUri!, why);
+            LogUpstreamFailure(_logger, Name, AddressDisplay.Show(message.RequestUri)!, why);
             return ConnectorResult.Failed(ModelFailureKind.Unavailable, why);
         }
     }
@@ -421,7 +421,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
     private static partial void LogUnreadableReply(ILogger logger, string connector, string contentType, string error);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: request to {Uri} failed: {Error}")]
-    private static partial void LogUpstreamFailure(ILogger logger, string connector, Uri uri, string error);
+    private static partial void LogUpstreamFailure(ILogger logger, string connector, string uri, string error);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: HTTP {Status}, {Advice}. Trying the next model.")]
     private static partial void LogUpstreamRejectedCredentials(ILogger logger, string connector, int status, string advice);

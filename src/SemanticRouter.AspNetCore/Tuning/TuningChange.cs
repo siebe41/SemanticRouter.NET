@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace SemanticRouter.AspNetCore;
 
@@ -49,7 +50,7 @@ public enum TuningChangeState
 /// One change automatic tuning made or suggests: what (<see cref="Kind"/>, <see cref="Route"/>, the old and new
 /// value or the utterance), why (<see cref="Why"/>, with the evidence), and when.
 /// </summary>
-public sealed record TuningChange
+public sealed partial record TuningChange
 {
     /// <summary>Sequence number.</summary>
     public long Id { get; init; }
@@ -137,6 +138,25 @@ public sealed record TuningChange
     /// <summary><see cref="Summary"/> without the utterance's text, which comes from a prompt: "utterance for code".</summary>
     [JsonIgnore]
     public string PlainSummary => Kind == TuningChangeKind.Utterance ? $"utterance for {Route}" : Summary;
+
+    /// <summary>
+    /// The change without the prompt previews it quotes as evidence (<see cref="Examples"/>, and the example or utterance
+    /// quoted in <see cref="Why"/>), for when the activity they came from is deleted. The utterance itself stays: it is
+    /// what the change adds to the configuration.
+    /// </summary>
+    internal TuningChange WithoutPromptText()
+    {
+        string why = QuotedExample().Replace(Why, string.Empty);
+        why = QuotedUtterance().Replace(why, "The utterance is labelled ");
+        return Examples.Count == 0 && why == Why ? this : this with { Why = why, Examples = [] };
+    }
+
+    // RouterTuner's wording: 'At 0.48, … now (…), e.g. "<prompt>"; none would …' and '"<utterance>" is labelled code (tier 3) …'.
+    [GeneratedRegex(@", e\.g\. "".*""(?=; )", RegexOptions.Singleline)]
+    private static partial Regex QuotedExample();
+
+    [GeneratedRegex(@"^"".*"" is labelled ", RegexOptions.Singleline)]
+    private static partial Regex QuotedUtterance();
 
     internal static string Format(float? threshold) =>
         threshold is { } value ? value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) : "default";
