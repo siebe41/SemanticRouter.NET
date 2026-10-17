@@ -272,7 +272,7 @@ internal static class InitCommand
         {
             OnnxModelInfo model = UseInProcessEmbeddings(document);
             notes.Add($"embeddings: no embedding server found, so '{model.Name}' runs in this process to recognise what each prompt asks for " +
-                      $"({Math.Round(model.ModelBytes / 1e6):0} MB, downloaded from huggingface.co on first start).");
+                      $"({Math.Round(model.ModelBytes / 1e6):0} MB, downloaded from {OnnxEmbeddingModels.DownloadHosts} on first start).");
         }
 
         if (cli is null)

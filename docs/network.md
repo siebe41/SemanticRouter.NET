@@ -8,11 +8,11 @@ What the router contacts, when, and how to turn it off. The router has no teleme
 |---|---|---|---|
 | **Connectors** | The `BaseAddress` of each HTTP connector (`api.anthropic.com`, `api.openai.com`, a local model server, …) | A request is routed to one of its models, the dashboard checks or discovers models, or `doctor` runs | Disable or remove the connector, or its models |
 | **Embeddings** | `Embeddings:Endpoint` when the provider is `OpenAICompatible` | Every classified prompt, and route warm-up | Use `Onnx`, or a server on this machine |
-| **ONNX model download** | `huggingface.co` and its download hosts | Once, on the first start with `Embeddings:Provider: Onnx` and no model in `models/{name}` | Copy a `models/{name}` directory into the configuration directory (or set `ModelPath`); the download is then skipped. The files are pinned to a revision and checked by SHA-256 |
+| **ONNX model download** | `huggingface.co`, which redirects the model file to its CDN (`*.hf.co`; the host is regional, e.g. `us.aws.cdn.hf.co` or `cas-bridge.xethub.hf.co`) | Once, on the first start with `Embeddings:Provider: Onnx` and no model in `models/{name}` | Copy a `models/{name}` directory into the configuration directory (or set `ModelPath`); the download is then skipped. The files are pinned to a revision and checked by SHA-256 |
 | **The answer judge** | One of your connectors (`Middleware:Judge:Model`) | A sampled share of cheap answers, when `Judge:Enabled` is on (off by default) | Leave `Judge:Enabled` off |
 | **Webhooks** | Each `Notifications:Webhooks` URL | A notice appears or clears, and the weekly digest | Remove the webhook |
 | **Subscription CLIs** (`claude`, `codex`, `copilot`) and the Copilot SDK connector | Their vendor's API, from the vendor's own process | A request is routed to one of their models, or `doctor` runs | Disable the connector. The router starts Claude Code with `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and Copilot with `--no-auto-update`, so a run makes no update, telemetry or error-reporting requests. Codex is started with `-c check_for_update_on_startup=false -c analytics.enabled=false -c otel.metrics_exporter="none"` (and `--ignore-user-config`), so it checks for no update and sends OpenAI no analytics or metrics |
-| **Desktop app updates** | `api.github.com` and GitHub's release download hosts | A minute after the app starts, then every 12 hours, when installed with the installer | Untick **Check for updates automatically** in the tray menu; for a whole machine, `Updates:Mode` `Off` or an internal feed in the [machine policy](enterprise.md) |
+| **Desktop app updates** | `api.github.com`, `github.com` and the release download hosts it redirects to (`release-assets.githubusercontent.com`, `objects.githubusercontent.com`) | A minute after the app starts, then every 12 hours, when installed with the installer | Untick **Check for updates automatically** in the tray menu; for a whole machine, `Updates:Mode` `Off` or an internal feed in the [machine policy](enterprise.md) |
 | **`init`** | `localhost:1234` (LM Studio), `localhost:11434` (Ollama) | When you run `semantic-router init` | Nothing leaves this machine |
 
 Nothing else is contacted:
@@ -68,10 +68,10 @@ It is a host setting, like `CaBundle`: `appsettings.json` in the configuration d
 For an egress allowlist, list:
 
 1. the hosts of the connectors you enabled;
-2. `huggingface.co` for the first start with ONNX embeddings, or pre-seed `models/` and leave it out;
+2. `huggingface.co` and `*.hf.co` (its CDN, which serves the model file through a redirect) for the first start with ONNX embeddings, or pre-seed `models/` and leave them out;
 3. your webhook hosts;
 4. for subscription CLIs, the hosts their vendors document;
-5. for desktop updates, `api.github.com`, `github.com` and `objects.githubusercontent.com`;
+5. for desktop updates, `api.github.com`, `github.com`, `release-assets.githubusercontent.com` and `objects.githubusercontent.com`;
 6. for the dashboard's price lookup, `openrouter.ai` (optional: without it, prices are entered by hand).
 
 `semantic-router doctor` prints this list for the current configuration, one `egress` line per destination:
@@ -80,10 +80,10 @@ For an egress allowlist, list:
 [ OK ] egress: connector lmstudio: localhost:1234 (this machine).
 [ OK ] egress: connector openai: api.openai.com.
 [ OK ] egress: connector claude: CLI: claude, which contacts Anthropic.
-[ OK ] egress: embeddings: huggingface.co, once, to download ONNX model all-MiniLM-L6-v2 into /data/models/all-MiniLM-L6-v2 (copy it there to skip the download).
+[ OK ] egress: embeddings: huggingface.co and its CDN (*.hf.co), once, to download ONNX model all-MiniLM-L6-v2 into /data/models/all-MiniLM-L6-v2 (copy it there to skip the download).
 [ OK ] egress: webhook ops: hooks.slack.com.
 [ OK ] egress: price list: openrouter.ai, only when the dashboard looks up cloud models' prices (Look up prices, Discover models); nothing but the request for the list is sent.
-[ OK ] egress: desktop app updates: api.github.com, github.com and objects.githubusercontent.com (only the installed desktop app; untick Check for updates automatically in its tray menu to turn this off).
+[ OK ] egress: desktop app updates: api.github.com, github.com, release-assets.githubusercontent.com and objects.githubusercontent.com (only the installed desktop app; untick Check for updates automatically in its tray menu to turn this off).
 ```
 
 Connectors and webhooks show their host and port only: a webhook URL usually carries its token, so its path and query are never printed. The embeddings line names the download host only while the model is not in the models directory yet. Then `doctor` checks each enabled connector and the embeddings, so it fails on any host the allowlist is missing.

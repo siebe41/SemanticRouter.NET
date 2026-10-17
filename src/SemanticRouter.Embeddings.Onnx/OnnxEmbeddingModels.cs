@@ -40,6 +40,12 @@ public static class OnnxEmbeddingModels
     /// <summary>The model used when <c>Embeddings:Model</c> is not set.</summary>
     public const string DefaultModel = "all-MiniLM-L6-v2";
 
+    /// <summary>
+    /// The hosts a model download reaches: Hugging Face answers for the ONNX file with a redirect to its CDN, whose host
+    /// name is regional (<c>us.aws.cdn.hf.co</c>, <c>cas-bridge.xethub.hf.co</c>…). A firewall allowlist needs both.
+    /// </summary>
+    public const string DownloadHosts = "huggingface.co and its CDN (*.hf.co)";
+
     private const string BertUncasedVocabSha256 = "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3";
 
     /// <summary>The downloadable models, int8-quantized ONNX exports that run on any x64 or arm64 CPU.</summary>
