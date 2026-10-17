@@ -217,10 +217,25 @@ public interface IRoutingActivityStore
 
     /// <summary>
     /// Deletes the entries with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/> so they cannot be
-    /// recovered from the store's files, and returns how many there were.
+    /// recovered from the store's files, and returns how many there were and whether they are gone from the files.
     /// </summary>
-    int Purge(DateTimeOffset since, DateTimeOffset until) => 0;
+    ActivityPurgeResult Purge(DateTimeOffset since, DateTimeOffset until) => new(0);
+
+    /// <summary>
+    /// The ids of every stored entry with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/>, including
+    /// ones past the retention that are not pruned yet: what a purge of that range deletes.
+    /// </summary>
+    IReadOnlyList<long> IdsBetween(DateTimeOffset since, DateTimeOffset until) => [.. Between(since, until, int.MaxValue).Select(e => e.Id)];
 }
+
+/// <summary>What a purge of activity did.</summary>
+/// <param name="Removed">How many entries were deleted.</param>
+/// <param name="Complete">
+/// Whether they are gone from the store's files too. <see langword="false"/> when another connection (a second router
+/// sharing the file, a dashboard read) kept reading until the busy timeout, so the write-ahead log still holds them
+/// until a later checkpoint.
+/// </param>
+public readonly record struct ActivityPurgeResult(int Removed, bool Complete = true);
 
 /// <summary>
 /// A bounded in-memory log of recent routing decisions, optionally backed by an <see cref="IRoutingActivityStore"/>
@@ -231,6 +246,7 @@ public sealed class RoutingActivityLog
     private readonly RoutingActivityEntry?[] _entries;
     private readonly IRoutingActivityStore? _store;
     private readonly Lock _gate = new();
+    private readonly List<(DateTimeOffset Since, DateTimeOffset Until, long Below)> _purges = [];
     private long _next;
 
     /// <summary>Creates a log keeping the latest <paramref name="capacity"/> entries, seeded from <paramref name="store"/>.</summary>
@@ -306,6 +322,11 @@ public sealed class RoutingActivityLog
     public void Complete(RoutingActivityEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
+        if (IsPurged(entry))
+        {
+            return; // deleted while its request was still running
+        }
+
         _store?.Append(entry);
         Updated?.Invoke(entry);
     }
@@ -317,30 +338,69 @@ public sealed class RoutingActivityLog
     public void Revise(RoutingActivityEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
+        if (IsPurged(entry))
+        {
+            return; // deleted before the judge graded it
+        }
+
         _store?.Append(entry);
         Updated?.Invoke(entry);
     }
 
     /// <summary>
     /// Deletes the entries with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/>, in memory and in the
-    /// store, and returns how many the store held (or memory, without a store).
+    /// store, and returns how many the store held (or memory, without a store). An entry in that range whose request is
+    /// still running, or that the judge grades later, is not stored again.
     /// </summary>
-    public int Purge(DateTimeOffset since, DateTimeOffset until)
+    public ActivityPurgeResult Purge(DateTimeOffset since, DateTimeOffset until) => Purge(since, until, beforeStore: null);
+
+    /// <summary>
+    /// As <see cref="Purge(DateTimeOffset, DateTimeOffset)"/>; <paramref name="beforeStore"/> gets the ids of the
+    /// entries being deleted before the store deletes them (and empties its files), to delete what else refers to them.
+    /// </summary>
+    internal ActivityPurgeResult Purge(DateTimeOffset since, DateTimeOffset until, Action<IReadOnlySet<long>>? beforeStore)
     {
-        int removed = 0;
+        var ids = new HashSet<long>();
         lock (_gate)
         {
+            // Entries with lower ids may still be running or waiting for the judge: they must not come back.
+            _purges.Add((since, until, _next));
             for (int i = 0; i < _entries.Length; i++)
             {
                 if (_entries[i] is { } entry && entry.Timestamp >= since && entry.Timestamp < until)
                 {
                     _entries[i] = null;
-                    removed++;
+                    ids.Add(entry.Id);
                 }
             }
         }
 
-        return _store?.Purge(since, until) ?? removed;
+        int inMemory = ids.Count;
+        if (_store is not null)
+        {
+            ids.UnionWith(_store.IdsBetween(since, until));
+        }
+
+        beforeStore?.Invoke(ids);
+        return _store?.Purge(since, until) ?? new ActivityPurgeResult(inMemory);
+    }
+
+    /// <summary>Whether <paramref name="entry"/> was deleted by a purge (it was added before the purge and is in its range).</summary>
+    public bool IsPurged(RoutingActivityEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        lock (_gate)
+        {
+            foreach ((DateTimeOffset since, DateTimeOffset until, long below) in _purges)
+            {
+                if (entry.Id < below && entry.Timestamp >= since && entry.Timestamp < until)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 
     /// <summary>Reserves the next id.</summary>

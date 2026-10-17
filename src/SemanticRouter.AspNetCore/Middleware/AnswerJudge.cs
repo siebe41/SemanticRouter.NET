@@ -250,9 +250,10 @@ internal sealed partial class AnswerJudge : IDisposable
     {
         RouterRuntime runtime = _provider.Current;
         JudgeOptions options = runtime.Configuration.Middleware.Judge;
-        if (!options.Enabled || JudgeModel(runtime) is not { } judge || !MaySee(runtime, judge, job.Entry.LocalOnly, job.Entry.Profile, job.Remote))
+        if (!options.Enabled || JudgeModel(runtime) is not { } judge || !MaySee(runtime, judge, job.Entry.LocalOnly, job.Entry.Profile, job.Remote)
+            || _activity.IsPurged(job.Entry))
         {
-            return;
+            return; // a job for an entry deleted while it waited is dropped: its text is not sent anywhere
         }
 
         string? reply = await AskAsync(runtime, judge, job, cancellationToken).ConfigureAwait(false);
@@ -260,6 +261,11 @@ internal sealed partial class AnswerJudge : IDisposable
         {
             LogNoGrade(_logger, job.Entry.Id, judge.Name);
             return;
+        }
+
+        if (_activity.IsPurged(job.Entry))
+        {
+            return; // deleted while the judge was answering
         }
 
         RoutingActivityEntry entry = job.Entry;

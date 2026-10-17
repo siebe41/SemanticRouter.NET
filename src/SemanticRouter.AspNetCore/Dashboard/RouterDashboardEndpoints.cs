@@ -430,13 +430,17 @@ public static partial class RouterDashboardEndpoints
             return Results.Json(new ActivityResponse(entries, activity.NextId - 1, kinds), ApiJson);
         });
 
-        // Deletes activity (and its prompt previews) for good: everything, or since/until. The state database zeroes and
-        // compacts what it deleted, so the rows cannot be recovered from its files.
-        api.MapDelete("/activity", (HttpContext context, RoutingActivityLog activity, DateTimeOffset? since, DateTimeOffset? until) =>
+        // Deletes activity (and its prompt previews) for good: everything, or since/until, with what else holds text from
+        // those prompts (ActivityPurge). The state database zeroes and compacts what it deleted, so the rows cannot be
+        // recovered from its files; complete is false when another reader kept its write-ahead log past the busy timeout.
+        api.MapDelete("/activity", (HttpContext context, ActivityPurge purge, DateTimeOffset? since, DateTimeOffset? until) =>
             {
-                int removed = activity.Purge(since ?? DateTimeOffset.MinValue, until ?? DateTimeOffset.MaxValue);
-                DashboardAudit.Detail(context, $"{removed} {(removed == 1 ? "entry" : "entries")}" + (since is null && until is null ? ", everything" : $" from {since?.ToString("u") ?? "the start"} to {until?.ToString("u") ?? "now"}"));
-                return Results.Json(new { removed }, ApiJson);
+                (int removed, bool complete) = purge.Run(since ?? DateTimeOffset.MinValue, until ?? DateTimeOffset.MaxValue);
+                DashboardAudit.Detail(
+                    context,
+                    $"{removed} {(removed == 1 ? "entry" : "entries")}" + (since is null && until is null ? ", everything" : $" from {since?.ToString("u") ?? "the start"} to {until?.ToString("u") ?? "now"}")
+                    + (complete ? string.Empty : "; not yet gone from the state file's write-ahead log"));
+                return Results.Json(new { removed, complete }, ApiJson);
             })
             .WithMetadata(DashboardWriteMetadata.Instance)
             .Audited("deleted activity");

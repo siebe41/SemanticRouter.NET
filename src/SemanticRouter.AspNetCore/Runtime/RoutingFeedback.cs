@@ -79,6 +79,14 @@ public interface IRoutingFeedbackStore
 
     /// <summary>Feedback with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/>, oldest first.</summary>
     IReadOnlyList<RoutingFeedback> Between(DateTimeOffset since, DateTimeOffset until, int limit);
+
+    /// <summary>
+    /// Deletes the feedback about the activity entries <paramref name="entryIds"/>, which were purged: the judge's
+    /// feedback quotes its reason, which can quote the prompt and the answer.
+    /// </summary>
+    void Remove(IReadOnlyCollection<long> entryIds)
+    {
+    }
 }
 
 /// <summary>
@@ -91,6 +99,7 @@ public sealed class RoutingFeedbackLog
     private readonly IRoutingFeedbackStore? _store;
     private readonly LinkedList<RoutingFeedback> _recent = new();
     private readonly HashSet<(long, FeedbackKind)> _seen = [];
+    private readonly HashSet<long> _forgotten = [];
     private readonly Lock _lock = new();
     private long _nextId;
 
@@ -117,7 +126,7 @@ public sealed class RoutingFeedbackLog
         RoutingFeedback stored;
         lock (_lock)
         {
-            if (!_seen.Add((feedback.EntryId, feedback.Kind)))
+            if (_forgotten.Contains(feedback.EntryId) || !_seen.Add((feedback.EntryId, feedback.Kind)))
             {
                 return false;
             }
@@ -134,6 +143,34 @@ public sealed class RoutingFeedbackLog
 
         _store?.Add(stored);
         return true;
+    }
+
+    /// <summary>
+    /// Deletes the feedback about purged activity entries, in memory and in the store, and refuses feedback about them
+    /// from now on. Returns how many items memory held.
+    /// </summary>
+    internal int Forget(IReadOnlySet<long> entryIds)
+    {
+        ArgumentNullException.ThrowIfNull(entryIds);
+        int removed = 0;
+        lock (_lock)
+        {
+            _forgotten.UnionWith(entryIds);
+            for (LinkedListNode<RoutingFeedback>? node = _recent.First; node is not null;)
+            {
+                LinkedListNode<RoutingFeedback>? next = node.Next;
+                if (entryIds.Contains(node.Value.EntryId))
+                {
+                    _recent.Remove(node);
+                    removed++;
+                }
+
+                node = next;
+            }
+        }
+
+        _store?.Remove([.. entryIds]);
+        return removed;
     }
 
     /// <summary>The newest first, at most <paramref name="limit"/>.</summary>
