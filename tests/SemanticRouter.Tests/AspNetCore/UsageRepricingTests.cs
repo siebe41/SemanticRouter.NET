@@ -35,8 +35,12 @@ public sealed class UsageRepricingTests
         ledger.Record(Million("cloud"));
         RouterConfiguration prices = Catalog(new ModelDefinition
         {
-            Name = "cloud", Connector = "c", InputCostPerMillionTokens = 3, OutputCostPerMillionTokens = 15,
-            CacheReadCostPerMillionTokens = 0.3m, CacheWriteCostPerMillionTokens = 3.75m,
+            Name = "cloud",
+            Connector = "c",
+            InputCostPerMillionTokens = 3,
+            OutputCostPerMillionTokens = 15,
+            CacheReadCostPerMillionTokens = 0.3m,
+            CacheWriteCostPerMillionTokens = 3.75m,
         });
 
         ledger.Total(Since, Until).CostUsd.Should().Be(0m, "the ledger keeps what it recorded");
@@ -52,8 +56,12 @@ public sealed class UsageRepricingTests
         RouterConfiguration prices = Catalog(
             new ModelDefinition
             {
-                Name = "sub", Connector = "cli", ApiInputCostPerMillionTokens = 2, ApiOutputCostPerMillionTokens = 10,
-                ApiCacheReadCostPerMillionTokens = 0.2m, ApiCacheWriteCostPerMillionTokens = 2.5m,
+                Name = "sub",
+                Connector = "cli",
+                ApiInputCostPerMillionTokens = 2,
+                ApiOutputCostPerMillionTokens = 10,
+                ApiCacheReadCostPerMillionTokens = 0.2m,
+                ApiCacheWriteCostPerMillionTokens = 2.5m,
             },
             new ModelDefinition { Name = "big", Connector = "c", InputCostPerMillionTokens = 5, OutputCostPerMillionTokens = 25 });
         prices.Usage.ReferenceModel = "big";
