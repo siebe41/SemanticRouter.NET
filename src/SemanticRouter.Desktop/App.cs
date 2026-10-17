@@ -207,13 +207,37 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
 
         var tray = _tray = new TrayIcon
         {
-            Icon = _icon,
+            Icon = TrayIconImage(),
             ToolTipText = "SemanticRouter",
             Menu = [open, _setUp, _needs, _update, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, _checkUpdates, _checkUpdatesNow, _applyOnQuit, logs, configuration, new NativeMenuItemSeparator(), settings, about, quit],
         };
+        if (OperatingSystem.IsMacOS())
+        {
+            // Drawn by macOS in the menu bar's own colours: light, dark, and highlighted while the menu is open.
+            MacOSProperties.SetIsTemplateIcon(tray, true);
+        }
+
         tray.Clicked += (_, _) => OpenDashboard();
         UpdateMenu();
         return tray;
+    }
+
+    /// <summary>
+    /// The tray icon: the app's pulse glyph without its dark tile, which nearly disappears on a dark menu bar or taskbar
+    /// (deploy/make-tray-icons.py makes them from the app icon). On macOS a black template image, at twice the menu
+    /// bar's size so it stays sharp on a Retina screen; on Windows an icon with every size the notification area uses.
+    /// Elsewhere the app's own tile, as tray hosts on Linux draw icons on many backgrounds.
+    /// </summary>
+    private WindowIcon TrayIconImage()
+    {
+        string? asset = OperatingSystem.IsMacOS() ? "tray-template@2x.png" : OperatingSystem.IsWindows() ? "tray.ico" : null;
+        if (asset is null)
+        {
+            return _icon;
+        }
+
+        using Stream stream = AssetLoader.Open(new Uri($"avares://SemanticRouter/Assets/{asset}"));
+        return new WindowIcon(stream);
     }
 
     /// <summary>
