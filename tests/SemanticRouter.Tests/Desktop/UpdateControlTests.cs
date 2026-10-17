@@ -350,6 +350,68 @@ public sealed class UpdateControlTests : IDisposable
     }
 
     [Fact]
+    public void On_Windows_a_package_whose_host_files_load_code_from_elsewhere_is_refused()
+    {
+        using X509Certificate2 microsoft = Certificate("CN=.NET, " + UpdatePublisher.Microsoft);
+        var check = new UpdatePublisher("Contoso Ltd", UpdatePublisher.Platform.Windows, new FakeSignatures(f =>
+            Path.GetFileName(f).StartsWith("SemanticRouter", StringComparison.Ordinal) ? new CodeSignature(null, Contoso) : new CodeSignature(null, microsoft)));
+        string[] files = ["lib/app/SemanticRouter.exe", "lib/app/SemanticRouter.dll", "lib/app/SemanticRouter.runtimeconfig.json", "lib/app/SemanticRouter.deps.json"];
+        string? Refuses(string name, string? runtimeConfig = null, string? deps = null, string[]? extra = null) => check.Refuses(Package(name, "SemanticRouter.exe", [.. files, .. extra ?? []],
+            new Dictionary<string, string> { ["lib/app/SemanticRouter.runtimeconfig.json"] = runtimeConfig ?? RuntimeConfig(string.Empty), ["lib/app/SemanticRouter.deps.json"] = deps ?? Deps("avalonia/12.1.4", "lib/net10.0/Avalonia.dll") }));
+
+        // What a release has: a self-contained runtimeconfig.json (it changes with every runtime patch) and deps.json.
+        Refuses("release.nupkg").Should().BeNull();
+        Refuses("newer.nupkg", RuntimeConfig("""
+            , "configProperties": { "System.GC.Server": false, "System.Runtime.TieredPGO": true }
+            """), Deps("avalonia/12.2.0", "runtimes/win-x64/native/av_libglesv2.dll")).Should().BeNull("a new release changes these files; only where they point is checked");
+
+        // A changed runtimeconfig.json that points the host outside the package.
+        Refuses("probing.nupkg", RuntimeConfig("""
+            , "additionalProbingPaths": [ "\\\\files.example\\share" ]
+            """)).Should().Be(@"SemanticRouter.runtimeconfig.json names additionalProbingPaths, places outside the package to load code from");
+        Refuses("hooks.nupkg", RuntimeConfig("""
+            , "configProperties": { "STARTUP_HOOKS": "C:\\Users\\Public\\hook.dll" }
+            """)).Should().Be("SemanticRouter.runtimeconfig.json sets the host property STARTUP_HOOKS, which can load code from outside the package");
+        Refuses("dev.nupkg", extra: ["lib/app/SemanticRouter.runtimeconfig.dev.json"]).Should().Be("SemanticRouter.runtimeconfig.dev.json adds places to load code from, and a release has none");
+        Refuses("broken.nupkg", "{ not json").Should().Be("SemanticRouter.runtimeconfig.json is not valid JSON");
+
+        // A deps.json that names a file outside the app's folder.
+        Refuses("escape.nupkg", deps: Deps("avalonia/12.1.4", "../../Users/Public/Avalonia.dll")).Should().Be("SemanticRouter.deps.json loads ../../Users/Public/Avalonia.dll, which is outside the app's folder");
+        Refuses("rooted.nupkg", deps: Deps("avalonia/12.1.4", @"C:\Users\Public\Avalonia.dll")).Should().Contain("outside the app's folder");
+        Refuses("unc.nupkg", deps: Deps(@"\\files.example\share", "lib/net10.0/Avalonia.dll")).Should().Be(@"SemanticRouter.deps.json loads \\files.example\share, which is outside the app's folder");
+
+        // macOS seals every file in the bundle itself, and the check there is codesign's.
+        new UpdatePublisher("TEAM", UpdatePublisher.Platform.MacOS, new FakeSignatures(_ => new CodeSignature(null, null, "TEAM")))
+            .Refuses(Package("osx-hooks.nupkg", "SemanticRouter", ["lib/app/Contents/MacOS/SemanticRouter", "lib/app/Contents/MacOS/SemanticRouter.runtimeconfig.dev.json"])).Should().BeNull();
+
+        static string RuntimeConfig(string more) => $$"""
+            {
+              // The host reads comments and trailing commas too.
+              "runtimeOptions": {
+                "tfm": "net10.0",
+                "includedFrameworks": [ { "name": "Microsoft.NETCore.App", "version": "10.0.4" }, ]{{more}}
+              }
+            }
+            """;
+
+        static string Deps(string path, string asset) => new JsonObject
+        {
+            ["runtimeTarget"] = new JsonObject { ["name"] = ".NETCoreApp,Version=v10.0/win-x64" },
+            ["targets"] = new JsonObject
+            {
+                [".NETCoreApp,Version=v10.0/win-x64"] = new JsonObject
+                {
+                    ["Avalonia/12.1.4"] = new JsonObject { ["runtime"] = new JsonObject { [asset] = new JsonObject() } },
+                },
+            },
+            ["libraries"] = new JsonObject
+            {
+                ["Avalonia/12.1.4"] = new JsonObject { ["type"] = "package", ["path"] = path },
+            },
+        }.ToJsonString();
+    }
+
+    [Fact]
     public void On_macOS_the_whole_bundle_is_checked_and_its_team_compared()
     {
         string package = Package("osx.nupkg", "SemanticRouter", ["lib/app/Contents/Info.plist", "lib/app/Contents/MacOS/SemanticRouter", "lib/app/Contents/MacOS/SemanticRouter.dll"]);
@@ -470,7 +532,7 @@ public sealed class UpdateControlTests : IDisposable
     private string WindowsPackage() => Package("win.nupkg", "SemanticRouter.exe",
         ["lib/app/SemanticRouter.exe", "lib/app/SemanticRouter.dll", "lib/app/SemanticRouter.Core.dll", "lib/app/onnxruntime.dll", "lib/app/Squirrel.exe", "lib/app/SemanticRouter.deps.json"]);
 
-    private string Package(string name, string mainExe, string[] files)
+    private string Package(string name, string mainExe, string[] files, IReadOnlyDictionary<string, string>? contents = null)
     {
         string path = Path.Combine(_directory, name);
         if (File.Exists(path))
@@ -482,9 +544,13 @@ public sealed class UpdateControlTests : IDisposable
         Nuspec(zip, mainExe);
         foreach (string file in files)
         {
-            // Programs and libraries start as Windows executable images do; the rest is text.
+            // Programs and libraries start as Windows executable images do; JSON files are as given or an empty object;
+            // the rest is text.
             using StreamWriter writer = new(zip.CreateEntry(file).Open());
-            writer.Write((file.EndsWith(".exe", StringComparison.Ordinal) || file.EndsWith(".dll", StringComparison.Ordinal) || file.EndsWith(".bin", StringComparison.Ordinal) ? "MZ" : string.Empty) + "not really " + file);
+            writer.Write(
+                contents?.GetValueOrDefault(file)
+                ?? (file.EndsWith(".json", StringComparison.Ordinal) ? "{}"
+                : (file.EndsWith(".exe", StringComparison.Ordinal) || file.EndsWith(".dll", StringComparison.Ordinal) || file.EndsWith(".bin", StringComparison.Ordinal) ? "MZ" : string.Empty) + "not really " + file));
         }
 
         return path;

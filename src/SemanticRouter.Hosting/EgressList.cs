@@ -44,6 +44,12 @@ internal static class EgressList
             lines.Add(new RouterCheck(Subject, problem ? RouterCheckStatus.Warning : RouterCheckStatus.Ok, $"embeddings: {embeddings}."));
         }
 
+        if (resolved.Embeddings.Provider == EmbeddingProviderKind.Onnx)
+        {
+            OnnxRuntimeEnvironment.DisableTelemetry();
+            lines.Add(OnnxTelemetry(OnnxRuntimeEnvironment.TelemetrySetting));
+        }
+
         foreach ((string name, WebhookOptions hook) in resolved.Notifications.Webhooks.OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase))
         {
             if (string.IsNullOrEmpty(hook.Url) || !(hook.Notices || hook.Digest))
@@ -82,6 +88,15 @@ internal static class EgressList
 
     private static RouterCheck Line(string message) => new(Subject, RouterCheckStatus.Ok, message);
 
+    /// <summary>Whether ONNX Runtime's own telemetry is off, from <c>ORT_DISABLE_TELEMETRY</c> as ONNX Runtime will read it.</summary>
+    internal static RouterCheck OnnxTelemetry(string? setting) => OnnxRuntimeEnvironment.TurnsTelemetryOff(setting)
+        ? Line($"ONNX Runtime telemetry: off ({OnnxRuntimeEnvironment.TelemetryVariable}=1, set before ONNX Runtime loads): " +
+               $"{OnnxRuntimeEnvironment.TelemetryHost} is never contacted and no device id is written.")
+        : new RouterCheck(Subject, RouterCheckStatus.Warning,
+            $"ONNX Runtime telemetry: {OnnxRuntimeEnvironment.TelemetryVariable} is {(setting is null ? "not set" : $"'{setting}'")} in this environment, " +
+            $"so on Linux and macOS ONNX Runtime may send usage data to {OnnxRuntimeEnvironment.TelemetryHost} and keep a device id in " +
+            $"~/.cache/Microsoft/DeveloperTools/.onnxruntime. Set it to 1, or unset it and the router sets it.");
+
     /// <summary>The desktop app's updates line: where they come from, and what the machine policy says about them.</summary>
     internal static string Updates(MachinePolicy policy)
     {
@@ -96,7 +111,8 @@ internal static class EgressList
             : UpdateHosts;
         string applied = updates.Apply == UpdateApply.Notify ? "; applied only when the person chooses to" : string.Empty;
         string signed = updates.Publisher is { } publisher ? $"; applied only when signed by {publisher}" : string.Empty;
-        return $"desktop app updates: {from} (only the installed desktop app{applied}{signed}; untick Check for updates automatically in its tray menu to turn this off).";
+        string custom = updates.AllowCustomFeed && updates.Mode != UpdateMode.Feed ? "; SEMANTICROUTER_UPDATE_SOURCE may name another feed" : string.Empty;
+        return $"desktop app updates: {from} (only the installed desktop app{applied}{signed}{custom}; untick Check for updates automatically in its tray menu to turn this off).";
     }
 
     private static string Vendor(CliPreset preset) => preset switch
@@ -115,10 +131,14 @@ internal static class EgressList
     /// <summary>Where embedding requests go, and whether that needs attention (a model that is missing and may not be downloaded).</summary>
     private static (string Text, bool Problem)? Embeddings(IServiceProvider services, EmbeddingProviderOptions embeddings, string configurationDirectory, MachinePolicy policy)
     {
+        bool onnxRuns = services.GetServices<IEmbeddingProviderFactory>().FirstOrDefault(f => f.Kind == EmbeddingProviderKind.Onnx)?.Unavailable is null;
         switch (embeddings.Provider)
         {
             case EmbeddingProviderKind.OpenAICompatible:
                 return (Host(embeddings.Endpoint) ?? "no Endpoint", false);
+            case EmbeddingProviderKind.Onnx when !onnxRuns:
+                // The embeddings check says why and what to use instead.
+                return ("none: ONNX Runtime cannot run on this machine, so no ONNX model is downloaded or used", true);
             case EmbeddingProviderKind.Onnx when !string.IsNullOrWhiteSpace(embeddings.ModelPath):
                 return ($"ONNX model at {embeddings.ModelPath}, on this machine; nothing is downloaded", false);
             case EmbeddingProviderKind.Onnx when OnnxEmbeddingModels.Find(embeddings.Model ?? OnnxEmbeddingModels.DefaultModel) is { } model:

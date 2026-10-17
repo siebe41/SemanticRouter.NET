@@ -30,7 +30,8 @@ internal enum KeyRingProtection
 /// folder set with <c>PersistKeysToFileSystem</c> (<c>SEMANTIC_ROUTER_KEYS_DIR</c>) is not encrypted anywhere unless
 /// an encryptor is configured, and on macOS and Linux the default key ring (<c>~/.aspnet/DataProtection-Keys</c>)
 /// never is. So: <c>SemanticRouter:DataProtection:Certificate</c> encrypts new keys to a certificate on any platform;
-/// otherwise a custom folder on Windows gets DPAPI too; on macOS and Linux the folder is kept owner-only (0700, files
+/// otherwise a custom folder on Windows gets DPAPI too (and, when the router creates it outside the profile, an ACL
+/// for this account only); on macOS and Linux the folder is kept owner-only (0700, files
 /// 0600) and <c>doctor</c> says that file permissions are all that protects it. Keys written before a protection was
 /// set stay readable: ASP.NET Core reads each key with the decryptor its file names, or as plain XML.
 /// </summary>
@@ -116,6 +117,18 @@ internal sealed partial class KeyRing
             foreach (string file in System.IO.Directory.EnumerateFiles(directory, "*.xml"))
             {
                 OwnerOnly.Restrict(file);
+            }
+        }
+        else if (custom && OperatingSystem.IsWindows())
+        {
+            // Created here, before ASP.NET Core writes a key, so that a new folder outside the profile gets its own ACL.
+            try
+            {
+                OwnerOnly.Directory(directory!);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Left to ASP.NET Core, which creates the folder when it writes the first key and reports what fails then.
             }
         }
 

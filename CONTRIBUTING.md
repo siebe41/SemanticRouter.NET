@@ -37,6 +37,43 @@ Every pull request runs CI ([`.github/workflows/ci.yml`](.github/workflows/ci.ym
 - **Add tests** for behaviour you change. Tests must not need the network, a model or a vendor CLI; the existing tests show how to use `TestServer` and the stand-in CLI in `tests/SemanticRouter.FakeCli`.
 - **Update the documentation** (README or `docs/`) when you change configuration, endpoints or behaviour.
 
+## Package versions and dependencies
+
+The five library packages (`SemanticRouter.Core`, `SemanticRouter.AspNetCore`, `SemanticRouter.Storage.Sqlite`, `SemanticRouter.Embeddings.Onnx` and `SemanticRouter.Connectors.Copilot`) and the `semantic-router` tool are versioned together: every release publishes all of them with the same version, built from one commit.
+
+They also depend on each other exactly. `SemanticRouter.AspNetCore` 0.6.0 depends on `SemanticRouter.Core` `[0.6.0]`, and Storage.Sqlite, Embeddings.Onnx and Connectors.Copilot 0.6.0 depend on `SemanticRouter.AspNetCore` `[0.6.0]`, not on 0.6.0 or later. Each is compiled against one build of the package below it, and Storage.Sqlite and Connectors.Copilot use its internals through `InternalsVisibleTo`, which carry no compatibility promise. With an open lower bound NuGet would pair an old package with a newer sibling without a word, and the app would fail at run time with a `MissingMethodException`. With an exact version, two packages that want different versions of a sibling fail the restore (NU1107), and an app that references a newer sibling directly gets warning NU1608. An app updates all the SemanticRouter packages it uses together.
+
+[`Directory.Build.targets`](Directory.Build.targets) makes every project reference an exact dependency in the package (`UseExactProjectReferenceVersions`), and `dotnet pack` fails when a generated nuspec gives a `SemanticRouter.*` dependency anything else (`CheckExactSemanticRouterDependencies`). So a new library package depends on its siblings through a `ProjectReference`, never a `PackageReference`.
+
+The internals the sibling packages use are a contract between the packages of one version, not a public API. Change them freely, but build and test the siblings with the change in the same pull request (the solution build does). Today they are:
+
+- Connectors.Copilot: `ChatResponseWriterFactory`, `IChatResponseWriter`, `ChatTranscript`, `CliScratch`, `DroppedFeatures`, `PromptedToolFormat` and `ConnectorOptions.EffectiveTimeout`.
+- Storage.Sqlite: `IStateRetention` and `OwnerOnly`.
+
+Do not add `InternalsVisibleTo` for a package outside this repository.
+
+**Third-party dependencies** have an open lower bound (the version in `Directory.Packages.props`, or later), except when a package uses an API its author marks as experimental or otherwise not covered by their compatibility promise. Then the dependency gets an upper bound up to the next version that may break it, and the bound moves only after the package was tested against that version. Today that is `GitHub.Copilot.SDK` `[1.0.22, 1.1)`: Connectors.Copilot uses its permission API, marked experimental (GHCP001). Raising the bound changes the version range in `Directory.Packages.props`; run `dotnet restore` and commit the lock files as for any version change.
+
+## Public API and package validation
+
+The public API is every public type and member of the five library packages, and every protected member of a public type that can be inherited, as compiled: names, parameter and return types, and members the compiler generates, such as a record's constructor and `Deconstruct`. Internals are not, nor is the code of the `semantic-router` tool and the desktop app. The HTTP endpoints, the configuration and the behaviour are part of what users depend on too, but no tool checks them: the changelog and the review do.
+
+Adding to the public API is fine. Removing or changing a member breaks every application compiled against the old one, even when its source would still compile: adding an optional parameter, for example, removes the method that had one parameter less. Prefer a new overload, and mark what it replaces `[Obsolete]` rather than removing it.
+
+`dotnet pack -c Release` (run by CI on every pull request) validates each library package against the last release on nuget.org, the baseline set by `PackageValidationBaselineVersion` in [`Directory.Build.targets`](Directory.Build.targets). A type or member that the baseline has and the new package does not, or one changed in a way that breaks callers (made sealed, abstract or less visible, for example), fails the pack with a CP diagnostic, such as `CP0002: Member '...' exists on [Baseline] ... but not on ...`.
+
+**A deliberate break** (before 1.0, or for a new major version) is suppressed in the pull request that makes it, so it is reviewed there:
+
+```bash
+dotnet pack -c Release -p:ApiCompatGenerateSuppressionFile=true
+```
+
+This writes `src/<Project>/CompatibilitySuppressions.xml` with one entry per break. Commit it, and say what broke in the changelog line. The suppression files are deleted after the release that ships the breaks ([After a release](docs/releases.md#after-a-release)).
+
+Validation is incremental: a second local pack with no file changed skips it, also when it passes another `-p:PackageValidationBaselineVersion`. Delete `src/*/obj/*/*/Microsoft.NET.ApiCompat.ValidatePackage.semaphore` (or the `obj` folders) before packing again. CI starts from a clean checkout.
+
+**The baseline.** Until 1.0.0 is released, it is the latest 0.x release. For 1.0 the API is cleaned up, the deliberate breaks against 0.x are suppressed, and 1.0.0 is released. From then on the baseline is the latest 1.x release, and the 1.x line allows no suppressions: a break waits for 2.0. A new library package has no baseline until its first release; its project file sets `<DisablePackageBaselineValidation>true</DisablePackageBaselineValidation>` until then.
+
 ## Changelog
 
 The [changelog](CHANGELOG.md) lists every user-visible change. If your pull request changes what someone using the packages, the tool, the container image or the desktop app sees (a setting, an endpoint, a default, a fix to behaviour they could notice, a security fix), add one line under **Unreleased**, in the right group:
