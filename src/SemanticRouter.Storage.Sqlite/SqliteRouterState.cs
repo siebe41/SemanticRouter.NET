@@ -610,10 +610,11 @@ internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRout
         bool prune = Interlocked.Increment(ref _writes) % 100 == 0;
         database.Run("saving feedback", connection =>
         {
+            // The row id is SQLite's: routers sharing the file number their feedback independently.
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
-                "INSERT OR REPLACE INTO feedback (id, timestamp_ticks, entry_id, item) VALUES ($id, $ts, $entry, $item);",
-                ("$id", feedback.Id), ("$ts", feedback.Timestamp.UtcTicks), ("$entry", feedback.EntryId), ("$item", JsonSerializer.Serialize(feedback, Json)));
+                "INSERT INTO feedback (timestamp_ticks, entry_id, item) VALUES ($ts, $entry, $item);",
+                ("$ts", feedback.Timestamp.UtcTicks), ("$entry", feedback.EntryId), ("$item", JsonSerializer.Serialize(feedback, Json)));
             command.ExecuteNonQuery();
             if (prune)
             {
@@ -743,22 +744,42 @@ internal sealed class SqliteStateValues(SqliteRouterDatabase database) : IStateV
     });
 }
 
-/// <summary>The activity log on disk, capped by count and age.</summary>
+/// <summary>
+/// The activity log on disk, capped by count and age. Entry ids come from a counter in the file, in blocks, so routers
+/// sharing it never hand out the same id.
+/// </summary>
 internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRoutingActivityStore
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private int _writes;
 
-    public void Append(RoutingActivityEntry entry)
+    // A plain INSERT: an id stored twice is a bug, and fails (with a warning) rather than replacing another request's entry.
+    public void Append(RoutingActivityEntry entry) => Store(entry, "INSERT INTO activity (id, timestamp_ticks, entry) VALUES ($id, $ts, $entry);");
+
+    public void Replace(RoutingActivityEntry entry) => Store(entry, "INSERT OR REPLACE INTO activity (id, timestamp_ticks, entry) VALUES ($id, $ts, $entry);");
+
+    public long? ReserveIds(int count, long floor) =>
+        database.Run<long?>("reserving activity ids", null, connection =>
+        {
+            // One statement, so atomic among routers sharing the file. Never below the newest stored id: a file
+            // written before the counter existed, or by a router that could not reserve.
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection,
+                "INSERT INTO meta (key, value) VALUES ('activity_next_id', max($floor, (SELECT COALESCE(MAX(id), -1) + 1 FROM activity)) + $count) " +
+                "ON CONFLICT(key) DO UPDATE SET value = max(CAST(value AS INTEGER), $floor, (SELECT COALESCE(MAX(id), -1) + 1 FROM activity)) + $count " +
+                "RETURNING CAST(value AS INTEGER) - $count;",
+                ("$floor", floor), ("$count", count));
+            return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+        });
+
+    private void Store(RoutingActivityEntry entry, string sql)
     {
         ArgumentNullException.ThrowIfNull(entry);
         bool prune = Interlocked.Increment(ref _writes) % 100 == 0;
         database.Run("saving activity", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
-                connection,
-                "INSERT OR REPLACE INTO activity (id, timestamp_ticks, entry) VALUES ($id, $ts, $entry);",
-                ("$id", entry.Id), ("$ts", entry.Timestamp.UtcTicks), ("$entry", JsonSerializer.Serialize(entry, Json)));
+                connection, sql, ("$id", entry.Id), ("$ts", entry.Timestamp.UtcTicks), ("$entry", JsonSerializer.Serialize(entry, Json)));
             command.ExecuteNonQuery();
             if (prune)
             {

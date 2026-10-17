@@ -182,8 +182,72 @@ public sealed class SqliteStateTests : IDisposable
         RoutingActivityEntry next = restarted.Add(new RoutingActivityEntry { Id = restarted.Reserve(), PromptPreview = "again" });
 
         seeded.Should().BeEquivalentTo(first);
-        next.Id.Should().Be(first.Id + 1);
+        next.Id.Should().BeGreaterThan(first.Id, "a restarted log takes a new block of ids");
         restarted.Recent(10, after: first.Id).Should().ContainSingle().Which.PromptPreview.Should().Be("again");
+    }
+
+    [Fact]
+    public async Task Concurrent_requests_get_distinct_ids_and_keep_every_entry()
+    {
+        var log = new RoutingActivityLog(store: new SqliteActivityStore(Open()));
+        const int Requests = 64 * 20;
+
+        await Parallel.ForAsync(0, Requests, new ParallelOptions { MaxDegreeOfParallelism = 64 }, (i, _) =>
+        {
+            log.Complete(log.Add(new RoutingActivityEntry { Id = log.Reserve(), Timestamp = _time.GetUtcNow(), PromptPreview = "request " + i }));
+            return ValueTask.CompletedTask;
+        });
+
+        StoredActivityIds().Should().HaveCount(Requests).And.OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task Two_routers_sharing_the_file_keep_every_entry()
+    {
+        // Two processes, as far as the logs can tell: each has its own database object, store and counter.
+        var first = new RoutingActivityLog(store: new SqliteActivityStore(Open()));
+        var second = new RoutingActivityLog(store: new SqliteActivityStore(Open()));
+        const int Each = 1_000;
+
+        await Task.WhenAll(Write(first, "first"), Write(second, "second"));
+
+        StoredActivityIds().Should().HaveCount(2 * Each).And.OnlyHaveUniqueItems();
+
+        Task Write(RoutingActivityLog log, string name) => Parallel.ForAsync(0, Each, new ParallelOptions { MaxDegreeOfParallelism = 8 }, (i, _) =>
+        {
+            log.Complete(log.Add(new RoutingActivityEntry { Id = log.Reserve(), Timestamp = _time.GetUtcNow(), PromptPreview = name + " " + i }));
+            return ValueTask.CompletedTask;
+        });
+    }
+
+    [Fact]
+    public void An_entry_stored_under_a_taken_id_does_not_replace_it()
+    {
+        var store = new SqliteActivityStore(Open());
+        store.Append(new RoutingActivityEntry { Id = 7, Timestamp = _time.GetUtcNow(), PromptPreview = "first" });
+        store.Append(new RoutingActivityEntry { Id = 7, Timestamp = _time.GetUtcNow(), PromptPreview = "second" });
+
+        store.Recent(10).Should().ContainSingle().Which.PromptPreview.Should().Be("first");
+        _logs.Messages.Should().Contain(m => m.Contains("saving activity", StringComparison.Ordinal));
+
+        store.Replace(new RoutingActivityEntry { Id = 7, Timestamp = _time.GetUtcNow(), PromptPreview = "graded" });
+        store.Recent(10).Should().ContainSingle().Which.PromptPreview.Should().Be("graded", "a revision replaces it");
+    }
+
+    private List<long> StoredActivityIds()
+    {
+        using var connection = new SqliteConnection($"Data Source={DbPath}");
+        connection.Open();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT id FROM activity;";
+        using SqliteDataReader reader = command.ExecuteReader();
+        var ids = new List<long>();
+        while (reader.Read())
+        {
+            ids.Add(reader.GetInt64(0));
+        }
+
+        return ids;
     }
 
     [Fact]
