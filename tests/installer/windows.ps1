@@ -135,10 +135,14 @@ Wait-Until { (Router-Processes).Count -ge 1 } 90 'the background service to run 
 $running = (Router-Processes)[0].ExecutablePath
 if ($running -ne $exe) { Fail "The service runs $running, expected $exe" }
 
-# Quit the restarted app; the service keeps running.
-$code = Invoke-Program $exe @('--quit', '--config-dir', "`"$config`"") 30
-if ($code -ne 0) { Fail "--quit exited with $code" }
-Wait-Until { (App-Processes).Count -eq 0 } 30 'the restarted app to quit'
+# Quit the restarted app; the service keeps running. The app starts the service before its window, and only then takes
+# a second launch: until it does, --quit finds no app and does nothing, so it is asked again until it is gone.
+Wait-Until {
+    $code = Invoke-Program $exe @('--quit', '--config-dir', "`"$config`"") 30
+    if ($code -ne 0) { Fail "--quit exited with $code" }
+    Start-Sleep -Seconds 2
+    (App-Processes).Count -eq 0
+} 90 'the restarted app to quit'
 if ((Router-Processes).Count -lt 1) { Fail 'Quitting the app stopped the background service' }
 python (Join-Path $tools 'check-usage.py') http://127.0.0.1:5080 $usage '1.0.1 after the update'
 if ($LASTEXITCODE -ne 0) { Fail 'The update lost the usage' }
