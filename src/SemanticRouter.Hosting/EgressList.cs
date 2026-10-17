@@ -131,10 +131,14 @@ internal static class EgressList
     /// <summary>Where embedding requests go, and whether that needs attention (a model that is missing and may not be downloaded).</summary>
     private static (string Text, bool Problem)? Embeddings(IServiceProvider services, EmbeddingProviderOptions embeddings, string configurationDirectory, MachinePolicy policy)
     {
+        bool onnxRuns = services.GetServices<IEmbeddingProviderFactory>().FirstOrDefault(f => f.Kind == EmbeddingProviderKind.Onnx)?.Unavailable is null;
         switch (embeddings.Provider)
         {
             case EmbeddingProviderKind.OpenAICompatible:
                 return (Host(embeddings.Endpoint) ?? "no Endpoint", false);
+            case EmbeddingProviderKind.Onnx when !onnxRuns:
+                // The embeddings check says why and what to use instead.
+                return ("none: ONNX Runtime cannot run on this machine, so no ONNX model is downloaded or used", true);
             case EmbeddingProviderKind.Onnx when !string.IsNullOrWhiteSpace(embeddings.ModelPath):
                 return ($"ONNX model at {embeddings.ModelPath}, on this machine; nothing is downloaded", false);
             case EmbeddingProviderKind.Onnx when OnnxEmbeddingModels.Find(embeddings.Model ?? OnnxEmbeddingModels.DefaultModel) is { } model:

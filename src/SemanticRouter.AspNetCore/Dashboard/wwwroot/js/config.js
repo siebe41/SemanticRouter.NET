@@ -306,7 +306,9 @@ views.embeddings = () => {
   const e = state.config.Embeddings || {};
   const provider = e.Provider || 'Hashing';
   const st = state.status.embeddings || {};
-  const available = st.available || ['Hashing', 'OpenAICompatible'];
+  const unavailable = st.unavailable || {};
+  // A provider that cannot run here is offered only while it is the one configured, so the page can say why.
+  const available = (st.available || ['Hashing', 'OpenAICompatible']).filter((x) => !unavailable[x] || x === provider);
   const onnxModels = (st.models || []).filter((m) => m.provider === 'Onnx');
   const chosen = onnxModels.find((m) => m.name.toLowerCase() === (e.Model || 'all-MiniLM-L6-v2').toLowerCase());
   const mb = (b) => Math.round(b / 1e6) + ' MB';
@@ -319,6 +321,8 @@ views.embeddings = () => {
     <div class="section-head"><h1>Embeddings</h1><span class="muted">How prompts and utterances are turned into vectors.</span></div>
     <div class="card section"><div class="form-grid">
       <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${available.map((x) => `<option ${x === provider ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only). Onnx runs a real embedding model in this process; OpenAICompatible calls a server (LM Studio, Ollama, OpenAI).</span></label>
+      ${unavailable[provider] ? `<div class="field wide"><span class="name">Not available here</span><span class="small">${h(unavailable[provider])}</span></div>` : ''}
+      ${!unavailable[provider] && unavailable.Onnx ? `<p class="field wide muted small">${h(unavailable.Onnx)}</p>` : ''}
       ${provider === 'Onnx' ? onnxFields() : provider === 'Hashing' ? numField({ bind: 'Embeddings.Dimensions', value: e.Dimensions, def: 512, label: 'Dimensions', min: 16, step: 1, hint: 'More dimensions, fewer accidental matches between unrelated words.' }) : `
         <label class="field"><span class="name">Endpoint</span><input type="url" data-bind="Embeddings.Endpoint" data-kind="nulltext" value="${h(e.Endpoint || '')}" placeholder="http://localhost:1234"></label>
         <label class="field"><span class="name">Model</span><input type="text" data-bind="Embeddings.Model" data-kind="nulltext" value="${h(e.Model || '')}" placeholder="text-embedding-nomic-embed-text-v1.5"></label>

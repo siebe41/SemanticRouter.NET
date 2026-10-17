@@ -16,6 +16,8 @@ Download the installer for your machine from the [releases](https://github.com/s
 
 The first start is the same as from the archives: the [welcome window](#using-it) offers the background service and start at sign-in.
 
+**On a Mac, the in-process embeddings (`Onnx`) need Apple silicon and macOS 14 or later.** ONNX Runtime, which runs them, publishes no build for Intel Macs, and its Apple silicon build is made for macOS 14. The rest of the app runs on macOS 12 and later. On an Intel Mac, or macOS 12 or 13, run an embedding model in LM Studio or Ollama (for example `nomic-embed-text`) and set it under **Providers → Embeddings**; `semantic-router init` and `doctor` say so, and the dashboard does not offer `Onnx` there.
+
 **Until the release is [signed](#signing)**, the operating system warns on first start. On Windows, SmartScreen says "Windows protected your PC": choose **More info → Run anyway**. On macOS, if the installer is blocked, right-click it and choose **Open**, or allow it under **System Settings → Privacy & Security**.
 
 ### Signing

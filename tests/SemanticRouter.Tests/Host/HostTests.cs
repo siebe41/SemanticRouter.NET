@@ -524,6 +524,29 @@ public sealed class HostTests : IDisposable
     }
 
     [Fact]
+    public async Task Without_an_embedding_server_init_picks_onnx_only_where_onnx_runtime_loads()
+    {
+        var nothing = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("Connection refused"));
+        var here = new StringWriter();
+        var intelMac = new StringWriter();
+        const string reason = "In-process (Onnx) embeddings are not available on an Intel Mac: ONNX Runtime publishes no build for it. Use an embedding model in LM Studio or Ollama instead (Embeddings: OpenAICompatible).";
+
+        (await InitCommand.RunAsync(Settings("init"), new InitProbes(new HttpClient(nothing), string.Empty, Windows: false), here)).Should().Be(0);
+        RouterConfiguration onnx = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+        (await InitCommand.RunAsync(Settings("init", "--force"), new InitProbes(new HttpClient(nothing), string.Empty, Windows: false, OnnxUnavailable: reason), intelMac))
+            .Should().Be(0);
+        RouterConfiguration hashing = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+
+        onnx.Embeddings.Provider.Should().Be(EmbeddingProviderKind.Onnx);
+        here.ToString().Should().Contain("'all-MiniLM-L6-v2' runs in this process");
+        hashing.Embeddings.Provider.Should().Be(EmbeddingProviderKind.Hashing, "a model that cannot load would leave every prompt unclassified");
+        hashing.DefaultSimilarityThreshold.Should().Be(RouterConfiguration.FromJson(RouterHost.Template()).DefaultSimilarityThreshold);
+        intelMac.ToString().Should().Contain("embeddings: no embedding server found, so prompts are matched by shared words (Hashing). " + reason)
+            .And.Contain("Providers → Embeddings").And.NotContain("runs in this process");
+        FirstRun.IsUntouchedTemplate(Path.Combine(_directory, "semantic-router.json")).Should().BeTrue("init may run again once a server is there");
+    }
+
+    [Fact]
     public async Task Init_leaves_out_ollama_cloud_models()
     {
         var ollama = LocalServers.Ollama();
