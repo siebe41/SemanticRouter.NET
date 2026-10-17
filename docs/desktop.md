@@ -58,6 +58,10 @@ From a script: `SemanticRouter --update` downloads and applies an available upda
 
 An administrator can turn updates off, take them from an internal feed, make them notify-only, or require them to be signed by a given publisher, for every user of the machine: see [Managed deployment](#managed-deployment).
 
+**What an update is checked against.** The app checks each downloaded package against the SHA-256 checksum in the feed's `releases.<channel>.json`, but that file comes from the same GitHub release as the package. Until the releases are [signed](#signing), an update is trusted on GitHub's word: whoever can change a release's files (a stolen maintainer token, a compromised release job) can ship an update that is applied when the app quits. Only `Updates:Publisher` in the [machine policy](#controlling-updates) adds a check of its own, and it refuses every update from GitHub until the releases are signed. Verifying the project's own publisher by default, without a policy, waits for the signing certificates.
+
+`SEMANTICROUTER_UPDATE_SOURCE` (a URL or a folder of packages) points the app at another feed to try a build before it is released. A release build takes it only when the machine policy sets `Updates:AllowCustomFeed`; otherwise it is ignored, with a line in the log. Any feed, from the policy or the variable, must be HTTPS or a folder (a local path or a file share); plain HTTP is accepted only to this machine.
+
 ### Uninstall
 
 - **Windows:** **Settings → Apps → SemanticRouter → Uninstall** (or `%LOCALAPPDATA%\SemanticRouter\Update.exe uninstall`). It removes the background service and the app's sign-in entry first, then the program and the Start menu entry.
@@ -177,6 +181,7 @@ The [machine-wide policy](enterprise.md) (the registry on Windows, a configurati
 | `Updates:Mode` `Feed` and `Updates:Feed` | Updates only from your own feed (below), never from GitHub. |
 | `Updates:Apply` `Notify` | Updates are announced, and downloaded and applied only when the person chooses **Restart to update**; never when the app quits. **Install updates when quitting** is greyed out. Works with either `Mode`. |
 | `Updates:Publisher` | An update is applied only when the app in it is signed by this publisher (Windows: the Authenticode certificate's subject or thumbprint; macOS: the Developer ID team ID); otherwise it is refused and deleted. On Linux it refuses every update, since AppImages are not signed. See [Update publisher](enterprise.md#update-publisher). |
+| `Updates:AllowCustomFeed` | A release build takes `SEMANTICROUTER_UPDATE_SOURCE` (another feed, for testing a build before it is released). Without it only a debug build does. |
 
 `semantic-router doctor` shows the policy and, on its `desktop app updates` line, where updates come from and what the policy adds.
 

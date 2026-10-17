@@ -109,6 +109,8 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - `GET api/routes/health`, which embeds every utterance, is refused from other sites and to the read-only role, and is recorded in the audit log, like the other endpoints that spend embedding calls. (#235)
 - The judge does not send a remote client's request and answer to a subscription CLI or Copilot connector that does not allow remote clients. (#235)
 - Desktop app: the app window hands only `https` and `http` links to your browser. A link or navigation to any other scheme (`file:`, a network share, `ms-msdt:`, `search-ms:`, `javascript:`, `data:` or another program's protocol) is dropped and noted in the app's log instead of being passed to the operating system, and the app acts on a message from the page only while the window shows the router. (#PRNUM)
+- Desktop app: a release build ignores `SEMANTICROUTER_UPDATE_SOURCE` unless the machine policy sets the new `Updates:AllowCustomFeed`, and an update feed (from the policy or the variable) must be HTTPS or a folder; plain HTTP is accepted only to this machine, and other schemes are refused. (#PRNUM)
+- Desktop app: with `Updates:Publisher` set on Windows, an update is also refused when its `*.runtimeconfig.json` or `*.deps.json` would make the .NET host load code from outside the package (`additionalProbingPaths`, `STARTUP_HOOKS` and the host's other properties, paths that leave the app's folder) or it has a `*.runtimeconfig.dev.json`. (#PRNUM)
 
 ## [0.4.0] - 2026-10-16
 
