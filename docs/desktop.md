@@ -2,7 +2,7 @@
 
 `SemanticRouter` is the router as a desktop app: an icon in the tray (the menu bar on macOS) that runs the router and shows the dashboard. Nothing stays open in a terminal, and it can start when you sign in. It is the same router and the same dashboard as the [`semantic-router` tool](host.md), with the same configuration directory, so you can switch between them freely.
 
-![The dashboard in the app window](images/dashboard.png)
+![The dashboard in the app window. The dashboard's Overview: this week 43 prompts routed, 53% served locally, $0.11 spent; a table of six models with their tiers, from two local LM Studio models on tiers 1 and 2 to Claude Sonnet and Opus on tiers 4 and 5; and recent activity, where a prompt matched the deep-reasoning route and went to Claude Sonnet](images/dashboard.png)
 
 ## Install
 
@@ -42,11 +42,11 @@ The app is built in jobs that hold no secret and can only read the repository (`
 
 Locally, `deploy/package-installer.sh` builds and signs in one go with the same settings as environment variables (see the script's header); with `PUBLISH_DIR` it packages an app already published there instead.
 
-Independently of code signing, every installer, archive and update package has a build provenance attestation and a line in the release's `SHA256SUMS`, made after signing, so you can check a download came from this repository's release workflow: see [releases.md](releases.md). The release's SBOM and `THIRD-PARTY-NOTICES.txt` cover the app too; the notices also ship next to the executable.
+Independently of code signing, every installer, archive and update package has a build provenance attestation and a line in the release's `SHA256SUMS`, made after signing, so you can check a download came from this repository's release workflow: see [Verifying a release](releases.md). The release's SBOM and `THIRD-PARTY-NOTICES.txt` cover the app too; the notices also ship next to the executable.
 
 ### Updates
 
-An installed app updates itself from GitHub Releases. It looks a minute after it starts and then twice a day, and downloads a new version in the background (only the changes when it can). The tray menu then offers **Restart to update to …**; otherwise the update is applied the next time you quit the app. When the background service runs, it is stopped for the update and started again with the new version, with the same configuration directory and options. **Check for updates** in the tray menu turns the checks off (kept in `desktop.json`).
+An installed app updates itself from GitHub Releases. It looks a minute after it starts and then twice a day, and downloads a new version in the background (only the changes when it can). The tray menu then offers **Restart to update to …**; otherwise the update is applied the next time you quit the app. When the background service runs, it is stopped for the update and started again with the new version, with the same configuration directory and options. **Check for updates automatically** in the tray menu turns the checks off (kept in `desktop.json`).
 
 **About SemanticRouter** (or **Check for updates now…** in the tray menu, which also checks at once) shows where updates stand: up to date and when it last checked, checking, a version ready to install or available, why a check or download failed, or why updates are off. Its **Check now** looks straight away, even with the automatic checks off; **Restart to update** and the two switches below are the tray menu's own.
 
@@ -79,7 +79,7 @@ To build it yourself: `dotnet run --project src/SemanticRouter.Desktop`, `deploy
 
 ## Using it
 
-Start it and the dashboard opens. The first time, a welcome window offers to keep the router running in the background and to show the app in the tray when you sign in; both are ticked, and both can be changed later in the tray menu. Then the dashboard opens on its Overview, where **Set up SemanticRouter** adds your first model: it lists the CLIs it finds on this machine (Claude Code, Codex, Copilot) and LM Studio or Ollama if they run, and the API providers you can add with a key, then lets you send a test prompt. The app needs no command line for any of it. Close the dashboard and the router keeps running; the tray icon brings it back (click it, or choose **Open dashboard**). Starting the app again while it runs also opens the dashboard.
+Start it and the dashboard opens. The first time, a welcome window offers to keep the router running in the background and to show the app in the tray when you sign in; both are ticked, and both can be changed later in the tray menu or in Settings. Then the dashboard opens on its Overview, where **Set up SemanticRouter** adds your first model: it lists the CLIs it finds on this machine (Claude Code, Codex, Copilot) and LM Studio or Ollama if they run, and the API providers you can add with a key, then lets you send a test prompt. The app needs no command line for any of it. Close the dashboard and the router keeps running; the tray icon brings it back (click it, or choose **Open dashboard**). Starting the app again while it runs also opens the dashboard.
 
 The window opens at a size that fits the screen it is on (title bar included, whatever the display scaling), and after that where you left it: its position, size and whether it was maximized are kept in `desktop.json`. If that screen is gone, it opens on the main screen again.
 
@@ -98,14 +98,15 @@ The tray menu:
 | **Open the dashboard in** → **App window** / **Web browser** | Your choice of where the dashboard opens, remembered in `desktop.json`. The app window uses the platform's own web view (WebView2, WebKit, WebKitGTK or WPE WebKit); links that leave the router open in your browser, and links to the router stay in the window. Each link it hands to the browser is noted in the app's log. |
 | **Keep the router running in the background** | The background service on or off; see [below](#the-app-and-the-background-service). |
 | **Start at sign-in** | Shows the app in the tray whenever you sign in. The router itself starts at sign-in through the background service. |
-| **Check for updates** | Installed app only: whether it looks for updates. |
+| **Check for updates automatically** | Installed app only: whether it looks for updates. |
 | **Check for updates now…** | Installed app only: opens the Updates section of **About SemanticRouter** and checks at once. |
 | **Install updates when quitting** | Installed app only: whether a downloaded update is applied when you quit. Unticked, an update is only announced and applied when you choose **Restart to update**. Greyed out when your organization's policy makes updates notify-only. |
 | **Show the log**, **Show the configuration folder** | The router's log (`logs/semantic-router.log`) and its files. |
+| **Settings…** | The router's status and what last went wrong, **Restart router**, the background service, start at sign-in, where the dashboard opens, and **Show the log** / **Show the configuration folder**: the tray menu's settings in a window. Also under **More** on the dashboard (as **App settings**, in the app window) and in the macOS app menu (⌘,). |
 | **About SemanticRouter** | The version, where [updates](#updates) stand (with **Check now**, **Restart to update** and the update switches), and links to the GitHub repository, the documentation, issues, releases and the licence. |
 | **Quit SemanticRouter** | Stops the app's router and quits. |
 
-When something [needs a decision](dashboard.md#digest-and-notifications), the app also shows a system notification, once per notice (Notification Center on macOS, `notify-send` on Linux, a toast on Windows). `Notifications:Enabled: false` in the router's configuration turns them off. A router with no enabled model gets a notification too, once (not on the first start, when the dashboard opens on the setup anyway), and again if every model is later turned off.
+When something [needs a decision](dashboard.md#digest-and-notifications), the app also shows a system notification, once per notice (Notification Center on macOS, `notify-send` on Linux, a toast on Windows). `Notifications:Enabled: false` in the router's configuration turns them off. On Linux (libnotify 0.7.10 or later) a click on a notification opens what it is about: the dashboard page for a notice, the setup, or About for an update; on macOS and Windows a click does nothing yet. When something you asked for fails (turning the background service on or off, restarting it, downloading an update), the app says so in a notification as well as in the tray menu and Settings. A router with no enabled model gets a notification too, once (not on the first start, when the dashboard opens on the setup anyway), and again if every model is later turned off.
 
 `SemanticRouter --quit` quits a running app from a script.
 
@@ -132,7 +133,7 @@ For scripts and installers, without the tray:
 
 Everything is in the router's [configuration directory](host.md#where-things-live), shared with the tool:
 
-| | |
+| File or folder | What it holds |
 |---|---|
 | `desktop.json` | The app's own settings: where the dashboard opens, where its window was, whether the welcome window was shown, and the two update switches. |
 | `logs/semantic-router.log` | What the router logged (the app has no console). Rolled over to `.1` past 10 MB. |
@@ -156,7 +157,7 @@ The installers install for one user, with no administrator rights, and that is t
 | macOS | `SemanticRouter.app` in `~/Applications` (installed for the current user) or `/Applications` | The background service is the launchd agent `~/Library/LaunchAgents/io.github.siebe41.semantic-router.plist`; start at sign-in is `~/Library/LaunchAgents/io.github.siebe41.semantic-router.desktop.plist`. |
 | Linux | The AppImage, wherever it was put | The background service is the systemd user unit `~/.config/systemd/user/semantic-router.service`; start at sign-in is `~/.config/autostart/semantic-router.desktop`. |
 
-All of these are per user. The configuration directory (configuration, state database, logs) is the router's usual one ([host.md](host.md#where-things-live)). `SemanticRouter --install-service` and `--uninstall-service` set the background service up or remove it from a script, without the welcome window; see [the app and the background service](#the-app-and-the-background-service).
+All of these are per user. The configuration directory (configuration, state database, logs) is the router's usual one ([where things live](host.md#where-things-live)). `SemanticRouter --install-service` and `--uninstall-service` set the background service up or remove it from a script, without the welcome window; see [the app and the background service](#the-app-and-the-background-service).
 
 ### Deploying the installer
 
@@ -164,7 +165,7 @@ All of these are per user. The configuration directory (configuration, state dat
 - **macOS (Jamf, an MDM):** `SemanticRouter-osx-arm64-Setup.pkg` (or `osx-x64`). `installer -pkg SemanticRouter-osx-arm64-Setup.pkg -target CurrentUserHomeDirectory` installs into the user's `~/Applications`, as the release tests do. Installed as root (`-target /`, how most MDMs run packages), it goes into `/Applications` and belongs to root; the app's own updates run as the signed-in user and have not been tried against such an install, so turn them off in the policy (`Updates:Mode` `Off`) and deploy each new version with your MDM.
 - **Linux:** copy the AppImage into place and make it executable; it does not install anything else.
 
-Check what you deploy before you deploy it: [releases.md](releases.md) shows how to verify an installer with `gh attestation verify` and the release's `SHA256SUMS`, and the installers are code-signed when the release has signing certificates ([Signing](#signing)).
+Check what you deploy before you deploy it: [Verifying a release](releases.md) shows how to verify an installer with `gh attestation verify` and the release's `SHA256SUMS`, and the installers are code-signed when the release has signing certificates ([Signing](#signing)).
 
 ### Controlling updates
 
@@ -175,7 +176,7 @@ The [machine-wide policy](enterprise.md) (the registry on Windows, a configurati
 | `Updates:Mode` `Off` | No update checks at all; the update items are gone from the tray menu. Deploy new versions yourself. |
 | `Updates:Mode` `Feed` and `Updates:Feed` | Updates only from your own feed (below), never from GitHub. |
 | `Updates:Apply` `Notify` | Updates are announced, and downloaded and applied only when the person chooses **Restart to update**; never when the app quits. **Install updates when quitting** is greyed out. Works with either `Mode`. |
-| `Updates:Publisher` | An update is applied only when the app in it is signed by this publisher (Windows: the Authenticode certificate's subject or thumbprint; macOS: the Developer ID team ID); otherwise it is refused and deleted. On Linux it refuses every update, since AppImages are not signed. See [enterprise.md](enterprise.md#update-publisher). |
+| `Updates:Publisher` | An update is applied only when the app in it is signed by this publisher (Windows: the Authenticode certificate's subject or thumbprint; macOS: the Developer ID team ID); otherwise it is refused and deleted. On Linux it refuses every update, since AppImages are not signed. See [Update publisher](enterprise.md#update-publisher). |
 
 `semantic-router doctor` shows the policy and, on its `desktop app updates` line, where updates come from and what the policy adds.
 
@@ -187,7 +188,7 @@ The update feed is static files, so any HTTPS server (or a file share the machin
 - `SemanticRouter-<version>-<channel>-full.nupkg`, and
 - `SemanticRouter-<version>-<channel>-delta.nupkg` when there is one (it updates from the previous version with a much smaller download; without it the app downloads the full package).
 
-Replace `releases.<channel>.json` with each new release's; the app reads the newest version from it and the package names it lists, so keep at least the packages it names. The installers (`*-Setup.exe`, `*-Setup.pkg`, the AppImage) and the zip archives are not part of the feed. Before you publish a release internally, check its files against the release's `SHA256SUMS` and attestation ([releases.md](releases.md)); the app also checks each package against the checksum in `releases.<channel>.json`. Then point the policy at the folder's URL: `Updates:Mode` `Feed` and `Updates:Feed` `https://updates.corp.example/semantic-router`.
+Replace `releases.<channel>.json` with each new release's; the app reads the newest version from it and the package names it lists, so keep at least the packages it names. The installers (`*-Setup.exe`, `*-Setup.pkg`, the AppImage) and the zip archives are not part of the feed. Before you publish a release internally, check its files against the release's `SHA256SUMS` and attestation ([Verifying a release](releases.md)); the app also checks each package against the checksum in `releases.<channel>.json`. Then point the policy at the folder's URL: `Updates:Mode` `Feed` and `Updates:Feed` `https://updates.corp.example/semantic-router`.
 
 ## Finding your CLIs
 
@@ -195,8 +196,15 @@ An app started from the Dock, Finder or a launcher does not get the PATH your sh
 
 ## Linux
 
-- **The tray icon** needs a desktop that shows StatusNotifier icons: KDE Plasma, Cinnamon, XFCE and most others do; on GNOME install the *AppIndicator and KStatusNotifierItem Support* extension. Without one the app still runs; start it again to open the dashboard, and `SemanticRouter --quit` to quit.
+- **The tray icon** needs a desktop that shows StatusNotifier icons: KDE Plasma, Cinnamon, XFCE and most others do; on GNOME install the *AppIndicator and KStatusNotifierItem Support* extension. Without one the app still runs; start it again to open the dashboard, where **More** has **App settings** and **About SemanticRouter**, and `SemanticRouter --quit` to quit.
 - **The app window** needs WebKitGTK 4.1 or WPE WebKit 2.0 (`libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora). Without either, **App window** is greyed out and the dashboard opens in your browser.
+
+## Accessibility
+
+- **Without the tray.** Everything the tray menu does is also in **Settings** and **About SemanticRouter**, which the dashboard's **More** panel opens in the app window, so nothing needs the tray icon (which a keyboard or screen-reader user may not reach, and which GNOME does not show without an extension).
+- **Screen readers.** The app's windows have headings, links read as links (with where they go), the logo is hidden as decoration, and each checkbox's explanation is read with it, including why one is unavailable. The update status and the router's status and problems are announced when they change. After **Check now**, the focus moves to **Restart to update** when an update is found, rather than being lost.
+- **Keyboard.** Every window works from the keyboard; Escape closes it (in the welcome window, Escape chooses neither option). Opening the dashboard window puts the focus in the page.
+- **Large text and contrast.** The windows scroll rather than run past the bottom of the screen. Under the platform's high-contrast setting, secondary text keeps full strength; problems are said in words ("Problem: …"), not only in colour. The Fluent theme has no high-contrast palette of its own, so Windows contrast themes do not recolour the app's windows yet.
 
 ## Status
 

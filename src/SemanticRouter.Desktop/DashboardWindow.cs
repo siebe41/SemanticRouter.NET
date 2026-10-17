@@ -156,6 +156,9 @@ internal sealed class DashboardWindow : Window
         }
 
         Activate();
+
+        // Into the page, so Tab and a screen reader's browse mode start there rather than on the window's frame.
+        _view.Focus();
     }
 
     /// <summary>Sizes and positions the window for the screens there are now, before it is first shown.</summary>

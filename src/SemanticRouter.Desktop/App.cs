@@ -35,6 +35,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private WindowIcon _icon = null!;
     private DashboardWindow? _window;
     private AboutWindow? _about;
+    private SettingsWindow? _settings;
+    private string? _lastProblem;
     private bool _openWhenReady;
 
     // The page to open when the router is ready: Overview, with its setup, on the first start (no configuration yet).
@@ -158,7 +160,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _setUp.Click += (_, _) => OpenDashboard("#/overview");
         _update = new NativeMenuItem { IsVisible = false };
         _update.Click += (_, _) => _ = RestartToUpdateAsync();
-        _checkUpdates = new NativeMenuItem("Check for updates") { ToggleType = MenuItemToggleType.CheckBox, IsVisible = _updater.Installed };
+        _checkUpdates = new NativeMenuItem("Check for updates automatically") { ToggleType = MenuItemToggleType.CheckBox, IsVisible = _updater.Installed };
         _checkUpdates.Click += (_, _) => SetCheckForUpdates(!_preferences.CheckForUpdates);
         _checkUpdatesNow = new NativeMenuItem("Check for updates now…") { IsVisible = _updater.Installed };
         _checkUpdatesNow.Click += (_, _) =>
@@ -196,6 +198,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         logs.Click += (_, _) => Shell.Open(Path.GetDirectoryName(RouterLog.FileIn(_directory))!);
         var configuration = new NativeMenuItem("Show the configuration folder");
         configuration.Click += (_, _) => Shell.Open(_directory);
+        var settings = new NativeMenuItem("Settings…");
+        settings.Click += (_, _) => ShowSettings();
         var about = new NativeMenuItem("About SemanticRouter");
         about.Click += (_, _) => ShowAbout();
         var quit = new NativeMenuItem("Quit SemanticRouter");
@@ -205,7 +209,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         {
             Icon = _icon,
             ToolTipText = "SemanticRouter",
-            Menu = [open, _setUp, _needs, _update, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, _checkUpdates, _checkUpdatesNow, _applyOnQuit, logs, configuration, new NativeMenuItemSeparator(), about, quit],
+            Menu = [open, _setUp, _needs, _update, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, _checkUpdates, _checkUpdatesNow, _applyOnQuit, logs, configuration, new NativeMenuItemSeparator(), settings, about, quit],
         };
         tray.Clicked += (_, _) => OpenDashboard();
         UpdateMenu();
@@ -214,19 +218,21 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
 
     /// <summary>
     /// The application menu, which macOS shows in the menu bar while the dashboard window is in front (other
-    /// platforms do not show it): About and Check for updates now, where a Mac app has them.
+    /// platforms do not show it): About, Check for updates now and Settings (⌘,), where a Mac app has them.
     /// </summary>
     private NativeMenu BuildApplicationMenu()
     {
         var about = new NativeMenuItem("About SemanticRouter");
         about.Click += (_, _) => ShowAbout();
+        var settings = new NativeMenuItem("Settings…") { Gesture = new Avalonia.Input.KeyGesture(Avalonia.Input.Key.OemComma, Avalonia.Input.KeyModifiers.Meta) };
+        settings.Click += (_, _) => ShowSettings();
         var check = new NativeMenuItem("Check for Updates…") { IsVisible = _updater.Installed };
         check.Click += (_, _) =>
         {
             ShowAbout();
             _ = CheckForUpdatesAsync(chosen: true);
         };
-        return [about, check];
+        return [about, check, settings];
     }
 
     /// <summary>What the dashboard in the app window asked for: its state, the About window, or Restart to update.</summary>
@@ -239,6 +245,9 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
                 break;
             case DesktopPageAction.About:
                 ShowAbout();
+                break;
+            case DesktopPageAction.Settings:
+                ShowSettings();
                 break;
             case DesktopPageAction.RestartToUpdate:
                 _ = RestartToUpdateAsync();
@@ -293,6 +302,9 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _needs.IsVisible = _digest.NeedsLine is not null;
         UpdateStatus updates = UpdateStatus.Of(_updater, _checkingUpdates, _downloadingUpdate, _preferences.CheckForUpdates, DateTimeOffset.Now);
         _about?.Updates.Show(updates);
+        _settings?.Show(new SettingsState(
+            _status.Header ?? string.Empty, _lastProblem, _restart.IsEnabled, serviceOn, _service.Available, _signIn?.IsEnabled() == true, _signIn is not null,
+            surface, Shell.WebViewAvailable, Shell.WebViewRequirement, _switching));
         _window?.Push(DesktopPageState.Of(updates, _updater.Offer, _downloadingUpdate));
         if (_tray is not null)
         {
@@ -346,7 +358,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         {
             foreach (TrayNotice notice in digest.New(_announced))
             {
-                DesktopNotifier.Show("SemanticRouter: " + notice.Title, notice.Detail);
+                string link = notice.Link;
+                DesktopNotifier.Show("SemanticRouter: " + notice.Title, notice.Detail, () => Dispatcher.UIThread.Post(() => OpenDashboard(link)));
             }
 
             // A notice that cleared may be announced again if it comes back.
@@ -371,7 +384,10 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         else if (!_noModelAnnounced)
         {
             _noModelAnnounced = true;
-            DesktopNotifier.Show("SemanticRouter has no model yet", "It cannot answer prompts until you add one. The tray menu opens the setup on the dashboard.");
+            DesktopNotifier.Show(
+                "SemanticRouter has no model yet",
+                "It cannot answer prompts until you add one. The tray menu opens the setup on the dashboard.",
+                () => Dispatcher.UIThread.Post(() => OpenDashboard("#/overview")));
         }
 
         UpdateMenu();
@@ -411,7 +427,10 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             if (_updater.NotifyOnly && found is not null && found != _announcedUpdate)
             {
                 _announcedUpdate = found;
-                DesktopNotifier.Show($"SemanticRouter {found} is available", "Choose Restart to update in the tray menu, or in About SemanticRouter, to install it.");
+                DesktopNotifier.Show(
+                    $"SemanticRouter {found} is available",
+                    "Choose Restart to update in the tray menu, or in About SemanticRouter, to install it.",
+                    () => Dispatcher.UIThread.Post(ShowAbout));
             }
 
             UpdateMenu();
@@ -444,7 +463,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
 
         if (ready is null)
         {
-            ShowProblem(_updater.Problem ?? "The update could not be downloaded.");
+            ShowProblem(_updater.Problem ?? "The update could not be downloaded.", notify: true);
             UpdateMenu();
             return;
         }
@@ -533,6 +552,25 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _about.Activate();
     }
 
+    private void ShowSettings()
+    {
+        if (_settings is null)
+        {
+            _settings = new SettingsWindow(_icon);
+            _settings.Closed += (_, _) => _settings = null;
+            _settings.RestartRequested += () => _ = RestartAsync();
+            _settings.BackgroundChanged += on => _ = SetBackgroundAsync(on);
+            _settings.SignInChanged += SetSignIn;
+            _settings.SurfaceChanged += SetSurface;
+            _settings.ShowLogRequested += () => Shell.Open(Path.GetDirectoryName(RouterLog.FileIn(_directory))!);
+            _settings.ShowFolderRequested += () => Shell.Open(_directory);
+            UpdateMenu();
+        }
+
+        _settings.Show();
+        _settings.Activate();
+    }
+
     private void SetSurface(DashboardSurface surface)
     {
         _preferences = _preferences with { OpenDashboardIn = surface };
@@ -596,7 +634,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         if (problem is not null)
         {
             await log.WriteLineAsync($"Could not turn the background service {(on ? "on" : "off")} ({_service.Location}): {problem}");
-            ShowProblem($"Background service: {problem}");
+            ShowProblem($"Background service: {problem}", notify: true);
         }
 
         UpdateMenu();
@@ -611,7 +649,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             UpdateMenu();
             string? problem = await _service.RestartAsync(_router);
             _switching = false;
-            ShowProblem(problem is null ? null : $"Background service: {problem}");
+            ShowProblem(problem is null ? null : $"Background service: {problem}", notify: true);
             UpdateMenu();
         }
         else
@@ -620,11 +658,20 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         }
     }
 
-    /// <summary>A line under the status in the menu, for what last went wrong; <see langword="null"/> hides it.</summary>
-    private void ShowProblem(string? problem)
+    /// <summary>
+    /// A line under the status in the menu and in Settings, for what last went wrong; <see langword="null"/> hides it.
+    /// What the person just asked for and could not get is also a notification (<paramref name="notify"/>): a greyed-out
+    /// menu line is easy to miss, and screen readers skip it as unavailable.
+    /// </summary>
+    private void ShowProblem(string? problem, bool notify = false)
     {
+        _lastProblem = problem;
         _problem.Header = problem;
         _problem.IsVisible = problem is not null;
+        if (notify && problem is not null)
+        {
+            DesktopNotifier.Show("SemanticRouter: something went wrong", problem, () => Dispatcher.UIThread.Post(ShowSettings));
+        }
     }
 
     private void SetSignIn(bool on)
@@ -662,6 +709,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
 
         _quitting = true;
         _about?.Close();
+        _settings?.Close();
         _window?.CloseForGood();
         await _router.DisposeAsync();
         instance.Dispose();

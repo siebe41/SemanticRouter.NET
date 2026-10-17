@@ -1,5 +1,6 @@
 using System.Globalization;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -102,7 +103,7 @@ internal sealed record UpdateStatus(
 internal sealed class UpdatesSection : StackPanel
 {
     private readonly TextBlock _headline = new() { TextWrapping = TextWrapping.Wrap };
-    private readonly TextBlock _detail = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = 0.75 };
+    private readonly TextBlock _detail = new() { TextWrapping = TextWrapping.Wrap, FontSize = 12, Opacity = Accessible.SecondaryOpacity };
     private readonly Button _check = new() { Content = "Check now" };
     private readonly Button _restart = new() { Content = "Restart to update", Classes = { "accent" } };
     private readonly CheckBox _automatic = new() { Content = "Check for updates automatically" };
@@ -111,12 +112,16 @@ internal sealed class UpdatesSection : StackPanel
     public UpdatesSection()
     {
         Spacing = 6;
+
+        // A check's outcome replaces the headline: screen readers say it when it changes, without moving the focus.
+        AutomationProperties.SetLiveSetting(_headline, AutomationLiveSetting.Polite);
+        AutomationProperties.SetLiveSetting(_detail, AutomationLiveSetting.Polite);
         _check.Click += (_, _) => CheckRequested?.Invoke();
         _restart.Click += (_, _) => RestartRequested?.Invoke();
         _automatic.Click += (_, _) => CheckAutomaticallyChanged?.Invoke(_automatic.IsChecked == true);
         _onQuit.Click += (_, _) => ApplyOnQuitChanged?.Invoke(_onQuit.IsChecked == true);
 
-        Children.Add(new TextBlock { Text = "Updates", FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 6, 0, 0) });
+        Children.Add(Accessible.Heading(new TextBlock { Text = "Updates", FontWeight = FontWeight.SemiBold, Margin = new Thickness(0, 6, 0, 0) }, 2));
         Children.Add(_headline);
         Children.Add(_detail);
         Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(0, 2), Children = { _restart, _check } });
@@ -138,6 +143,7 @@ internal sealed class UpdatesSection : StackPanel
 
     public void Show(UpdateStatus status)
     {
+        bool focused = _check.IsFocused || _restart.IsFocused;
         _headline.Text = status.Headline;
         _detail.Text = status.Detail;
         _detail.IsVisible = status.Detail is not null;
@@ -149,5 +155,13 @@ internal sealed class UpdatesSection : StackPanel
         _onQuit.IsChecked = status.ApplyOnQuit;
         _onQuit.IsEnabled = !status.ApplyOnQuitLocked;
         _onQuit.Content = status.ApplyOnQuitLocked ? "Install updates when quitting (off: your organization's policy)" : "Install updates when quitting";
+
+        // Check now is disabled while it checks, and gives way to Restart to update when an update is found: the focus
+        // moves to what can be used next, rather than to nowhere.
+        if (focused && !(_check.IsFocused && _check.IsVisible && _check.IsEnabled) && !(_restart.IsFocused && _restart.IsVisible))
+        {
+            Control? next = _restart.IsVisible ? _restart : _check.IsVisible && _check.IsEnabled ? _check : _automatic.IsVisible ? _automatic : null;
+            next?.Focus();
+        }
     }
 }
