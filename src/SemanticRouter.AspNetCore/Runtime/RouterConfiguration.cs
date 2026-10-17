@@ -818,11 +818,16 @@ public sealed class RouterConfiguration : SemanticRouterOptions
     public IReadOnlyList<string> LiteralSecretSettings() =>
         Slots(secretsOnly: true).Where(s => IsLiteralSecret(s.Get())).Select(s => s.Setting).ToArray();
 
-    /// <summary>Every non-empty secret value in this (resolved) document, for redaction.</summary>
+    /// <summary>
+    /// Every non-empty secret value in this (resolved) document, for redaction: the secret settings, and the credentials
+    /// written into connector and embeddings addresses (<c>https://user:sk-…@host/?api-key=…</c>).
+    /// </summary>
     internal IEnumerable<string> SecretValues() =>
         Slots(secretsOnly: false)
             .Where(s => s.IsSecret)
             .Select(s => s.Get())
+            .Concat(Connectors.Values.SelectMany(c => AddressDisplay.Credentials(c.BaseAddress)))
+            .Concat(AddressDisplay.Credentials(Embeddings.Endpoint))
             .Where(v => !string.IsNullOrEmpty(v) && v != MaskedSecret)
             .Cast<string>();
 

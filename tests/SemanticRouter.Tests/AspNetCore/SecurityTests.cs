@@ -247,6 +247,24 @@ public sealed class SecretHandlingTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Credentials_in_an_unreachable_connectors_address_never_reach_the_logs()
+    {
+        LocalHttp = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("Connection refused (localhost:1234) for user:sk-userinfo-secret-77"));
+        HttpClient client = await StartDispatchAsync(s =>
+            s.PostConfigure<SemanticRouterConnectorsOptions>(o =>
+                o.Connectors["lmstudio"].BaseAddress = new Uri("http://user:sk-userinfo-secret-77@localhost:1234/?api-key=query-secret-88")));
+
+        await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+        string activity = await client.GetStringAsync("/router/api/activity");
+
+        _logs.All.Should().Contain("Connector lmstudio: request to http://localhost:1234/v1/chat/completions failed");
+        foreach (string text in new[] { _logs.All, activity })
+        {
+            text.Should().NotContain("sk-userinfo-secret-77").And.NotContain("query-secret-88");
+        }
+    }
+
+    [Fact]
     public async Task Relayed_upstream_errors_are_redacted_in_both_protocols()
     {
         ClassifyAs(tier: 4);
