@@ -155,6 +155,8 @@ public static class SemanticRouterServiceCollectionExtensions
                 client.Timeout = sp.GetRequiredService<RouterRuntimeProvider>().Current.Configuration.Embeddings.Timeout);
         // A webhook URL carries its token in the path, which the client factory would log with every request.
         services.AddHttpClient(WebhookNotifier.ClientName).ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(10)).RemoveAllLoggers();
+        services.AddHttpClient(ModelPriceList.HttpClientName).ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(20));
+        services.TryAddSingleton(sp => new ModelPriceSource(sp, sp.GetService<TimeProvider>() ?? TimeProvider.System));
 
         return new SemanticRouterBuilder(services);
     }
@@ -188,8 +190,9 @@ public static class SemanticRouterServiceCollectionExtensions
             }
 
             // These requests carry keys, and a redirect drops only the Authorization header: x-api-key, api-key and other
-            // key headers would go to whatever host the redirect names. No backend needs one, so none is followed.
-            if (connector || name is EmbeddingsClientName or WebhookNotifier.ClientName)
+            // key headers would go to whatever host the redirect names. No backend needs one, so none is followed. The price
+            // list carries no key, but a redirect could take it past the allowed endpoints.
+            if (connector || name is EmbeddingsClientName or WebhookNotifier.ClientName or ModelPriceList.HttpClientName)
             {
                 options.HttpMessageHandlerBuilderActions.Add(builder =>
                 {
