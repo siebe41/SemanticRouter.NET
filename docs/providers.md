@@ -171,7 +171,7 @@ Any server with `POST /v1/chat/completions` works the same way. Set `BaseAddress
 
 Uses your own Claude subscription. **Read [Claude Code's terms](TERMS.md#anthropic-claude-code) first.** In short: personal, local use, with the unmodified binary and your own login.
 
-1. Install Claude Code. On Windows use the native installer, so that `claude.exe` is on `PATH`.
+1. Install Claude Code. On Windows use the native installer (in PowerShell: `irm https://claude.ai/install.ps1 | iex`), which puts `claude.exe` in `%USERPROFILE%\.local\bin`; make sure that folder is on `PATH`. See [CLIs on Windows](#clis-on-windows).
 2. Run `claude` once and sign in with `/login`.
 3. Configure:
 
@@ -208,7 +208,7 @@ Your user-level Claude settings (for example `~/.claude/CLAUDE.md`) still apply.
 
 Uses your Copilot plan's AI credits. See [Copilot CLI's terms](TERMS.md#github-copilot-cli).
 
-1. Install the Copilot CLI (`npm install -g @github/copilot`, or a native package; on Windows make sure `copilot.exe` is on `PATH` or set `Executable`).
+1. Install the Copilot CLI: `npm install -g @github/copilot` on Linux and macOS; on Windows `winget install GitHub.Copilot`, which installs `copilot.exe` (see [CLIs on Windows](#clis-on-windows)).
 2. Sign in once with `copilot login`.
 
 ```jsonc
@@ -251,7 +251,7 @@ Uses your Copilot plan through GitHub's official [Copilot SDK](https://github.co
 
 Uses your ChatGPT plan. See [Codex CLI's terms](TERMS.md#openai-codex-cli).
 
-1. Install Codex (`npm install -g @openai/codex`).
+1. Install Codex: `npm install -g @openai/codex` on Linux and macOS. On Windows download the Windows build from [Codex's releases](https://github.com/openai/codex/releases) (`codex-x86_64-pc-windows-msvc.exe`) and save it as `codex.exe` in a folder on `PATH`, or set `Executable` to it (see [CLIs on Windows](#clis-on-windows)).
 2. Sign in with `codex login`, choosing "Sign in with ChatGPT".
 
 ```jsonc
@@ -286,6 +286,18 @@ The `Custom` preset runs any command:
 ```
 
 The executable is started directly, never through a shell, so prompts cannot inject commands. With `"PromptInput": "Argument"`, a prompt that starts with `-` gets a leading space when `{prompt}` is a whole argument, so the CLI cannot read it as an option (inside a larger argument, such as `--prompt={prompt}`, it is left as is). A bare name (`llm`) is looked up on the absolute `PATH` entries only and started by its full path, never from the current directory; a relative path with a folder (`tools/llm`) is taken relative to the router's current directory.
+
+## CLIs on Windows
+
+The router starts a CLI's `.exe` directly and never through a script wrapper (`.cmd`, `.bat` or `.ps1`), because `cmd.exe` and PowerShell would re-parse the prompt, which may contain shell syntax. A global `npm install` on Windows installs only such wrappers (`%APPDATA%\npm\codex.cmd`), so install each CLI as a native program:
+
+| CLI | Windows install that gives an `.exe` |
+|---|---|
+| Claude Code | The native installer, in PowerShell: `irm https://claude.ai/install.ps1 \| iex`. It puts `claude.exe` in `%USERPROFILE%\.local\bin`. |
+| Codex | The Windows build from [Codex's releases](https://github.com/openai/codex/releases): `codex-x86_64-pc-windows-msvc.exe`, saved as `codex.exe` in a folder on `PATH`. |
+| GitHub Copilot CLI | `winget install GitHub.Copilot`. |
+
+Or keep the program where it is and set the connector's `Executable` to the `.exe`. A CLI found only as a wrapper is listed by the dashboard's setup as found but not usable as installed, with these steps, and `init` and `doctor` say the same. These routes have not yet been checked on a Windows 11 machine by the project; if one does not give you a startable `.exe`, please open an issue.
 
 ## OpenAI API
 

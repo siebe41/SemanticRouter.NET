@@ -21,9 +21,10 @@ public sealed record CliExecutableLookup(string Requested, string? Path, string?
         }
 
         string name = System.IO.Path.GetFileNameWithoutExtension(Requested);
+        string where = CliExecutableLocator.NativeWindowsInstall(name) is { } install ? $" ({install})" : string.Empty;
         return ScriptPath is not null
             ? $"only a script wrapper was found ({ScriptPath}). The router starts executables directly, never through cmd.exe or " +
-              $"PowerShell, because those would re-parse the prompt. Install the native binary ({name}.exe) or set " +
+              $"PowerShell, because those would re-parse the prompt. Install the native binary ({name}.exe{where}) or set " +
               $"SemanticRouter:Connectors:{connector}:Executable to the .exe."
             : $"'{Requested}' was not found on PATH. Install it, or set SemanticRouter:Connectors:{connector}:Executable to its full path.";
     }
@@ -40,6 +41,18 @@ public sealed record CliExecutableLookup(string Requested, string? Path, string?
 public static class CliExecutableLocator
 {
     private static readonly string[] ScriptExtensions = [".cmd", ".bat", ".ps1"];
+
+    /// <summary>
+    /// Where a native Windows build of a CLI the router has a preset for comes from, for when only an npm script wrapper
+    /// is installed; <see langword="null"/> for any other program.
+    /// </summary>
+    public static string? NativeWindowsInstall(string name) => name.ToUpperInvariant() switch
+    {
+        "CLAUDE" => @"Claude Code's native installer puts claude.exe in %USERPROFILE%\.local\bin: in PowerShell, irm https://claude.ai/install.ps1 | iex",
+        "CODEX" => "the Windows build from https://github.com/openai/codex/releases (codex-x86_64-pc-windows-msvc.exe), saved as codex.exe in a folder on PATH",
+        "COPILOT" => "winget install GitHub.Copilot",
+        _ => null,
+    };
 
     /// <summary>Whether <paramref name="executable"/> names a script the router refuses to start (<c>.cmd</c>, <c>.bat</c>, <c>.ps1</c>).</summary>
     public static bool IsScript(string executable) =>

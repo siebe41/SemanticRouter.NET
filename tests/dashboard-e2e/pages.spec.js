@@ -133,6 +133,25 @@ test('a tool found on this machine comes first, once, and the other presets fold
   await expect(page.locator('#view .empty-state .choice')).toHaveText([/Claude Code/, /LM Studio/, /OpenAI/, /Blank connector/]);
 });
 
+test('a CLI found only as a script wrapper says what to do, with no Enable button, and keeps its preset', async ({ page, request }) => {
+  expect((await request.put('/router/api/config?persist=false', { data: empty })).ok()).toBeTruthy();
+  const codex = {
+    id: 'codex', title: 'Codex', kind: 'cli', detail: 'Found C:\\Users\\ada\\AppData\\Roaming\\npm\\codex.cmd', models: [],
+    problem: 'only a script wrapper was found (C:\\Users\\ada\\AppData\\Roaming\\npm\\codex.cmd). Install the native binary (codex.exe).',
+    connector: { name: 'codex-cli', settings: { Type: 'Cli', Preset: 'Codex' } },
+  };
+  const presetCodex = { ...codex, problem: undefined, detail: 'Your ChatGPT plan through the codex CLI' };
+  await page.route('**/router/api/setup', (r) => r.fulfill({ json: { ...SETUP, detected: [codex], presets: [...SETUP.presets, presetCodex] } }));
+  await open(page, 'overview');
+  const card = page.locator('#setup');
+  const found = card.locator('.choice', { hasText: 'codex.cmd' });
+  await expect(found).toContainText("can't be used as installed");
+  await expect(found).toContainText('Install the native binary (codex.exe)');
+  await expect(found.locator('[data-action="setup-choose"]')).toHaveCount(0);
+  await card.locator('details.advanced summary', { hasText: 'Other providers (3)' }).click();
+  await expect(card.locator('.choice', { hasText: 'Your ChatGPT plan' }).locator('[data-action="setup-choose"]')).toHaveText('Add');
+});
+
 test('the setup card lists the router\'s own presets, and a gateway refusal says where to fix it', async ({ page, request }) => {
   expects4xx.add(page); // the gateway refuses the Send with a 400
   const setup = await request.get('/router/api/setup');

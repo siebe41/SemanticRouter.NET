@@ -311,7 +311,8 @@ internal static class InitCommand
             }
             else if (lookup.ScriptPath is not null)
             {
-                notes.Add($"{executable}: only a script wrapper was found ({lookup.ScriptPath}); install the native {executable}.exe to use it.");
+                notes.Add($"{executable}: only a script wrapper was found ({lookup.ScriptPath}); install the native {executable}.exe to use it" +
+                          (CliExecutableLocator.NativeWindowsInstall(executable) is { } install ? $" ({install})." : "."));
                 explained.Add(executable);
             }
         }

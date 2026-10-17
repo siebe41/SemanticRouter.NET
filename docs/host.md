@@ -99,7 +99,7 @@ While it runs, the router records its process id and addresses in `semantic-rout
 | `codex` on PATH | `codex-cli` (concurrency 1) and a tier-4 `codex` model. |
 | `copilot` on PATH | `copilot-cli` and a tier-4 `copilot` model, **disabled**: it spends your plan's premium requests, so you turn it on. |
 
-On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not used, because the router never starts a CLI through `cmd.exe`. Everything else (API-key providers, tiers, routes) is edited on the dashboard.
+On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not used, because the router never starts a CLI through `cmd.exe`; [CLIs on Windows](providers.md#clis-on-windows) says where each `.exe` comes from. Everything else (API-key providers, tiers, routes) is edited on the dashboard.
 
 **Subscription CLIs are enabled only on a yes.** A CLI connector answers with whatever account that CLI is signed in to, which on a work machine may be a personal plan under consumer terms (see [Using it at work](TERMS.md#using-it-at-work)). So `init` lists the `claude` and `codex` it found and asks about each one (`[y/N]`, no by default):
 
