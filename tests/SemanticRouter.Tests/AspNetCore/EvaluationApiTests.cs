@@ -133,6 +133,23 @@ public sealed class EvaluationApiTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Route_health_spends_embedding_calls_so_another_site_cannot_set_it_off()
+    {
+        HttpClient client = await StartRealAsync();
+
+        // <img src="http://localhost:5080/router/api/routes/health"> on another site.
+        var crossSite = new HttpRequestMessage(HttpMethod.Get, "/router/api/routes/health");
+        crossSite.Headers.Add("Sec-Fetch-Site", "cross-site");
+        (await client.SendAsync(crossSite)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        var sameOrigin = new HttpRequestMessage(HttpMethod.Get, "/router/api/routes/health");
+        sameOrigin.Headers.Add("Sec-Fetch-Site", "same-origin");
+        (await client.SendAsync(sameOrigin)).StatusCode.Should().Be(HttpStatusCode.OK, "the dashboard's own fetch");
+
+        Services.GetRequiredService<IAuditLog>().Query(null, null, 100).Should().Contain(e => e.Summary.StartsWith("checked the routes' health", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Reports_route_health()
     {
         HttpClient client = await StartRealAsync();

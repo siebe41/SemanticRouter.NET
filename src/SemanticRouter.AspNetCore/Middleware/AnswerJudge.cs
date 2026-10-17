@@ -90,11 +90,11 @@ internal sealed partial class AnswerJudge : IDisposable
     /// Before the request is served: whether to keep a copy of the reply for grading. Draws the sample among requests
     /// the router decided itself that a model of <see cref="JudgeOptions.MaxTier"/> or below may answer.
     /// </summary>
-    public bool Sample(RouterRuntime runtime, RoutingPlan plan, bool automatic)
+    public bool Sample(RouterRuntime runtime, RoutingPlan plan, bool automatic, bool remote)
     {
         JudgeOptions options = runtime.Configuration.Middleware.Judge;
         if (!options.Enabled || !automatic || options.SampleRate <= 0 || JudgeModel(runtime) is not { } judge
-            || !MaySee(runtime, judge, plan.Requirements.LocalOnly, plan.Requirements.Profile)
+            || !MaySee(runtime, judge, plan.Requirements.LocalOnly, plan.Requirements.Profile, remote)
             || !plan.Candidates.Any(c => c.Model.Tier <= options.MaxTier))
         {
             return false;
@@ -110,11 +110,11 @@ internal sealed partial class AnswerJudge : IDisposable
     /// After the request was served: queues the answer for grading when a model of <see cref="JudgeOptions.MaxTier"/>
     /// or below (not the judge) answered with text. Counts against <see cref="JudgeOptions.DailyLimit"/>.
     /// </summary>
-    public bool Enqueue(RouterRuntime runtime, RoutingActivityEntry entry, string prompt, ChatProtocol protocol, AnswerCapture reply, int highestTier)
+    public bool Enqueue(RouterRuntime runtime, RoutingActivityEntry entry, string prompt, ChatProtocol protocol, AnswerCapture reply, int highestTier, bool remote)
     {
         JudgeOptions options = runtime.Configuration.Middleware.Judge;
         if (entry.Outcome != "served" || reply.Truncated || JudgeModel(runtime) is not { } judge
-            || !MaySee(runtime, judge, entry.LocalOnly, entry.Profile)
+            || !MaySee(runtime, judge, entry.LocalOnly, entry.Profile, remote)
             || runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, entry.ServedBy, StringComparison.OrdinalIgnoreCase)) is not { } answering
             || answering.Tier > options.MaxTier
             || string.Equals(answering.Name, judge.Name, StringComparison.OrdinalIgnoreCase))
@@ -137,7 +137,7 @@ internal sealed partial class AnswerJudge : IDisposable
                 return false;
             }
 
-            if (!_queue.Writer.TryWrite(new Job(entry, Clip(prompt, options.MaxCharacters), Clip(answer, options.MaxCharacters), highestTier, JudgeAgreement.KeyOf(prompt))))
+            if (!_queue.Writer.TryWrite(new Job(entry, Clip(prompt, options.MaxCharacters), Clip(answer, options.MaxCharacters), highestTier, JudgeAgreement.KeyOf(prompt), remote)))
             {
                 return false;
             }
@@ -178,11 +178,14 @@ internal sealed partial class AnswerJudge : IDisposable
 
     /// <summary>
     /// Whether the judge may read this request and its answer: it is the one model that sees them besides the one that
-    /// answered, so it keeps the same rules (local-only, and the routing profile's allowed and denied models and connectors).
+    /// answered, so it keeps the same rules (local-only, the routing profile's allowed and denied models and connectors,
+    /// and a CLI or Copilot connector that serves only this machine is not sent a remote client's text).
     /// </summary>
-    private static bool MaySee(RouterRuntime runtime, ModelDefinition judge, bool localOnly, string? profile) =>
+    private static bool MaySee(RouterRuntime runtime, ModelDefinition judge, bool localOnly, string? profile, bool remote) =>
         (!localOnly || judge.IsLocal)
-        && (profile is null || (runtime.Router.Profiles.TryGetValue(profile, out RoutingProfile? rules) && rules.Allows(judge)));
+        && (profile is null || (runtime.Router.Profiles.TryGetValue(profile, out RoutingProfile? rules) && rules.Allows(judge)))
+        && (!remote || !runtime.Configuration.Connectors.TryGetValue(judge.Connector, out ConnectorOptions? connector)
+            || connector.Type is not (ConnectorType.Cli or ConnectorType.Copilot) || connector.AllowRemoteClients);
 
     private static ModelDefinition? JudgeModel(RouterRuntime runtime) =>
         runtime.Configuration.Middleware.Judge.Model is { Length: > 0 } name
@@ -247,7 +250,7 @@ internal sealed partial class AnswerJudge : IDisposable
     {
         RouterRuntime runtime = _provider.Current;
         JudgeOptions options = runtime.Configuration.Middleware.Judge;
-        if (!options.Enabled || JudgeModel(runtime) is not { } judge || !MaySee(runtime, judge, job.Entry.LocalOnly, job.Entry.Profile))
+        if (!options.Enabled || JudgeModel(runtime) is not { } judge || !MaySee(runtime, judge, job.Entry.LocalOnly, job.Entry.Profile, job.Remote))
         {
             return;
         }
@@ -319,6 +322,11 @@ internal sealed partial class AnswerJudge : IDisposable
         context.Request.Body = new MemoryStream(body, writable: false);
         context.Response.Body = response;
         context.RequestAborted = cancellationToken;
+        if (job.Remote)
+        {
+            // The connectors decide as they would for the client's own request.
+            DashboardAccess.MarkRemote(context);
+        }
 
         var plan = new RoutingPlan(
             new PromptClassificationResult { RequiredTier = judge.Tier, Reason = RoutingReason.ModelOverride, RouteName = UsageLabel, Complexity = new ComplexityAnalysis() },
@@ -374,7 +382,7 @@ internal sealed partial class AnswerJudge : IDisposable
     [GeneratedRegex(@"\bgrade\b\D{0,10}([1-5])\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex GradeText();
 
-    private sealed record Job(RoutingActivityEntry Entry, string Prompt, string Answer, int HighestTier, string PromptKey);
+    private sealed record Job(RoutingActivityEntry Entry, string Prompt, string Answer, int HighestTier, string PromptKey, bool Remote);
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Request {Id} (answered by {Model}) graded {Grade}/5 by {Judge}.")]
     private static partial void LogGraded(ILogger logger, long id, string model, int grade, string judge);

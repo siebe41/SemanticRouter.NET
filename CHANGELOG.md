@@ -94,6 +94,13 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Desktop app accessibility: the About, welcome and new Settings windows have headings, links that read as links, a logo hidden as decoration, and explanations read with their checkboxes; the update status and the router's problems are announced when they change; the focus moves to **Restart to update** after **Check now** finds one; the welcome window closes with Escape; the windows scroll instead of running off a short screen with large text; secondary text keeps full strength under high contrast; opening the dashboard window puts the focus in the page.
 - Documentation site: the brand buttons' white text has at least 4.5:1 contrast in both themes, including on hover. The screenshots' alt text describes what they show (the memory map's colours included), the Mermaid diagrams have accessible titles and descriptions, links show page or section names instead of file names, and `semantic-router models` writes "why:" instead of an arrow glyph.
 
+### Security
+
+- Another account on the same machine is no longer trusted as "this machine": the router asks the operating system who opened each loopback connection (Linux, macOS, Windows), and another user is a remote client that needs a dashboard token or a gateway key and is not served by subscription CLI connectors. Root and LocalSystem still count as the router's own account. `SemanticRouter:Network:TrustOtherLocalAccounts` restores the old behaviour for a router that serves everyone who signs in to the machine. (#235)
+- Over the admin API, every value the router resolves is held to the secret-reference rules, not only header names that look secret, and an `${env:…}` reference a setting did not have before is accepted only from this machine or as a provider preset's key for that provider's address. (#235)
+- `GET api/routes/health`, which embeds every utterance, is refused from other sites and to the read-only role, and is recorded in the audit log, like the other endpoints that spend embedding calls. (#235)
+- The judge does not send a remote client's request and answer to a subscription CLI or Copilot connector that does not allow remote clients. (#235)
+
 ## [0.4.0] - 2026-10-16
 
 ### Added

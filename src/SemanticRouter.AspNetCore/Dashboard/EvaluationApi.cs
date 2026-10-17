@@ -122,7 +122,7 @@ internal static class EvaluationApi
             RouterConfiguration candidate = runtime.Configuration.Clone();
             candidate.Embeddings = request.Embeddings;
             candidate.UnmaskFrom(runtime.Configuration);
-            IEnumerable<string> errors = RouterRuntimeProvider.Validate(candidate).Concat(candidate.ReferenceErrors(runtime.Configuration));
+            IEnumerable<string> errors = RouterRuntimeProvider.Validate(candidate).Concat(candidate.ReferenceErrors(runtime.Configuration, DashboardAccess.IsLocal(context)));
             if (errors.FirstOrDefault(e => e.StartsWith("Embeddings", StringComparison.Ordinal)) is { } problem)
             {
                 return Results.Problem(problem, statusCode: StatusCodes.Status400BadRequest);
@@ -168,7 +168,7 @@ internal static class EvaluationApi
             {
                 return Results.Problem($"The embedding provider failed: {runtime.Redactor.Redact(ex.Message)}", statusCode: StatusCodes.Status502BadGateway);
             }
-        });
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("checked the routes' health"); // embeds every utterance: not for a page elsewhere
 
         api.MapPost("/routes/{name}/utterances", async (HttpContext context, string name, AddUtteranceRequest request, RouterRuntimeProvider provider) =>
         {
