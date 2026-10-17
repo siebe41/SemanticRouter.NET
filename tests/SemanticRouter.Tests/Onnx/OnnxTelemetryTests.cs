@@ -1,7 +1,13 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json.Nodes;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Embeddings.Onnx;
 using SemanticRouter.Host;
@@ -9,8 +15,8 @@ using SemanticRouter.Host;
 namespace SemanticRouter.Tests.Onnx;
 
 /// <summary>
-/// ONNX Runtime's own telemetry, in a router process of its own with a fresh home directory and a recording proxy in
-/// <c>HTTPS_PROXY</c>: with the in-process embeddings, nothing leaves and no device id is written.
+/// ONNX Runtime's Linux and macOS builds send usage data to Microsoft unless <c>ORT_DISABLE_TELEMETRY</c> is in the native
+/// environment before they load (#186).
 /// </summary>
 public sealed class OnnxTelemetryTests : IDisposable
 {
@@ -20,53 +26,62 @@ public sealed class OnnxTelemetryTests : IDisposable
 
     private readonly string _directory = Directory.CreateTempSubdirectory("router-onnx-telemetry").FullName;
 
-    public void Dispose()
+    public void Dispose() => Directory.Delete(_directory, recursive: true);
+
+    [Fact]
+    public void The_variable_is_in_the_native_environment_before_a_session_is_created()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-        Directory.Delete(_directory, recursive: true);
+        if (OperatingSystem.IsWindows())
+        {
+            // .NET sets Windows' process environment itself; there ONNX Runtime's events go to ETW, turned off per session.
+            return;
+        }
+
+        using var factory = new OnnxEmbeddingProviderFactory(new ServiceCollection().BuildServiceProvider(), Options.Create(new OnnxEmbeddingOptions { ModelsDirectory = _directory }));
+
+        string? native = Marshal.PtrToStringUTF8(GetEnv(Encoding.UTF8.GetBytes(OnnxRuntimeEnvironment.TelemetryVariable + '\0')));
+        native.Should().NotBeNull("the factory sets it with setenv, which ONNX Runtime reads, not only in .NET's copy");
+        Environment.GetEnvironmentVariable(OnnxRuntimeEnvironment.TelemetryVariable).Should().Be(native, "processes started from here get it too");
+        OnnxRuntimeEnvironment.TelemetrySetting.Should().Be(native);
     }
 
     [Fact]
-    public void Telemetry_is_off_in_this_process_once_the_provider_is_loaded()
+    public void A_value_someone_set_is_never_replaced()
     {
-        OnnxRuntimeTelemetry.TurnOff();
-
-        OnnxRuntimeTelemetry.IsOff.Should().BeTrue(OnnxRuntimeTelemetry.Setting ?? "not set");
+        OnnxRuntimeEnvironment.ValueToSet(native: null, managed: null).Should().Be("1");
+        OnnxRuntimeEnvironment.ValueToSet(native: "0", managed: "0").Should().BeNull("the process was started with it");
+        OnnxRuntimeEnvironment.ValueToSet(native: string.Empty, managed: null).Should().BeNull();
+        OnnxRuntimeEnvironment.ValueToSet(native: null, managed: "0").Should().Be("0", "set in this process through .NET: passed on to ONNX Runtime");
+        OnnxRuntimeEnvironment.TurnsTelemetryOff("1").Should().BeTrue();
+        OnnxRuntimeEnvironment.TurnsTelemetryOff("0").Should().BeFalse();
     }
 
+    /// <summary>
+    /// The router as the tool runs it, with the in-process model and a recording proxy in its environment: after the model
+    /// is loaded nothing connects anywhere for 30 seconds (ONNX Runtime 1.31 called home after about 10), and no device
+    /// id is written to the home directory.
+    /// </summary>
     [Fact]
-    public async Task A_router_with_onnx_embeddings_contacts_no_telemetry_host_and_writes_no_device_id()
+    public async Task The_router_with_onnx_embeddings_connects_nowhere_and_writes_no_device_id()
     {
-        // ONNX Runtime uploads telemetry from Linux and macOS (on Windows it writes ETW events instead). Linux only: on
-        // macOS a home directory of its own would also move the key ring away from the keychain it expects.
         if (!OperatingSystem.IsLinux())
         {
             return;
         }
 
-        OnnxModelInfo model = OnnxEmbeddingModels.Find(OnnxEmbeddingModels.DefaultModel)!;
-        using (var download = new HttpClient())
-        {
-            await OnnxModelDownloader.EnsureAsync(model, ModelCache, download);
-        }
-
-        string home = Directory.CreateDirectory(Path.Combine(_directory, "home")).FullName;
-        string configuration = Path.Combine(_directory, "config");
-        string models = Directory.CreateDirectory(Path.Combine(configuration, "models", model.Name)).FullName;
-        foreach (string file in new[] { "model.onnx", "vocab.txt" })
-        {
-            File.Copy(Path.Combine(ModelCache, model.Name, file), Path.Combine(models, file));
-        }
-
-        // The configuration file decides the embeddings (a command-line setting would not override it): the template's
-        // routes, with the default of `init` on a machine with no embedding server.
-        RouterConfiguration document = RouterConfiguration.FromJson(RouterHost.Template());
-        document.Embeddings = new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx, Model = model.Name };
-        await File.WriteAllTextAsync(Path.Combine(configuration, "semantic-router.json"), document.ToJson());
-
+        (string modelFile, _) = await OnnxModelDownloader.EnsureAsync(OnnxEmbeddingModels.Find(null)!, ModelCache, new HttpClient());
         using var proxy = new RecordingProxy();
+        string home = Directory.CreateDirectory(Path.Combine(_directory, "home")).FullName;
+        // The configuration init writes when it finds no embedding server, with the model already on disk.
+        HostSettings settings = HostSettings.Parse(["--config-dir", Path.Combine(_directory, "config")], _ => null);
+        RouterConfiguration document = RouterConfiguration.FromJson(RouterHost.Template());
+        InitCommand.UseInProcessEmbeddings(document);
+        document.Embeddings.ModelPath = Path.GetDirectoryName(modelFile);
+        Directory.CreateDirectory(settings.ConfigurationDirectory);
+        new JsonFileRouterConfigurationStore(settings.ConfigurationFile).Save(document);
         int port = FreePort();
-        var start = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "semantic-router"))
+
+        var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } dotnet ? dotnet : "dotnet")
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
@@ -74,58 +89,68 @@ public sealed class OnnxTelemetryTests : IDisposable
         };
         foreach (string argument in new[]
                  {
-                     "--config-dir", configuration, "--urls", $"http://127.0.0.1:{port}", "--SemanticRouter:Network:Offline=true",
+                     Path.Combine(AppContext.BaseDirectory, "semantic-router.dll"), "--config-dir", settings.ConfigurationDirectory,
+                     "--urls", $"http://127.0.0.1:{port}", "--SemanticRouter:Network:Offline=true",
                  })
         {
             start.ArgumentList.Add(argument);
         }
 
-        // The process starts without the variable, as an installed tool would: the router must set it itself.
-        foreach (string name in new[] { OnnxRuntimeTelemetry.Variable, "XDG_CACHE_HOME", "SEMANTIC_ROUTER_HOME", "NO_PROXY", "no_proxy" })
+        // A clean start: none of this process's proxies or ONNX Runtime settings (this test process has set the variable).
+        foreach (string name in start.Environment.Keys.Where(k => k.Contains("proxy", StringComparison.OrdinalIgnoreCase)
+                     || k.StartsWith("ORT_", StringComparison.OrdinalIgnoreCase) || k.StartsWith("XDG_", StringComparison.Ordinal)).ToArray())
         {
             start.Environment.Remove(name);
         }
 
         start.Environment["HOME"] = home;
-        start.Environment["HTTPS_PROXY"] = start.Environment["https_proxy"] = proxy.Address;
+        start.Environment["XDG_CACHE_HOME"] = Path.Combine(home, ".cache");
+        foreach (string name in new[] { "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy" })
+        {
+            start.Environment[name] = $"http://127.0.0.1:{proxy.Port}";
+        }
 
-        var output = new StringBuilder();
         using Process process = Process.Start(start)!;
+        var output = new StringBuilder();
         process.OutputDataReceived += (_, e) => { lock (output) { output.AppendLine(e.Data); } };
         process.ErrorDataReceived += (_, e) => { lock (output) { output.AppendLine(e.Data); } };
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
         try
         {
-            RouterInstance? instance = await RouterInstance.WaitForStartAsync(configuration, DateTimeOffset.UtcNow.AddSeconds(-5), TimeSpan.FromSeconds(60));
-            instance.Should().NotBeNull(Output());
-            using (var http = new HttpClient())
+            using var http = new HttpClient(new HttpClientHandler { UseProxy = false }) { Timeout = TimeSpan.FromSeconds(5) };
+            JsonNode? status = null;
+            for (DateTime until = DateTime.UtcNow.AddSeconds(90); DateTime.UtcNow < until && !process.HasExited; await Task.Delay(500))
             {
-                HttpResponseMessage classified = await http.PostAsync(
-                    new Uri($"http://127.0.0.1:{port}/router/api/classify"),
-                    new StringContent("""{"prompt":"why does this async code deadlock?"}""", Encoding.UTF8, "application/json"));
-                classified.StatusCode.Should().Be(HttpStatusCode.OK, await classified.Content.ReadAsStringAsync());
+                try
+                {
+                    status = JsonNode.Parse(await http.GetStringAsync(new Uri($"http://127.0.0.1:{port}/router/api/status")));
+                    if (status?["warmedUp"]?.GetValue<bool>() == true || status?["warmUpError"] is not null)
+                    {
+                        break;
+                    }
+                }
+                catch (HttpRequestException)
+                {
+                    // Not listening yet.
+                }
             }
 
-            // ONNX Runtime reports about 10 seconds after its first session.
+            string Log() { lock (output) { return output.ToString(); } }
+            (status?["warmedUp"]?.GetValue<bool>() ?? false).Should().BeTrue($"the router loads the model and embeds its routes: {status?["warmUpError"]} {Log()}");
+
             await Task.Delay(TimeSpan.FromSeconds(30));
 
-            proxy.Requests.Should().BeEmpty("nothing may leave the router in offline mode");
-            Directory.EnumerateDirectories(home, "*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = 0 })
-                .Where(d => d.Contains(".onnxruntime", StringComparison.Ordinal) || d.Contains("DeveloperTools", StringComparison.Ordinal))
-                .Should().BeEmpty("ONNX Runtime keeps no device id or event queue");
+            process.HasExited.Should().BeFalse(Log());
+            proxy.Requests.Should().BeEmpty("offline, with the in-process model, nothing is contacted");
+            Directory.EnumerateDirectories(home, ".onnxruntime", SearchOption.AllDirectories).Should().BeEmpty("ONNX Runtime keeps no device id");
         }
         finally
         {
-            process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync();
-        }
-
-        string Output()
-        {
-            lock (output)
+            if (!process.HasExited)
             {
-                return output.ToString();
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
             }
         }
     }
@@ -137,12 +162,15 @@ public sealed class OnnxTelemetryTests : IDisposable
         return ((IPEndPoint)listener.LocalEndpoint).Port;
     }
 
-    /// <summary>An HTTPS proxy that records the first line of each request (<c>CONNECT host:443 …</c>) and refuses it.</summary>
+    [DllImport("libc", EntryPoint = "getenv")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static extern IntPtr GetEnv(byte[] name);
+
+    /// <summary>A proxy that answers nothing: it records the first line of each connection (<c>CONNECT host:443 HTTP/1.1</c>).</summary>
     private sealed class RecordingProxy : IDisposable
     {
         private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
-        private readonly CancellationTokenSource _stopping = new();
-        private readonly List<string> _requests = [];
+        private readonly CancellationTokenSource _stop = new();
 
         public RecordingProxy()
         {
@@ -150,44 +178,52 @@ public sealed class OnnxTelemetryTests : IDisposable
             _ = AcceptAsync();
         }
 
-        public string Address => $"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}";
+        public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
 
-        public IReadOnlyList<string> Requests
-        {
-            get
-            {
-                lock (_requests)
-                {
-                    return [.. _requests];
-                }
-            }
-        }
+        public ConcurrentQueue<string> Requests { get; } = new();
 
         public void Dispose()
         {
-            _stopping.Cancel();
+            _stop.Cancel();
             _listener.Stop();
-            _stopping.Dispose();
+            _stop.Dispose();
         }
 
         private async Task AcceptAsync()
         {
-            try
+            while (!_stop.IsCancellationRequested)
             {
-                while (!_stopping.IsCancellationRequested)
+                TcpClient client;
+                try
                 {
-                    using TcpClient client = await _listener.AcceptTcpClientAsync(_stopping.Token);
-                    using var reader = new StreamReader(client.GetStream(), Encoding.ASCII);
-                    string? line = await reader.ReadLineAsync(_stopping.Token);
-                    lock (_requests)
-                    {
-                        _requests.Add(line ?? "(nothing)");
-                    }
+                    client = await _listener.AcceptTcpClientAsync(_stop.Token);
                 }
+                catch (Exception ex) when (ex is OperationCanceledException or SocketException or ObjectDisposedException)
+                {
+                    return;
+                }
+
+                _ = RecordAsync(client, DateTime.UtcNow.ToString("HH:mm:ss", CultureInfo.InvariantCulture));
             }
-            catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or SocketException)
+        }
+
+        private async Task RecordAsync(TcpClient client, string at)
+        {
+            using (client)
             {
-                // Stopped.
+                string? line = null;
+                try
+                {
+                    using var reader = new StreamReader(client.GetStream(), Encoding.ASCII);
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    line = await reader.ReadLineAsync(timeout.Token);
+                }
+                catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException)
+                {
+                    // The connection is what counts.
+                }
+
+                Requests.Enqueue($"{at} {line ?? "(connected without a request line)"}");
             }
         }
     }

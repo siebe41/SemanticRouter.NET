@@ -86,6 +86,50 @@ public sealed class CliProcessIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task The_routers_own_settings_and_secrets_stay_out_of_the_child_environment()
+    {
+        string[] names = ["ROUTER_SR_TEST_TOKEN", "SemanticRouter__SrTest__ApiKey", "SR_TEST_HOLDS_KEY", "SR_TEST_PLAIN"];
+        Environment.SetEnvironmentVariable(names[0], "admin-token-0123456789");
+        Environment.SetEnvironmentVariable(names[1], "sk-config-0123456789");
+        Environment.SetEnvironmentVariable(names[2], "sk-resolved-key-0123456789");
+        Environment.SetEnvironmentVariable(names[3], "not a secret");
+        try
+        {
+            ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);
+            options.EnvironmentVariables["SR_TEST_SET"] = "yes";
+            using var connector = new CliChatConnector(
+                "claude", options, new SystemCliProcessRunner(), NullLogger.Instance, redactor: new SecretRedactor(["sk-resolved-key-0123456789"]));
+
+            (ConnectorResult result, string body) = await SendAsync(connector, "hello there");
+
+            result.Outcome.Should().Be(ConnectorOutcome.Completed);
+            using JsonDocument report = JsonDocument.Parse(Content(body));
+            // Only the variables this test set: tests running alongside set SR_TEST_ variables of their own.
+            string[] ours = [.. names, "SR_TEST_SET"];
+            report.RootElement.GetProperty("inherited").GetString()!.Split(',').Where(n => ours.Contains(n, StringComparer.OrdinalIgnoreCase)).Should().BeEquivalentTo(
+                ["SR_TEST_PLAIN", "SR_TEST_SET"],
+                "what configures the router and any variable holding a secret it resolved are removed; what the connector sets stays");
+        }
+        finally
+        {
+            foreach (string name in names)
+            {
+                Environment.SetEnvironmentVariable(name, null);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("OPENAI_API_KEY", true)]
+    [InlineData("gemini_api_key", true)]
+    [InlineData("SemanticRouter__Dashboard__AdminToken", true)]
+    [InlineData("ROUTER_GATEWAY_KEY", true)]
+    [InlineData("PATH", false)]
+    [InlineData("CLAUDE_CODE_OAUTH_TOKEN", false)]
+    public void Router_variables_are_named_by_prefix_and_provider_key(string name, bool router) =>
+        CliEnvironment.IsRouterVariable(name).Should().Be(router);
+
+    [Fact]
     public async Task Argument_prompts_arrive_after_print()
     {
         ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);

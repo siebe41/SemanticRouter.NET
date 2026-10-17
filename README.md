@@ -476,7 +476,8 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `MaxArgumentLength` | CLI | `24000` | With `PromptInput: Argument`, longer prompts are sent on stdin. Longer Claude Code system prompts are moved into the conversation. |
 | `Executable`, `HomeDirectory` | Copilot | `copilot`, `~/.copilot` | The Copilot CLI the SDK runs as its runtime, and its `COPILOT_HOME`. |
 | `AllowRemoteClients` | CLI, Copilot | `false` | See [Subscription CLI terms](docs/TERMS.md) before changing this. |
-| `Timeout` | all | HTTP 100 s · CLI 5 min | Time to first output. Streams are not cut off. |
+| `Timeout` | all | HTTP 100 s · CLI 5 min | Time to first output. |
+| `StallTimeout` | HTTP, CLI | the `Timeout` | Time allowed between two pieces of a reply once it has started. A backend that stops sending for longer is given up on: before anything reached the client the next model answers; after, the client gets an error event and the model cools down. A reply that keeps coming is never cut off. |
 
 ### `Embeddings`, `Middleware` and the other sections
 
@@ -639,7 +640,7 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every pull r
 | `secret-scan` | [gitleaks](https://github.com/gitleaks/gitleaks) finds a credential anywhere in the git history, including in commits whose files were later deleted | `gitleaks git --redact .` |
 | Vulnerable packages | a direct or transitive NuGet package has a published advisory | `dotnet list package --vulnerable --include-transitive` |
 | Formatting | code differs from `dotnet format` under `.editorconfig` | `dotnet format` (fixes in place) |
-| Build, test, pack | any warning, test failure or packaging error | the commands above |
+| Build, test, pack | any warning, test failure or packaging error; a library package whose public API removed or changed something the last release on nuget.org has ([package validation](CONTRIBUTING.md#public-api-and-package-validation)); or a package that depends on another SemanticRouter package without an exact version ([CONTRIBUTING.md](CONTRIBUTING.md#package-versions-and-dependencies)) | the commands above |
 | Container image | the image does not start, serves a remote client without a gateway key or an admin request without the token, or [Trivy](https://trivy.dev) finds a high or critical vulnerability that has a fix | `docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router .`, then `trivy image --ignore-unfixed --severity HIGH,CRITICAL semantic-router` |
 
 A leaked key must be revoked at the provider; removing it from the code does not remove it from history. For a confirmed false positive, add the fingerprint gitleaks prints to `.gitleaksignore`. Dependabot ([`.github/dependabot.yml`](.github/dependabot.yml)) proposes NuGet, GitHub Actions, container base image and npm updates weekly; actions are pinned to commit SHAs and base images to digests.

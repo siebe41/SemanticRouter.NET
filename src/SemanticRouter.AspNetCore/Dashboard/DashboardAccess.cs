@@ -235,6 +235,14 @@ internal sealed class DashboardAccess
                     $"The {_options.TrustedIdentityHeader} header from the proxy does not name one user. Make the proxy replace the header rather than add to what the client sent.");
             }
 
+            // The same for the groups: a second instance is what a proxy that appends to the client's header leaves, and the
+            // client's own instance could name an admin group.
+            if (!string.IsNullOrWhiteSpace(_options.TrustedGroupsHeader) && context.Request.Headers[_options.TrustedGroupsHeader].Count > 1)
+            {
+                return Refuse(StatusCodes.Status403Forbidden,
+                    $"The {_options.TrustedGroupsHeader} header from the proxy appears more than once. Make the proxy replace the header rather than add to what the client sent.");
+            }
+
             // As for loopback clients without a token: a page that reached the router through DNS rebinding (and so from a
             // proxy's address, when the proxy runs on this machine) could set the header itself, but not a Host naming us.
             if (!IsLocalHost(context.Request))

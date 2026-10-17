@@ -171,7 +171,7 @@ Any server with `POST /v1/chat/completions` works the same way. Set `BaseAddress
 
 Uses your own Claude subscription. **Read [Claude Code's terms](TERMS.md#anthropic-claude-code) first.** In short: personal, local use, with the unmodified binary and your own login.
 
-1. Install Claude Code. On Windows use the native installer, so that `claude.exe` is on `PATH`.
+1. Install Claude Code. On Windows use the native installer (in PowerShell: `irm https://claude.ai/install.ps1 | iex`), which puts `claude.exe` in `%USERPROFILE%\.local\bin`; make sure that folder is on `PATH`. See [CLIs on Windows](#clis-on-windows).
 2. Run `claude` once and sign in with `/login`.
 3. Configure:
 
@@ -196,7 +196,7 @@ What the preset does:
 - **Tools.** `"ToolCalling": "Prompted"` with `tools` in the models' capabilities (as `init` sets them up) lets agentic clients such as Claude Code use this connector for tool-bearing turns; see [Tool calling and agentic clients](#tool-calling-and-agentic-clients). Without them, tool-bearing requests skip this connector.
 - **Prompt on stdin.** The conversation is written to the CLI's standard input, not passed as an argument, because other users of the machine can read a process's arguments (`ps`) and process auditing records them. `"PromptInput": "Argument"` puts it after `-p` instead, up to `MaxArgumentLength` characters.
 - **System messages.** Client system messages replace Claude Code's default system prompt. They are passed with `--system-prompt`, so they are visible on the command line; one longer than `MaxArgumentLength` is moved into the conversation instead.
-- **Environment.** It removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` from the child environment. In print mode an API key would otherwise be used instead of your subscription. Set `RemoveEnvironmentVariables` yourself to change this. It sets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, so a run contacts only Anthropic's API: no auto-update, telemetry or error reporting. `EnvironmentVariables` overrides them (for example `"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "0"`).
+- **Environment.** It removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` from the child environment. In print mode an API key would otherwise be used instead of your subscription. Set `RemoveEnvironmentVariables` yourself to change this (in the configuration file: like the program and its arguments, it is not changed over the admin API unless `AllowProcessSettings` is on). Every CLI connector also leaves out what belongs to the router: variables that configure it (`SemanticRouter__…`, `ROUTER_…`), the provider keys the setup reads (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`), and any variable that holds a key, gateway key or other secret the router resolved. `EnvironmentVariables` can still pass one on explicitly. It sets `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, so a run contacts only Anthropic's API: no auto-update, telemetry or error reporting. `EnvironmentVariables` overrides them (for example `"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "0"`).
 - **Limits.** Usage-limit messages ("You've hit your session limit", "weekly limit", …) are quota errors. Account-wide limits cool down every model on the connector; "You've hit your Opus limit" cools down only the Opus model.
 - **Extra flags** go in `Arguments`, e.g. `[ "--effort", "low" ]`.
 
@@ -208,7 +208,7 @@ Your user-level Claude settings (for example `~/.claude/CLAUDE.md`) still apply.
 
 Uses your Copilot plan's AI credits. See [Copilot CLI's terms](TERMS.md#github-copilot-cli).
 
-1. Install the Copilot CLI (`npm install -g @github/copilot`, or a native package; on Windows make sure `copilot.exe` is on `PATH` or set `Executable`).
+1. Install the Copilot CLI: `npm install -g @github/copilot` on Linux and macOS; on Windows `winget install GitHub.Copilot`, which installs `copilot.exe` (see [CLIs on Windows](#clis-on-windows)).
 2. Sign in once with `copilot login`.
 
 ```jsonc
@@ -251,7 +251,7 @@ Uses your Copilot plan through GitHub's official [Copilot SDK](https://github.co
 
 Uses your ChatGPT plan. See [Codex CLI's terms](TERMS.md#openai-codex-cli).
 
-1. Install Codex (`npm install -g @openai/codex`).
+1. Install Codex: `npm install -g @openai/codex` on Linux and macOS. On Windows download the Windows build from [Codex's releases](https://github.com/openai/codex/releases) (`codex-x86_64-pc-windows-msvc.exe`) and save it as `codex.exe` in a folder on `PATH`, or set `Executable` to it (see [CLIs on Windows](#clis-on-windows)).
 2. Sign in with `codex login`, choosing "Sign in with ChatGPT".
 
 ```jsonc
@@ -286,6 +286,18 @@ The `Custom` preset runs any command:
 ```
 
 The executable is started directly, never through a shell, so prompts cannot inject commands. With `"PromptInput": "Argument"`, a prompt that starts with `-` gets a leading space when `{prompt}` is a whole argument, so the CLI cannot read it as an option (inside a larger argument, such as `--prompt={prompt}`, it is left as is). A bare name (`llm`) is looked up on the absolute `PATH` entries only and started by its full path, never from the current directory; a relative path with a folder (`tools/llm`) is taken relative to the router's current directory.
+
+## CLIs on Windows
+
+The router starts a CLI's `.exe` directly and never through a script wrapper (`.cmd`, `.bat` or `.ps1`), because `cmd.exe` and PowerShell would re-parse the prompt, which may contain shell syntax. A global `npm install` on Windows installs only such wrappers (`%APPDATA%\npm\codex.cmd`), so install each CLI as a native program:
+
+| CLI | Windows install that gives an `.exe` |
+|---|---|
+| Claude Code | The native installer, in PowerShell: `irm https://claude.ai/install.ps1 \| iex`. It puts `claude.exe` in `%USERPROFILE%\.local\bin`. |
+| Codex | The Windows build from [Codex's releases](https://github.com/openai/codex/releases): `codex-x86_64-pc-windows-msvc.exe`, saved as `codex.exe` in a folder on `PATH`. |
+| GitHub Copilot CLI | `winget install GitHub.Copilot`. |
+
+Or keep the program where it is and set the connector's `Executable` to the `.exe`. A CLI found only as a wrapper is listed by the dashboard's setup as found but not usable as installed, with these steps, and `init` and `doctor` say the same. These routes have not yet been checked on a Windows 11 machine by the project; if one does not give you a startable `.exe`, please open an issue.
 
 ## OpenAI API
 

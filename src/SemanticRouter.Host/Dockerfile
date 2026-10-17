@@ -32,15 +32,15 @@ COPY --from=build --chown=$APP_UID:$APP_UID /data /data
 # token (ROUTER_ADMIN_TOKEN) and the gateway a key (ROUTER_GATEWAY_KEY), both resolved at start-up through ${env:...}
 # references. Without them, everyone is refused. While the configuration is the untouched template, an OPENAI_API_KEY or
 # ANTHROPIC_API_KEY in the environment gets a connector that refers to it (SEMANTIC_ROUTER_SEED_API_KEYS).
-# ORT_DISABLE_TELEMETRY: ONNX Runtime (the in-process embeddings) sends Microsoft no telemetry (docs/network.md).
+# ORT_DISABLE_TELEMETRY: ONNX Runtime (the in-process embeddings) sends no usage data to Microsoft (docs/network.md).
 ENV SEMANTIC_ROUTER_HOME=/data \
+    ORT_DISABLE_TELEMETRY=1 \
     SEMANTIC_ROUTER_KEYS_DIR=/data/keys \
     SEMANTIC_ROUTER_SEED_API_KEYS=true \
     ASPNETCORE_URLS=http://0.0.0.0:8080 \
     SemanticRouter__Dashboard__RequireLocalClient=false \
     SemanticRouter__Dashboard__AdminToken=\${env:ROUTER_ADMIN_TOKEN} \
-    SemanticRouter__Middleware__GatewayKeys__default=\${env:ROUTER_GATEWAY_KEY} \
-    ORT_DISABLE_TELEMETRY=1
+    SemanticRouter__Middleware__GatewayKeys__default=\${env:ROUTER_GATEWAY_KEY}
 VOLUME /data
 EXPOSE 8080
 USER $APP_UID

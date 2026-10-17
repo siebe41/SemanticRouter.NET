@@ -71,8 +71,18 @@ public sealed record RoutingFeedback
 /// <summary>Keeps feedback beyond memory and across restarts.</summary>
 public interface IRoutingFeedbackStore
 {
-    /// <summary>Stores feedback. Must not throw for storage problems: log them and carry on.</summary>
+    /// <summary>
+    /// Stores feedback. Its id is new: a store should refuse (and log) feedback whose id it already holds rather than
+    /// replace it. Must not throw for storage problems: log them and carry on.
+    /// </summary>
     void Add(RoutingFeedback feedback);
+
+    /// <summary>
+    /// Reserves <paramref name="count"/> consecutive ids that no log sharing this store has handed out or will, and
+    /// returns the first. -1 (the default) for a store that only one log uses, or when it failed: the log then counts
+    /// on from the newest id it knows.
+    /// </summary>
+    long ReserveIds(int count) => -1;
 
     /// <summary>The newest first, at most <paramref name="limit"/>.</summary>
     IReadOnlyList<RoutingFeedback> Recent(int limit);
@@ -101,7 +111,8 @@ public sealed class RoutingFeedbackLog
     private readonly HashSet<(long, FeedbackKind)> _seen = [];
     private readonly HashSet<long> _forgotten = [];
     private readonly Lock _lock = new();
-    private long _nextId;
+    private long _nextId; // the last id handed out
+    private long _blockEnd;
 
     /// <summary>Creates a log keeping the latest <paramref name="capacity"/> items, seeded from <paramref name="store"/>.</summary>
     public RoutingFeedbackLog(int capacity = 2000, IRoutingFeedbackStore? store = null)
@@ -129,6 +140,14 @@ public sealed class RoutingFeedbackLog
             if (_forgotten.Contains(feedback.EntryId) || !_seen.Add((feedback.EntryId, feedback.Kind)))
             {
                 return false;
+            }
+
+            if (_nextId + 1 >= _blockEnd)
+            {
+                // Logs sharing a store take blocks of ids from it; without one (or when it failed) this log counts on.
+                long first = _store?.ReserveIds(RoutingActivityLog.IdBlock) ?? -1;
+                _nextId = first >= 0 ? first - 1 : _nextId;
+                _blockEnd = _nextId + 1 + RoutingActivityLog.IdBlock;
             }
 
             stored = feedback with { Id = ++_nextId };

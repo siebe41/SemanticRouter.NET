@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SemanticRouter.Host;
+using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.Host;
 
@@ -22,7 +23,7 @@ public sealed class ServiceTests : IDisposable
         // Windows can hold a closed database file for a moment longer (the last connection, a virus scanner): try again.
         for (int attempt = 1; ; attempt++)
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            SqliteFiles.Release(_directory);
             try
             {
                 Directory.Delete(_directory, recursive: true);
@@ -83,11 +84,55 @@ public sealed class ServiceTests : IDisposable
             ["PATH"] = "/home/ada/.local/bin:/usr/bin",
             ["DOTNET_ROOT"] = "/home/ada/.dotnet",
             ["ORT_DISABLE_TELEMETRY"] = "1",
-        });
+        }, "ONNX Runtime's telemetry is off from the service's start");
+        ServiceDefinition.ForDesktop(settings, "/opt/SemanticRouter/SemanticRouter", n => n == "ORT_DISABLE_TELEMETRY" ? "0" : environment(n))
+            .Environment["ORT_DISABLE_TELEMETRY"].Should().Be("0", "a value set in the shell is kept");
 
         ServiceDefinition viaDotnet = ServiceDefinition.ForTool(settings, "/usr/share/dotnet/dotnet", "/store/semantic-router.dll", environment);
         viaDotnet.Arguments[0].Should().Be("/store/semantic-router.dll");
         viaDotnet.Command("service", "start").Should().Equal("/store/semantic-router.dll", "service", "start", "--config-dir", Path.GetFullPath(ConfigurationDirectory));
+    }
+
+    [Theory]
+    [InlineData("/home/ada/.dotnet/tools/semantic-router")]
+    [InlineData("/opt/Semantic Router/100% \"$HOME\" C:\\x/SemanticRouter")]
+    [InlineData("/Applications/SemanticRouter.app/Contents/MacOS/SemanticRouter")]
+    public async Task Each_service_definition_says_which_program_it_runs(string program)
+    {
+        ServiceDefinition definition = Definition() with { Program = program };
+        var systemd = new SystemdUserService(Path.Combine(_directory, "units"), new FakeRunner().RunAsync);
+        var launchd = new LaunchAgentService(Path.Combine(_directory, "LaunchAgents"), Path.Combine(_directory, "Logs"), new FakeRunner().RunAsync);
+        systemd.InstalledProgram().Should().BeNull("nothing is installed");
+
+        SystemdUserService.ProgramOfUnit(systemd.Render(definition)).Should().Be(program);
+        LaunchAgentService.ProgramOfPlist(launchd.Render(definition)).Should().Be(program);
+        Directory.CreateDirectory(Path.Combine(_directory, "units"));
+        await File.WriteAllTextAsync(systemd.Location, systemd.Render(definition));
+        systemd.InstalledProgram().Should().Be(program);
+        systemd.Runs(program).Should().BeTrue();
+        systemd.Runs("/somewhere/else/SemanticRouter").Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_service_definition_that_cannot_be_read_names_no_program()
+    {
+        SystemdUserService.ProgramOfUnit("[Service]\nType=simple\n").Should().BeNull();
+        SystemdUserService.ProgramOfUnit("ExecStart=/usr/bin/semantic-router run").Should().Be("/usr/bin/semantic-router");
+        LaunchAgentService.ProgramOfPlist("<plist><dict><key>Label</key><string>x</string></dict></plist>").Should().BeNull();
+        LaunchAgentService.ProgramOfPlist("not xml").Should().BeNull();
+        new FakePlatform(() => { }) { Installed = true }.Runs("/any/program").Should().BeTrue("a definition that cannot be read is treated as before");
+    }
+
+    [Fact]
+    public void The_windows_sign_in_entry_says_which_program_it_runs()
+    {
+        ServiceDefinition tool = Definition() with { Program = @"C:\Users\Ada Lovelace\.dotnet\tools\semantic-router.exe" };
+        ServiceDefinition app = tool with { Program = @"C:\Users\Ada\AppData\Local\SemanticRouter\current\SemanticRouter.exe", Windowless = true };
+
+        WindowsCommandLine.First(WindowsSignInService.SignInCommand(tool)).Should().Be(tool.Program);
+        WindowsCommandLine.First(WindowsSignInService.SignInCommand(app)).Should().Be(app.Program);
+        WindowsCommandLine.First(@"C:\tools\semantic-router.exe service start").Should().Be(@"C:\tools\semantic-router.exe");
+        WindowsCommandLine.First("  ").Should().BeNull();
     }
 
     [Fact]

@@ -626,11 +626,15 @@ public sealed class DashboardAccessTests : RouterHostTest
 
         HttpResponseMessage shell = await PutWithAsync(client, "evil", """{"Type":"Cli","Preset":"Custom","Executable":"/bin/sh","Arguments":["-c","id"]}""");
         HttpResponseMessage preload = await PutWithAsync(client, "claude", """{"Type":"Cli","Preset":"ClaudeCode","EnvironmentVariables":{"LD_PRELOAD":"/tmp/x.so"}}""");
+        HttpResponseMessage keepKeys = await PutWithAsync(client, "claude", """{"Type":"Cli","Preset":"ClaudeCode","RemoveEnvironmentVariables":[]}""");
+        HttpResponseMessage onCommandLine = await PutWithAsync(client, "claude", """{"Type":"Cli","Preset":"ClaudeCode","PromptInput":"Argument"}""");
         HttpResponseMessage preset = await PutWithAsync(client, "claude", """{"Type":"Cli","Preset":"ClaudeCode"}""");
 
         shell.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await shell.Content.ReadAsStringAsync()).Should().Contain("Connectors:evil").And.Contain("AllowProcessSettings");
         preload.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        keepKeys.StatusCode.Should().Be(HttpStatusCode.BadRequest, "keeping ANTHROPIC_API_KEY would switch the CLI's billing to the API key");
+        onCommandLine.StatusCode.Should().Be(HttpStatusCode.BadRequest, "a prompt on the command line can be read by other users of the machine");
         preset.StatusCode.Should().Be(HttpStatusCode.OK, "a preset started from PATH runs the vendor's own CLI");
         await DisposeAsync();
 
@@ -827,6 +831,68 @@ public sealed class DashboardAccessTests : RouterHostTest
             o.RequireGatewayKeyForLocalClients = true;
         });
         (await strict.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+}
+
+/// <summary>Gateway keys must be long enough, and an address that sends many wrong ones has to wait.</summary>
+public sealed class GatewayKeyGuessingTests : RouterHostTest
+{
+    private const string Key = "gw-laptop-key-0123456789";
+    private readonly ManualTimeProvider _time = new();
+
+    private Task<HttpClient> StartAsync() =>
+        StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+                o.GatewayKeys["laptop"] = Key;
+            },
+            services: s => s.AddSingleton<TimeProvider>(_time),
+            beforeRouter: app => app.Use((context, next) =>
+            {
+                context.Connection.RemoteIpAddress = IPAddress.Parse(context.Request.Headers["X-Test-Address"].FirstOrDefault() ?? "203.0.113.7");
+                return next(context);
+            }));
+
+    private static HttpRequestMessage Chat(string key, string address = "203.0.113.7")
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = Json(ChatJson) };
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key);
+        request.Headers.Add("X-Test-Address", address);
+        return request;
+    }
+
+    [Theory]
+    [InlineData("short-key", true)]
+    [InlineData("exactly-16-chars", false)]
+    [InlineData("${env:ROUTER_KEY_LAPTOP}", false)] // checked once it resolves
+    public void A_gateway_key_must_have_at_least_16_characters(string key, bool refused)
+    {
+        var configuration = new RouterConfiguration();
+        configuration.Middleware.GatewayKeys["laptop"] = key;
+
+        configuration.GetDocumentValidationErrors().Any(e => e.StartsWith("Middleware:GatewayKeys:laptop must be at least 16 characters", StringComparison.Ordinal))
+            .Should().Be(refused);
+    }
+
+    [Fact]
+    public async Task An_address_that_sends_many_wrong_keys_waits_even_with_the_right_one()
+    {
+        HttpClient client = await StartAsync();
+
+        for (int i = 0; i < GatewayKeyThrottle.MaxFailures; i++)
+        {
+            (await client.SendAsync(Chat($"wrong-key-guess-{i:D4}"))).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+
+        HttpResponseMessage throttled = await client.SendAsync(Chat(Key));
+        throttled.StatusCode.Should().Be(HttpStatusCode.TooManyRequests, "a right key is not tried while the address waits, so guessing tells nothing");
+        throttled.Headers.RetryAfter!.Delta.Should().BeGreaterThan(TimeSpan.Zero);
+        (await client.SendAsync(Chat(Key, "198.51.100.9"))).StatusCode.Should().Be(HttpStatusCode.OK, "other addresses are not held up");
+
+        _time.Advance(GatewayKeyThrottle.Window);
+        (await client.SendAsync(Chat(Key))).StatusCode.Should().Be(HttpStatusCode.OK);
     }
 }
 

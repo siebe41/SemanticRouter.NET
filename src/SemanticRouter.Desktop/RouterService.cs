@@ -19,7 +19,19 @@ internal sealed class RouterService(ServicePlatform? platform, HostSettings sett
     /// <summary>Whether the service is installed (by the app, or by <c>semantic-router service install</c>).</summary>
     public bool IsOn => platform?.IsInstalled() == true;
 
+    /// <summary>
+    /// The program the service runs when it is not this app (the <c>semantic-router</c> tool, installed with
+    /// <c>service install</c>); <see langword="null"/> when it is this app, or no service is installed.
+    /// </summary>
+    public string? OtherProgram => platform is not null && platform.IsInstalled() && !platform.Runs(executable) ? platform.InstalledProgram() : null;
+
     public string? Location => platform?.Location;
+
+    /// <summary>The tray's and the Settings window's label for the service, naming the program it runs when that is not this app.</summary>
+    public static string BackgroundLabel(string? otherProgram) =>
+        otherProgram is null
+            ? "Keep the router running in the background"
+            : $"Keep the router running in the background (the service runs {Path.GetFileName(otherProgram)})";
 
     /// <summary>Installs and starts the service, then shows its router. Returns what went wrong, or <see langword="null"/>.</summary>
     public async Task<string?> TurnOnAsync(DesktopRouter router)

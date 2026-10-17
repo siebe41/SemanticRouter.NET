@@ -848,7 +848,7 @@ public static partial class RouterDashboardEndpoints
 
         string file = $"configuration file{(provider.Store is { } store ? $" ({store.Location})" : string.Empty)}";
         return candidate.ProcessSettingChanges(provider.Current.Configuration).Select(name =>
-                $"Connectors:{name}: what a CLI runs (its program, arguments, environment variables and home directory) is changed in the " +
+                $"Connectors:{name}: what a CLI runs (its program, arguments, environment variables, the variables it removes, how it gets the prompt and its home directory) is changed in the " +
                 $"{file}, not over the admin API, which any program on this machine can reach. Presets started from PATH can be added here. " +
                 "To allow it, set SemanticRouter:Dashboard:AllowProcessSettings.")
             .Concat(candidate.MemoryPathChanges(provider.Current.Configuration).Select(name =>
@@ -1149,7 +1149,14 @@ public static partial class RouterDashboardEndpoints
                 (runtime.Classifier as SemanticPromptClassifier)?.IndexStatistics is { } index
                     ? new IndexStatus(index.Utterances, index.Dimensions, Math.Round(index.BuildTime.TotalMilliseconds, 1))
                     : null,
-                (runtime.Classifier as SemanticPromptClassifier)?.CacheStatistics),
+                (runtime.Classifier as SemanticPromptClassifier)?.CacheStatistics)
+            {
+                Unavailable = factories
+                    .Select(f => (Kind: f.Kind.ToString(), Reason: f.Unavailable))
+                    .Where(f => f.Reason is not null)
+                    .DistinctBy(f => f.Kind)
+                    .ToDictionary(f => f.Kind, f => f.Reason!, StringComparer.Ordinal),
+            },
             config.EffectiveTiers.Select(t => new TierStatus(t.Level, t.Name, t.Description)).ToArray(),
             config.Models.Select(m => new ModelStatus(
                 m.Name, m.Connector, m.Model, m.Tier, m.Capabilities.ToArray(), m.IsLocal, m.Enabled, m.Priority, m.ContextWindow,
@@ -1418,7 +1425,11 @@ public static partial class RouterDashboardEndpoints
     /// <summary>Embedding provider in use.</summary>
     public sealed record EmbeddingsStatus(
         string Provider, string? Model, string? Endpoint, int Dimensions, IReadOnlyList<string> Available, IReadOnlyList<EmbeddingModelStatus> Models,
-        IndexStatus? Index, ClassificationCacheStatistics? Cache);
+        IndexStatus? Index, ClassificationCacheStatistics? Cache)
+    {
+        /// <summary>Provider kinds in <see cref="Available"/> that cannot run on this machine, with why (<see cref="IEmbeddingProviderFactory.Unavailable"/>).</summary>
+        public IReadOnlyDictionary<string, string> Unavailable { get; init; } = new Dictionary<string, string>();
+    }
 
     /// <summary>The route index of the running configuration: utterances embedded and how long the warm-up took.</summary>
     public sealed record IndexStatus(int Utterances, int Dimensions, double BuildMilliseconds);

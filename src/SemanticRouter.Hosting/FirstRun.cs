@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using SemanticRouter.AspNetCore;
 
 namespace SemanticRouter.Host;
@@ -18,11 +17,12 @@ internal static class FirstRun
     ];
 
     /// <summary>
-    /// Whether <paramref name="configurationFile"/> still holds the built-in template, as the router or an <c>init</c>
-    /// that found nothing wrote it: no models, no connectors, and every setting the template's, the embeddings included,
-    /// except that they may be the in-process ones such an <c>init</c> picks (so running <c>init</c> again, as it
-    /// suggests, still works). Embeddings someone chose are a change. Compared as configurations, so formatting and
-    /// property order do not matter. A file that cannot be read is not the template.
+    /// Whether <paramref name="configurationFile"/> still holds a built-in template, this release's or an earlier one's
+    /// (<see cref="TemplateMigration"/>), as the router or an <c>init</c> that found nothing wrote it: no models, no
+    /// connectors, and every setting the template's, the embeddings included, except that they may be the in-process
+    /// ones such an <c>init</c> picks (so running <c>init</c> again, as it suggests, still works). Embeddings someone
+    /// chose are a change. Compared as configurations, so formatting, property order and the template stamp do not
+    /// matter. A file that cannot be read is not the template.
     /// </summary>
     /// <param name="configurationFile">The configuration file.</param>
     /// <param name="exactly">Count the embeddings <c>init</c> picks as a change too: the file is the template as the router writes it, so no <c>init</c> ran.</param>
@@ -36,15 +36,7 @@ internal static class FirstRun
                 return false;
             }
 
-            JsonNode? mine = JsonNode.Parse(stored.ToJson());
-            RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
-            if (JsonNode.DeepEquals(mine, JsonNode.Parse(template.ToJson())))
-            {
-                return true;
-            }
-
-            InitCommand.UseInProcessEmbeddings(template);
-            return !exactly && JsonNode.DeepEquals(mine, JsonNode.Parse(template.ToJson()));
+            return TemplateMigration.IsTemplate(stored, exactly ? null : template => InitCommand.UseInProcessEmbeddings(template));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or NotSupportedException)
         {

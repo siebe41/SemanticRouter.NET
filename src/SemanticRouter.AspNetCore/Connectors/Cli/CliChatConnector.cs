@@ -181,6 +181,12 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
                 LogTimedOut(_logger, Name, _options.EffectiveTimeout);
                 return ConnectorResult.Failed(ModelFailureKind.Unavailable, "timed out");
             }
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                // The reply started, then the CLI went quiet for longer than StallTimeout: the process goes, and the
+                // dispatcher ends the reply with an error and cools the model down.
+                throw new TimeoutException("stalled: no output for " + StallGuard.Duration(_options.EffectiveStallTimeout), ex);
+            }
         }
     }
 
@@ -200,6 +206,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             StandardInput = standardInput,
             SetEnvironment = _adapter.EnvironmentFor(_options),
             RemoveEnvironment = _removedEnvironment,
+            SecretValues = _redactor.Values,
         };
     }
 
@@ -225,6 +232,12 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
 
         await foreach (string line in process.ReadOutputLinesAsync(firstOutputTimeout.Token).ConfigureAwait(false))
         {
+            if (committed)
+            {
+                // Once the reply has started, each line buys the CLI another StallTimeout.
+                firstOutputTimeout.CancelAfter(_options.EffectiveStallTimeout);
+            }
+
             if (parser is null)
             {
                 text.Append(line).Append('\n'); // LF on every OS: the reply must not depend on where the router runs
@@ -237,9 +250,9 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             {
                 if (!committed)
                 {
-                    // Committed: from here on the client owns the stream and only the request's own token applies.
+                    // Committed: from here on the client owns the stream, and the CLI may take StallTimeout between lines.
                     committed = true;
-                    firstOutputTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
+                    firstOutputTimeout.CancelAfter(_options.EffectiveStallTimeout);
                 }
 
                 streamed.Append(evt.Text);

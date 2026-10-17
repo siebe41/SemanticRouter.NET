@@ -26,6 +26,9 @@ public sealed class SecretRedactor
             .ToArray();
     }
 
+    /// <summary>The secret values it replaces (long enough to match), for keeping them out of a child process's environment.</summary>
+    internal IReadOnlyList<string> Values => _secrets;
+
     /// <summary>A redactor that changes nothing.</summary>
     public static SecretRedactor None { get; } = new([]);
 

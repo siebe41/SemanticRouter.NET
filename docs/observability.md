@@ -59,6 +59,8 @@ A budget covers one model, every model on one connector, or every request under 
 
 Budgets read the usage ledger. With `UseSqliteState`, spend survives restarts. Otherwise a restart starts the period's count again.
 
+A budget check does not add up the period's usage on every request. The ledger keeps each budget's totals for the period in memory and adds each request to them as it is recorded, so the check costs the same on the last day of the month as on the first. Routers that share one state file read the rows the others added at most every 2 seconds, so they agree on a budget within that time. The Usage page and the digest add up their window in the database.
+
 ## Usage limits that say when they reset
 
 A provider that reports when its limit ends replaces the fixed `QuotaCooldown` (15 minutes). The model cools down until that time, capped at 8 days:
@@ -107,7 +109,7 @@ Failed attempts are marked with error status. HTTP backends receive `traceparent
 | `semantic_router.classification.duration` | s | `reason` |
 | `semantic_router.classification.cache_hits` | {decision} | `reason` (decisions reused from the classification cache, with no embedding call) |
 | `semantic_router.attempts` | {attempt} | `model`, `outcome` |
-| `semantic_router.request.duration` | s | `model`, `connector`, `outcome` (`served`, `failed`) |
+| `semantic_router.request.duration` | s | `model`, `connector`, `outcome` (`served`, `failed`, or `cancelled` when the client went away) |
 | `semantic_router.time_to_first_byte` | s | `model`, `connector` (the serving one; the time counts from routing, so it includes attempts that failed before it) |
 | `semantic_router.attempt.time_to_first_byte` | s | `model`, `connector` (from the start of the serving attempt only) |
 | `semantic_router.tokens` | {token} | `model`, `connector`, `type` (`input`, `output`, `cache_read`, `cache_write`) |

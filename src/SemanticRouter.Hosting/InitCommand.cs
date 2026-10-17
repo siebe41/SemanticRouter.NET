@@ -5,17 +5,18 @@ using SemanticRouter.Embeddings.Onnx;
 namespace SemanticRouter.Host;
 
 /// <summary>
-/// Where <c>init</c> looks for local servers and CLIs, and the machine policy it keeps to (<see cref="MachinePolicy"/>:
-/// a connector type or CLI preset it turns off is not added); replaceable in tests.
+/// Where <c>init</c> looks for local servers and CLIs, the machine policy it keeps to (<see cref="MachinePolicy"/>:
+/// a connector type or CLI preset it turns off is not added), and whether the in-process embeddings can run here
+/// (<see cref="OnnxRuntimeEnvironment.Unavailable"/>, <see langword="null"/> when they can); replaceable in tests.
 /// </summary>
-internal sealed record InitProbes(HttpClient Http, string? SearchPath, bool Windows, MachinePolicy? Policy = null)
+internal sealed record InitProbes(HttpClient Http, string? SearchPath, bool Windows, MachinePolicy? Policy = null, string? OnnxUnavailable = null)
 {
     public static readonly Uri LmStudio = new("http://localhost:1234");
     public static readonly Uri Ollama = new("http://localhost:11434");
 
     /// <exception cref="InvalidDataException">A machine policy is set but cannot be read.</exception>
     public static InitProbes ForThisMachine(HttpClient http) =>
-        new(http, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows(), MachinePolicyLoader.Load());
+        new(http, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows(), MachinePolicyLoader.Load(), OnnxRuntimeEnvironment.Unavailable);
 }
 
 /// <summary>
@@ -147,6 +148,10 @@ internal static class InitCommand
             await File.WriteAllTextAsync(evaluation, RouterHost.EvaluationTemplate(), cancellationToken).ConfigureAwait(false);
             await output.WriteLineAsync($"Wrote {evaluation}").ConfigureAwait(false);
         }
+        else if (TemplateMigration.UpgradeEvaluationSet(evaluation) is { } updated)
+        {
+            await output.WriteLineAsync(updated).ConfigureAwait(false);
+        }
 
         if (document.Models.Count > 0)
         {
@@ -268,6 +273,12 @@ internal static class InitCommand
             document.DefaultSimilarityThreshold = embeddingModel.Contains("mxbai", StringComparison.OrdinalIgnoreCase) ? 0.68f : 0.62f;
             notes.Add($"embeddings: '{embeddingModel}' on {embeddingEndpoint}, to recognise what each prompt asks for.");
         }
+        else if (probes.OnnxUnavailable is { } unavailable)
+        {
+            // The template's Hashing stays: an Onnx model that cannot load would leave every prompt unclassified.
+            notes.Add($"embeddings: no embedding server found, so prompts are matched by shared words (Hashing). {unavailable} " +
+                      "Then run `semantic-router init --force` again, or choose it on the dashboard under Providers → Embeddings.");
+        }
         else
         {
             OnnxModelInfo model = UseInProcessEmbeddings(document);
@@ -307,7 +318,8 @@ internal static class InitCommand
             }
             else if (lookup.ScriptPath is not null)
             {
-                notes.Add($"{executable}: only a script wrapper was found ({lookup.ScriptPath}); install the native {executable}.exe to use it.");
+                notes.Add($"{executable}: only a script wrapper was found ({lookup.ScriptPath}); install the native {executable}.exe to use it" +
+                          (CliExecutableLocator.NativeWindowsInstall(executable) is { } install ? $" ({install})." : "."));
                 explained.Add(executable);
             }
         }

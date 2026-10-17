@@ -102,7 +102,7 @@ internal sealed partial class PromptRoutingMiddleware
             {
                 LogGatewayKeyMissing(_logger, context.Connection.RemoteIpAddress?.ToString() ?? "unknown", context.Request.Path);
             }
-            else
+            else if (!gateway.Throttled)
             {
                 LogGatewayRequestRefused(_logger, context.Request.Path, gateway.Detail!);
             }
@@ -278,12 +278,18 @@ internal sealed partial class PromptRoutingMiddleware
             ? _affinity?.Lookup(chat.AnsweredToolUseIds)
             : null;
 
-        // A prompt the same client repeats soon after it was answered: feedback on that answer, and one tier up when
-        // retry escalation is on.
+        // A prompt the same client repeats in the same conversation soon after it was answered, before the conversation
+        // moved on: one tier up when retry escalation is on, and feedback on that answer. Feedback only the first time:
+        // a prompt sent again and again is a script or a monitor, not a verdict on the model. The same prompt in another
+        // conversation is not a retry, nor is a short follow-up ("yes", "continue"), which is said again for its own sake.
         RetryEscalationOptions retry = options.RetryEscalation;
         int highestTier = runtime.Router.Models.Where(m => m.Enabled).Select(m => m.Tier).DefaultIfEmpty(0).Max();
-        bool retryable = (retry.Enabled || feedback) && _retries is not null && requestedModel is null && !chat.IsToolResultContinuation && clientTurn is null;
-        DecisionRecord? retried = retryable ? _retries!.Previous(retryClient, prompt, retry.Window) : null;
+        bool retryable = (retry.Enabled || feedback) && _retries is not null && requestedModel is null && !chat.IsToolResultContinuation && clientTurn is null
+            && (firstTurn || !ConversationTracker.IsFollowUp(prompt, conversation));
+        string? retryScope = retryable ? conversationKey ?? ConversationTracker.Identify(retryClient, chat, SessionId(context.Request, conversation)) : null;
+        RetryMatch? repeated = retryable ? _retries!.Previous(retryClient, prompt, retry.Window, retryScope) : null;
+        DecisionRecord? lastTurn = repeated is not null && conversationKey is not null ? _conversations!.Last(conversationKey, conversation) : null;
+        DecisionRecord? retried = repeated is not null && (lastTurn is null || lastTurn.EntryId == repeated.Decision.EntryId) ? repeated.Decision : null;
         int? minimumTier = retry.Enabled && retried is not null && retried.Tier < highestTier ? retried.Tier + 1 : null;
 
         // Route by the conversation: keep the tier recent turns needed and the model that answered them. Not for
@@ -397,7 +403,7 @@ internal sealed partial class PromptRoutingMiddleware
 
         if (feedback)
         {
-            RecordFeedback(runtime, entry, client, chat, prompt, conversationKey, previousTurn, retried, callout, classifiedTurn, highestTier);
+            RecordFeedback(runtime, entry, client, chat, prompt, conversationKey, previousTurn, repeated is { Repeat: false } ? retried : null, callout, classifiedTurn, highestTier);
         }
 
         routeSpan?.SetTag("semantic_router.request_id", entry.Id);
@@ -455,7 +461,8 @@ internal sealed partial class PromptRoutingMiddleware
         if (retryable && answeredBy is not null
             && runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, answeredBy, StringComparison.OrdinalIgnoreCase)) is { } answering)
         {
-            _retries!.Answered(retryClient, prompt, new DecisionRecord(entry.Id, answering.Tier, result.RouteName, answeredBy, automatic), retry.Window);
+            _retries!.Answered(
+                retryClient, prompt, new DecisionRecord(entry.Id, answering.Tier, result.RouteName, answeredBy, automatic), retry.Window, retryScope, repeat: retried is not null);
         }
 
         if (conversationKey is not null && answeredBy is not null && !chat.IsToolResultContinuation)
@@ -705,6 +712,11 @@ internal sealed partial class PromptRoutingMiddleware
     /// The name of the gateway key the client presented, or <see langword="null"/>. Keys are compared in constant time
     /// and are only read for this comparison: they are never logged or forwarded.
     /// </summary>
+    /// <summary>Whether the request carries something that could be a gateway key (a bearer token or <c>x-api-key</c>).</summary>
+    internal static bool PresentsKey(HttpRequest request) =>
+        request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+        || !string.IsNullOrEmpty(request.Headers["x-api-key"]);
+
     internal static string? IdentifyClient(HttpRequest request, IReadOnlyDictionary<string, string> keys)
     {
         string? bearer = request.Headers.Authorization;

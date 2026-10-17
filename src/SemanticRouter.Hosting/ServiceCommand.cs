@@ -269,15 +269,17 @@ internal sealed record ServiceDefinition
         Environment = Carried(environment),
     };
 
+    /// <summary>
+    /// The <see cref="CarriedVariables"/> that are set, and <c>ORT_DISABLE_TELEMETRY=1</c> unless the shell sets it: the
+    /// service starts with ONNX Runtime's telemetry off, as the router also arranges itself (docs/network.md).
+    /// </summary>
     private static Dictionary<string, string> Carried(Func<string, string?> environment)
     {
         Dictionary<string, string> carried = CarriedVariables
             .Select(name => (name, value: environment(name)))
             .Where(v => !string.IsNullOrEmpty(v.value))
             .ToDictionary(v => v.name, v => v.value!, StringComparer.Ordinal);
-
-        // ONNX Runtime's telemetry stays off from the start, before the router turns it off itself (docs/network.md).
-        carried[OnnxRuntimeTelemetry.Variable] = environment(OnnxRuntimeTelemetry.Variable) is { Length: > 0 } set ? set : "1";
+        carried[OnnxRuntimeEnvironment.TelemetryVariable] = environment(OnnxRuntimeEnvironment.TelemetryVariable) is { Length: > 0 } set ? set : "1";
         return carried;
     }
 }
@@ -324,6 +326,33 @@ internal abstract class ServicePlatform
 
     public abstract bool IsInstalled();
 
+    /// <summary>
+    /// The program the installed definition starts: the <c>semantic-router</c> tool, or the desktop app, which install
+    /// the same service. <see langword="null"/> when nothing is installed or the definition cannot be read.
+    /// </summary>
+    public virtual string? InstalledProgram() => null;
+
+    /// <summary>
+    /// Whether the installed definition starts <paramref name="program"/>; also when it cannot be read, so the service is
+    /// treated as it was before this was checked.
+    /// </summary>
+    public bool Runs(string program) =>
+        InstalledProgram() is not { } installed || string.Equals(
+            Path.GetFullPath(installed), Path.GetFullPath(program), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Reads the definition file at <paramref name="location"/> with <paramref name="program"/>; <see langword="null"/> when it cannot.</summary>
+    protected static string? ReadInstalled(string location, Func<string, string?> program)
+    {
+        try
+        {
+            return File.Exists(location) ? program(File.ReadAllText(location)) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>The definition as it is written to <see cref="Location"/>.</summary>
     public abstract string Render(ServiceDefinition definition);
 
@@ -355,7 +384,7 @@ internal abstract class ServicePlatform
     {
         if (OperatingSystem.IsWindows())
         {
-            return new WindowsSignInService(settings.ConfigurationDirectory);
+            return new WindowsSignInService(settings.ConfigurationDirectory, localDataDirectory: settings.LocalDataDirectory);
         }
 
         string home = System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile);

@@ -38,6 +38,37 @@ internal sealed class SystemdUserService(string unitDirectory, ProcessRunner run
 
     public override bool IsInstalled() => File.Exists(Location);
 
+    public override string? InstalledProgram() => ReadInstalled(Location, ProgramOfUnit);
+
+    /// <summary>The program of a unit's <c>ExecStart</c>, as <see cref="Render"/> quotes it (or unquoted).</summary>
+    internal static string? ProgramOfUnit(string unit)
+    {
+        string? line = unit.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.StartsWith("ExecStart=", StringComparison.Ordinal));
+        if (line is null || line["ExecStart=".Length..].TrimStart() is not { Length: > 0 } command)
+        {
+            return null;
+        }
+
+        if (command[0] != '"')
+        {
+            return command.Split(' ', 2)[0];
+        }
+
+        var program = new StringBuilder();
+        for (int i = 1; i < command.Length; i++)
+        {
+            char c = command[i];
+            if (c == '"')
+            {
+                return program.Replace("%%", "%").Replace("$$", "$").ToString();
+            }
+
+            program.Append(c == '\\' && i + 1 < command.Length ? command[++i] : c);
+        }
+
+        return null;
+    }
+
     public override string Render(ServiceDefinition definition)
     {
         var unit = new StringBuilder()
@@ -183,6 +214,26 @@ internal sealed class LaunchAgentService(string agentsDirectory, string logDirec
     ];
 
     public override bool IsInstalled() => File.Exists(Location);
+
+    public override string? InstalledProgram() => ReadInstalled(Location, ProgramOfPlist);
+
+    /// <summary>The first of a property list's <c>ProgramArguments</c>.</summary>
+    internal static string? ProgramOfPlist(string plist)
+    {
+        try
+        {
+            using var reader = System.Xml.XmlReader.Create(new StringReader(plist), new System.Xml.XmlReaderSettings { DtdProcessing = System.Xml.DtdProcessing.Ignore, XmlResolver = null });
+            System.Xml.Linq.XElement? dict = System.Xml.Linq.XDocument.Load(reader).Root?.Element("dict");
+            System.Xml.Linq.XElement? key = dict?.Elements("key").FirstOrDefault(k => k.Value == "ProgramArguments");
+            return key?.ElementsAfterSelf().FirstOrDefault() is { Name.LocalName: "array" } array && array.Elements("string").FirstOrDefault()?.Value is { Length: > 0 } program
+                ? program
+                : null;
+        }
+        catch (System.Xml.XmlException)
+        {
+            return null;
+        }
+    }
 
     public override string Render(ServiceDefinition definition)
     {
@@ -369,12 +420,18 @@ internal sealed class WindowsSignInService : ServicePlatform
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     private readonly string _configurationDirectory;
+    private readonly string _logDirectory;
     private readonly string _runKey;
     private readonly string _valueName;
 
-    public WindowsSignInService(string configurationDirectory, string runKey = DefaultRunKey, string valueName = DefaultValueName)
+    /// <param name="configurationDirectory">Where <see cref="DefinitionFileName"/> is kept.</param>
+    /// <param name="runKey">The registry key of the sign-in entry.</param>
+    /// <param name="valueName">The sign-in entry's value name.</param>
+    /// <param name="localDataDirectory">Where the router logs (<see cref="HostSettings.LocalDataDirectory"/>); the configuration directory by default.</param>
+    public WindowsSignInService(string configurationDirectory, string runKey = DefaultRunKey, string valueName = DefaultValueName, string? localDataDirectory = null)
     {
         _configurationDirectory = configurationDirectory;
+        _logDirectory = localDataDirectory ?? configurationDirectory;
         _runKey = runKey;
         _valueName = valueName;
     }
@@ -385,7 +442,7 @@ internal sealed class WindowsSignInService : ServicePlatform
 
     public string DefinitionFile => Path.Combine(_configurationDirectory, DefinitionFileName);
 
-    public override string LogHint => $"Get-Content -Wait \"{RouterLog.FileIn(_configurationDirectory)}\"";
+    public override string LogHint => $"Get-Content -Wait \"{RouterLog.FileIn(_logDirectory)}\"";
 
     public override string EnvironmentAdvice =>
         "The router started at sign-in sees your user environment variables (set with `setx` or in System Properties), not ones set only in a PowerShell session or profile.";
@@ -397,6 +454,8 @@ internal sealed class WindowsSignInService : ServicePlatform
     ];
 
     public override bool IsInstalled() => OperatingSystem.IsWindows() && ReadValue() is not null;
+
+    public override string? InstalledProgram() => ReadValue() is { } command ? WindowsCommandLine.First(command) : null;
 
     public override string Render(ServiceDefinition definition) =>
         $"""
@@ -585,6 +644,22 @@ internal sealed class WindowsSignInService : ServicePlatform
 internal static class WindowsCommandLine
 {
     public static string Join(IEnumerable<string> arguments) => string.Join(' ', arguments.Select(Quote));
+
+    /// <summary>
+    /// The program of a command line, read as Windows reads it: up to the closing quote when it starts with one (a
+    /// program path holds no quotes), otherwise up to the first space or tab.
+    /// </summary>
+    public static string? First(string commandLine)
+    {
+        string line = commandLine.TrimStart();
+        if (line.StartsWith('"'))
+        {
+            int end = line.IndexOf('"', 1);
+            return end > 1 ? line[1..end] : null;
+        }
+
+        return line.Split([' ', '\t'], 2)[0] is { Length: > 0 } program ? program : null;
+    }
 
     public static string Quote(string argument)
     {

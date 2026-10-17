@@ -10,11 +10,15 @@ set -euo pipefail
 source="$1"
 feed="$(cd "$2" && pwd)"
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+policy=/etc/semantic-router/policy.json
+trap 'rm -rf "$work"; sudo rm -f "$policy"' EXIT
 app="$work/SemanticRouter.AppImage"
 config="$work/config"
 cp "$source" "$app"
 chmod +x "$app"
+# A release build takes SEMANTICROUTER_UPDATE_SOURCE only when the machine policy allows a custom feed.
+sudo mkdir -p "$(dirname "$policy")"
+echo '{ "Updates": { "AllowCustomFeed": true } }' | sudo tee "$policy" >/dev/null
 export APPIMAGE_EXTRACT_AND_RUN=1 SEMANTICROUTER_UPDATE_SOURCE="$feed"
 
 run() { "$app" "$@" --config-dir "$config" 2>&1 | grep -v '^\[' || true; }

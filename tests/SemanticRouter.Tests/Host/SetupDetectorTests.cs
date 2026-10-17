@@ -16,8 +16,34 @@ public sealed class SetupDetectorTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         Directory.Delete(_directory, recursive: true);
+    }
+
+    [Fact]
+    public async Task On_windows_a_cli_installed_only_as_an_npm_shim_is_shown_with_what_to_do()
+    {
+        // npm's global install on Windows: codex.cmd and copilot.ps1, no .exe; claude.exe from the native installer.
+        string bin = Directory.CreateDirectory(Path.Combine(_directory, "npm")).FullName;
+        File.WriteAllText(Path.Combine(bin, "codex.cmd"), string.Empty);
+        File.WriteAllText(Path.Combine(bin, "copilot.ps1"), string.Empty);
+        File.WriteAllText(Path.Combine(bin, "claude.exe"), string.Empty);
+        var runner = new FakeCliProcessRunner(_ => new FakeCliProcess(["1.0.0"]));
+        using ServiceProvider services = new ServiceCollection().AddSingleton<ICliProcessRunner>(runner).BuildServiceProvider();
+        var probes = new InitProbes(new HttpClient(StubHttpMessageHandler.Throws()), bin, Windows: true);
+
+        IReadOnlyList<SetupDetection> found = await SetupDetector.DetectAsync(services, probes, CancellationToken.None);
+
+        found.Single(d => d.Id == "claude-code").Problem.Should().BeNull();
+        SetupDetection codex = found.Single(d => d.Id == "codex");
+        codex.Detail.Should().Be($"Found {Path.Combine(bin, "codex.cmd")}");
+        codex.Problem.Should().Contain("only a script wrapper was found").And.Contain("https://github.com/openai/codex/releases")
+            .And.Contain("SemanticRouter:Connectors:codex-cli:Executable");
+        codex.Models.Should().BeEmpty("it cannot be enabled as it is");
+        found.Single(d => d.Id == "copilot-cli").Problem.Should().Contain("winget install GitHub.Copilot");
+
+        var blocked = probes with { Policy = MachinePolicy.FromJson("""{ "DisabledPresets": [ "Codex" ] }""") };
+        (await SetupDetector.DetectAsync(services, blocked, CancellationToken.None)).Should().NotContain(d => d.Id == "codex", "the policy turns it off anyway");
     }
 
     [Fact]

@@ -14,9 +14,11 @@ namespace SemanticRouter.Desktop;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>SEMANTICROUTER_UPDATE_SOURCE</c> points the updater at another feed (a URL or a folder of packages), for testing.
-/// The machine policy (<see cref="MachinePolicy.Updates"/>) can turn updates off or pin them to an internal feed; the
-/// user's preference and the variable cannot override it. A feed over plain HTTP (other than to this machine) is refused.
+/// <c>SEMANTICROUTER_UPDATE_SOURCE</c> points the updater at another feed (a URL or a folder of packages), for testing:
+/// in a debug build, or when the machine policy allows it (<see cref="UpdatePolicy.AllowCustomFeed"/>). The machine
+/// policy (<see cref="MachinePolicy.Updates"/>) can turn updates off or pin them to an internal feed; the user's
+/// preference and the variable cannot override it. A feed that is not HTTPS or a folder (other than plain HTTP to this
+/// machine) is refused.
 /// </para>
 /// <para>
 /// Notify (the policy's <see cref="UpdateApply.Notify"/>, or the user's preference): an update is only announced, and
@@ -32,7 +34,8 @@ internal sealed class DesktopUpdater(
     IReadOnlyList<string>? hostArguments = null,
     UpdateApply apply = UpdateApply.Default,
     UpdatePublisher? publisher = null,
-    string? off = null)
+    string? off = null,
+    string? executable = null)
 {
     /// <summary>The argument the updated app is started with to start the service again, then carry on as usual.</summary>
     public const string ResumeService = "--resume-service";
@@ -55,14 +58,20 @@ internal sealed class DesktopUpdater(
         {
             // An administrator set a policy that cannot be read: do not update past it.
             log.WriteLine($"Updates are off: {ex.Message}");
-            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings), off: "your organization's policy cannot be read");
+            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings), off: "your organization's policy cannot be read", executable: Installation.Executable(environment));
         }
 
-        (string? feed, string? off) = Feed(policy, environment);
+        bool variable = SourceVariableAllowed(policy);
+        if (!variable && policy.Mode != UpdateMode.Feed && environment(SourceVariable) is { Length: > 0 })
+        {
+            log.WriteLine($"{SourceVariable} is ignored: a release build takes it only when your organization's policy sets Updates:AllowCustomFeed.");
+        }
+
+        (string? feed, string? off) = Feed(policy, environment, variable);
         if (off is not null)
         {
             log.WriteLine($"Updates are off: {off}.");
-            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings), off: off);
+            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings), off: off, executable: Installation.Executable(environment));
         }
 
         UpdateManager? manager = null;
@@ -90,24 +99,49 @@ internal sealed class DesktopUpdater(
             HostArgumentsOf(settings),
             policy.Apply,
             UpdatePublisher.ForThisMachine(policy.Publisher),
-            broken);
+            broken,
+            Installation.Executable(environment));
     }
 
+    /// <summary>The environment variable that points the updater at another feed, for testing.</summary>
+    internal const string SourceVariable = "SEMANTICROUTER_UPDATE_SOURCE";
+
     /// <summary>
-    /// Where updates come from: the policy's feed, else <c>SEMANTICROUTER_UPDATE_SOURCE</c>, else GitHub Releases
-    /// (<see langword="null"/>); or why there are none.
+    /// Whether <see cref="SourceVariable"/> counts: in a debug build, or when the machine policy allows a custom feed
+    /// (<see cref="UpdatePolicy.AllowCustomFeed"/>). A release build otherwise ignores it, so whatever can set the user's
+    /// environment cannot quietly move the installed app onto another feed.
     /// </summary>
-    internal static (string? Feed, string? Off) Feed(UpdatePolicy policy, Func<string, string?> environment)
+    internal static bool SourceVariableAllowed(UpdatePolicy policy) => DebugBuild || policy.AllowCustomFeed;
+
+#if DEBUG
+    internal const bool DebugBuild = true;
+#else
+    internal const bool DebugBuild = false;
+#endif
+
+    /// <summary>
+    /// Where updates come from: the policy's feed, else <see cref="SourceVariable"/> when <paramref name="variable"/>
+    /// says it counts, else GitHub Releases (<see langword="null"/>); or why there are none. A feed must be HTTPS, a
+    /// folder (a local or network path) or plain HTTP to this machine.
+    /// </summary>
+    internal static (string? Feed, string? Off) Feed(UpdatePolicy policy, Func<string, string?> environment, bool variable)
     {
         if (policy.Mode == UpdateMode.Off)
         {
             return (null, "turned off by your organization's policy");
         }
 
-        string? feed = policy.Mode == UpdateMode.Feed ? policy.Feed : environment("SEMANTICROUTER_UPDATE_SOURCE") is { Length: > 0 } source ? source : null;
-        return feed is not null && Uri.TryCreate(feed, UriKind.Absolute, out Uri? address) && address.Scheme == Uri.UriSchemeHttp && !address.IsLoopback
-            ? (null, $"the update feed {address.Authority} is not HTTPS")
-            : (feed, null);
+        string? feed = policy.Mode == UpdateMode.Feed ? policy.Feed
+            : variable && environment(SourceVariable) is { Length: > 0 } source ? source
+            : null;
+        return feed is not null && Refuses(feed) is { } refused ? (null, refused) : (feed, null);
+
+        // A string that is not an absolute URI is a relative folder path, which Velopack reads as a folder.
+        static string? Refuses(string feed) =>
+            !Uri.TryCreate(feed, UriKind.Absolute, out Uri? address) || address.IsFile || address.Scheme == Uri.UriSchemeHttps ? null
+            : address.Scheme == Uri.UriSchemeHttp && address.IsLoopback ? null
+            : address.Scheme == Uri.UriSchemeHttp ? $"the update feed {address.Authority} is not HTTPS"
+            : $"the update feed is a {address.Scheme}: address, not HTTPS or a folder";
     }
 
     /// <summary>
@@ -283,7 +317,9 @@ internal sealed class DesktopUpdater(
     /// <summary>
     /// Hands the waiting update to the updater, which applies it once this process exits. The background service is
     /// stopped first; after the update it starts again: the app restarts with <see cref="ResumeService"/> when
-    /// <paramref name="restartApp"/>, otherwise the new version reinstalls and starts the service on its own.
+    /// <paramref name="restartApp"/>, otherwise the new version reinstalls and starts the service on its own. A service
+    /// that runs another program (the <c>semantic-router</c> tool, installed with <c>service install</c>) is not this
+    /// app's to stop or reinstall: the update does not replace that program, so it is left running as it is.
     /// Returns <see langword="false"/> when there was nothing to apply, or it was refused.
     /// </summary>
     private async Task<bool> ApplyAsync(bool restartApp)
@@ -295,6 +331,12 @@ internal sealed class DesktopUpdater(
         }
 
         bool serviceOn = platform?.IsInstalled() == true;
+        if (serviceOn && executable is not null && !platform!.Runs(executable))
+        {
+            log.WriteLine($"{Now} The background service runs {platform.InstalledProgram()}, not this app: the update leaves it as it is.");
+            serviceOn = false;
+        }
+
         if (serviceOn)
         {
             ServiceOutcome stopped = await platform!.StopAsync().ConfigureAwait(false);

@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Host;
+using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.Host;
 
@@ -20,7 +21,7 @@ public sealed class LifecycleTests : IDisposable
     {
         for (int attempt = 1; ; attempt++)
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            SqliteFiles.Release(_directory);
             try
             {
                 Directory.Delete(_directory, recursive: true);

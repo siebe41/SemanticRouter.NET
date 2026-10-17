@@ -437,11 +437,21 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         }
     }
 
-    /// <summary>Records the start-up document unless the history already ends with it (a plain restart).</summary>
+    /// <summary>
+    /// Records the start-up document unless the history already ends with it (a plain restart). When the host changed the
+    /// stored document before this start (<see cref="StartupConfigurationNote"/>), it is recorded as that change, so the
+    /// history shows what changed and the version before it stays the one to roll back to.
+    /// </summary>
     private void RecordStartup(RouterConfiguration document, RouterConfigurationSource source)
     {
         if (_history is null)
         {
+            return;
+        }
+
+        if (source == RouterConfigurationSource.Store && _services.GetService<StartupConfigurationNote>() is { } changed)
+        {
+            Record(document, changed.Source, null, changed.Note);
             return;
         }
 
@@ -522,6 +532,12 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         _services.GetService<IStateRetention>()?.Apply(configuration.State.Retention);
 
         var warnings = new List<string>(enforced);
+        if (_services.GetService<IStateStorageHealth>()?.Problem is { } state)
+        {
+            // Budgets that count from zero and an audit log kept in memory must not go unnoticed: listed on every apply.
+            warnings.Add(state);
+        }
+
         if (configuration.Middleware.Mode == PromptRouterMode.Dispatch && !configuration.Models.Any(m => m.Enabled))
         {
             // Allowed so a fresh install can start and be set up from the dashboard; until then every request is refused.
@@ -553,6 +569,14 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         }
 
         RouterConfiguration resolved = configuration.ResolveSecrets(_secrets, warnings);
+        foreach ((string client, string key) in resolved.Middleware.GatewayKeys
+            .Where(k => k.Value.Length is > 0 && k.Value.Length < Microsoft.AspNetCore.Builder.RouterDashboardOptions.MinimumTokenLength))
+        {
+            warnings.Add(
+                $"Gateway key '{client}' is shorter than {Microsoft.AspNetCore.Builder.RouterDashboardOptions.MinimumTokenLength} characters, so it can be guessed: " +
+                "set its variable or secret to a longer one (try `openssl rand -hex 24`).");
+        }
+
         foreach ((string name, string reason) in Policy.BlockedWebhooks(resolved.Notifications).ToArray())
         {
             // A webhook address held as a secret is only known once resolved.
