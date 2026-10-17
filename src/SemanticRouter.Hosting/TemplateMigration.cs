@@ -48,9 +48,12 @@ internal static class TemplateMigration
 
     /// <summary>
     /// The template a document started from: its <see cref="RouterConfiguration.TemplateVersion"/>, or, for a document
-    /// written before templates were numbered (0.5.0 and older), the template it differs from least, the newer one on a tie.
+    /// written before templates were numbered (0.5.0 and older), the template it differs from least, the newer one on a
+    /// tie. <see langword="null"/> for an unstamped document that did not come from a template: one that keeps fewer than
+    /// half of that template's routes was written by hand (or from an application's own settings), and a template's new
+    /// routes and aliases are not for it.
     /// </summary>
-    public static int Origin(RouterConfiguration document)
+    public static int? Origin(RouterConfiguration document)
     {
         ArgumentNullException.ThrowIfNull(document);
         if (document.TemplateVersion is int version)
@@ -59,17 +62,20 @@ internal static class TemplateMigration
         }
 
         JsonObject mine = Normalize(document);
-        return Enumerable.Range(1, Current)
+        int closest = Enumerable.Range(1, Current)
             .Select(v => (Version: v, Distance: Distance(mine, Normalize(Template(v)))))
             .OrderBy(c => c.Distance)
             .ThenByDescending(c => c.Version)
             .First().Version;
+        string[] routes = [.. RouterConfiguration.FromJson(Template(closest)).Routes.Select(r => r.Name)];
+        int kept = routes.Count(name => document.Routes.Any(r => string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase)));
+        return kept * 2 >= routes.Length ? closest : null;
     }
 
     /// <summary>
     /// The document brought up to the current template, or <see langword="null"/> when it is stamped with the current
-    /// template already, or with a newer one (written by a newer release: it is left alone). An unstamped document that
-    /// needs no change still gets the stamp.
+    /// template already, or with a newer one (written by a newer release: it is left alone), or did not come from a
+    /// template at all (<see cref="Origin"/>). An unstamped document that needs no change still gets the stamp.
     /// </summary>
     public static TemplateUpgrade? Upgrade(RouterConfiguration document)
     {
@@ -79,7 +85,12 @@ internal static class TemplateMigration
             return null;
         }
 
-        int from = Math.Clamp(Origin(document), 1, Current);
+        if (Origin(document) is not int origin)
+        {
+            return null;
+        }
+
+        int from = Math.Clamp(origin, 1, Current);
         JsonObject mine = Normalize(document);
         var changes = new List<string>();
         var kept = new List<string>();
