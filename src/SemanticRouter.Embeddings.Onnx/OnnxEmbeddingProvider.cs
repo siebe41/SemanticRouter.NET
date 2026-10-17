@@ -21,6 +21,9 @@ public sealed class OnnxEmbeddingProvider : IEmbeddingProvider, IDisposable
     private readonly bool _hasTokenTypes;
     private readonly string _output;
 
+    // Before the first use of ONNX Runtime, which reads it once.
+    static OnnxEmbeddingProvider() => OnnxRuntimeTelemetry.TurnOff();
+
     /// <summary>Loads a model.</summary>
     /// <param name="modelFile">The ONNX file (inputs <c>input_ids</c>, <c>attention_mask</c>, optionally <c>token_type_ids</c>; output the token vectors).</param>
     /// <param name="vocabFile">The model's <c>vocab.txt</c> (uncased WordPiece).</param>
@@ -37,6 +40,8 @@ public sealed class OnnxEmbeddingProvider : IEmbeddingProvider, IDisposable
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             IntraOpNumThreads = Math.Clamp(Environment.ProcessorCount / 2, 1, 4),
         };
+        // Windows: its ETW telemetry events (the variable covers the uploads on Linux and macOS).
+        OrtEnv.Instance().DisableTelemetryEvents();
         _session = new InferenceSession(modelFile, options);
         _tokenizer = BertTokenizer.Create(vocabFile, new BertOptions { LowerCaseBeforeTokenization = true, RemoveNonSpacingMarks = true });
         _pooling = pooling;

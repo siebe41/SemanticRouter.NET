@@ -1,6 +1,6 @@
 # Network traffic
 
-What the router contacts, when, and how to turn it off. The router has no telemetry, crash reporting or analytics. Every outbound connection is one of the destinations below, and most of them only exist because you configured them.
+What the router contacts, when, and how to turn it off. The router has no telemetry, crash reporting or analytics, and it turns off the telemetry of ONNX Runtime, which runs the in-process embeddings (see [ONNX Runtime telemetry](#onnx-runtime-telemetry)). Every outbound connection is one of the destinations below, and most of them only exist because you configured them.
 
 ## Destinations
 
@@ -20,6 +20,21 @@ Nothing else is contacted:
 - **The dashboard** loads its scripts, styles and fonts from the router itself and sends `Content-Security-Policy: default-src 'self'; …`, so the browser refuses requests to any other host. The link to the project on GitHub is only followed when you click it.
 - **The desktop app** shows the dashboard from the router it runs, and reads the weekly digest from it for the tray.
 - **Building from source** sends no Avalonia build telemetry: `Directory.Build.targets` replaces its telemetry target. The .NET SDK has its own; set `DOTNET_CLI_TELEMETRY_OPTOUT=1` to turn it off (see [Contributing](../CONTRIBUTING.md)).
+
+## ONNX Runtime telemetry
+
+ONNX Runtime, the library that runs the in-process embeddings (`Embeddings:Provider: Onnx`, what `init` sets up when it finds no embedding server), has telemetry of its own:
+
+- **Linux and macOS:** about 10 seconds after its first model loads, it sends usage events to `mobile.events.data.microsoft.com` and keeps a device id and an event queue in `~/.cache/Microsoft/DeveloperTools/.onnxruntime/`. Offline mode does not stop it: the library makes the connection itself.
+- **Windows:** it writes events to Event Tracing for Windows (ETW), which leave the machine only if Windows' own diagnostic data collects them.
+
+The router turns this off. Before ONNX Runtime first loads, it sets `ORT_DISABLE_TELEMETRY=1` in the process's native environment, which is what the library reads, and on Windows it also disables the library's ETW events. The container image, and the background service that `semantic-router service install` writes, also set `ORT_DISABLE_TELEMETRY=1` in the environment the router starts with. `semantic-router doctor` says so with the embeddings:
+
+```
+[ OK ] egress: ONNX Runtime telemetry: off (ORT_DISABLE_TELEMETRY=1), so the in-process embeddings contact no Microsoft host and keep no device id.
+```
+
+An `ORT_DISABLE_TELEMETRY` already in the environment the router starts with is left as it is; with any value other than `1`, `doctor` warns that the telemetry is on. A CI test runs the router with the in-process embeddings behind a recording proxy and fails if it connects anywhere or writes the device id.
 
 ## Proxies and certificates
 
@@ -58,6 +73,7 @@ For an air-gapped or locked-down network, `SemanticRouter:Network:Offline` makes
 - **Connectors, the embeddings endpoint and webhooks** reach only this machine (loopback) and `AllowedHosts` (host names, `*.domain` or IP addresses, each with an optional `:port`). Models on any other connector are turned off at start-up and listed with the warnings on the dashboard; turning one back on, on the dashboard or through the admin API, is refused. Remote embeddings fall back to the in-process hashing provider; a webhook elsewhere is not used.
 - **CLI and Copilot connectors are off.** They always reach their vendor over the internet, whatever the router does.
 - **Prices are not looked up** (the dashboard's Look up prices, and the prices Discover models fills in from OpenRouter's list), unless `openrouter.ai` is in `AllowedHosts`.
+- **ONNX Runtime's telemetry is off**, as it is outside offline mode (see [above](#onnx-runtime-telemetry)).
 - **The ONNX embedding model is never downloaded.** If it is not on disk, classification fails with a message naming the file, where to put it and its SHA-256: download it on another machine (`semantic-router doctor` prints the URLs' host and the folder) or set `Embeddings:ModelPath` to a folder with `model.onnx` and `vocab.txt`.
 - `semantic-router doctor` shows what is still contacted, and what is never contacted and why.
 
@@ -81,6 +97,7 @@ For an egress allowlist, list:
 [ OK ] egress: connector openai: api.openai.com.
 [ OK ] egress: connector claude: CLI: claude, which contacts Anthropic.
 [ OK ] egress: embeddings: huggingface.co and its CDN (*.hf.co), once, to download ONNX model all-MiniLM-L6-v2 into /data/models/all-MiniLM-L6-v2 (copy it there to skip the download).
+[ OK ] egress: ONNX Runtime telemetry: off (ORT_DISABLE_TELEMETRY=1), so the in-process embeddings contact no Microsoft host and keep no device id.
 [ OK ] egress: webhook ops: hooks.slack.com.
 [ OK ] egress: price list: openrouter.ai, only when the dashboard looks up cloud models' prices (Look up prices, Discover models); nothing but the request for the list is sent.
 [ OK ] egress: desktop app updates: api.github.com, github.com, release-assets.githubusercontent.com and objects.githubusercontent.com (only the installed desktop app; untick Check for updates automatically in its tray menu to turn this off).

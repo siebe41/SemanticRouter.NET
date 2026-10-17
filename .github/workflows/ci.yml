@@ -280,6 +280,11 @@ jobs:
       - name: Build the image
         run: docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router:ci .
 
+      # The router turns ONNX Runtime's telemetry off itself (the tool's test checks that with a recording proxy); the
+      # image also starts it with the variable set.
+      - name: ONNX Runtime telemetry is off
+        run: docker image inspect semantic-router:ci --format '{{json .Config.Env}}' | grep -q '"ORT_DISABLE_TELEMETRY=1"'
+
       - name: Smoke test
         run: |
           status() { curl -s -o /dev/null -w '%{http_code}' "$@"; }

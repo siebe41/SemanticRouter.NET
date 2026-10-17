@@ -438,6 +438,7 @@ public sealed class HostTests : IDisposable
         report.Should().Contain($"[ OK ] egress: connector codex: CLI: {FakeCli}, which contacts OpenAI.");
         report.Should().Contain("[ OK ] egress: connector copilot: CLI: copilot (the Copilot SDK's runtime), which contacts GitHub (no enabled model uses it yet).");
         report.Should().Contain("[ OK ] egress: embeddings: huggingface.co and its CDN (*.hf.co), once, to download ONNX model all-MiniLM-L6-v2 into " + models);
+        report.Should().Contain("[ OK ] egress: ONNX Runtime telemetry: off (ORT_DISABLE_TELEMETRY=1), so the in-process embeddings contact no Microsoft host and keep no device id.");
         report.Should().Contain("[ OK ] egress: webhook ops: hooks.example.com.");
         report.Should().Contain("[ OK ] egress: price list: openrouter.ai, only when the dashboard looks up cloud models' prices");
         report.Should().Contain("[ OK ] egress: desktop app updates: api.github.com, github.com, release-assets.githubusercontent.com and objects.githubusercontent.com (only the installed desktop app");

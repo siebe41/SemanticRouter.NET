@@ -47,6 +47,11 @@ internal static class EgressList
             lines.Add(new RouterCheck(Subject, problem ? RouterCheckStatus.Warning : RouterCheckStatus.Ok, $"embeddings: {embeddings}."));
         }
 
+        if (resolved.Embeddings.Provider == EmbeddingProviderKind.Onnx)
+        {
+            lines.Add(OnnxTelemetry());
+        }
+
         foreach ((string name, WebhookOptions hook) in resolved.Notifications.Webhooks.OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase))
         {
             if (string.IsNullOrEmpty(hook.Url) || !(hook.Notices || hook.Digest))
@@ -84,6 +89,17 @@ internal static class EgressList
     }
 
     private static RouterCheck Line(string message) => new(Subject, RouterCheckStatus.Ok, message);
+
+    /// <summary>Whether ONNX Runtime, which runs the in-process embeddings, reports to Microsoft: off unless the environment turned it on.</summary>
+    internal static RouterCheck OnnxTelemetry()
+    {
+        OnnxRuntimeTelemetry.TurnOff(); // as the embeddings do before they load it
+        return OnnxRuntimeTelemetry.IsOff
+            ? Line($"ONNX Runtime telemetry: off ({OnnxRuntimeTelemetry.Variable}=1), so the in-process embeddings contact no Microsoft host and keep no device id.")
+            : new RouterCheck(Subject, RouterCheckStatus.Warning,
+                $"ONNX Runtime telemetry: on, because {OnnxRuntimeTelemetry.Variable}={OnnxRuntimeTelemetry.Setting} is in the environment: it reports to " +
+                "mobile.events.data.microsoft.com and keeps a device id under ~/.cache/Microsoft/DeveloperTools. Remove the variable or set it to 1.");
+    }
 
     /// <summary>The desktop app's updates line: where they come from, and what the machine policy says about them.</summary>
     internal static string Updates(MachinePolicy policy)

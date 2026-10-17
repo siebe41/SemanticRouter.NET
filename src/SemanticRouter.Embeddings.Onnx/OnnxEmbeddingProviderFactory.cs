@@ -36,6 +36,9 @@ internal sealed class OnnxEmbeddingProviderFactory : IEmbeddingProviderFactory, 
     {
         _services = services;
         _options = options.Value;
+
+        // As early as possible: changing the native environment is safest before other threads read it.
+        OnnxRuntimeTelemetry.TurnOff();
     }
 
     public EmbeddingProviderKind Kind => EmbeddingProviderKind.Onnx;

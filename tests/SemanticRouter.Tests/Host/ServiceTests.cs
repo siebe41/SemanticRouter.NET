@@ -78,7 +78,12 @@ public sealed class ServiceTests : IDisposable
 
         ServiceDefinition tool = ServiceDefinition.ForTool(settings, "/home/ada/.dotnet/tools/semantic-router", "/store/semantic-router.dll", environment);
         tool.Arguments.Should().Equal("run", "--config-dir", Path.GetFullPath(ConfigurationDirectory), "--urls", "http://localhost:6000");
-        tool.Environment.Should().BeEquivalentTo(new Dictionary<string, string> { ["PATH"] = "/home/ada/.local/bin:/usr/bin", ["DOTNET_ROOT"] = "/home/ada/.dotnet" });
+        tool.Environment.Should().BeEquivalentTo(new Dictionary<string, string>
+        {
+            ["PATH"] = "/home/ada/.local/bin:/usr/bin",
+            ["DOTNET_ROOT"] = "/home/ada/.dotnet",
+            ["ORT_DISABLE_TELEMETRY"] = "1",
+        });
 
         ServiceDefinition viaDotnet = ServiceDefinition.ForTool(settings, "/usr/share/dotnet/dotnet", "/store/semantic-router.dll", environment);
         viaDotnet.Arguments[0].Should().Be("/store/semantic-router.dll");

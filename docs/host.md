@@ -76,7 +76,7 @@ It is a **per-user service on purpose**. The subscription CLI connectors run `cl
 
 Things to know:
 
-- **PATH and the .NET runtime are copied from the shell you install from.** Services start with a minimal PATH, so the unit and the agent carry yours (plus `DOTNET_ROOT` if it is set, without which a .NET installed in your home directory is not found). Install a CLI somewhere new? Run `service install` again.
+- **PATH and the .NET runtime are copied from the shell you install from.** Services start with a minimal PATH, so the unit and the agent carry yours (plus `DOTNET_ROOT` if it is set, without which a .NET installed in your home directory is not found), and set `ORT_DISABLE_TELEMETRY=1` so the in-process embeddings' ONNX Runtime sends no telemetry ([Network traffic](network.md#onnx-runtime-telemetry)). Install a CLI somewhere new? Run `service install` again.
 - **Other environment variables are not copied.** If your configuration uses `${env:OPENAI_API_KEY}`, `install` names the variables a service will not see. Type the key on the dashboard instead (it is stored encrypted), or give it to the service: `systemctl --user edit semantic-router.service` on Linux, a user environment variable (`setx`) on Windows.
 - **Updating the tool:** on Linux and macOS run `service restart` after `dotnet tool update`. On Windows run `service stop` first, because a running program cannot be replaced.
 - **Exit codes a restart cannot fix are not retried by systemd**: 2 (a command-line error) and 3 (the address is already in use, for example by a router you started in a terminal). The message names `service status`.

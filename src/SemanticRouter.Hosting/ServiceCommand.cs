@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Embeddings.Onnx;
 
 namespace SemanticRouter.Host;
 
@@ -268,10 +269,17 @@ internal sealed record ServiceDefinition
         Environment = Carried(environment),
     };
 
-    private static Dictionary<string, string> Carried(Func<string, string?> environment) => CarriedVariables
-        .Select(name => (name, value: environment(name)))
-        .Where(v => !string.IsNullOrEmpty(v.value))
-        .ToDictionary(v => v.name, v => v.value!, StringComparer.Ordinal);
+    private static Dictionary<string, string> Carried(Func<string, string?> environment)
+    {
+        Dictionary<string, string> carried = CarriedVariables
+            .Select(name => (name, value: environment(name)))
+            .Where(v => !string.IsNullOrEmpty(v.value))
+            .ToDictionary(v => v.name, v => v.value!, StringComparer.Ordinal);
+
+        // ONNX Runtime's telemetry stays off from the start, before the router turns it off itself (docs/network.md).
+        carried[OnnxRuntimeTelemetry.Variable] = environment(OnnxRuntimeTelemetry.Variable) is { Length: > 0 } set ? set : "1";
+        return carried;
+    }
 }
 
 /// <summary>What happened when a service manager was asked to do something.</summary>
