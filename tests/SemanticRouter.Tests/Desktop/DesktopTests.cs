@@ -49,6 +49,57 @@ public sealed class DesktopTests : IDisposable
         DashboardWindow.IsSameRouter(new Uri("http://192.168.1.20:5080/router#/tiers"), new Uri("http://192.168.1.20:5080/router")).Should().BeTrue("a router reached by its network address keeps its own links too");
     }
 
+    [Theory]
+    [InlineData("https://github.com/siebe41/SemanticRouter.NET/issues/new?title=x", true)]
+    [InlineData("http://example.com/docs", true)]
+    [InlineData("file:///etc/passwd", false)]
+    [InlineData("file:///C:/Windows/System32/calc.exe", false)]
+    [InlineData(@"\\host\share\run.exe", false)]
+    [InlineData("smb://host/share", false)]
+    [InlineData("ms-msdt:/id%20PCWDiagnostic", false)]
+    [InlineData("search-ms:query=invoice&crumb=location:%5C%5Chost%5Cshare", false)]
+    [InlineData("javascript:alert(1)", false)]
+    [InlineData("data:text/html,<script>alert(1)</script>", false)]
+    [InlineData("vscode://file/home/user/x", false)]
+    [InlineData("mailto:someone@example.com", false)]
+    public void Only_web_links_leave_the_dashboard_window_for_the_browser(string link, bool opened)
+    {
+        DashboardWindow.ShouldOpenExternally(new Uri(link)).Should().Be(opened);
+        DashboardWindow.ShouldOpenExternally(new Uri("/router#/tiers", UriKind.Relative)).Should().BeFalse("a relative link has no scheme to trust");
+    }
+
+    [Theory]
+    [InlineData("http://localhost:5080/router#/tiers", nameof(NavigationOutcome.Stay))]
+    [InlineData("http://127.0.0.1:5080/router/api/audit?format=jsonl", nameof(NavigationOutcome.Stay))]
+    [InlineData("about:blank", nameof(NavigationOutcome.Stay))]
+    [InlineData("blob:http://localhost:5080/6f1c0e7a-3a7b-4d0e-9a51-0c1d3e2f4a5b", nameof(NavigationOutcome.Stay))]
+    [InlineData("blob:https://example.com/6f1c0e7a-3a7b-4d0e-9a51-0c1d3e2f4a5b", nameof(NavigationOutcome.Refuse))]
+    [InlineData("https://github.com/siebe41/SemanticRouter.NET", nameof(NavigationOutcome.OpenInBrowser))]
+    [InlineData("http://localhost:5081/router", nameof(NavigationOutcome.OpenInBrowser))]
+    [InlineData("about:srcdoc", nameof(NavigationOutcome.Refuse))]
+    [InlineData("file:///C:/Users/me/semantic-router.json", nameof(NavigationOutcome.Refuse))]
+    [InlineData(@"\\host\share", nameof(NavigationOutcome.Refuse))]
+    [InlineData("ms-msdt:/id%20PCWDiagnostic", nameof(NavigationOutcome.Refuse))]
+    [InlineData("javascript:alert(1)", nameof(NavigationOutcome.Refuse))]
+    [InlineData("data:text/html,hello", nameof(NavigationOutcome.Refuse))]
+    [InlineData("search-ms:query=x", nameof(NavigationOutcome.Refuse))]
+    public void The_dashboard_window_cancels_navigations_that_are_neither_the_router_nor_the_web(string link, string outcome)
+    {
+        DashboardWindow.Decide(new Uri(link), new Uri("http://localhost:5080/router#/overview")).ToString().Should().Be(outcome);
+    }
+
+    [Fact]
+    public void Bridge_messages_count_only_from_the_router_page()
+    {
+        // The window acts on a message only while its web view shows the router (IsSameRouter on its Source).
+        var home = new Uri("http://localhost:5080/router");
+        DashboardWindow.IsSameRouter(new Uri("http://localhost:5080/router#/overview"), home).Should().BeTrue();
+        DashboardWindow.IsSameRouter(new Uri("about:blank"), home).Should().BeFalse();
+        DashboardWindow.IsSameRouter(new Uri("https://example.com/"), home).Should().BeFalse();
+        DashboardWindow.IsSameRouter(new Uri("/router", UriKind.Relative), home).Should().BeFalse();
+        DashboardWindow.IsSameRouter(null, home).Should().BeFalse();
+    }
+
     [Fact]
     public void Preferences_round_trip_and_fall_back_to_the_window()
     {

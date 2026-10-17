@@ -182,72 +182,8 @@ public sealed class SqliteStateTests : IDisposable
         RoutingActivityEntry next = restarted.Add(new RoutingActivityEntry { Id = restarted.Reserve(), PromptPreview = "again" });
 
         seeded.Should().BeEquivalentTo(first);
-        next.Id.Should().BeGreaterThan(first.Id, "a restarted log takes a new block of ids");
+        next.Id.Should().BeGreaterThan(first.Id, "the restarted log takes a new block of ids, past the one the first run reserved");
         restarted.Recent(10, after: first.Id).Should().ContainSingle().Which.PromptPreview.Should().Be("again");
-    }
-
-    [Fact]
-    public async Task Concurrent_requests_get_distinct_ids_and_keep_every_entry()
-    {
-        var log = new RoutingActivityLog(store: new SqliteActivityStore(Open()));
-        const int Requests = 64 * 20;
-
-        await Parallel.ForAsync(0, Requests, new ParallelOptions { MaxDegreeOfParallelism = 64 }, (i, _) =>
-        {
-            log.Complete(log.Add(new RoutingActivityEntry { Id = log.Reserve(), Timestamp = _time.GetUtcNow(), PromptPreview = "request " + i }));
-            return ValueTask.CompletedTask;
-        });
-
-        StoredActivityIds().Should().HaveCount(Requests).And.OnlyHaveUniqueItems();
-    }
-
-    [Fact]
-    public async Task Two_routers_sharing_the_file_keep_every_entry()
-    {
-        // Two processes, as far as the logs can tell: each has its own database object, store and counter.
-        var first = new RoutingActivityLog(store: new SqliteActivityStore(Open()));
-        var second = new RoutingActivityLog(store: new SqliteActivityStore(Open()));
-        const int Each = 1_000;
-
-        await Task.WhenAll(Write(first, "first"), Write(second, "second"));
-
-        StoredActivityIds().Should().HaveCount(2 * Each).And.OnlyHaveUniqueItems();
-
-        Task Write(RoutingActivityLog log, string name) => Parallel.ForAsync(0, Each, new ParallelOptions { MaxDegreeOfParallelism = 8 }, (i, _) =>
-        {
-            log.Complete(log.Add(new RoutingActivityEntry { Id = log.Reserve(), Timestamp = _time.GetUtcNow(), PromptPreview = name + " " + i }));
-            return ValueTask.CompletedTask;
-        });
-    }
-
-    [Fact]
-    public void An_entry_stored_under_a_taken_id_does_not_replace_it()
-    {
-        var store = new SqliteActivityStore(Open());
-        store.Append(new RoutingActivityEntry { Id = 7, Timestamp = _time.GetUtcNow(), PromptPreview = "first" });
-        store.Append(new RoutingActivityEntry { Id = 7, Timestamp = _time.GetUtcNow(), PromptPreview = "second" });
-
-        store.Recent(10).Should().ContainSingle().Which.PromptPreview.Should().Be("first");
-        _logs.Messages.Should().Contain(m => m.Contains("saving activity", StringComparison.Ordinal));
-
-        store.Replace(new RoutingActivityEntry { Id = 7, Timestamp = _time.GetUtcNow(), PromptPreview = "graded" });
-        store.Recent(10).Should().ContainSingle().Which.PromptPreview.Should().Be("graded", "a revision replaces it");
-    }
-
-    private List<long> StoredActivityIds()
-    {
-        using var connection = new SqliteConnection($"Data Source={DbPath}");
-        connection.Open();
-        using SqliteCommand command = connection.CreateCommand();
-        command.CommandText = "SELECT id FROM activity;";
-        using SqliteDataReader reader = command.ExecuteReader();
-        var ids = new List<long>();
-        while (reader.Read())
-        {
-            ids.Add(reader.GetInt64(0));
-        }
-
-        return ids;
     }
 
     [Fact]
@@ -391,7 +327,7 @@ public sealed class SqliteStateTests : IDisposable
         reopened.Between(now.AddMinutes(-1), now.AddMinutes(1)).Should().HaveCount(2);
         reopened.Add(new RoutingFeedback { Timestamp = now, EntryId = 8, Kind = FeedbackKind.Corrected }).Should().BeFalse("the reopened log knows what was recorded");
         reopened.Add(new RoutingFeedback { Timestamp = now, EntryId = 9, Kind = FeedbackKind.Overridden }).Should().BeTrue();
-        reopened.Recent()[0].Id.Should().Be(3, "ids continue after a restart");
+        reopened.Recent()[0].Id.Should().BeGreaterThan(reopened.Recent()[1].Id, "ids continue after a restart, never reused");
     }
 
     [Fact]
@@ -459,6 +395,240 @@ public sealed class SqliteStateTests : IDisposable
         tracker.IsAvailable(Model("claude", 4)).Should().BeFalse();
         _logs.All.Should().Contain("saving a cooldown failed").And.Contain("continuing in memory");
     }
+
+    [Fact]
+    public void A_version_3_state_file_gets_row_ids_and_costs_in_picodollars()
+    {
+        using (var connection = new SqliteConnection($"Data Source={DbPath};Pooling=False"))
+        {
+            connection.Open();
+            using SqliteCommand create = connection.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                INSERT INTO meta (key, value) VALUES ('schema_version', '3');
+                CREATE TABLE usage (
+                    timestamp_ticks INTEGER NOT NULL, model TEXT NOT NULL, connector TEXT NOT NULL, route TEXT, client TEXT,
+                    is_local INTEGER NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL, cache_read INTEGER NOT NULL,
+                    cache_write INTEGER NOT NULL, cost TEXT NOT NULL, reference_cost TEXT NOT NULL, profile TEXT,
+                    subscription_value TEXT NOT NULL DEFAULT '0');
+                CREATE INDEX usage_timestamp ON usage (timestamp_ticks);
+                INSERT INTO usage VALUES ($ts, 'a', 'c', NULL, NULL, 0, 10, 5, 0, 0, '0.1', '0.2', NULL, '0');
+                INSERT INTO usage VALUES ($ts, 'b', 'c', 'r', NULL, 0, 1, 1, 0, 0, '0.0000000000001', '0', 'work', '0.5');
+                """;
+            create.Parameters.AddWithValue("$ts", _time.GetUtcNow().UtcTicks);
+            create.ExecuteNonQuery();
+        }
+
+        var ledger = new SqliteUsageLedger(Open());
+        ledger.Record(new UsageRecord(_time.GetUtcNow(), "a", "c", null, null, false, 1, 1, 0, 0, 0.3m, 0.3m));
+        new SqliteUsageLedger(Open()).Total(Since, Until).Requests.Should().Be(3, "opening the migrated file again changes nothing");
+
+        UsageTotals total = ledger.Total(Since, Until);
+        total.Should().Be(new UsageTotals(3, 12, 7, 0, 0, 0.4000000000001m, 0.5m, 0.5m));
+        ledger.Total(Since, Until, model: "A").CostUsd.Should().Be(0.4m);
+        ledger.Summarize(Since, Until, UsageGrouping.Profile).Select(g => g.Key).Should().BeEquivalentTo("work", "(no profile)");
+        using var check = new SqliteConnection($"Data Source={DbPath};Pooling=False");
+        check.Open();
+        using SqliteCommand rows = check.CreateCommand();
+        rows.CommandText = "SELECT id, model, cost_pico FROM usage ORDER BY id; SELECT value FROM meta WHERE key = 'schema_version';";
+        using SqliteDataReader reader = rows.ExecuteReader();
+        var migrated = new List<(long, string, long?)>();
+        while (reader.Read())
+        {
+            migrated.Add((reader.GetInt64(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetInt64(2)));
+        }
+
+        migrated.Should().Equal((1L, "a", 100_000_000_000L), (2L, "b", null), (3L, "a", 300_000_000_000L));
+        reader.NextResult().Should().BeTrue();
+        reader.Read().Should().BeTrue();
+        reader.GetString(0).Should().Be("4");
+    }
+
+    [Fact]
+    public void Usage_costs_add_up_exactly()
+    {
+        var ledger = new SqliteUsageLedger(Open());
+        foreach (decimal cost in new[] { 0.1m, 0.1m, 0.1m, 0.0000000000001m, 1234567.000000000001m })
+        {
+            ledger.Record(new UsageRecord(_time.GetUtcNow(), "m", "c", null, null, false, 1, 1, 0, 0, cost, cost * 2, SubscriptionValueUsd: cost));
+        }
+
+        UsageTotals total = ledger.Total(Since, Until);
+        total.CostUsd.Should().Be(1234567.300000000001m + 0.0000000000001m);
+        total.ReferenceCostUsd.Should().Be(2 * total.CostUsd);
+        total.SubscriptionValueUsd.Should().Be(total.CostUsd);
+        ledger.Summarize(Since, Until, UsageGrouping.Connector).Single().Totals.Should().Be(total);
+        new SqliteUsageLedger(Open()).Total(Since, Until, connector: "c").CostUsd.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            .Should().Be("1234567.3000000000011", "no trailing zeros are added");
+    }
+
+    [Fact]
+    public void Usage_summaries_from_the_database_match_the_records_in_every_grouping()
+    {
+        // Days in a zone with daylight saving time: the last Sunday of October 2026 has 25 hours.
+        TimeZoneInfo zone = TimeZoneInfo.CreateCustomTimeZone("test", TimeSpan.FromHours(1), "test", "test", "test",
+        [
+            TimeZoneInfo.AdjustmentRule.CreateAdjustmentRule(
+                DateTime.MinValue.Date, DateTime.MaxValue.Date, TimeSpan.FromHours(1),
+                TimeZoneInfo.TransitionTime.CreateFloatingDateRule(new DateTime(1, 1, 1, 2, 0, 0), 3, 5, DayOfWeek.Sunday),
+                TimeZoneInfo.TransitionTime.CreateFloatingDateRule(new DateTime(1, 1, 1, 3, 0, 0), 10, 5, DayOfWeek.Sunday)),
+        ]);
+        var ledger = new SqliteUsageLedger(Open());
+        var records = new List<UsageRecord>();
+        DateTimeOffset start = new(2026, 10, 23, 20, 0, 0, TimeSpan.Zero);
+        for (int i = 0; i < 300; i++)
+        {
+            var record = new UsageRecord(
+                start.AddMinutes(17 * i), i % 3 == 0 ? "Cloud" : i % 3 == 1 ? "cloud" : "local", i % 2 == 0 ? "c" : "d", i % 4 == 0 ? null : "r" + (i % 2),
+                i % 5 == 0 ? null : "k", i % 3 == 2, i, 2 * i, i % 7, i % 11, i * 0.001m, i * 0.002m, i % 6 == 0 ? null : "p", i * 0.0005m);
+            records.Add(record);
+            ledger.Record(record);
+        }
+
+        var prices = new RouterConfiguration();
+        prices.Models.Add(new ModelDefinition { Name = "cloud", Connector = "c", InputCostPerMillionTokens = 3, OutputCostPerMillionTokens = 15, CacheReadCostPerMillionTokens = 0.3m });
+        prices.Usage.ReferenceModel = "cloud";
+        DateTimeOffset since = start.AddHours(5), until = start.AddDays(3);
+        Func<UsageRecord, UsageRecord> price = UsagePricing.Pricer(prices);
+        UsageRecord[] inRange = [.. records.Where(r => r.Timestamp >= since && r.Timestamp < until)];
+        foreach (UsageGrouping by in Enum.GetValues<UsageGrouping>())
+        {
+            ledger.Summarize(since, until, by, zone).Should().BeEquivalentTo(UsageSummaries.Group(inRange, by, zone), o => o.WithStrictOrdering(), by.ToString());
+            ledger.SummarizeAtCurrentPrices(prices, since, until, by, zone)
+                .Should().BeEquivalentTo(UsageSummaries.Group(inRange.Select(price), by, zone), o => o.WithStrictOrdering(), by + " at current prices");
+        }
+
+        ledger.Summarize(since, until, UsageGrouping.Day, zone).Select(g => g.Key).Should().Equal("2026-10-24", "2026-10-25", "2026-10-26");
+        ledger.TotalAtCurrentPrices(prices, since, until, connector: "c").Should().Be(
+            inRange.Where(r => r.Connector == "c").Select(price).Aggregate(UsageTotals.Zero, (t, r) => t.Add(r)));
+    }
+
+    [Fact]
+    public void A_budget_check_reads_the_usage_table_once_however_many_rows_it_has()
+    {
+        var ledger = new SqliteUsageLedger(Open());
+        using (var connection = new SqliteConnection($"Data Source={DbPath};Pooling=False"))
+        {
+            connection.Open();
+            using SqliteTransaction transaction = connection.BeginTransaction();
+            using SqliteCommand insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText =
+                "INSERT INTO usage (timestamp_ticks, model, connector, route, client, is_local, input, output, cache_read, cache_write, cost, reference_cost, profile, subscription_value, cost_pico, reference_pico, value_pico) " +
+                "VALUES ($ts, $model, $connector, NULL, NULL, 0, 1000, 100, 0, 0, '0.001', '0.001', NULL, '0', 1000000000, 1000000000, 0);";
+            SqliteParameter ts = insert.Parameters.Add("$ts", SqliteType.Integer);
+            SqliteParameter model = insert.Parameters.Add("$model", SqliteType.Text);
+            SqliteParameter connector = insert.Parameters.Add("$connector", SqliteType.Text);
+            for (int i = 0; i < 100_000; i++)
+            {
+                ts.Value = _time.GetUtcNow().AddSeconds(-i).UtcTicks;
+                model.Value = i % 2 == 0 ? "cloud" : "other";
+                connector.Value = i % 2 == 0 ? "c" : "d";
+                insert.ExecuteNonQuery();
+            }
+
+            transaction.Commit();
+        }
+
+        var configuration = new RouterConfiguration();
+        ModelDefinition cloud = new() { Name = "cloud", Connector = "c", InputCostPerMillionTokens = 2, OutputCostPerMillionTokens = 10 };
+        configuration.Models.Add(cloud);
+        configuration.Usage.TimeZone = "UTC";
+        configuration.Usage.Budgets.Add(new BudgetDefinition { Name = "monthly", Connector = "c", Period = BudgetPeriod.Month, MaxCostUsd = 1_000_000 });
+        var gate = new BudgetGate(ledger, _time, Microsoft.Extensions.Logging.Abstractions.NullLogger<BudgetGate>.Instance, () => configuration);
+
+        gate.Blocking(cloud, configuration.Usage).Should().BeNull();
+        int reads = ledger.Reads;
+        for (int i = 0; i < 50; i++)
+        {
+            ledger.Record(new UsageRecord(_time.GetUtcNow(), "cloud", "c", null, null, false, 1000, 100, 0, 0, 0m, 0m));
+            gate.Blocking(cloud, configuration.Usage).Should().BeNull();
+        }
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < 1000; i++)
+        {
+            gate.Blocking(cloud, configuration.Usage);
+        }
+
+        watch.Stop();
+        ledger.Reads.Should().Be(reads, "what this instance records is added to the running totals; nothing is read again");
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1), "1,000 checks against 100,000 rows; reading them took most of a second per check");
+        gate.Status(configuration.Usage).Single().CostUsedUsd.Should().Be(50_050 * 0.003m, "the period's 50,050 requests on the connector, at its current prices");
+    }
+
+    [Fact]
+    public void Instances_sharing_the_file_see_each_others_usage_within_the_refresh_interval()
+    {
+        var a = new SqliteUsageLedger(Open());
+        var b = new SqliteUsageLedger(Open());
+        UsageRecord Request() => new(_time.GetUtcNow(), "cloud", "c", null, null, false, 10, 10, 0, 0, 0.25m, 0.25m);
+        a.Total(Since, Until, connector: "c").Requests.Should().Be(0);
+
+        b.Record(Request());
+        a.Total(Since, Until, connector: "c").Requests.Should().Be(0, "within the refresh interval");
+        _time.Advance(SqliteUsageLedger.RefreshInterval);
+        a.Total(Since, Until, connector: "c").Should().Match<UsageTotals>(t => t.Requests == 1 && t.CostUsd == 0.25m);
+
+        b.Record(Request());
+        a.Record(Request());
+        a.Total(Since, Until, connector: "c").Requests.Should().Be(3, "a row it did not write came before its own, so it reads the rows it missed");
+        b.Total(Since, Until, connector: "c").CostUsd.Should().Be(0.75m);
+    }
+
+    [Fact]
+    public async Task Two_activity_logs_sharing_the_file_keep_every_entry_under_concurrent_writes()
+    {
+        RoutingActivityLog[] logs = [new(store: new SqliteActivityStore(Open())), new(store: new SqliteActivityStore(Open()))];
+
+        RoutingActivityEntry[] written = await Task.WhenAll(Enumerable.Range(0, 400).Select(i => Task.Run(() =>
+        {
+            RoutingActivityLog log = logs[i % 2];
+            RoutingActivityEntry entry = log.Add(new RoutingActivityEntry { Id = log.Reserve(), Timestamp = _time.GetUtcNow(), PromptPreview = "p" + i });
+            entry.Outcome = "served";
+            log.Complete(entry);
+            return entry;
+        })));
+        RoutingActivityEntry graded = written[7];
+        graded.Grade = 2;
+        logs[1].Revise(graded);
+
+        IReadOnlyList<RoutingActivityEntry> stored = new SqliteActivityStore(Open()).Recent(1000);
+        written.Select(e => e.Id).Should().OnlyHaveUniqueItems();
+        stored.Should().HaveCount(400, "no entry replaced another");
+        stored.Select(e => e.PromptPreview).Should().BeEquivalentTo(Enumerable.Range(0, 400).Select(i => "p" + i));
+        stored.Single(e => e.Id == graded.Id).Should().Match<RoutingActivityEntry>(e => e.Grade == 2 && e.PromptPreview == graded.PromptPreview);
+        _logs.All.Should().NotContain("failed");
+    }
+
+    [Fact]
+    public async Task Two_feedback_logs_sharing_the_file_keep_every_item_under_concurrent_writes()
+    {
+        RoutingFeedbackLog[] logs = [new(store: new SqliteFeedbackStore(Open())), new(store: new SqliteFeedbackStore(Open()))];
+
+        await Task.WhenAll(Enumerable.Range(0, 200).Select(i => Task.Run(() =>
+            logs[i % 2].Add(new RoutingFeedback { Timestamp = _time.GetUtcNow(), EntryId = i, Kind = FeedbackKind.Retried }).Should().BeTrue())));
+
+        IReadOnlyList<RoutingFeedback> stored = new SqliteFeedbackStore(Open()).Recent(1000);
+        stored.Select(f => f.EntryId).Should().BeEquivalentTo(Enumerable.Range(0, 200).Select(i => (long)i));
+        stored.Select(f => f.Id).Should().OnlyHaveUniqueItems().And.OnlyContain(id => id > 0);
+        _logs.All.Should().NotContain("failed");
+    }
+
+    [Fact]
+    public void An_activity_id_that_is_already_stored_is_not_overwritten()
+    {
+        var store = new SqliteActivityStore(Open());
+        store.Append(new RoutingActivityEntry { Id = 5, Timestamp = _time.GetUtcNow(), PromptPreview = "first" });
+        store.Append(new RoutingActivityEntry { Id = 5, Timestamp = _time.GetUtcNow(), PromptPreview = "second" });
+
+        store.Recent(10).Should().ContainSingle().Which.PromptPreview.Should().Be("first");
+        _logs.All.Should().Contain("saving activity failed");
+    }
+
+    private DateTimeOffset Since => _time.GetUtcNow().Date.AddDays(-1);
+
+    private DateTimeOffset Until => _time.GetUtcNow().Date.AddDays(2);
 }
 
 /// <summary>Durable state through the running router: activity after a restart, history and rollback over the admin API.</summary>
@@ -558,6 +728,23 @@ public sealed class DurableStateHostTests : RouterHostTest
 
     private static async Task<string> LastPreviewAsync(HttpClient client) =>
         JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray()[0]!["promptPreview"]!.GetValue<string>();
+
+    [Fact]
+    public async Task Concurrent_requests_get_distinct_ids_and_each_its_own_stored_entry()
+    {
+        const int Requests = 48;
+        HttpClient client = await StartDurableAsync();
+
+        HttpResponseMessage[] responses = await Task.WhenAll(Enumerable.Range(0, Requests).Select(i => client.PostAsync("/v1/chat/completions", Chat("hello " + i))));
+
+        responses.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.OK);
+        long[] ids = [.. responses.Select(r => long.Parse(r.Headers.GetValues("X-Prompt-Route-Id").Single(), System.Globalization.CultureInfo.InvariantCulture))];
+        ids.Should().OnlyHaveUniqueItems();
+        await WaitForStoredActivityAsync(Requests);
+        IReadOnlyList<RoutingActivityEntry> stored = Services.GetRequiredService<IRoutingActivityStore>().Recent(1000);
+        stored.Select(e => e.Id).Should().BeEquivalentTo(ids);
+        stored.Select(e => e.PromptPreview).Should().BeEquivalentTo(Enumerable.Range(0, Requests).Select(i => "hello " + i));
+    }
 
     [Fact]
     public async Task Prompt_previews_mask_credentials_by_default_and_can_be_turned_off()

@@ -20,6 +20,12 @@ internal sealed class CliInvocation
     public IReadOnlyDictionary<string, string> SetEnvironment { get; init; } = new Dictionary<string, string>();
 
     public IReadOnlyCollection<string> RemoveEnvironment { get; init; } = [];
+
+    /// <summary>
+    /// The router's secrets (resolved keys, gateway keys, CLI environment values): an inherited variable holding one of
+    /// them is removed, whatever its name, so a key the router was given never reaches a child it was not meant for.
+    /// </summary>
+    public IReadOnlyCollection<string> SecretValues { get; init; } = [];
 }
 
 /// <summary>A running CLI process.</summary>
@@ -99,6 +105,18 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
         foreach (string name in invocation.RemoveEnvironment)
         {
             startInfo.Environment.Remove(name);
+        }
+
+        // The router's own settings and keys stay with it: what configures the router (SemanticRouter__…, ROUTER_…), the
+        // providers' keys the setup reads (OPENAI_API_KEY, …), and any variable holding a secret the router resolved.
+        // Variables the connector sets itself come back below.
+        HashSet<string> secrets = [.. invocation.SecretValues];
+        foreach ((string name, string? value) in startInfo.Environment.ToArray())
+        {
+            if (CliEnvironment.IsRouterVariable(name) || (value is not null && secrets.Contains(value)))
+            {
+                startInfo.Environment.Remove(name);
+            }
         }
 
         foreach ((string name, string value) in invocation.SetEnvironment)
@@ -201,4 +219,21 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
             _process.Dispose();
         }
     }
+}
+
+/// <summary>The variables of the router's environment that a CLI child never inherits.</summary>
+internal static class CliEnvironment
+{
+    private static readonly string[] Prefixes = ["SemanticRouter__", "ROUTER_"];
+
+    // The API keys the dashboard's provider presets read (SetupApi.Presets), plus ANTHROPIC_API_KEY that Claude Code
+    // already drops: each belongs to a connector of the router, not to a subscription CLI.
+    private static readonly HashSet<string> ProviderKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "GEMINI_API_KEY",
+    };
+
+    /// <summary>Whether <paramref name="name"/> configures the router or holds a provider key it uses.</summary>
+    public static bool IsRouterVariable(string name) =>
+        ProviderKeys.Contains(name) || Prefixes.Any(p => name.StartsWith(p, StringComparison.OrdinalIgnoreCase));
 }

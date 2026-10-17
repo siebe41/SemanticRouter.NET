@@ -284,7 +284,7 @@
       "semanticrouter.connectors.copilot": {
         "type": "Project",
         "dependencies": {
-          "GitHub.Copilot.SDK": "[1.0.22, )",
+          "GitHub.Copilot.SDK": "[1.0.22, 1.1.0)",
           "SemanticRouter.AspNetCore": "[0.1.0, )"
         }
       },
@@ -317,7 +317,7 @@
       },
       "GitHub.Copilot.SDK": {
         "type": "CentralTransitive",
-        "requested": "[1.0.22, )",
+        "requested": "[1.0.22, 1.1.0)",
         "resolved": "1.0.22",
         "contentHash": "SDsgUS1YnxPgE3xVxs+eq+wTEY9K61CVpgWifCqdPVcGFPQs2mM/EIJ5UOwzVHMXYF5POvQBJo7ptqG4aqQ7lg==",
         "dependencies": {

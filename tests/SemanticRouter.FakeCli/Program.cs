@@ -40,6 +40,10 @@ switch (mode)
             ["stdin"] = input.Length <= 200 ? input : null,
             ["secret"] = Environment.GetEnvironmentVariable("SR_TEST_SECRET") ?? "unset",
             ["set"] = Environment.GetEnvironmentVariable("SR_TEST_SET") ?? "unset",
+            ["inherited"] = string.Join(',', Environment.GetEnvironmentVariables().Keys.Cast<string>()
+                .Where(n => n.StartsWith("SR_TEST_", StringComparison.OrdinalIgnoreCase) || n.StartsWith("ROUTER_", StringComparison.OrdinalIgnoreCase)
+                    || n.StartsWith("SemanticRouter__", StringComparison.OrdinalIgnoreCase))
+                .Order(StringComparer.OrdinalIgnoreCase)),
             ["files"] = Directory.EnumerateFileSystemEntries(Directory.GetCurrentDirectory()).Count(),
         };
         string reply = JsonSerializer.Serialize(report);

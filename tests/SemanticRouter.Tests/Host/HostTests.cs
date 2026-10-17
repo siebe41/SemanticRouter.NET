@@ -438,6 +438,7 @@ public sealed class HostTests : IDisposable
         report.Should().Contain($"[ OK ] egress: connector codex: CLI: {FakeCli}, which contacts OpenAI.");
         report.Should().Contain("[ OK ] egress: connector copilot: CLI: copilot (the Copilot SDK's runtime), which contacts GitHub (no enabled model uses it yet).");
         report.Should().Contain("[ OK ] egress: embeddings: huggingface.co, once, to download ONNX model all-MiniLM-L6-v2 into " + models);
+        report.Should().Contain("[ OK ] egress: ONNX Runtime telemetry: off (ORT_DISABLE_TELEMETRY=1, set before ONNX Runtime loads): mobile.events.data.microsoft.com is never contacted");
         report.Should().Contain("[ OK ] egress: webhook ops: hooks.example.com.");
         report.Should().Contain("[ OK ] egress: price list: openrouter.ai, only when the dashboard looks up cloud models' prices");
         report.Should().Contain("[ OK ] egress: desktop app updates: api.github.com, github.com and objects.githubusercontent.com (only the installed desktop app");
@@ -445,6 +446,16 @@ public sealed class HostTests : IDisposable
         report.Should().NotContain("hook-secret").And.NotContain("token=abc").And.NotContain("/services/").And.NotContain("sk-doctor-test");
         second.ToString().Should().Contain($"[ OK ] egress: embeddings: ONNX model all-MiniLM-L6-v2 is in {models}; nothing is downloaded.")
             .And.NotContain("network: HTTPS also trusts");
+    }
+
+    [Fact]
+    public void Doctor_warns_when_onnx_runtime_telemetry_is_left_on()
+    {
+        EgressList.OnnxTelemetry("1").Status.Should().Be(RouterCheckStatus.Ok);
+        RouterCheck on = EgressList.OnnxTelemetry("0");
+        on.Status.Should().Be(RouterCheckStatus.Warning);
+        on.Message.Should().Contain("ORT_DISABLE_TELEMETRY is '0'").And.Contain("mobile.events.data.microsoft.com").And.Contain("Set it to 1");
+        EgressList.OnnxTelemetry(null).Message.Should().Contain("is not set");
     }
 
     [Fact]
@@ -510,6 +521,29 @@ public sealed class HostTests : IDisposable
             ("lmstudio-gemma-3-12b", 2, 1, 0));
         written.Embeddings.Model.Should().Be("text-embedding-nomic-embed-text-v1.5");
         output.ToString().Should().Contain("(LM Studio), 3 chat model(s)").And.Contain("just-in-time loading is on");
+    }
+
+    [Fact]
+    public async Task Without_an_embedding_server_init_picks_onnx_only_where_onnx_runtime_loads()
+    {
+        var nothing = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("Connection refused"));
+        var here = new StringWriter();
+        var intelMac = new StringWriter();
+        const string reason = "In-process (Onnx) embeddings are not available on an Intel Mac: ONNX Runtime publishes no build for it. Use an embedding model in LM Studio or Ollama instead (Embeddings: OpenAICompatible).";
+
+        (await InitCommand.RunAsync(Settings("init"), new InitProbes(new HttpClient(nothing), string.Empty, Windows: false), here)).Should().Be(0);
+        RouterConfiguration onnx = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+        (await InitCommand.RunAsync(Settings("init", "--force"), new InitProbes(new HttpClient(nothing), string.Empty, Windows: false, OnnxUnavailable: reason), intelMac))
+            .Should().Be(0);
+        RouterConfiguration hashing = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
+
+        onnx.Embeddings.Provider.Should().Be(EmbeddingProviderKind.Onnx);
+        here.ToString().Should().Contain("'all-MiniLM-L6-v2' runs in this process");
+        hashing.Embeddings.Provider.Should().Be(EmbeddingProviderKind.Hashing, "a model that cannot load would leave every prompt unclassified");
+        hashing.DefaultSimilarityThreshold.Should().Be(RouterConfiguration.FromJson(RouterHost.Template()).DefaultSimilarityThreshold);
+        intelMac.ToString().Should().Contain("embeddings: no embedding server found, so prompts are matched by shared words (Hashing). " + reason)
+            .And.Contain("Providers → Embeddings").And.NotContain("runs in this process");
+        FirstRun.IsUntouchedTemplate(Path.Combine(_directory, "semantic-router.json")).Should().BeTrue("init may run again once a server is there");
     }
 
     [Fact]

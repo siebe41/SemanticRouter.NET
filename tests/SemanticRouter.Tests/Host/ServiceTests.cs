@@ -79,7 +79,14 @@ public sealed class ServiceTests : IDisposable
 
         ServiceDefinition tool = ServiceDefinition.ForTool(settings, "/home/ada/.dotnet/tools/semantic-router", "/store/semantic-router.dll", environment);
         tool.Arguments.Should().Equal("run", "--config-dir", Path.GetFullPath(ConfigurationDirectory), "--urls", "http://localhost:6000");
-        tool.Environment.Should().BeEquivalentTo(new Dictionary<string, string> { ["PATH"] = "/home/ada/.local/bin:/usr/bin", ["DOTNET_ROOT"] = "/home/ada/.dotnet" });
+        tool.Environment.Should().BeEquivalentTo(new Dictionary<string, string>
+        {
+            ["PATH"] = "/home/ada/.local/bin:/usr/bin",
+            ["DOTNET_ROOT"] = "/home/ada/.dotnet",
+            ["ORT_DISABLE_TELEMETRY"] = "1",
+        }, "ONNX Runtime's telemetry is off from the service's start");
+        ServiceDefinition.ForDesktop(settings, "/opt/SemanticRouter/SemanticRouter", n => n == "ORT_DISABLE_TELEMETRY" ? "0" : environment(n))
+            .Environment["ORT_DISABLE_TELEMETRY"].Should().Be("0", "a value set in the shell is kept");
 
         ServiceDefinition viaDotnet = ServiceDefinition.ForTool(settings, "/usr/share/dotnet/dotnet", "/store/semantic-router.dll", environment);
         viaDotnet.Arguments[0].Should().Be("/store/semantic-router.dll");

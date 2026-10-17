@@ -1,6 +1,6 @@
 # Network traffic
 
-What the router contacts, when, and how to turn it off. The router has no telemetry, crash reporting or analytics. Every outbound connection is one of the destinations below, and most of them only exist because you configured them.
+What the router contacts, when, and how to turn it off. The router has no telemetry, crash reporting or analytics, and it turns off the telemetry of the ONNX Runtime library it uses for in-process embeddings ([below](#onnx-runtime-telemetry)). Every outbound connection is one of the destinations below, and most of them only exist because you configured them.
 
 ## Destinations
 
@@ -20,6 +20,18 @@ Nothing else is contacted:
 - **The dashboard** loads its scripts, styles and fonts from the router itself and sends `Content-Security-Policy: default-src 'self'; …`, so the browser refuses requests to any other host. The link to the project on GitHub is only followed when you click it.
 - **The desktop app** shows the dashboard from the router it runs, and reads the weekly digest from it for the tray.
 - **Building from source** sends no Avalonia build telemetry: `Directory.Build.targets` replaces its telemetry target. The .NET SDK has its own; set `DOTNET_CLI_TELEMETRY_OPTOUT=1` to turn it off (see [Contributing](../CONTRIBUTING.md)).
+
+## ONNX Runtime telemetry
+
+The in-process embeddings (`Embeddings:Provider: Onnx`, which `init` picks when it finds no embedding server) run on Microsoft's ONNX Runtime. Its Linux and macOS builds send usage data to `mobile.events.data.microsoft.com` about ten seconds after a model is loaded, and keep a device id and an event queue in `~/.cache/Microsoft/DeveloperTools/.onnxruntime/`, unless the environment variable `ORT_DISABLE_TELEMETRY` is `1` when ONNX Runtime loads. Its Windows build writes its events to Event Tracing for Windows (ETW) on the machine instead.
+
+The router turns this off:
+
+- **Every way it runs** (the tool, the desktop app, a service, the container): before it first loads ONNX Runtime, it sets `ORT_DISABLE_TELEMETRY=1` in the process's own environment, where ONNX Runtime reads it (`setenv` on Linux and macOS). On every platform it also turns off ONNX Runtime's telemetry events, which covers the Windows ETW events. Your own value is kept when you set `ORT_DISABLE_TELEMETRY` before starting the router.
+- **The container image** and the **systemd and launchd services** that `semantic-router service install` writes also set `ORT_DISABLE_TELEMETRY=1` in the environment they start the router with.
+- **Your own app** with the `SemanticRouter.Embeddings.Onnx` package: `AddOnnxEmbeddings` and `UseOnnxEmbeddings` set it. If your app uses ONNX Runtime itself before that, call `OnnxRuntimeEnvironment.DisableTelemetry()` first, or set the variable before the process starts. `Environment.SetEnvironmentVariable` alone does not work on Linux and macOS: it changes only .NET's copy of the environment, which ONNX Runtime does not read.
+
+`semantic-router doctor` says whether it is off, on an `egress` line, when the embeddings are `Onnx`.
 
 ## Proxies and certificates
 
@@ -81,6 +93,7 @@ For an egress allowlist, list:
 [ OK ] egress: connector openai: api.openai.com.
 [ OK ] egress: connector claude: CLI: claude, which contacts Anthropic.
 [ OK ] egress: embeddings: huggingface.co, once, to download ONNX model all-MiniLM-L6-v2 into /data/models/all-MiniLM-L6-v2 (copy it there to skip the download).
+[ OK ] egress: ONNX Runtime telemetry: off (ORT_DISABLE_TELEMETRY=1, set before ONNX Runtime loads): mobile.events.data.microsoft.com is never contacted and no device id is written.
 [ OK ] egress: webhook ops: hooks.slack.com.
 [ OK ] egress: price list: openrouter.ai, only when the dashboard looks up cloud models' prices (Look up prices, Discover models); nothing but the request for the list is sent.
 [ OK ] egress: desktop app updates: api.github.com, github.com and objects.githubusercontent.com (only the installed desktop app; untick Check for updates automatically in its tray menu to turn this off).

@@ -305,12 +305,41 @@ public sealed class MachinePolicyTests : RouterHostTest
     {
         static string? Environment(string name) => name == "SEMANTICROUTER_UPDATE_SOURCE" ? "https://example.com/feed" : null;
 
-        DesktopUpdater.Feed(new UpdatePolicy(), _ => null).Should().Be(((string?)null, (string?)null), "GitHub Releases");
-        DesktopUpdater.Feed(new UpdatePolicy(), Environment).Should().Be(("https://example.com/feed", (string?)null));
-        DesktopUpdater.Feed(new UpdatePolicy { Mode = UpdateMode.Off }, Environment).Off.Should().Contain("organization's policy");
-        DesktopUpdater.Feed(new UpdatePolicy { Mode = UpdateMode.Feed, Feed = "https://mirror.corp.example/router" }, Environment)
+        DesktopUpdater.Feed(new UpdatePolicy(), _ => null, variable: true).Should().Be(((string?)null, (string?)null), "GitHub Releases");
+        DesktopUpdater.Feed(new UpdatePolicy(), Environment, variable: true).Should().Be(("https://example.com/feed", (string?)null));
+        DesktopUpdater.Feed(new UpdatePolicy { Mode = UpdateMode.Off }, Environment, variable: true).Off.Should().Contain("organization's policy");
+        DesktopUpdater.Feed(new UpdatePolicy { Mode = UpdateMode.Feed, Feed = "https://mirror.corp.example/router" }, Environment, variable: true)
             .Should().Be(("https://mirror.corp.example/router", (string?)null), "the policy's feed wins over the variable");
-        DesktopUpdater.Feed(new UpdatePolicy(), _ => "http://mirror.corp.example/router").Off.Should().Contain("not HTTPS");
-        DesktopUpdater.Feed(new UpdatePolicy(), _ => "http://localhost:8080/").Should().Be(("http://localhost:8080/", (string?)null));
+        DesktopUpdater.Feed(new UpdatePolicy(), _ => "http://mirror.corp.example/router", variable: true).Off.Should().Contain("not HTTPS");
+        DesktopUpdater.Feed(new UpdatePolicy(), _ => "http://localhost:8080/", variable: true).Should().Be(("http://localhost:8080/", (string?)null));
+
+        // Anything but HTTPS, a folder or plain HTTP to this machine is refused, from the variable and the policy alike.
+        DesktopUpdater.Feed(new UpdatePolicy(), _ => "ftp://mirror.corp.example/router", variable: true).Off.Should().Be("the update feed is a ftp: address, not HTTPS or a folder");
+        DesktopUpdater.Feed(new UpdatePolicy { Mode = UpdateMode.Feed, Feed = "http://mirror.corp.example/router" }, _ => null, variable: false).Off.Should().Contain("not HTTPS");
+        string folder = Path.Combine(Path.GetTempPath(), "feed");
+        DesktopUpdater.Feed(new UpdatePolicy(), _ => folder, variable: true).Should().Be((folder, (string?)null), "a folder of packages");
+        DesktopUpdater.Feed(new UpdatePolicy(), _ => "feeds/local", variable: true).Should().Be(("feeds/local", (string?)null), "a relative folder");
+        DesktopUpdater.Feed(new UpdatePolicy { Mode = UpdateMode.Feed, Feed = @"\\files.corp.example\router" }, _ => null, variable: false)
+            .Should().Be((@"\\files.corp.example\router", (string?)null), "a network share the policy names");
+    }
+
+    [Fact]
+    public void A_release_build_takes_the_update_source_variable_only_when_the_policy_allows_a_custom_feed()
+    {
+        static string? Environment(string name) => name == DesktopUpdater.SourceVariable ? "https://example.com/feed" : null;
+
+        // Not counted: GitHub Releases, whatever the variable says.
+        DesktopUpdater.Feed(new UpdatePolicy(), Environment, variable: false).Should().Be(((string?)null, (string?)null));
+        DesktopUpdater.Feed(new UpdatePolicy { AllowCustomFeed = true }, Environment, variable: true).Should().Be(("https://example.com/feed", (string?)null));
+
+        DesktopUpdater.SourceVariableAllowed(new UpdatePolicy { AllowCustomFeed = true }).Should().BeTrue();
+        DesktopUpdater.SourceVariableAllowed(new UpdatePolicy()).Should().Be(DesktopUpdater.DebugBuild, "only a debug build takes it without the policy");
+
+        MachinePolicy policy = MachinePolicy.FromJson("""{"Updates":{"AllowCustomFeed":true}}""");
+        policy.Updates.AllowCustomFeed.Should().BeTrue();
+        policy.IsEmpty.Should().BeFalse();
+        string registry = MachinePolicyLoader.FromValues(new Dictionary<string, object?> { ["AllowCustomFeed"] = 1 }).ToJsonString();
+        MachinePolicy.FromJson($$"""{"Updates":{{registry}}}""").Updates.AllowCustomFeed.Should().BeTrue("a DWORD 1 in the registry");
+        SemanticRouter.Host.EgressList.Updates(policy).Should().Contain("SEMANTICROUTER_UPDATE_SOURCE may name another feed");
     }
 }

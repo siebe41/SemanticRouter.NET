@@ -49,7 +49,7 @@ public static class RouterDoctor
             checks.Add(new RouterCheck("configuration", RouterCheckStatus.Warning, warning));
         }
 
-        checks.Add(await CheckEmbeddingsAsync(runtime, cancellationToken).ConfigureAwait(false));
+        checks.Add(await CheckEmbeddingsAsync(runtime, services.GetServices<IEmbeddingProviderFactory>(), cancellationToken).ConfigureAwait(false));
 
         foreach (string name in resolved.Connectors.Keys.Order(StringComparer.OrdinalIgnoreCase))
         {
@@ -139,19 +139,30 @@ public static class RouterDoctor
         }
     }
 
-    private static async Task<RouterCheck> CheckEmbeddingsAsync(RouterRuntime runtime, CancellationToken cancellationToken)
+    private static async Task<RouterCheck> CheckEmbeddingsAsync(RouterRuntime runtime, IEnumerable<IEmbeddingProviderFactory> factories, CancellationToken cancellationToken)
     {
         EmbeddingProviderOptions embeddings = runtime.Resolved.Embeddings;
         if (embeddings.Provider == EmbeddingProviderKind.Hashing)
         {
-            return new RouterCheck("embeddings", RouterCheckStatus.Warning,
-                "the Hashing provider only matches shared words. For meaning-based routing set SemanticRouter:Embeddings:Provider to Onnx " +
-                "(in-process, no server) or to an OpenAICompatible endpoint (LM Studio, Ollama, OpenAI) on the dashboard under Providers → Embeddings, " +
-                "and raise DefaultSimilarityThreshold (https://siebe41.github.io/SemanticRouter.NET/overview#thresholds-by-embedding-model).");
+            // Onnx is suggested only where it can run (ONNX Runtime has no build for some platforms, e.g. Intel Macs).
+            string? noOnnx = factories.FirstOrDefault(f => f.Kind == EmbeddingProviderKind.Onnx)?.Unavailable;
+            return new RouterCheck("embeddings", RouterCheckStatus.Warning, noOnnx is null
+                ? "the Hashing provider only matches shared words. For meaning-based routing set SemanticRouter:Embeddings:Provider to Onnx " +
+                  "(in-process, no server) or to an OpenAICompatible endpoint (LM Studio, Ollama, OpenAI) on the dashboard under Providers → Embeddings, " +
+                  $"and raise DefaultSimilarityThreshold ({ThresholdsLink})."
+                : "the Hashing provider only matches shared words. For meaning-based routing set SemanticRouter:Embeddings:Provider to an OpenAICompatible " +
+                  "endpoint (an embedding model in LM Studio or Ollama) on the dashboard under Providers → Embeddings, " +
+                  $"and raise DefaultSimilarityThreshold ({ThresholdsLink}). {noOnnx}");
         }
 
         bool onnx = embeddings.Provider == EmbeddingProviderKind.Onnx;
         string what = onnx ? $"ONNX model {embeddings.ModelPath ?? embeddings.Model ?? "all-MiniLM-L6-v2"}" : $"{embeddings.Model} at {AddressDisplay.Show(embeddings.Endpoint)}";
+        if (onnx && factories.FirstOrDefault(f => f.Kind == EmbeddingProviderKind.Onnx)?.Unavailable is { } unavailable)
+        {
+            return new RouterCheck("embeddings", RouterCheckStatus.Failed,
+                $"{what} cannot run on this machine, so no prompt is classified. {unavailable} (SemanticRouter:Embeddings:Provider; dashboard: Providers → Embeddings)");
+        }
+
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -170,6 +181,8 @@ public static class RouterDoctor
                 : $"{what} failed: {reason} (SemanticRouter:Embeddings:Endpoint / Model / ApiKey; dashboard: Providers → Embeddings).");
         }
     }
+
+    private const string ThresholdsLink = "https://siebe41.github.io/SemanticRouter.NET/overview#thresholds-by-embedding-model";
 
     private static async Task<IEnumerable<RouterCheck>> CheckHttpAsync(
         string name, ConnectorOptions connector, ModelDefinition[] models, RouterConfiguration resolved, IHttpClientFactory http, CancellationToken cancellationToken)

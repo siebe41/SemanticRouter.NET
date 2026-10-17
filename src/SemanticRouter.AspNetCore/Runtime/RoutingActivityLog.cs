@@ -3,10 +3,7 @@ namespace SemanticRouter.AspNetCore;
 /// <summary>One routed request, for the dashboard's activity view.</summary>
 public sealed class RoutingActivityEntry
 {
-    /// <summary>
-    /// The entry's number: unique, also among routers sharing a store, and increasing within one router (not across
-    /// routers sharing a store, which take numbers in blocks).
-    /// </summary>
+    /// <summary>Sequence number, increasing.</summary>
     public long Id { get; init; }
 
     /// <summary>When the request was routed.</summary>
@@ -207,23 +204,23 @@ public sealed class RoutingActivityEntry
 public interface IRoutingActivityStore
 {
     /// <summary>
-    /// Stores a finished entry, or replaces it when it is stored again (<see cref="RoutingActivityLog.Revise"/>). Must not
-    /// throw for storage problems: log them and carry on.
+    /// Stores a finished entry. Its id is new: a store should refuse (and log) an entry whose id it already holds rather
+    /// than replace it. Must not throw for storage problems: log them and carry on.
     /// </summary>
     void Append(RoutingActivityEntry entry);
 
     /// <summary>
     /// Stores an entry again after something was learned about it later (<see cref="RoutingActivityLog.Revise"/>),
-    /// replacing what <see cref="Append"/> stored. Must not throw for storage problems.
+    /// replacing the stored one with its id. The default stores it with <see cref="Append"/>.
     /// </summary>
     void Replace(RoutingActivityEntry entry) => Append(entry);
 
     /// <summary>
-    /// Reserves <paramref name="count"/> consecutive entry ids that no other log sharing this store has had or will
-    /// get, none below <paramref name="floor"/>, and returns the first; or <see langword="null"/> when the store does
-    /// not hand out ids (it belongs to one log) or cannot right now.
+    /// Reserves <paramref name="count"/> consecutive ids that no log sharing this store has handed out or will, and
+    /// returns the first. -1 (the default) for a store that only one log uses, or when it failed: the log then counts
+    /// on from the newest id it knows.
     /// </summary>
-    long? ReserveIds(int count, long floor) => null;
+    long ReserveIds(int count) => -1;
 
     /// <summary>The newest entries first, at most <paramref name="limit"/>.</summary>
     IReadOnlyList<RoutingActivityEntry> Recent(int limit);
@@ -244,18 +241,14 @@ public interface IRoutingActivityStore
 /// </summary>
 public sealed class RoutingActivityLog
 {
-    /// <summary>How many ids a log takes from a shared store at a time.</summary>
-    internal const int IdBlock = 256;
-
+    // Ids are reserved from a shared store this many at a time, so routers sharing it never hand out the same one.
+    internal const int IdBlock = 32;
     private readonly RoutingActivityEntry?[] _entries;
     private readonly IRoutingActivityStore? _store;
     private readonly Lock _gate = new();
-
-    // _next counts slots of the ring; _nextId is the next entry id, and _idsEnd the end of the block of ids reserved
-    // from a shared store.
     private long _next;
-    private long _nextId;
-    private long _idsEnd;
+    private long _blockEnd;
+    private long _added;
 
     /// <summary>Creates a log keeping the latest <paramref name="capacity"/> entries, seeded from <paramref name="store"/>.</summary>
     public RoutingActivityLog(int capacity = 500, IRoutingActivityStore? store = null)
@@ -264,15 +257,12 @@ public sealed class RoutingActivityLog
         _store = store;
         if (store?.Recent(_entries.Length) is { Count: > 0 } stored)
         {
-            // Ids may have gaps (a request that never finished, another router's block), so the entries take
-            // consecutive slots, oldest first; new ids continue after the newest.
-            RoutingActivityEntry[] oldestFirst = [.. stored.OrderBy(e => e.Id)];
-            foreach (RoutingActivityEntry entry in oldestFirst)
-            {
-                _entries[_next++ % _entries.Length] = entry;
-            }
-
-            _nextId = oldestFirst[^1].Id + 1;
+            // Oldest first into the slots. Ids may have gaps (a request that never finished, ids a router reserved and
+            // did not use before it stopped); new entries continue after the newest.
+            RoutingActivityEntry[] oldestFirst = [.. stored.OrderBy(e => e.Id).TakeLast(_entries.Length)];
+            oldestFirst.CopyTo(_entries, 0);
+            _added = oldestFirst.Length;
+            _next = oldestFirst[^1].Id + 1;
         }
     }
 
@@ -290,14 +280,14 @@ public sealed class RoutingActivityLog
         return Recent(_entries.Length).Where(e => e.Timestamp >= since && e.Timestamp < until).OrderBy(e => e.Id).Take(limit).ToArray();
     }
 
-    /// <summary>The next sequence number: every id this log handed out is below it.</summary>
+    /// <summary>The next sequence number this log hands out, unless it reserves a new block of them first.</summary>
     public long NextId
     {
         get
         {
             lock (_gate)
             {
-                return _nextId;
+                return _next;
             }
         }
     }
@@ -314,9 +304,8 @@ public sealed class RoutingActivityLog
         ArgumentNullException.ThrowIfNull(entry);
         lock (_gate)
         {
-            _entries[_next % _entries.Length] = entry;
-            _next++;
-            _nextId = Math.Max(_nextId, entry.Id + 1);
+            _entries[_added % _entries.Length] = entry;
+            _added++;
         }
 
         Updated?.Invoke(entry);
@@ -368,45 +357,41 @@ public sealed class RoutingActivityLog
     }
 
     /// <summary>
-    /// Takes the next id for an entry. Each call returns a new one, also among logs sharing a store that hands out ids
-    /// (<see cref="IRoutingActivityStore.ReserveIds"/>): those take them in blocks.
+    /// Reserves an id for a new entry. Each call returns another one, and logs sharing a store never get the same one:
+    /// the store hands out blocks of them (<see cref="IRoutingActivityStore.ReserveIds"/>).
     /// </summary>
     public long Reserve()
     {
         lock (_gate)
         {
-            if (_nextId >= _idsEnd)
+            if (_next >= _blockEnd)
             {
-                // Once per block: other routers sharing the store may have taken the ids after this one's. A store
-                // that hands out none (or cannot right now) is asked again after a block's worth.
-                long? first = _store?.ReserveIds(IdBlock, _nextId);
-                (_nextId, _idsEnd) = first is long start ? (Math.Max(start, _nextId), start + IdBlock) : (_nextId, _nextId + IdBlock);
+                // A store that only this log uses (or that failed) reserves nothing: then the log counts on.
+                long first = _store?.ReserveIds(IdBlock) ?? -1;
+                _next = first >= 0 ? first : _next;
+                _blockEnd = _next + IdBlock;
             }
 
-            return _nextId++;
+            return _next++;
         }
     }
 
-    /// <summary>The newest entries first, at most <paramref name="limit"/>, newer than <paramref name="after"/> when given.</summary>
+    /// <summary>
+    /// The newest entries first, at most <paramref name="limit"/>; with <paramref name="after"/>, only those with a
+    /// greater id.
+    /// </summary>
     public IReadOnlyList<RoutingActivityEntry> Recent(int limit = 100, long? after = null)
     {
         lock (_gate)
         {
             var result = new List<RoutingActivityEntry>(Math.Min(limit, _entries.Length));
-            for (long i = _next - 1; i >= 0 && i >= _next - _entries.Length && result.Count < limit; i--)
+            for (long i = _added - 1; i >= 0 && i >= _added - _entries.Length && result.Count < limit; i--)
             {
-                RoutingActivityEntry? entry = _entries[i % _entries.Length];
-                if (entry is null)
+                // Never filled, purged, or not newer: concurrent requests can be added out of id order, so read on.
+                if (_entries[i % _entries.Length] is { } entry && (after is not { } a || entry.Id > a))
                 {
-                    continue; // never filled, or purged
+                    result.Add(entry);
                 }
-
-                if (after is { } a && entry.Id <= a)
-                {
-                    continue; // added in another order than its id was taken
-                }
-
-                result.Add(entry);
             }
 
             return result;

@@ -90,6 +90,12 @@ public enum UsageGrouping
 /// <summary>One group of a usage summary.</summary>
 public sealed record UsageGroup(string Key, UsageTotals Totals);
 
+/// <summary>
+/// One model's usage within one group of a summary (<paramref name="Key"/>, as in <see cref="UsageGroup"/>), at the
+/// prices it was recorded at.
+/// </summary>
+public sealed record UsageModelTotals(string Key, string Model, UsageTotals Totals);
+
 /// <summary>Records what every served request used, for the dashboard and for budgets.</summary>
 public interface IUsageLedger
 {
@@ -110,20 +116,26 @@ public interface IUsageLedger
     IReadOnlyList<UsageRecord>? Records(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) => null;
 
     /// <summary>
-    /// Totals per model (the group key) between <paramref name="since"/> and <paramref name="until"/>, optionally for one
-    /// model, connector or profile. A cost is linear in each model's tokens, so this is all <see cref="UsagePricing"/>
-    /// needs to price usage at current prices, without reading every record: budgets check it on every request. The
-    /// default groups <see cref="Records"/>; <see langword="null"/> for a ledger that keeps no records.
+    /// Totals per group and model between <paramref name="since"/> and <paramref name="until"/>, optionally for one
+    /// model, connector or profile, so <see cref="UsagePricing"/> can price the tokens at the catalog's current prices
+    /// without reading every record: cost is linear in tokens, so a model's token totals price the same as its records.
+    /// With <see cref="UsageGrouping.Model"/>, the key is the model. <see langword="null"/> (the default) for a ledger
+    /// that does not add them up: <see cref="Records"/> is used then.
     /// </summary>
-    IReadOnlyList<UsageGroup>? TotalsByModel(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
-        Records(since, until, model, connector, profile) is { } records ? UsageSummaries.Group(records, UsageGrouping.Model, TimeZoneInfo.Utc) : null;
+    IReadOnlyList<UsageModelTotals>? ModelTotals(
+        DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null, string? model = null, string? connector = null, string? profile = null) => null;
 }
 
-/// <summary>The default <see cref="IUsageLedger"/>: this process's usage, in memory, for the last 40 days.</summary>
+/// <summary>
+/// The default <see cref="IUsageLedger"/>: this process's usage, in memory, for the last 40 days. The totals of the
+/// ranges asked for most recently (a budget's current period) are kept up to date as records arrive, so a budget check
+/// does not add up the period's records on every request.
+/// </summary>
 public sealed class InMemoryUsageLedger : IUsageLedger
 {
     private static readonly TimeSpan Retention = TimeSpan.FromDays(40);
     private readonly List<UsageRecord> _records = [];
+    private readonly RunningUsageTotals<UsageModelTotalsBuilder> _running = new();
     private readonly Lock _gate = new();
 
     /// <inheritdoc />
@@ -136,26 +148,46 @@ public sealed class InMemoryUsageLedger : IUsageLedger
             if (_records.Count % 1000 == 0)
             {
                 DateTimeOffset oldest = record.Timestamp - Retention;
-                _records.RemoveAll(r => r.Timestamp < oldest);
+                if (_records.RemoveAll(r => r.Timestamp < oldest) > 0)
+                {
+                    _running.Clear(); // a range reaching back past the retention lost records
+                }
+            }
+
+            foreach ((UsageRange range, UsageModelTotalsBuilder totals) in _running.Entries)
+            {
+                if (range.Covers(record))
+                {
+                    totals.Add(record.Model, record);
+                }
             }
         }
     }
 
     /// <inheritdoc />
     public UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
-        Records(since, until, model, connector, profile).Aggregate(UsageTotals.Zero, (total, r) => total.Add(r));
+        ModelTotals(since, until, UsageGrouping.Model, null, model, connector, profile).Aggregate(UsageTotals.Zero, (total, g) => total.Add(g.Totals));
 
     /// <inheritdoc />
     public IReadOnlyList<UsageRecord> Records(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null)
     {
+        var range = new UsageRange(since, until, model, connector, profile);
         lock (_gate)
         {
-            return _records
-                .Where(r => r.Timestamp >= since && r.Timestamp < until
-                            && (model is null || string.Equals(r.Model, model, StringComparison.OrdinalIgnoreCase))
-                            && (connector is null || string.Equals(r.Connector, connector, StringComparison.OrdinalIgnoreCase))
-                            && (profile is null || string.Equals(r.Profile, profile, StringComparison.OrdinalIgnoreCase)))
-                .ToArray();
+            return _records.Where(range.Covers).ToArray();
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<UsageModelTotals> ModelTotals(
+        DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null, string? model = null, string? connector = null, string? profile = null)
+    {
+        var range = new UsageRange(since, until, model, connector, profile);
+        lock (_gate)
+        {
+            return by == UsageGrouping.Model
+                ? _running.GetOrAdd(range, r => UsageModelTotalsBuilder.Of(_records.Where(r.Covers), by, TimeZoneInfo.Local)).ToList()
+                : UsageModelTotalsBuilder.Of(_records.Where(range.Covers), by, zone ?? TimeZoneInfo.Local).ToList();
         }
     }
 
@@ -169,6 +201,103 @@ public sealed class InMemoryUsageLedger : IUsageLedger
     }
 }
 
+/// <summary>A range of usage to add up: a period, optionally for one model, connector or profile.</summary>
+internal readonly record struct UsageRange(DateTimeOffset Since, DateTimeOffset Until, string? Model, string? Connector, string? Profile)
+{
+    public bool Covers(UsageRecord record) =>
+        record.Timestamp >= Since && record.Timestamp < Until
+        && (Model is null || string.Equals(record.Model, Model, StringComparison.OrdinalIgnoreCase))
+        && (Connector is null || string.Equals(record.Connector, Connector, StringComparison.OrdinalIgnoreCase))
+        && (Profile is null || string.Equals(record.Profile, Profile, StringComparison.OrdinalIgnoreCase));
+}
+
+/// <summary>Usage added up per group and model; keys and models are compared ignoring case, as in <see cref="UsageSummaries"/>.</summary>
+internal sealed class UsageModelTotalsBuilder
+{
+    private readonly Dictionary<(string Key, string Model), UsageModelTotals> _totals = new(KeyComparer.Instance);
+
+    public static UsageModelTotalsBuilder Of(IEnumerable<UsageRecord> records, UsageGrouping by, TimeZoneInfo zone)
+    {
+        var builder = new UsageModelTotalsBuilder();
+        foreach (UsageRecord record in records)
+        {
+            builder.Add(UsageSummaries.KeyOf(record, by, zone), record);
+        }
+
+        return builder;
+    }
+
+    public void Add(string key, UsageRecord record) => Add(key, record.Model, UsageTotals.Zero.Add(record));
+
+    public void Add(string key, string model, UsageTotals totals) =>
+        _totals[(key, model)] = _totals.TryGetValue((key, model), out UsageModelTotals? sum)
+            ? sum with { Totals = sum.Totals.Add(totals) }
+            : new UsageModelTotals(key, model, totals);
+
+    public void Add(IEnumerable<UsageModelTotals> totals)
+    {
+        foreach (UsageModelTotals group in totals)
+        {
+            Add(group.Key, group.Model, group.Totals);
+        }
+    }
+
+    public IReadOnlyList<UsageModelTotals> ToList() => [.. _totals.Values];
+
+    private sealed class KeyComparer : IEqualityComparer<(string Key, string Model)>
+    {
+        public static readonly KeyComparer Instance = new();
+
+        public bool Equals((string Key, string Model) x, (string Key, string Model) y) =>
+            StringComparer.OrdinalIgnoreCase.Equals(x.Key, y.Key) && StringComparer.OrdinalIgnoreCase.Equals(x.Model, y.Model);
+
+        public int GetHashCode((string Key, string Model) obj) =>
+            HashCode.Combine(StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Key), StringComparer.OrdinalIgnoreCase.GetHashCode(obj.Model));
+    }
+}
+
+/// <summary>
+/// The running totals of the ranges a ledger was asked for most recently, at most <see cref="Capacity"/>: the least
+/// recently used goes first. Not thread-safe; the ledger locks around it.
+/// </summary>
+internal sealed class RunningUsageTotals<T>
+    where T : class
+{
+    public const int Capacity = 16;
+    private readonly Dictionary<UsageRange, (T Totals, long Used)> _entries = [];
+    private long _uses;
+
+    public IEnumerable<KeyValuePair<UsageRange, T>> Entries => _entries.Select(e => KeyValuePair.Create(e.Key, e.Value.Totals));
+
+    public T GetOrAdd(UsageRange range, Func<UsageRange, T> create)
+    {
+        if (_entries.TryGetValue(range, out (T Totals, long Used) entry))
+        {
+            _entries[range] = (entry.Totals, ++_uses);
+            return entry.Totals;
+        }
+
+        if (_entries.Count >= Capacity)
+        {
+            _entries.Remove(_entries.MinBy(e => e.Value.Used).Key);
+        }
+
+        T totals = create(range);
+        _entries[range] = (totals, ++_uses);
+        return totals;
+    }
+
+    public void Clear() => _entries.Clear();
+
+    public void RemoveWhere(Func<UsageRange, bool> predicate)
+    {
+        foreach (UsageRange range in _entries.Keys.Where(predicate).ToArray())
+        {
+            _entries.Remove(range);
+        }
+    }
+}
+
 /// <summary>Shared grouping for ledgers.</summary>
 public static class UsageSummaries
 {
@@ -177,14 +306,22 @@ public static class UsageSummaries
     {
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(zone);
-        return records
+        return Order(records
             .GroupBy(r => KeyOf(r, by, zone), StringComparer.OrdinalIgnoreCase)
-            .Select(g => new UsageGroup(g.Key, g.Aggregate(UsageTotals.Zero, (total, r) => total.Add(r))))
-            .OrderByDescending(g => by == UsageGrouping.Day ? 0 : g.Totals.CostUsd)
-            .ThenByDescending(g => by == UsageGrouping.Day ? 0 : g.Totals.TotalTokens)
-            .ThenBy(g => g.Key, StringComparer.Ordinal)
-            .ToArray();
+            .Select(g => new UsageGroup(g.Key, g.Aggregate(UsageTotals.Zero, (total, r) => total.Add(r)))), by);
     }
+
+    /// <summary>Adds up <paramref name="totals"/> per group, in the order of the groups of records.</summary>
+    internal static IReadOnlyList<UsageGroup> Group(IEnumerable<UsageModelTotals> totals, UsageGrouping by) =>
+        Order(totals
+            .GroupBy(t => t.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new UsageGroup(g.Key, g.Aggregate(UsageTotals.Zero, (total, t) => total.Add(t.Totals)))), by);
+
+    private static UsageGroup[] Order(IEnumerable<UsageGroup> groups, UsageGrouping by) => groups
+        .OrderByDescending(g => by == UsageGrouping.Day ? 0 : g.Totals.CostUsd)
+        .ThenByDescending(g => by == UsageGrouping.Day ? 0 : g.Totals.TotalTokens)
+        .ThenBy(g => g.Key, StringComparer.Ordinal)
+        .ToArray();
 
     /// <summary>The group key of one record.</summary>
     public static string KeyOf(UsageRecord record, UsageGrouping by, TimeZoneInfo zone)
@@ -194,13 +331,21 @@ public static class UsageSummaries
         {
             UsageGrouping.Model => record.Model,
             UsageGrouping.Connector => record.Connector,
-            UsageGrouping.Route => record.Route ?? "(no route)",
-            UsageGrouping.Client => record.Client ?? "(no key)",
-            UsageGrouping.Profile => record.Profile ?? "(no profile)",
+            UsageGrouping.Route => record.Route ?? NoRoute,
+            UsageGrouping.Client => record.Client ?? NoClient,
+            UsageGrouping.Profile => record.Profile ?? NoProfile,
             UsageGrouping.Location => record.IsLocal ? "local" : "cloud",
-            _ => TimeZoneInfo.ConvertTime(record.Timestamp, zone).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            _ => DayKey(record.Timestamp, zone),
         };
     }
+
+    internal const string NoRoute = "(no route)";
+    internal const string NoClient = "(no key)";
+    internal const string NoProfile = "(no profile)";
+
+    /// <summary>The day <paramref name="timestamp"/> falls on in <paramref name="zone"/>, <c>yyyy-MM-dd</c>.</summary>
+    internal static string DayKey(DateTimeOffset timestamp, TimeZoneInfo zone) =>
+        TimeZoneInfo.ConvertTime(timestamp, zone).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
 }
 
 /// <summary>
@@ -210,7 +355,7 @@ public static class UsageSummaries
 /// </summary>
 public static class UsagePricing
 {
-    /// <summary><see cref="IUsageLedger.Total"/>, priced at <paramref name="prices"/>' current prices when the ledger keeps records.</summary>
+    /// <summary><see cref="IUsageLedger.Total"/>, priced at <paramref name="prices"/>' current prices when the ledger keeps records or per-model totals.</summary>
     /// <param name="ledger">The ledger.</param>
     /// <param name="prices">The configuration whose models and reference model price the usage; <see langword="null"/> for the stored costs.</param>
     /// <param name="since">From (inclusive).</param>
@@ -222,12 +367,23 @@ public static class UsagePricing
         this IUsageLedger ledger, RouterConfiguration? prices, DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null)
     {
         ArgumentNullException.ThrowIfNull(ledger);
-        return prices is not null && ledger.TotalsByModel(since, until, model, connector, profile) is { } byModel
-            ? byModel.Select(TotalsPricer(prices)).Aggregate(UsageTotals.Zero, (total, t) => total.Add(t))
+        if (prices is null)
+        {
+            return ledger.Total(since, until, model, connector, profile);
+        }
+
+        if (ledger.ModelTotals(since, until, UsageGrouping.Model, null, model, connector, profile) is { } totals)
+        {
+            Func<UsageModelTotals, UsageTotals> price = TotalsPricer(prices);
+            return totals.Aggregate(UsageTotals.Zero, (total, t) => total.Add(price(t)));
+        }
+
+        return ledger.Records(since, until, model, connector, profile) is { } records
+            ? records.Select(Pricer(prices)).Aggregate(UsageTotals.Zero, (total, r) => total.Add(r))
             : ledger.Total(since, until, model, connector, profile);
     }
 
-    /// <summary><see cref="IUsageLedger.Summarize"/>, priced at <paramref name="prices"/>' current prices when the ledger keeps records.</summary>
+    /// <summary><see cref="IUsageLedger.Summarize"/>, priced at <paramref name="prices"/>' current prices when the ledger keeps records or per-model totals.</summary>
     /// <param name="ledger">The ledger.</param>
     /// <param name="prices">The configuration whose models and reference model price the usage; <see langword="null"/> for the stored costs.</param>
     /// <param name="since">From (inclusive).</param>
@@ -238,7 +394,18 @@ public static class UsagePricing
         this IUsageLedger ledger, RouterConfiguration? prices, DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null)
     {
         ArgumentNullException.ThrowIfNull(ledger);
-        return prices is not null && ledger.Records(since, until) is { } records
+        if (prices is null)
+        {
+            return ledger.Summarize(since, until, by, zone);
+        }
+
+        if (ledger.ModelTotals(since, until, by, zone) is { } totals)
+        {
+            Func<UsageModelTotals, UsageTotals> price = TotalsPricer(prices);
+            return UsageSummaries.Group(totals.Select(t => t with { Totals = price(t) }), by);
+        }
+
+        return ledger.Records(since, until) is { } records
             ? UsageSummaries.Group(records.Select(Pricer(prices)), by, zone ?? TimeZoneInfo.Local)
             : ledger.Summarize(since, until, by, zone);
     }
@@ -250,43 +417,31 @@ public static class UsagePricing
     /// <param name="prices">The configuration whose models and reference model price the records.</param>
     public static Func<UsageRecord, UsageRecord> Pricer(RouterConfiguration prices)
     {
-        (Dictionary<string, ModelDefinition> models, ModelDefinition? reference) = Catalog(prices);
+        Func<string, long, long, long, long, decimal, decimal, (decimal Cost, decimal Reference, decimal Value)> price = Prices(prices);
         return r =>
         {
-            ModelDefinition? model = models.GetValueOrDefault(r.Model);
-            decimal cost = model?.Cost(r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens) ?? r.CostUsd;
-            return r with
-            {
-                CostUsd = cost,
-                ReferenceCostUsd = reference?.Cost(r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens) ?? cost,
-                SubscriptionValueUsd = model?.ApiValue(r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens) ?? r.SubscriptionValueUsd,
-            };
+            (decimal cost, decimal reference, decimal value) = price(r.Model, r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens, r.CostUsd, r.SubscriptionValueUsd);
+            return r with { CostUsd = cost, ReferenceCostUsd = reference, SubscriptionValueUsd = value };
         };
     }
 
     /// <summary>
-    /// Prices one model's totals (<see cref="IUsageLedger.TotalsByModel"/>) as <see cref="Pricer"/> prices each of its
-    /// records: the prices are per token, so the sum of the records' costs is the cost of their summed tokens.
+    /// <see cref="Pricer"/> for one model's totals: prices are per token, so pricing the token totals gives what pricing
+    /// each record and adding them up gives.
     /// </summary>
-    /// <param name="prices">The configuration whose models and reference model price the totals.</param>
-    public static Func<UsageGroup, UsageTotals> TotalsPricer(RouterConfiguration prices)
+    private static Func<UsageModelTotals, UsageTotals> TotalsPricer(RouterConfiguration prices)
     {
-        (Dictionary<string, ModelDefinition> models, ModelDefinition? reference) = Catalog(prices);
-        return g =>
+        Func<string, long, long, long, long, decimal, decimal, (decimal Cost, decimal Reference, decimal Value)> price = Prices(prices);
+        return t =>
         {
-            UsageTotals t = g.Totals;
-            ModelDefinition? model = models.GetValueOrDefault(g.Key);
-            decimal cost = model?.Cost(t.InputTokens, t.OutputTokens, t.CacheReadTokens, t.CacheWriteTokens) ?? t.CostUsd;
-            return t with
-            {
-                CostUsd = cost,
-                ReferenceCostUsd = reference?.Cost(t.InputTokens, t.OutputTokens, t.CacheReadTokens, t.CacheWriteTokens) ?? cost,
-                SubscriptionValueUsd = model?.ApiValue(t.InputTokens, t.OutputTokens, t.CacheReadTokens, t.CacheWriteTokens) ?? t.SubscriptionValueUsd,
-            };
+            UsageTotals totals = t.Totals;
+            (decimal cost, decimal reference, decimal value) = price(
+                t.Model, totals.InputTokens, totals.OutputTokens, totals.CacheReadTokens, totals.CacheWriteTokens, totals.CostUsd, totals.SubscriptionValueUsd);
+            return totals with { CostUsd = cost, ReferenceCostUsd = reference, SubscriptionValueUsd = value };
         };
     }
 
-    private static (Dictionary<string, ModelDefinition> Models, ModelDefinition? Reference) Catalog(RouterConfiguration prices)
+    private static Func<string, long, long, long, long, decimal, decimal, (decimal Cost, decimal Reference, decimal Value)> Prices(RouterConfiguration prices)
     {
         ArgumentNullException.ThrowIfNull(prices);
         var models = new Dictionary<string, ModelDefinition>(StringComparer.OrdinalIgnoreCase);
@@ -295,6 +450,12 @@ public static class UsagePricing
             models.TryAdd(m.Name, m);
         }
 
-        return (models, prices.Usage.ReferenceModel is { Length: > 0 } name ? models.GetValueOrDefault(name) : null);
+        ModelDefinition? reference = prices.Usage.ReferenceModel is { Length: > 0 } name ? models.GetValueOrDefault(name) : null;
+        return (name, input, output, cacheRead, cacheWrite, storedCost, storedValue) =>
+        {
+            ModelDefinition? model = models.GetValueOrDefault(name);
+            decimal cost = model?.Cost(input, output, cacheRead, cacheWrite) ?? storedCost;
+            return (cost, reference?.Cost(input, output, cacheRead, cacheWrite) ?? cost, model?.ApiValue(input, output, cacheRead, cacheWrite) ?? storedValue);
+        };
     }
 }
