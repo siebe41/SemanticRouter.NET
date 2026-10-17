@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -78,6 +79,9 @@ internal readonly record struct GatewayAdmission(string? Client, int Status = 0,
 
     /// <summary>The key check that refused it (401), rather than the web-page check (403).</summary>
     public bool KeyMissing => Status == StatusCodes.Status401Unauthorized;
+
+    /// <summary>Refused because its address sent too many wrong keys (429): not logged again, the wrong keys were.</summary>
+    public bool Throttled => Status == StatusCodes.Status429TooManyRequests;
 }
 
 /// <summary>Who may use the gateway: the same rule for the chat endpoints and the ones the middleware does not intercept.</summary>
@@ -90,20 +94,38 @@ internal static class GatewayAuthentication
     /// </summary>
     public static GatewayAdmission Admit(HttpContext context, RouterRuntime runtime)
     {
+        PromptRouterMiddlewareOptions options = runtime.Configuration.Middleware;
+        bool needsKey = !DashboardAccess.IsLocal(context) || options.RequireGatewayKeyForLocalClients;
+
+        // An address that sent too many wrong keys is not answered whether its next key is right, so keys cannot be guessed
+        // by trying many. Checked before the keys are compared.
+        GatewayKeyThrottle? throttle = context.RequestServices?.GetService<GatewayKeyThrottle>();
+        bool presented = PromptRoutingMiddleware.PresentsKey(context.Request);
+        if (needsKey && presented && throttle?.RetryAfter(context) is { } wait)
+        {
+            context.Response.Headers.RetryAfter = Math.Ceiling(wait.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+            return new GatewayAdmission(
+                null, StatusCodes.Status429TooManyRequests, "Too many wrong gateway keys",
+                $"This address sent {GatewayKeyThrottle.MaxFailures} wrong gateway keys within {GatewayKeyThrottle.Window.TotalMinutes:0} minutes; " +
+                "try again later with the right key.");
+        }
+
         string? client = runtime.GatewayKeys.Count > 0 ? PromptRoutingMiddleware.IdentifyClient(context.Request, runtime.GatewayKeys) : null;
         if (client is not null)
         {
             return new GatewayAdmission(client);
         }
 
-        PromptRouterMiddlewareOptions options = runtime.Configuration.Middleware;
-
         // Configured keys count even when their references did not resolve: a missing variable must not open the gateway.
         bool keysConfigured = options.GatewayKeys.Count > 0;
-        if (!DashboardAccess.IsLocal(context) || options.RequireGatewayKeyForLocalClients)
+        if (needsKey)
         {
             if (keysConfigured)
             {
+                if (presented)
+                {
+                    throttle?.Failed(context);
+                }
                 return new GatewayAdmission(
                     null, StatusCodes.Status401Unauthorized, "Gateway key required",
                     "This router requires a gateway key: send it as 'Authorization: Bearer <key>' or 'x-api-key: <key>' " +
@@ -153,4 +175,26 @@ internal static class GatewayEndpointAccess
 
             return await next(invocation).ConfigureAwait(false);
         });
+}
+
+/// <summary>
+/// Counts wrong gateway keys per client address (<see cref="SignInThrottle"/> with a larger allowance, since a client that
+/// is set up with an old key retries on its own): after <see cref="MaxFailures"/> within <see cref="Window"/>, keys from
+/// that address are refused with 429 until the oldest is a window old.
+/// </summary>
+internal sealed class GatewayKeyThrottle(TimeProvider time)
+{
+    /// <summary>Wrong keys allowed from one address within <see cref="Window"/>.</summary>
+    public const int MaxFailures = 20;
+
+    /// <summary>How long a wrong key counts.</summary>
+    public static readonly TimeSpan Window = SignInThrottle.Window;
+
+    private readonly SignInThrottle _failures = new(time, MaxFailures);
+
+    /// <summary>How long until the address may try again; <see langword="null"/> when it may now.</summary>
+    public TimeSpan? RetryAfter(HttpContext context) => _failures.RetryAfter(context);
+
+    /// <summary>Records a wrong key from the address.</summary>
+    public void Failed(HttpContext context) => _failures.Failed(context);
 }

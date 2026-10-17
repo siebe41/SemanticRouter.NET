@@ -102,7 +102,7 @@ internal sealed partial class PromptRoutingMiddleware
             {
                 LogGatewayKeyMissing(_logger, context.Connection.RemoteIpAddress?.ToString() ?? "unknown", context.Request.Path);
             }
-            else
+            else if (!gateway.Throttled)
             {
                 LogGatewayRequestRefused(_logger, context.Request.Path, gateway.Detail!);
             }
@@ -705,6 +705,11 @@ internal sealed partial class PromptRoutingMiddleware
     /// The name of the gateway key the client presented, or <see langword="null"/>. Keys are compared in constant time
     /// and are only read for this comparison: they are never logged or forwarded.
     /// </summary>
+    /// <summary>Whether the request carries something that could be a gateway key (a bearer token or <c>x-api-key</c>).</summary>
+    internal static bool PresentsKey(HttpRequest request) =>
+        request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+        || !string.IsNullOrEmpty(request.Headers["x-api-key"]);
+
     internal static string? IdentifyClient(HttpRequest request, IReadOnlyDictionary<string, string> keys)
     {
         string? bearer = request.Headers.Authorization;

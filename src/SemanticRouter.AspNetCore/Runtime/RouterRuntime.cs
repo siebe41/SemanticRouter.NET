@@ -553,6 +553,14 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         }
 
         RouterConfiguration resolved = configuration.ResolveSecrets(_secrets, warnings);
+        foreach ((string client, string key) in resolved.Middleware.GatewayKeys
+            .Where(k => k.Value.Length is > 0 && k.Value.Length < Microsoft.AspNetCore.Builder.RouterDashboardOptions.MinimumTokenLength))
+        {
+            warnings.Add(
+                $"Gateway key '{client}' is shorter than {Microsoft.AspNetCore.Builder.RouterDashboardOptions.MinimumTokenLength} characters, so it can be guessed: " +
+                "set its variable or secret to a longer one (try `openssl rand -hex 24`).");
+        }
+
         foreach ((string name, string reason) in Policy.BlockedWebhooks(resolved.Notifications).ToArray())
         {
             // A webhook address held as a secret is only known once resolved.

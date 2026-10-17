@@ -329,6 +329,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             {
                 errors.Add($"Middleware:GatewayKeys:{client} must not be empty.");
             }
+            else if (IsLiteralSecret(key) && key.Length < Microsoft.AspNetCore.Builder.RouterDashboardOptions.MinimumTokenLength)
+            {
+                // A short key can be guessed by a client that keeps trying (#182); a reference is checked once it resolves.
+                errors.Add($"Middleware:GatewayKeys:{client} must be at least {Microsoft.AspNetCore.Builder.RouterDashboardOptions.MinimumTokenLength} characters (try `openssl rand -hex 24`).");
+            }
         }
 
         if (Middleware.Feedback.CorrectionSimilarity is < 0 or > 1 || Middleware.Feedback.CorrectionMargin is < 0 or > 1)

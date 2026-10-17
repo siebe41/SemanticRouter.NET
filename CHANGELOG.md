@@ -100,6 +100,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Security
 
+- Gateway keys must have at least 16 characters (a shorter key in the configuration is refused, one from a reference is a warning), and an address that sends 20 wrong keys within 15 minutes gets `429` with `Retry-After` until the oldest is 15 minutes old. (#PRNUM)
 - A repeated `TrustedGroupsHeader` is refused with `403`, as a repeated user header already was, so a client's own copy of the groups header cannot raise its role behind a proxy that appends to it. (#PRNUM)
 - Another account on the same machine is no longer trusted as "this machine": the router asks the operating system who opened each loopback connection (Linux, macOS, Windows), and another user is a remote client that needs a dashboard token or a gateway key and is not served by subscription CLI connectors. Root and LocalSystem still count as the router's own account. `SemanticRouter:Network:TrustOtherLocalAccounts` restores the old behaviour for a router that serves everyone who signs in to the machine. (#235)
 - Over the admin API, every value the router resolves is held to the secret-reference rules, not only header names that look secret, and an `${env:…}` reference a setting did not have before is accepted only from this machine or as a provider preset's key for that provider's address. (#235)
