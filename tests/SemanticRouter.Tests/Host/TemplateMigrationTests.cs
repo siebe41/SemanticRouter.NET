@@ -176,6 +176,31 @@ public sealed class TemplateMigrationTests : IDisposable
     }
 
     [Fact]
+    public void A_configuration_written_by_hand_is_left_alone()
+    {
+        // Two routes of its own, one named like the template's, no model aliases: not a template someone edited.
+        RouterConfiguration document = RouterConfiguration.FromJson("""
+            {
+              "Routes": [
+                { "Name": "smalltalk", "Tier": 1, "Utterances": [ "hi there" ] },
+                { "Name": "architecture", "Tier": 4, "Utterances": [ "design a system" ] }
+              ]
+            }
+            """);
+
+        TemplateMigration.Origin(document).Should().BeNull();
+        TemplateMigration.Upgrade(document).Should().BeNull("a template's new routes and aliases are not for it");
+
+        RouterConfiguration trimmed = AsReleased(1);
+        while (trimmed.Routes.Count > 4)
+        {
+            trimmed.Routes.RemoveAt(trimmed.Routes.Count - 1);
+        }
+
+        TemplateMigration.Origin(trimmed).Should().Be(1, "half of the template's routes are still there");
+    }
+
+    [Fact]
     public async Task The_router_upgrades_a_file_from_0_2_1_on_start_and_records_it_in_the_history()
     {
         RouterConfiguration document = AsReleased(1);
