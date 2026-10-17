@@ -235,6 +235,24 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
         }
     }
 
+    /// <summary>
+    /// Reserves <paramref name="count"/> ids for rows of <paramref name="table"/> (<c>activity</c> or <c>feedback</c>),
+    /// past every id reserved before and every id in the table, and returns the first; -1 when the database failed.
+    /// The counter is in <c>meta</c>, so routers sharing the file never hand out the same id.
+    /// </summary>
+    public long ReserveIds(string table, int count) =>
+        Run("reserving ids", -1L, connection =>
+        {
+            // One statement, so it is atomic. The table's newest id counts too: rows written before the counter existed.
+            using SqliteCommand command = Command(
+                connection,
+                $"INSERT INTO meta (key, value) VALUES ($key, (SELECT COALESCE(MAX(id), 0) + 1 FROM {table}) + $count) " +
+                $"ON CONFLICT(key) DO UPDATE SET value = MAX(CAST(value AS INTEGER), (SELECT COALESCE(MAX(id), 0) + 1 FROM {table})) + $count " +
+                "RETURNING CAST(value AS INTEGER) - $count;",
+                ("$key", table + "_next_id"), ("$count", count));
+            return (long)command.ExecuteScalar()!;
+        });
+
     public static SqliteCommand Command(SqliteConnection connection, string sql, params (string Name, object? Value)[] parameters)
     {
         SqliteCommand command = connection.CreateCommand();
@@ -684,7 +702,7 @@ internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRout
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
-                "INSERT OR REPLACE INTO feedback (id, timestamp_ticks, entry_id, item) VALUES ($id, $ts, $entry, $item);",
+                "INSERT INTO feedback (id, timestamp_ticks, entry_id, item) VALUES ($id, $ts, $entry, $item);",
                 ("$id", feedback.Id), ("$ts", feedback.Timestamp.UtcTicks), ("$entry", feedback.EntryId), ("$item", JsonSerializer.Serialize(feedback, Json)));
             command.ExecuteNonQuery();
             if (prune)
@@ -696,6 +714,8 @@ internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRout
             }
         });
     }
+
+    public long ReserveIds(int count) => database.ReserveIds("feedback", count);
 
     public IReadOnlyList<RoutingFeedback> Recent(int limit) => Read(
         "SELECT item FROM feedback ORDER BY id DESC LIMIT $limit;", ("$limit", Math.Max(0, limit)));
@@ -827,9 +847,10 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
         bool prune = Interlocked.Increment(ref _writes) % 100 == 0;
         database.Run("saving activity", connection =>
         {
+            // A plain insert: an id that is already there is a bug to hear about, not an entry to overwrite.
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
-                "INSERT OR REPLACE INTO activity (id, timestamp_ticks, entry) VALUES ($id, $ts, $entry);",
+                "INSERT INTO activity (id, timestamp_ticks, entry) VALUES ($id, $ts, $entry);",
                 ("$id", entry.Id), ("$ts", entry.Timestamp.UtcTicks), ("$entry", JsonSerializer.Serialize(entry, Json)));
             command.ExecuteNonQuery();
             if (prune)
@@ -838,6 +859,20 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
             }
         });
     }
+
+    public void Replace(RoutingActivityEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        database.Run("saving activity", connection =>
+        {
+            using SqliteCommand command = SqliteRouterDatabase.Command(
+                connection, "UPDATE activity SET timestamp_ticks = $ts, entry = $entry WHERE id = $id;",
+                ("$id", entry.Id), ("$ts", entry.Timestamp.UtcTicks), ("$entry", JsonSerializer.Serialize(entry, Json)));
+            command.ExecuteNonQuery();
+        });
+    }
+
+    public long ReserveIds(int count) => database.ReserveIds("activity", count);
 
     public IReadOnlyList<RoutingActivityEntry> Recent(int limit) =>
         database.Run<IReadOnlyList<RoutingActivityEntry>>("reading activity", [], connection =>

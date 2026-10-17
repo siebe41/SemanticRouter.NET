@@ -182,7 +182,7 @@ public sealed class SqliteStateTests : IDisposable
         RoutingActivityEntry next = restarted.Add(new RoutingActivityEntry { Id = restarted.Reserve(), PromptPreview = "again" });
 
         seeded.Should().BeEquivalentTo(first);
-        next.Id.Should().Be(first.Id + 1);
+        next.Id.Should().BeGreaterThan(first.Id, "the restarted log takes a new block of ids, past the one the first run reserved");
         restarted.Recent(10, after: first.Id).Should().ContainSingle().Which.PromptPreview.Should().Be("again");
     }
 
@@ -327,7 +327,7 @@ public sealed class SqliteStateTests : IDisposable
         reopened.Between(now.AddMinutes(-1), now.AddMinutes(1)).Should().HaveCount(2);
         reopened.Add(new RoutingFeedback { Timestamp = now, EntryId = 8, Kind = FeedbackKind.Corrected }).Should().BeFalse("the reopened log knows what was recorded");
         reopened.Add(new RoutingFeedback { Timestamp = now, EntryId = 9, Kind = FeedbackKind.Overridden }).Should().BeTrue();
-        reopened.Recent()[0].Id.Should().Be(3, "ids continue after a restart");
+        reopened.Recent()[0].Id.Should().BeGreaterThan(reopened.Recent()[1].Id, "ids continue after a restart, never reused");
     }
 
     [Fact]
@@ -576,6 +576,56 @@ public sealed class SqliteStateTests : IDisposable
         b.Total(Since, Until, connector: "c").CostUsd.Should().Be(0.75m);
     }
 
+    [Fact]
+    public async Task Two_activity_logs_sharing_the_file_keep_every_entry_under_concurrent_writes()
+    {
+        RoutingActivityLog[] logs = [new(store: new SqliteActivityStore(Open())), new(store: new SqliteActivityStore(Open()))];
+
+        RoutingActivityEntry[] written = await Task.WhenAll(Enumerable.Range(0, 400).Select(i => Task.Run(() =>
+        {
+            RoutingActivityLog log = logs[i % 2];
+            RoutingActivityEntry entry = log.Add(new RoutingActivityEntry { Id = log.Reserve(), Timestamp = _time.GetUtcNow(), PromptPreview = "p" + i });
+            entry.Outcome = "served";
+            log.Complete(entry);
+            return entry;
+        })));
+        RoutingActivityEntry graded = written[7];
+        graded.Grade = 2;
+        logs[1].Revise(graded);
+
+        IReadOnlyList<RoutingActivityEntry> stored = new SqliteActivityStore(Open()).Recent(1000);
+        written.Select(e => e.Id).Should().OnlyHaveUniqueItems();
+        stored.Should().HaveCount(400, "no entry replaced another");
+        stored.Select(e => e.PromptPreview).Should().BeEquivalentTo(Enumerable.Range(0, 400).Select(i => "p" + i));
+        stored.Single(e => e.Id == graded.Id).Should().Match<RoutingActivityEntry>(e => e.Grade == 2 && e.PromptPreview == graded.PromptPreview);
+        _logs.All.Should().NotContain("failed");
+    }
+
+    [Fact]
+    public async Task Two_feedback_logs_sharing_the_file_keep_every_item_under_concurrent_writes()
+    {
+        RoutingFeedbackLog[] logs = [new(store: new SqliteFeedbackStore(Open())), new(store: new SqliteFeedbackStore(Open()))];
+
+        await Task.WhenAll(Enumerable.Range(0, 200).Select(i => Task.Run(() =>
+            logs[i % 2].Add(new RoutingFeedback { Timestamp = _time.GetUtcNow(), EntryId = i, Kind = FeedbackKind.Retried }).Should().BeTrue())));
+
+        IReadOnlyList<RoutingFeedback> stored = new SqliteFeedbackStore(Open()).Recent(1000);
+        stored.Select(f => f.EntryId).Should().BeEquivalentTo(Enumerable.Range(0, 200).Select(i => (long)i));
+        stored.Select(f => f.Id).Should().OnlyHaveUniqueItems().And.OnlyContain(id => id > 0);
+        _logs.All.Should().NotContain("failed");
+    }
+
+    [Fact]
+    public void An_activity_id_that_is_already_stored_is_not_overwritten()
+    {
+        var store = new SqliteActivityStore(Open());
+        store.Append(new RoutingActivityEntry { Id = 5, Timestamp = _time.GetUtcNow(), PromptPreview = "first" });
+        store.Append(new RoutingActivityEntry { Id = 5, Timestamp = _time.GetUtcNow(), PromptPreview = "second" });
+
+        store.Recent(10).Should().ContainSingle().Which.PromptPreview.Should().Be("first");
+        _logs.All.Should().Contain("saving activity failed");
+    }
+
     private DateTimeOffset Since => _time.GetUtcNow().Date.AddDays(-1);
 
     private DateTimeOffset Until => _time.GetUtcNow().Date.AddDays(2);
@@ -665,6 +715,23 @@ public sealed class DurableStateHostTests : RouterHostTest
 
     private static async Task<string> LastPreviewAsync(HttpClient client) =>
         JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray()[0]!["promptPreview"]!.GetValue<string>();
+
+    [Fact]
+    public async Task Concurrent_requests_get_distinct_ids_and_each_its_own_stored_entry()
+    {
+        const int Requests = 48;
+        HttpClient client = await StartDurableAsync();
+
+        HttpResponseMessage[] responses = await Task.WhenAll(Enumerable.Range(0, Requests).Select(i => client.PostAsync("/v1/chat/completions", Chat("hello " + i))));
+
+        responses.Should().OnlyContain(r => r.StatusCode == HttpStatusCode.OK);
+        long[] ids = [.. responses.Select(r => long.Parse(r.Headers.GetValues("X-Prompt-Route-Id").Single(), System.Globalization.CultureInfo.InvariantCulture))];
+        ids.Should().OnlyHaveUniqueItems();
+        await WaitForStoredActivityAsync(Requests);
+        IReadOnlyList<RoutingActivityEntry> stored = Services.GetRequiredService<IRoutingActivityStore>().Recent(1000);
+        stored.Select(e => e.Id).Should().BeEquivalentTo(ids);
+        stored.Select(e => e.PromptPreview).Should().BeEquivalentTo(Enumerable.Range(0, Requests).Select(i => "hello " + i));
+    }
 
     [Fact]
     public async Task Prompt_previews_mask_credentials_by_default_and_can_be_turned_off()

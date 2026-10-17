@@ -131,7 +131,7 @@ History documents are stored as applied. They keep `${…}` references where the
 - Cooldowns are re-read every `ModelHealthTracker.RefreshInterval` (5 s), so an account limit one instance hits is honoured by the others within seconds.
 - Affinity lookups fall through to the file, so a tool turn can continue on another instance.
 - Budgets count every instance's usage: each reads the rows the others added at most every 2 s (`SqliteUsageLedger.RefreshInterval`).
-- Activity ids are per instance, so a shared file mixes their entries; give each instance its own file if you want separate logs.
+- Activity and feedback ids come from a counter in the file, which each instance takes 32 at a time, so no two requests get the same id. Ids therefore skip ahead after a restart, and two instances' ids interleave in blocks. The shared file mixes their entries; give each instance its own file if you want separate logs.
 
 Do not put the file on a network share: SQLite's locking is unreliable there. For instances on different machines, implement `ICooldownStore` and `IToolCallAffinity` over a shared cache such as Redis.
 
