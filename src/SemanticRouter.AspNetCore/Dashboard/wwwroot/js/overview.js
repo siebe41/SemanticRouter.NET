@@ -12,6 +12,7 @@ import { pageActions } from './page-actions.js';
 import { unreliableBadge } from './reliability.js';
 import { runsOn, serviceCard } from './service.js';
 import { gatewayError, setupCard, setupShowing } from './setup.js';
+import { templateDefaultsCard } from './template-defaults.js';
 import { render } from './shell.js';
 
 views.overview = () => {
@@ -28,6 +29,7 @@ views.overview = () => {
     <div class="section-head"><h1>Overview</h1><span class="muted">What the router is doing right now.</span></div>
     ${setupCard()}
     ${noticesCard()}
+    ${templateDefaultsCard()}
     ${digestCard() || countersRow(s)}
     ${modelsCard(s)}
     ${metricsOnly() ? '' : `<div class="card section">

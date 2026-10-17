@@ -301,13 +301,20 @@ internal static partial class RouterHost
         }
 
         // A file an earlier release wrote from its template gets the current template's fixes wherever it still has the
-        // earlier template's values; the history records what changed.
-        string? upgraded = await TemplateMigration.UpgradeFilesAsync(settings.ConfigurationFile, output).ConfigureAwait(false);
+        // earlier template's values; the history records what changed, and the Overview offers the new defaults of the
+        // settings it kept as you had them.
+        TemplateUpgrade? upgraded = await TemplateMigration.UpgradeFilesAsync(settings.ConfigurationFile, output).ConfigureAwait(false);
         WebApplication app = Build(settings, upgraded is null ? configure : builder =>
         {
-            builder.Services.AddSingleton(new StartupConfigurationNote(TemplateMigration.HistorySource, upgraded));
+            builder.Services.AddSingleton(new StartupConfigurationNote(TemplateMigration.HistorySource, upgraded.Describe()));
             configure?.Invoke(builder);
         });
+        if (upgraded is not null)
+        {
+            app.Services.GetRequiredService<TemplateDefaults>().Record(
+                new TemplateDefaultsPending(upgraded.From, TemplateMigration.Current, DateTimeOffset.UtcNow, upgraded.Kept));
+        }
+
         StartingQuietly starting = app.Services.GetRequiredService<StartingQuietly>();
         starting.On = true;
         try

@@ -18,6 +18,9 @@ public enum NoticeKind
 
     /// <summary>Automatic tuning wants changes it may not make on its own.</summary>
     TuningSuggestion,
+
+    /// <summary>An upgrade to a newer built-in template kept settings you had changed that the template changed too.</summary>
+    TemplateDefaults,
 }
 
 /// <summary>One thing that needs a decision.</summary>
@@ -50,7 +53,8 @@ internal sealed class RouterNotices(
     ConnectorIncidents incidents,
     ModelReliabilityTracker reliability,
     RouterTuner tuner,
-    TimeProvider? time = null)
+    TimeProvider? time = null,
+    TemplateDefaults? templateDefaults = null)
 {
     /// <summary>A budget spent in this many of its last <see cref="BudgetPeriods"/> periods keeps running out.</summary>
     internal const int BudgetPeriodsSpent = 2;
@@ -74,6 +78,23 @@ internal sealed class RouterNotices(
         Unreliable(configuration, now, notices);
         Down(configuration, now, notices);
         Suggestions(configuration, notices);
+        if (templateDefaults?.Pending is { Settings.Count: > 0 } kept)
+        {
+            string settings = string.Join(", ", kept.Settings.Take(3).Select(s => s.Setting)) + (kept.Settings.Count > 3 ? ", …" : string.Empty);
+            string detail = $"The template the configuration started from changed {settings} too. " +
+                            "For each, take the new default or keep yours, on the Overview.";
+            notices.Add(new RouterNotice(
+                $"template:{kept.From}-{kept.To}",
+                NoticeKind.TemplateDefaults,
+                $"The upgrade kept {kept.Settings.Count} setting{(kept.Settings.Count == 1 ? string.Empty : "s")} you had changed",
+                detail,
+                "#/overview",
+                kept.At)
+            {
+                PlainDetail = detail,
+            });
+        }
+
         return [.. notices.OrderBy(n => n.Since)];
     }
 

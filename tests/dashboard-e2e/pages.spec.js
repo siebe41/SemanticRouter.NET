@@ -456,3 +456,33 @@ test('on a Mac, the app window does the editing shortcuts itself', async ({ page
   await page.keyboard.press('Meta+c');
   expect(await clipboard()).toBe('sk-');
 });
+
+// After an upgrade to a newer built-in template: the settings it kept as you had them, each with the new default to take
+// or yours to keep (#204). The router's endpoints are answered here, as the upgrade needs a home from an older release.
+test('the Overview offers the new defaults of what a template upgrade kept', async ({ page }) => {
+  let settings = [
+    { name: 'Middleware.ModelAliases.*opus*', yours: '"family:sonnet"', default: '"auto"', current: '"family:sonnet"' },
+    { name: 'Routes[quick-answers]', yours: '{"Name":"quick-answers","Tier":3}', default: '{"Name":"quick-answers","Tier":2}', current: '{"Name":"quick-answers","Tier":3}' },
+  ];
+  const posted = [];
+  await page.route('**/router/api/config/template-defaults', (r) => r.fulfill({ json: { from: 1, to: 2, at: '2026-10-17T10:00:00Z', settings } }));
+  await page.route('**/router/api/config/template-defaults/*', (r) => {
+    const { setting } = r.request().postDataJSON();
+    posted.push([r.request().url().split('/').pop(), setting]);
+    settings = settings.filter((s) => s.name !== setting);
+    return r.request().url().endsWith('/use') ? r.fulfill({ json: { setting, saved: true } }) : r.fulfill({ status: 204 });
+  });
+  await open(page, 'overview');
+  const card = page.locator('#template-defaults');
+  await expect(card).toContainText('New defaults to review');
+  await expect(card).toContainText('from template 1 to 2');
+  await expect(card.locator('.learned-item')).toHaveCount(2);
+  await expect(card.locator('.learned-item').first()).toContainText('Yours: "family:sonnet" · the template\'s: "auto"');
+
+  await card.locator('[data-action="template-use"][data-setting="Middleware.ModelAliases.*opus*"]').click();
+  await expect(page.locator('.toast').last()).toContainText('Applied and saved: Middleware.ModelAliases.*opus* now has the template\'s default.');
+  await expect(card.locator('.learned-item')).toHaveCount(1);
+  await card.getByRole('button', { name: 'Keep mine' }).click();
+  await expect(page.locator('#template-defaults')).toHaveCount(0);
+  expect(posted).toEqual([['use', 'Middleware.ModelAliases.*opus*'], ['keep', 'Routes[quick-answers]']]);
+});

@@ -9,6 +9,7 @@ import { activityHeld, scheduleLive, showNewEntries } from './live.js';
 import { graph, mounts, readPalette, unmount } from './memory.js';
 import { loadUsage } from './usage.js';
 import { setupShowing } from './setup.js';
+import { loadTemplateDefaults } from './template-defaults.js';
 
 /* ---------------------------------------------------------------------------------------------
    Data loading
@@ -29,7 +30,7 @@ export async function loadAll() {
   setConfig(cfg);
   state.activity = activity.entries;
   state.feedback = activity.feedback || {};
-  await Promise.all([loadTuning(), loadDigest()]);
+  await Promise.all([loadTuning(), loadDigest(), loadTemplateDefaults()]);
   renderChrome();
   loadThemes();
 }
