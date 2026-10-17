@@ -7,7 +7,8 @@ using Velopack;
 // SemanticRouter --quit
 // SemanticRouter --headless [options]   the router only, no window or tray (what the background service runs)
 // SemanticRouter --install-service | --uninstall-service [options]   set the background service up or remove it
-// SemanticRouter --update [options]   download and apply an available update (installed app only) and exit
+// SemanticRouter --update [--restart] [options]   download and apply an available update (installed app only) and exit;
+//                                                 with --restart the new version starts, as after Restart to update
 internal static class Program
 {
     [STAThread]
@@ -102,8 +103,9 @@ internal static class Program
         }
         else
         {
-            // Asked for by name, so also when updates are otherwise only announced (Updates:Apply Notify).
-            bool handed = await updater.ApplyNowAsync(restartApp: false);
+            // Asked for by name, so also when updates are otherwise only announced (Updates:Apply Notify). With --restart,
+            // exactly what the tray's Restart to update does: the new version starts again (resuming the service).
+            bool handed = await updater.ApplyNowAsync(restartApp: options.Restart);
             (message, code) = handed
                 ? ($"Updating SemanticRouter {updater.CurrentVersion} to {version}.", 0)
                 : ($"The update could not be applied{(updater.Problem is { } problem ? ": " + problem : ".")}", 1);

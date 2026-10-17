@@ -103,7 +103,9 @@ public sealed class InstallationTests
     {
         DesktopOptions.Parse(["--update"], _ => null).Update.Should().BeTrue();
         DesktopOptions.Parse([DesktopUpdater.ResumeService, "--background"], _ => null).Should().Match<DesktopOptions>(o => o.ResumeService && o.Background && o.Host.Error == null);
-        DesktopOptions.Parse([], _ => null).Should().Match<DesktopOptions>(o => !o.Update && !o.ResumeService);
+        DesktopOptions.Parse([], _ => null).Should().Match<DesktopOptions>(o => !o.Update && !o.ResumeService && !o.Restart);
+        DesktopOptions.Parse(["--update", "--restart"], _ => null).Should().Match<DesktopOptions>(o => o.Update && o.Restart && o.Host.Error == null);
+        DesktopOptions.Parse(["--restart"], _ => null).Host.Error.Should().Contain("--restart goes with --update");
     }
 
     [Fact]

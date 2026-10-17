@@ -1,6 +1,7 @@
 # Exercises the Windows installer (#50): install 1.0.0 per user, set up the background service and the sign-in entry,
-# start the app and hand a second launch over to it (#212), update to 1.0.1 from a local feed, then uninstall, and
-# checks that nothing is left behind but the configuration.
+# start the app and hand a second launch over to it (#212), update to 1.0.1 from a local feed as Restart to update does
+# (the new version starts again and resumes the service), then uninstall, and checks that nothing is left behind but
+# the configuration.
 #
 #   pwsh tests/installer/windows.ps1 -Setup installers/SemanticRouter-win-x64-Setup-1.0.0.exe -Feed installers
 #
@@ -97,23 +98,36 @@ if (Test-Path (Join-Path $other 'semantic-router.instance.json')) { Fail "The ap
 Write-Host 'Started, handed a second launch over, and quit.'
 Done
 
-Step 'Update to 1.0.1'
+Step 'Update to 1.0.1, as Restart to update'
 # A release build takes SEMANTICROUTER_UPDATE_SOURCE only when the machine policy allows a custom feed (CI runs as an administrator).
 $policy = 'HKLM:\Software\Policies\SemanticRouter\Updates'
 New-Item -Path $policy -Force | Out-Null
 New-ItemProperty -Path $policy -Name 'AllowCustomFeed' -Value 1 -PropertyType DWord -Force | Out-Null
 $env:SEMANTICROUTER_UPDATE_SOURCE = (Resolve-Path $Feed).Path
-$code = Invoke-Program $exe @('--update') 300
+$code = Invoke-Program $exe @('--update', '--restart') 300
 if ($code -ne 0) { Get-Content (Join-Path $local 'logs\semantic-router.log') -Tail 20 -ErrorAction SilentlyContinue; Fail "--update exited with $code" }
 Wait-Until { (Installed-Version) -eq '1.0.1' } 120 'version 1.0.1 to be installed'
 Remove-Item Env:SEMANTICROUTER_UPDATE_SOURCE
 Remove-Item -Path 'HKLM:\Software\Policies\SemanticRouter' -Recurse -Force
 
-# The update stopped the service; the new version installed and started it again.
+# The update stopped the service; the new version started again and resumed it.
+function App-Processes {
+    @(Get-CimInstance Win32_Process -Filter "Name = 'SemanticRouter.exe'" | Where-Object { $_.CommandLine -like '*--resume-service*' })
+}
+Wait-Until { (App-Processes).Count -ge 1 } 90 'the new version to start again with --resume-service'
+$app = (App-Processes)[0]
+if ($app.ExecutablePath -ne $exe) { Fail "The app restarted from $($app.ExecutablePath), expected $exe" }
+if ($app.CommandLine -notlike "*$config*") { Fail "The app restarted without its configuration directory: $($app.CommandLine)" }
 Wait-Until { (Router-Processes).Count -ge 1 } 90 'the background service to run again after the update'
 $running = (Router-Processes)[0].ExecutablePath
 if ($running -ne $exe) { Fail "The service runs $running, expected $exe" }
-Write-Host "Updated to $(Installed-Version); the service runs again"
+
+# Quit the restarted app; the service keeps running.
+$code = Invoke-Program $exe @('--quit', '--config-dir', "`"$config`"") 30
+if ($code -ne 0) { Fail "--quit exited with $code" }
+Wait-Until { (App-Processes).Count -eq 0 } 30 'the restarted app to quit'
+if ((Router-Processes).Count -lt 1) { Fail 'Quitting the app stopped the background service' }
+Write-Host "Updated to $(Installed-Version); the app started again and the service runs again"
 Done
 
 Step 'Uninstall'
