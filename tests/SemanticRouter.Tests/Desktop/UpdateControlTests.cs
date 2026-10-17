@@ -507,7 +507,7 @@ public sealed class UpdateControlTests : IDisposable
     }
 
     /// <summary>A feed with 1.0.1 for an installed 1.0.0, recording what the updater asks of Velopack.</summary>
-    private sealed class FakeUpdates : IAppUpdates
+    internal sealed class FakeUpdates : IAppUpdates
     {
         private readonly VelopackAsset _latest = new()
         {

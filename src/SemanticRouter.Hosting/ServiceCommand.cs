@@ -316,6 +316,33 @@ internal abstract class ServicePlatform
 
     public abstract bool IsInstalled();
 
+    /// <summary>
+    /// The program the installed definition starts: the <c>semantic-router</c> tool, or the desktop app, which install
+    /// the same service. <see langword="null"/> when nothing is installed or the definition cannot be read.
+    /// </summary>
+    public virtual string? InstalledProgram() => null;
+
+    /// <summary>
+    /// Whether the installed definition starts <paramref name="program"/>; also when it cannot be read, so the service is
+    /// treated as it was before this was checked.
+    /// </summary>
+    public bool Runs(string program) =>
+        InstalledProgram() is not { } installed || string.Equals(
+            Path.GetFullPath(installed), Path.GetFullPath(program), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Reads the definition file at <paramref name="location"/> with <paramref name="program"/>; <see langword="null"/> when it cannot.</summary>
+    protected static string? ReadInstalled(string location, Func<string, string?> program)
+    {
+        try
+        {
+            return File.Exists(location) ? program(File.ReadAllText(location)) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>The definition as it is written to <see cref="Location"/>.</summary>
     public abstract string Render(ServiceDefinition definition);
 

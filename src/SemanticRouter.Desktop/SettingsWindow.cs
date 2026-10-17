@@ -19,7 +19,8 @@ internal sealed record SettingsState(
     DashboardSurface Surface,
     bool WindowAvailable,
     string WindowRequirement,
-    bool Switching);
+    bool Switching,
+    string? ServiceProgram = null);
 
 /// <summary>
 /// The tray menu's settings and actions in a window, for whoever cannot reach the tray: a keyboard or screen-reader
@@ -121,6 +122,7 @@ internal sealed class SettingsWindow : Window
         _problem.IsVisible = state.Problem is not null;
         _restart.IsEnabled = state.CanRestart;
         _background.IsChecked = state.ServiceOn;
+        _background.Content = new TextBlock { Text = RouterService.BackgroundLabel(state.ServiceProgram), TextWrapping = TextWrapping.Wrap };
         _background.IsEnabled = state.ServiceAvailable && !state.Switching;
         _signIn.IsChecked = state.SignInOn;
         _signIn.IsEnabled = state.SignInAvailable;

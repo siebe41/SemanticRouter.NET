@@ -20,7 +20,8 @@ internal static class Program
         {
             // Only Windows has an uninstaller; on macOS and Linux the person deletes the app (docs/desktop.md).
             velopack = velopack.OnBeforeUninstallFastCallback(_ =>
-                Installation.BeforeUninstall(DesktopOptions.Parse([]).Host, ServicePlatform.ForThisMachine, SignInLaunch.ForThisMachine()));
+                Installation.BeforeUninstall(
+                    DesktopOptions.Parse([]).Host, ServicePlatform.ForThisMachine, SignInLaunch.ForThisMachine(), Installation.Executable(Environment.GetEnvironmentVariable)));
         }
 
         velopack.Run();

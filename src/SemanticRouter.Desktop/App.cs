@@ -282,6 +282,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _restart.IsEnabled = !_switching
             && (_router.State is RouterState.Hosting or RouterState.Stopped or RouterState.Failed || (_router.State == RouterState.Attached && serviceOn));
         _inBackground.IsChecked = serviceOn;
+        string? otherProgram = _service.OtherProgram;
+        _inBackground.Header = RouterService.BackgroundLabel(otherProgram);
         _inBackground.IsEnabled = _service.Available && !_switching;
         DashboardSurface surface = EffectiveSurface;
         _inWindow.IsChecked = surface == DashboardSurface.Window;
@@ -304,7 +306,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _about?.Updates.Show(updates);
         _settings?.Show(new SettingsState(
             _status.Header ?? string.Empty, _lastProblem, _restart.IsEnabled, serviceOn, _service.Available, _signIn?.IsEnabled() == true, _signIn is not null,
-            surface, Shell.WebViewAvailable, Shell.WebViewRequirement, _switching));
+            surface, Shell.WebViewAvailable, Shell.WebViewRequirement, _switching, otherProgram));
         _window?.Push(DesktopPageState.Of(updates, _updater.Offer, _downloadingUpdate));
         if (_tray is not null)
         {
