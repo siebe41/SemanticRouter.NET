@@ -16,6 +16,8 @@ Download the installer for your machine from the [releases](https://github.com/s
 
 The first start is the same as from the archives: the [welcome window](#using-it) offers the background service and start at sign-in.
 
+**On a Mac, the in-process embeddings (`Onnx`) need Apple silicon and macOS 14 or later.** ONNX Runtime, which runs them, publishes no build for Intel Macs, and its Apple silicon build is made for macOS 14. The rest of the app runs on macOS 12 and later. On an Intel Mac, or macOS 12 or 13, run an embedding model in LM Studio or Ollama (for example `nomic-embed-text`) and set it under **Providers → Embeddings**; `semantic-router init` and `doctor` say so, and the dashboard does not offer `Onnx` there.
+
 **Until the release is [signed](#signing)**, the operating system warns on first start. On Windows, SmartScreen says "Windows protected your PC": choose **More info → Run anyway**. On macOS, if the installer is blocked, right-click it and choose **Open**, or allow it under **System Settings → Privacy & Security**.
 
 ### Signing
@@ -60,6 +62,10 @@ From a script: `SemanticRouter --update` downloads and applies an available upda
 
 An administrator can turn updates off, take them from an internal feed, make them notify-only, or require them to be signed by a given publisher, for every user of the machine: see [Managed deployment](#managed-deployment).
 
+**What an update is checked against.** The app checks each downloaded package against the SHA-256 checksum in the feed's `releases.<channel>.json`, but that file comes from the same GitHub release as the package. Until the releases are [signed](#signing), an update is trusted on GitHub's word: whoever can change a release's files (a stolen maintainer token, a compromised release job) can ship an update that is applied when the app quits. Only `Updates:Publisher` in the [machine policy](#controlling-updates) adds a check of its own, and it refuses every update from GitHub until the releases are signed. Verifying the project's own publisher by default, without a policy, waits for the signing certificates.
+
+`SEMANTICROUTER_UPDATE_SOURCE` (a URL or a folder of packages) points the app at another feed to try a build before it is released. A release build takes it only when the machine policy sets `Updates:AllowCustomFeed`; otherwise it is ignored, with a line in the log. Any feed, from the policy or the variable, must be HTTPS or a folder (a local path or a file share); plain HTTP is accepted only to this machine.
+
 ### Uninstall
 
 - **Windows:** **Settings → Apps → SemanticRouter → Uninstall** (or `%LOCALAPPDATA%\SemanticRouter\Update.exe uninstall`). It removes the background service (unless it runs the `semantic-router` tool) and the app's sign-in entry first, then the program and the Start menu entry.
@@ -97,7 +103,7 @@ The tray menu:
 | **Router learned N things this week** | Shown when [automatic tuning](routing-quality.md#automatic-tuning) applied changes in the last 7 days; opens the Router learned page. |
 | Status line | Where the router listens, whether it is the app's own or one already running, or why it could not start. While no model is enabled it adds "but no model is enabled yet". |
 | **Restart router** | Restarts the router: the background service's, or the app's own (for example after it failed to start). |
-| **Open the dashboard in** → **App window** / **Web browser** | Your choice of where the dashboard opens, remembered in `desktop.json`. The app window uses the platform's own web view (WebView2, WebKit, WebKitGTK or WPE WebKit); links that leave the router open in your browser, and links to the router stay in the window. Each link it hands to the browser is noted in the app's log. |
+| **Open the dashboard in** → **App window** / **Web browser** | Your choice of where the dashboard opens, remembered in `desktop.json`. The app window uses the platform's own web view (WebView2, WebKit, WebKitGTK or WPE WebKit); links to the router stay in the window, and `https` and `http` links elsewhere open in your browser. A link to any other scheme (`file:`, a network share, `ms-msdt:`, `javascript:` and the like) is not opened at all, so a link in the dashboard can never start another program. Each link it hands to the browser or drops is noted in the app's log. |
 | **Keep the router running in the background** | The background service on or off; see [below](#the-app-and-the-background-service). |
 | **Start at sign-in** | Shows the app in the tray whenever you sign in. The router itself starts at sign-in through the background service. |
 | **Check for updates automatically** | Installed app only: whether it looks for updates. |
@@ -185,6 +191,7 @@ The [machine-wide policy](enterprise.md) (the registry on Windows, a configurati
 | `Updates:Mode` `Feed` and `Updates:Feed` | Updates only from your own feed (below), never from GitHub. |
 | `Updates:Apply` `Notify` | Updates are announced, and downloaded and applied only when the person chooses **Restart to update**; never when the app quits. **Install updates when quitting** is greyed out. Works with either `Mode`. |
 | `Updates:Publisher` | An update is applied only when the app in it is signed by this publisher (Windows: the Authenticode certificate's subject or thumbprint; macOS: the Developer ID team ID); otherwise it is refused and deleted. On Linux it refuses every update, since AppImages are not signed. See [Update publisher](enterprise.md#update-publisher). |
+| `Updates:AllowCustomFeed` | A release build takes `SEMANTICROUTER_UPDATE_SOURCE` (another feed, for testing a build before it is released). Without it only a debug build does. |
 
 `semantic-router doctor` shows the policy and, on its `desktop app updates` line, where updates come from and what the policy adds.
 

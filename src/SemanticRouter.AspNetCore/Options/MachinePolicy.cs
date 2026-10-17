@@ -461,7 +461,14 @@ public sealed class UpdatePolicy
     /// </summary>
     public string? Publisher { get; set; }
 
-    internal bool IsDefault => Mode == UpdateMode.Default && Apply == UpdateApply.Default && Publisher is null;
+    /// <summary>
+    /// Whether the <c>SEMANTICROUTER_UPDATE_SOURCE</c> environment variable may point the desktop app at another feed
+    /// (to try a build before it is released). A release build ignores the variable unless this is set; a feed in
+    /// <see cref="Feed"/> always wins over it.
+    /// </summary>
+    public bool AllowCustomFeed { get; set; }
+
+    internal bool IsDefault => Mode == UpdateMode.Default && Apply == UpdateApply.Default && Publisher is null && !AllowCustomFeed;
 
     /// <summary>Why <paramref name="publisher"/> cannot name a publisher, or <see langword="null"/> when it can.</summary>
     internal static string? PublisherError(string publisher)

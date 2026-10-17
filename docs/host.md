@@ -76,7 +76,7 @@ It is a **per-user service on purpose**. The subscription CLI connectors run `cl
 
 Things to know:
 
-- **PATH and the .NET runtime are copied from the shell you install from.** Services start with a minimal PATH, so the unit and the agent carry yours (plus `DOTNET_ROOT` if it is set, without which a .NET installed in your home directory is not found). Install a CLI somewhere new? Run `service install` again.
+- **PATH and the .NET runtime are copied from the shell you install from.** Services start with a minimal PATH, so the unit and the agent carry yours (plus `DOTNET_ROOT` if it is set, without which a .NET installed in your home directory is not found). Install a CLI somewhere new? Run `service install` again. The unit and the agent also set `ORT_DISABLE_TELEMETRY=1` (unless your shell sets it), so ONNX Runtime sends no usage data ([Network traffic](network.md#onnx-runtime-telemetry)).
 - **Other environment variables are not copied.** If your configuration uses `${env:OPENAI_API_KEY}`, `install` names the variables a service will not see. Type the key on the dashboard instead (it is stored encrypted), or give it to the service: `systemctl --user edit semantic-router.service` on Linux, a user environment variable (`setx`) on Windows.
 - **Updating the tool:** on Linux and macOS run `service restart` after `dotnet tool update`. On Windows run `service stop` first, because a running program cannot be replaced.
 - **Exit codes a restart cannot fix are not retried by systemd**: 2 (a command-line error) and 3 (the address is already in use, for example by a router you started in a terminal). The message names `service status`.
@@ -93,7 +93,7 @@ While it runs, the router records its process id and addresses in `semantic-rout
 |---|---|
 | LM Studio or Ollama with chat models | A connector and **every chat model it serves**, each on the tier its family suggests ([model-family table](providers.md#the-model-family-table)) or else its size (≤ 9B: 1, ≤ 35B: 2, larger: 3), with `code`, `tools`, `vision` and `reasoning` from the server's report or the family table, and the context it is loaded with. Models that are not loaded get `Priority` 1, so loaded ones are preferred. The notes say whether the server loads models on demand. |
 | An embedding model on either server | `Embeddings` switched to it, with a starting similarity threshold for that model family (calibrate it later on the **Evaluate** page). |
-| No embedding server | `Embeddings` set to `Onnx` with `all-MiniLM-L6-v2`: a 23 MB model that runs inside the router. It is downloaded on first start and checksum-verified. Threshold 0.40. |
+| No embedding server | `Embeddings` set to `Onnx` with `all-MiniLM-L6-v2`: a 23 MB model that runs inside the router. It is downloaded on first start and checksum-verified. Threshold 0.40. Where ONNX Runtime cannot run (an Intel Mac, or macOS before 14: on a Mac it needs Apple silicon and macOS 14 or later), `Embeddings` stays `Hashing` and the notes say to run an embedding model in LM Studio or Ollama instead. |
 | A server that answers `401` | The connector, plus a note to set its `ApiKey` (for example `"${env:LM_API_TOKEN}"`). |
 | `claude` on PATH | `claude-cli` with prompted tool calling and Claude's lineup, one tier per family: `claude-haiku` (tier 2), `claude-sonnet` (3), `claude-opus` (4) and `claude-fable-5-1` (5, **disabled** until you enable it, because not every plan includes it). |
 | `codex` on PATH | `codex-cli` (concurrency 1) and a tier-4 `codex` model. |
@@ -173,7 +173,7 @@ The same setting covers text a model wrote about the prompt, which can quote it:
 
 The setting applies to new requests; delete earlier activity to remove previews already stored. The database is opened with `secure_delete` and its write-ahead log is truncated after each prune, so deleted rows are overwritten rather than left in free pages. A purge also compacts the file (`VACUUM`). The evaluation set is not affected: it holds what you chose to label.
 
-On Linux and macOS the configuration directory is kept at mode 0700 and the files the router writes in it at 0600, since they hold prompt previews and configuration; Windows profile folders are private already.
+On Linux and macOS the configuration directory is kept at mode 0700 and the files the router writes in it at 0600, since they hold prompt previews and configuration. On Windows the default directory is in your profile, whose folders are private already. A custom `SEMANTIC_ROUTER_HOME` or `SEMANTIC_ROUTER_KEYS_DIR` outside your profile (such as `C:\ProgramData\semantic-router` or `D:\router`) would inherit its parent's permissions, which usually let every user of the machine read it. So when the router creates such a folder, it gives the folder permissions of its own: full control for your account, SYSTEM and Administrators, nothing inherited from the parent, and inherited by everything the router writes in it. A folder that already exists keeps its permissions, since it may be shared on purpose; `semantic-router doctor` warns when `Users`, `Everyone` or `Authenticated Users` can read it, and gives the `icacls` command that limits it to your account. If the router cannot set the permissions, it starts anyway and says so on standard error. The key ring in such a folder is encrypted with DPAPI for your account in any case (below).
 
 Precedence, lowest first: the built-in template, `appsettings.json` in the configuration directory, `SemanticRouter__…` environment variables, command-line settings. A saved `semantic-router.json` then replaces the routing document as a whole. Secrets it leaves empty are still inherited from the layers below, so `SemanticRouter__Connectors__openai__ApiKey` keeps working.
 
@@ -222,7 +222,8 @@ Install the new version over the old one (`dotnet tool update -g SemanticRouter.
 | Release | State schema |
 |---|---|
 | 0.1.0 – 0.3.0 | 2 |
-| 0.4.0 and later | 3 |
+| 0.4.0 – 0.5.0 | 3 |
+| The next release | 4 |
 
 **Going back to an older version.** A version can't use a state database that a newer one migrated: the schema is newer than it knows. From this version on, the router then doesn't start: it says which file it is, its schema, and where the copy from before the upgrade is (exit code 2, so a service manager doesn't restart it). `semantic-router doctor` reports it as `[FAIL] state:`. To go back:
 

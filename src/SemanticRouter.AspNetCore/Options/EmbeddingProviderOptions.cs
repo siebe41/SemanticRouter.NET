@@ -46,6 +46,12 @@ public interface IEmbeddingProviderFactory
 
     /// <summary>Models the dashboard offers for this kind (by <see cref="EmbeddingProviderOptions.Model"/> name).</summary>
     IReadOnlyList<EmbeddingModelChoice> Models => [];
+
+    /// <summary>
+    /// <see langword="null"/> when this kind can run on this machine; otherwise why not and what to use instead (a native
+    /// library with no build for this platform). The dashboard and <c>doctor</c> then do not suggest it.
+    /// </summary>
+    string? Unavailable => null;
 }
 
 /// <summary>A model an <see cref="IEmbeddingProviderFactory"/> can provide by name.</summary>

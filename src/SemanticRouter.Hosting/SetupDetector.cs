@@ -18,7 +18,11 @@ internal sealed class SetupDetector(IServiceProvider services) : IRouterSetupDet
     {
         // The router's own client settings (Network:CaBundle, a proxy), as for a connector.
         HttpClient http = services.GetRequiredService<IHttpClientFactory>().CreateClient(OpenAICompatibleConnector.HttpClientNamePrefix + "setup");
-        return DetectAsync(services, new InitProbes(http, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows(), PolicyOf(services)), cancellationToken);
+        string? onnx = services.GetServices<IEmbeddingProviderFactory>().FirstOrDefault(f => f.Kind == EmbeddingProviderKind.Onnx) is { } factory
+            ? factory.Unavailable
+            : "In-process (Onnx) embeddings are not installed in this router.";
+        return DetectAsync(
+            services, new InitProbes(http, Environment.GetEnvironmentVariable("PATH"), OperatingSystem.IsWindows(), PolicyOf(services), onnx), cancellationToken);
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.ML.OnnxRuntime;
@@ -31,17 +32,32 @@ internal sealed class OnnxEmbeddingProviderFactory : IEmbeddingProviderFactory, 
     private readonly ConcurrentDictionary<string, Lazy<Task<OnnxEmbeddingProvider>>> _loaded = new(StringComparer.Ordinal);
     private readonly IServiceProvider _services;
     private readonly OnnxEmbeddingOptions _options;
+    private readonly Func<string?> _unavailable;
 
     public OnnxEmbeddingProviderFactory(IServiceProvider services, IOptions<OnnxEmbeddingOptions> options)
+        : this(services, options, () => OnnxRuntimeEnvironment.Unavailable)
+    {
+    }
+
+    /// <param name="services">The router's services.</param>
+    /// <param name="options">Where models go.</param>
+    /// <param name="unavailable">Whether ONNX Runtime can load here (<see cref="OnnxRuntimeEnvironment.Unavailable"/>; replaced in tests).</param>
+    internal OnnxEmbeddingProviderFactory(IServiceProvider services, IOptions<OnnxEmbeddingOptions> options, Func<string?> unavailable)
     {
         _services = services;
         _options = options.Value;
+        _unavailable = unavailable;
+
+        // Early, while the router starts: setting a variable is safest before other threads read the environment.
+        OnnxRuntimeEnvironment.DisableTelemetry();
     }
 
     public EmbeddingProviderKind Kind => EmbeddingProviderKind.Onnx;
 
     public IReadOnlyList<EmbeddingModelChoice> Models { get; } =
         OnnxEmbeddingModels.Known.Select(m => new EmbeddingModelChoice(m.Name, m.Description, m.SuggestedThreshold, m.ModelBytes)).ToArray();
+
+    public string? Unavailable => _unavailable();
 
     /// <summary>Where downloaded models go.</summary>
     public string ModelsDirectory =>
@@ -124,9 +140,21 @@ internal sealed class OnnxEmbeddingProviderFactory : IEmbeddingProviderFactory, 
 
         private async Task<OnnxEmbeddingProvider> GetAsync(CancellationToken cancellationToken)
         {
+            // Said before any download: on a machine ONNX Runtime has no build for, the model would never run. An
+            // InvalidOperationException, so the router reports it as an embedding problem instead of a stack trace per request.
+            if (factory.Unavailable is { } unavailable)
+            {
+                throw new InvalidOperationException(unavailable);
+            }
+
             try
             {
                 return await factory.LoadAsync(key, load).WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OnnxRuntimeException && OnnxRuntimeEnvironment.IsLoadFailure(ex))
+            {
+                throw new InvalidOperationException(
+                    OnnxRuntimeEnvironment.Explain(ex, OperatingSystem.IsMacOS(), RuntimeInformation.ProcessArchitecture, Environment.OSVersion.Version), ex);
             }
             catch (Exception ex) when (ex is HttpRequestException or IOException or UnauthorizedAccessException or OnnxRuntimeException or InvalidDataException or FormatException or ArgumentException)
             {

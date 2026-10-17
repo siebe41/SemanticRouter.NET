@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 using System.Xml.Linq;
 using SemanticRouter.AspNetCore;
 
@@ -15,7 +16,9 @@ namespace SemanticRouter.Desktop;
 /// <list type="bullet">
 /// <item>Windows: every executable image in the package (whatever its extension) must have a valid Authenticode
 /// signature (<c>WinVerifyTrust</c>); the main executable and the app's own assemblies (<c>SemanticRouter.*</c>) must be
-/// signed by the publisher, and the rest by the publisher or Microsoft.</item>
+/// signed by the publisher, and the rest by the publisher or Microsoft. The .NET host's unsigned files
+/// (<c>*.runtimeconfig.json</c>, <c>*.deps.json</c>) may not point it at code outside the package
+/// (<see cref="HostFileRefuses"/>). Other data files are not covered: that needs a manifest signed with the release.</item>
 /// <item>macOS: the app bundle must pass <c>codesign --verify --deep --strict</c> with a Developer ID signature, and its
 /// team ID must be the publisher.</item>
 /// <item>Linux: the packages carry no signature, so every update is refused.</item>
@@ -127,7 +130,128 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
             }
         }
 
+        // The .NET host's own files carry no signature, but decide where code is loaded from.
+        foreach (ZipArchiveEntry entry in zip.Entries.Where(e => e.FullName.StartsWith(AppFolder, StringComparison.Ordinal) && !e.FullName.EndsWith('/')))
+        {
+            if (HostFileRefuses(entry.FullName[AppFolder.Length..], entry) is { } refused)
+            {
+                return refused;
+            }
+        }
+
         return null;
+    }
+
+    private static readonly JsonDocumentOptions HostJson = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+
+    /// <summary>
+    /// Why the .NET host file <paramref name="relative"/> would make the app load code from outside the package, or
+    /// <see langword="null"/> when it would not (or it is not a host file). The signature check covers every executable
+    /// image in the package; these files decide which of them the host loads, and could otherwise point it elsewhere:
+    /// <list type="bullet">
+    /// <item><c>*.runtimeconfig.json</c>: no <c>additionalProbingPaths</c> (folders, or a network share, searched for
+    /// assemblies that are not in the package) and none of the host's own properties in <c>configProperties</c>, which
+    /// are written in capitals (<c>STARTUP_HOOKS</c>, <c>APP_PATHS</c>, <c>NATIVE_DLL_SEARCH_DIRECTORIES</c>, …).</item>
+    /// <item><c>*.runtimeconfig.dev.json</c>: none at all. It only adds probing paths, and a release never has one.</item>
+    /// <item><c>*.deps.json</c>: every path is relative and stays in the app's folder.</item>
+    /// </list>
+    /// </summary>
+    internal static string? HostFileRefuses(string relative, ZipArchiveEntry entry)
+    {
+        string name = Path.GetFileName(relative);
+        bool runtimeConfig = name.EndsWith(".runtimeconfig.json", StringComparison.OrdinalIgnoreCase);
+        bool deps = name.EndsWith(".deps.json", StringComparison.OrdinalIgnoreCase);
+        if (name.EndsWith(".runtimeconfig.dev.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{relative} adds places to load code from, and a release has none";
+        }
+
+        if (!runtimeConfig && !deps)
+        {
+            return null;
+        }
+
+        JsonDocument document;
+        try
+        {
+            using Stream stream = entry.Open();
+            document = JsonDocument.Parse(stream, HostJson);
+        }
+        catch (JsonException)
+        {
+            return $"{relative} is not valid JSON";
+        }
+
+        using (document)
+        {
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return $"{relative} is not a JSON object";
+            }
+
+            return runtimeConfig ? RuntimeConfigRefuses(relative, document.RootElement) : DepsRefuses(relative, document.RootElement);
+        }
+    }
+
+    private static string? RuntimeConfigRefuses(string relative, JsonElement root)
+    {
+        if (!root.TryGetProperty("runtimeOptions", out JsonElement options) || options.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (options.TryGetProperty("additionalProbingPaths", out JsonElement probing)
+            && probing.ValueKind is not JsonValueKind.Null && !(probing.ValueKind == JsonValueKind.Array && probing.GetArrayLength() == 0))
+        {
+            return $"{relative} names additionalProbingPaths, places outside the package to load code from";
+        }
+
+        if (options.TryGetProperty("configProperties", out JsonElement properties) && properties.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty property in properties.EnumerateObject())
+            {
+                if (property.Name.Length > 0 && property.Name.All(c => char.IsAsciiLetterUpper(c) || char.IsAsciiDigit(c) || c == '_'))
+                {
+                    return $"{relative} sets the host property {property.Name}, which can load code from outside the package";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? DepsRefuses(string relative, JsonElement root)
+    {
+        // Asset paths are the property names under targets/<framework>/<library>/{runtime,native,resources,runtimeTargets};
+        // a library's "path" is where its package's files are probed.
+        IEnumerable<string> paths = [];
+        if (root.TryGetProperty("targets", out JsonElement targets) && targets.ValueKind == JsonValueKind.Object)
+        {
+            paths = targets.EnumerateObject()
+                .Where(t => t.Value.ValueKind == JsonValueKind.Object)
+                .SelectMany(t => t.Value.EnumerateObject())
+                .Where(l => l.Value.ValueKind == JsonValueKind.Object)
+                .SelectMany(l => l.Value.EnumerateObject())
+                .Where(a => a.Name is "runtime" or "native" or "resources" or "runtimeTargets" && a.Value.ValueKind == JsonValueKind.Object)
+                .SelectMany(a => a.Value.EnumerateObject().Select(p => p.Name));
+        }
+
+        if (root.TryGetProperty("libraries", out JsonElement libraries) && libraries.ValueKind == JsonValueKind.Object)
+        {
+            paths = paths.Concat(libraries.EnumerateObject()
+                .Where(l => l.Value.ValueKind == JsonValueKind.Object && l.Value.TryGetProperty("path", out JsonElement p) && p.ValueKind == JsonValueKind.String)
+                .Select(l => l.Value.GetProperty("path").GetString()!));
+        }
+
+        string? outside = paths.FirstOrDefault(p => !StaysInside(p));
+        return outside is null ? null : $"{relative} loads {outside}, which is outside the app's folder";
+
+        static bool StaysInside(string path) =>
+            path.Length > 0
+            && !Path.IsPathRooted(path)
+            && path[0] is not ('/' or '\\')
+            && !path.Contains(':', StringComparison.Ordinal)
+            && !path.Split('/', '\\').Contains("..");
     }
 
     /// <summary>Whether <paramref name="entry"/> is a Windows executable image (<c>MZ</c>): a program or a library.</summary>

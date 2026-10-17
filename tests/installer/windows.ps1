@@ -98,11 +98,16 @@ Write-Host 'Started, handed a second launch over, and quit.'
 Done
 
 Step 'Update to 1.0.1'
+# A release build takes SEMANTICROUTER_UPDATE_SOURCE only when the machine policy allows a custom feed (CI runs as an administrator).
+$policy = 'HKLM:\Software\Policies\SemanticRouter\Updates'
+New-Item -Path $policy -Force | Out-Null
+New-ItemProperty -Path $policy -Name 'AllowCustomFeed' -Value 1 -PropertyType DWord -Force | Out-Null
 $env:SEMANTICROUTER_UPDATE_SOURCE = (Resolve-Path $Feed).Path
 $code = Invoke-Program $exe @('--update') 300
 if ($code -ne 0) { Get-Content (Join-Path $local 'logs\semantic-router.log') -Tail 20 -ErrorAction SilentlyContinue; Fail "--update exited with $code" }
 Wait-Until { (Installed-Version) -eq '1.0.1' } 120 'version 1.0.1 to be installed'
 Remove-Item Env:SEMANTICROUTER_UPDATE_SOURCE
+Remove-Item -Path 'HKLM:\Software\Policies\SemanticRouter' -Recurse -Force
 
 # The update stopped the service; the new version installed and started it again.
 Wait-Until { (Router-Processes).Count -ge 1 } 90 'the background service to run again after the update'

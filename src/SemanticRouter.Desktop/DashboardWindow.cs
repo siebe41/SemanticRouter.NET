@@ -5,9 +5,9 @@ using Avalonia.Platform;
 namespace SemanticRouter.Desktop;
 
 /// <summary>
-/// The dashboard in the platform's own web view. Links that leave the router open in the default browser; links to the
-/// router stay in the window, however the web view asks (a navigation or a new window) and whichever name of this
-/// machine they use. Closing the window hides it: the router keeps running in the tray. It opens sized to fit the
+/// The dashboard in the platform's own web view. Web links that leave the router open in the default browser, and
+/// links of any other scheme are dropped; links to the router stay in the window, however the web view asks (a
+/// navigation or a new window) and whichever name of this machine they use. Closing the window hides it: the router keeps running in the tray. It opens sized to fit the
 /// screen, or where it was last. The page and the app talk through <see cref="DesktopBridge"/>: the page asks for the
 /// About window or Restart to update (<see cref="PageAction"/>), and the app hands it where updates stand (<see cref="Push"/>).
 /// </summary>
@@ -66,9 +66,13 @@ internal sealed class DashboardWindow : Window
                 {
                     _view.Navigate(target);
                 }
-                else
+                else if (ShouldOpenExternally(target))
                 {
                     OpenInBrowser(target, "a new window");
+                }
+                else
+                {
+                    Refuse(target, "a new window");
                 }
             }
 
@@ -76,14 +80,33 @@ internal sealed class DashboardWindow : Window
         };
         _view.NavigationStarted += (_, e) =>
         {
-            if (e.Request is { Scheme: "http" or "https" } target && !IsSameRouter(target, _home))
+            if (e.Request is not { } target)
             {
-                e.Cancel = true;
-                OpenInBrowser(target, "a navigation");
+                return;
+            }
+
+            switch (Decide(target, _home))
+            {
+                case NavigationOutcome.OpenInBrowser:
+                    e.Cancel = true;
+                    OpenInBrowser(target, "a navigation");
+                    break;
+                case NavigationOutcome.Refuse:
+                    e.Cancel = true;
+                    Refuse(target, "a navigation");
+                    break;
             }
         };
         _view.WebMessageReceived += (_, e) =>
         {
+            // Only the router's own page speaks for the app. The web view's source is the page it last loaded, and a
+            // navigation away from the router is cancelled above, so this refuses only what got past that.
+            if (!IsSameRouter(_view.Source, _home))
+            {
+                _log.WriteLine($"Dashboard window: ignored a message from {Describe(_view.Source)}, which is not the router ({_home.GetLeftPart(UriPartial.Authority)}).");
+                return;
+            }
+
             if (DesktopBridge.Parse(e.Body) is { } action)
             {
                 PageAction?.Invoke(action);
@@ -228,16 +251,80 @@ internal sealed class DashboardWindow : Window
     /// Whether <paramref name="target"/> is on the router at <paramref name="home"/>: the same scheme and port, and the
     /// same host, where localhost, 127.0.0.1 and [::1] all count as this machine.
     /// </summary>
-    internal static bool IsSameRouter(Uri target, Uri home) =>
-        string.Equals(target.Scheme, home.Scheme, StringComparison.OrdinalIgnoreCase)
+    internal static bool IsSameRouter(Uri? target, Uri home) =>
+        target is { IsAbsoluteUri: true }
+        && string.Equals(target.Scheme, home.Scheme, StringComparison.OrdinalIgnoreCase)
         && target.Port == home.Port
         && (string.Equals(target.IdnHost, home.IdnHost, StringComparison.OrdinalIgnoreCase) || (target.IsLoopback && home.IsLoopback));
 
-    /// <summary>Hands a link to the default browser, and notes why in the app's log (a router link should never get here).</summary>
+    /// <summary>
+    /// What the window does with a navigation to <paramref name="target"/>: the router's own pages, <c>about:blank</c>
+    /// and a download the page made itself stay in the window, web links go to the default browser, and every other
+    /// scheme is refused.
+    /// </summary>
+    internal static NavigationOutcome Decide(Uri target, Uri home)
+    {
+        if (IsSameRouter(target, home) || IsBlank(target) || IsOwnBlob(target, home))
+        {
+            return NavigationOutcome.Stay;
+        }
+
+        return ShouldOpenExternally(target) ? NavigationOutcome.OpenInBrowser : NavigationOutcome.Refuse;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="target"/> may go to the default browser: an absolute <c>https</c> or <c>http</c> URL
+    /// with a host. Anything else (<c>file:</c>, a UNC path, <c>javascript:</c>, <c>data:</c>, <c>ms-msdt:</c>,
+    /// <c>search-ms:</c> or another protocol handler) the operating system would hand to a program, so it is not opened.
+    /// </summary>
+    internal static bool ShouldOpenExternally(Uri target) =>
+        target is { IsAbsoluteUri: true, IsUnc: false }
+        && (target.Scheme == Uri.UriSchemeHttps || target.Scheme == Uri.UriSchemeHttp)
+        && target.Host.Length > 0;
+
+    private static bool IsBlank(Uri target) =>
+        target.IsAbsoluteUri && string.Equals(target.AbsoluteUri, "about:blank", StringComparison.OrdinalIgnoreCase);
+
+    // The dashboard downloads its configuration as a blob: URL of its own origin (blob:http://localhost:5080/<id>).
+    private static bool IsOwnBlob(Uri target, Uri home) =>
+        target.IsAbsoluteUri
+        && target.Scheme == "blob"
+        && Uri.TryCreate(target.AbsolutePath, UriKind.Absolute, out Uri? origin)
+        && IsSameRouter(origin, home);
+
+    /// <summary>What the log says about <paramref name="target"/>: a web URL without its query, or only the scheme of anything else.</summary>
+    private static string Describe(Uri? target) => target switch
+    {
+        null or { IsAbsoluteUri: false } => "a page with no address",
+        { Scheme: "http" or "https" } => target.GetLeftPart(UriPartial.Path),
+        _ => $"a {target.Scheme}: address",
+    };
+
+    /// <summary>Hands a web link to the default browser, and notes why in the app's log (a router link should never get here).</summary>
     private void OpenInBrowser(Uri target, string how)
     {
         _log.WriteLine($"Dashboard window: opened {target.GetLeftPart(UriPartial.Path)} in the browser ({how}; the router is {_home.GetLeftPart(UriPartial.Authority)}).");
         _log.Flush();
         Shell.Open(target.AbsoluteUri);
     }
+
+    /// <summary>Notes in the app's log that the window dropped <paramref name="target"/>, which is neither the router nor a web link.</summary>
+    private void Refuse(Uri target, string how)
+    {
+        _log.WriteLine($"Dashboard window: refused {Describe(target)} ({how}): only web links leave the window.");
+        _log.Flush();
+    }
+}
+
+/// <summary>What the dashboard window does with a navigation (<see cref="DashboardWindow.Decide"/>).</summary>
+internal enum NavigationOutcome
+{
+    /// <summary>Let it happen in the window: a page of the router, <c>about:blank</c> or the page's own download.</summary>
+    Stay,
+
+    /// <summary>Cancel it and open the link in the default browser: a web page elsewhere.</summary>
+    OpenInBrowser,
+
+    /// <summary>Cancel it: any other scheme, which the operating system would hand to a program.</summary>
+    Refuse,
 }

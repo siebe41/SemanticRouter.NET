@@ -297,6 +297,13 @@ public sealed class DashboardRoleTests : RouterHostTest
         (await client.SendAsync(AsUser("/router/api/usage", "finance"))).StatusCode.Should().Be(HttpStatusCode.OK);
         (await client.SendAsync(AsUser("/router/api/activity", "finance"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await client.SendAsync(AsUser("/router/api/activity", "finance, staff"))).StatusCode.Should().Be(HttpStatusCode.OK, "the highest role among the groups applies");
+
+        // A proxy that appends its own groups header to the one the client sent: the client's copy must not count.
+        HttpRequestMessage appended = AsUser("/router/api/activity", "finance");
+        appended.Headers.Add("X-Forwarded-Groups", "staff");
+        HttpResponseMessage refused = await client.SendAsync(appended);
+        refused.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await refused.Content.ReadAsStringAsync()).Should().Contain("appears more than once");
         (await client.SendAsync(Request(HttpMethod.Get, "/router/api/config", MetricsToken))).StatusCode.Should().Be(HttpStatusCode.Forbidden, "the policy does not raise it");
         (await client.SendAsync(Request(HttpMethod.Get, "/router/api/status", MetricsToken))).StatusCode.Should().Be(HttpStatusCode.OK);
     }

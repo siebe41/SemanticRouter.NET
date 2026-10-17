@@ -337,6 +337,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             {
                 errors.Add($"Middleware:GatewayKeys:{client} must not be empty.");
             }
+            else if (IsLiteralSecret(key) && key.Length < Microsoft.AspNetCore.Builder.RouterDashboardOptions.MinimumTokenLength)
+            {
+                // A short key can be guessed by a client that keeps trying (#182); a reference is checked once it resolves.
+                errors.Add($"Middleware:GatewayKeys:{client} must be at least {Microsoft.AspNetCore.Builder.RouterDashboardOptions.MinimumTokenLength} characters (try `openssl rand -hex 24`).");
+            }
         }
 
         if (Middleware.Feedback.CorrectionSimilarity is < 0 or > 1 || Middleware.Feedback.CorrectionMargin is < 0 or > 1)
@@ -716,7 +721,8 @@ public sealed class RouterConfiguration : SemanticRouterOptions
 
             bool plainPreset = (connector.Type == ConnectorType.Copilot || connector.Preset != CliPreset.Custom)
                 && string.IsNullOrEmpty(connector.Executable) && connector.Arguments is not { Count: > 0 }
-                && connector.EnvironmentVariables.Count == 0 && string.IsNullOrEmpty(connector.HomeDirectory);
+                && connector.EnvironmentVariables.Count == 0 && string.IsNullOrEmpty(connector.HomeDirectory)
+                && connector.RemoveEnvironmentVariables is null && connector.PromptInput == CliPromptInput.Stdin;
             if (!plainPreset)
             {
                 changed.Add(name);
@@ -736,11 +742,16 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 && !current.Memory.Sources.Any(c => c.Type == s.Type && string.Equals(c.Path, s.Path, StringComparison.Ordinal)))
             .Select(s => s.Name)];
 
+    // The environment a CLI keeps (RemoveEnvironmentVariables decides whether an API key switches its billing) and where
+    // the prompt goes (PromptInput: Argument shows it to other users of the machine) count as what it runs.
     private static bool SameProcess(ConnectorOptions a, ConnectorOptions b) =>
         a.Type == b.Type && a.Preset == b.Preset
         && string.Equals(a.Executable, b.Executable, StringComparison.Ordinal)
         && string.Equals(a.HomeDirectory, b.HomeDirectory, StringComparison.Ordinal)
         && (a.Arguments ?? []).SequenceEqual(b.Arguments ?? [], StringComparer.Ordinal)
+        && a.PromptInput == b.PromptInput
+        && (a.RemoveEnvironmentVariables is null) == (b.RemoveEnvironmentVariables is null)
+        && (a.RemoveEnvironmentVariables ?? []).SequenceEqual(b.RemoveEnvironmentVariables ?? [], StringComparer.Ordinal)
         && a.EnvironmentVariables.Count == b.EnvironmentVariables.Count
         && a.EnvironmentVariables.All(v => b.EnvironmentVariables.TryGetValue(v.Key, out string? value) && (v.Value == value || v.Value == MaskedSecret));
 

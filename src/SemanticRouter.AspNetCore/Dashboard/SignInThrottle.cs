@@ -7,7 +7,7 @@ namespace SemanticRouter.AspNetCore;
 /// After <see cref="MaxFailures"/> within <see cref="Window"/>, the address may not try again until the oldest of them
 /// is a window old, so a token cannot be guessed by trying many.
 /// </summary>
-internal sealed class SignInThrottle(TimeProvider time)
+internal sealed class SignInThrottle(TimeProvider time, int maxFailures = SignInThrottle.MaxFailures)
 {
     /// <summary>Failed attempts allowed within <see cref="Window"/>.</summary>
     public const int MaxFailures = 5;
@@ -33,7 +33,7 @@ internal sealed class SignInThrottle(TimeProvider time)
             }
 
             Expire(failures, now);
-            return failures.Count >= MaxFailures ? failures.Peek() + Window - now : null;
+            return failures.Count >= maxFailures ? failures.Peek() + Window - now : null;
         }
     }
 

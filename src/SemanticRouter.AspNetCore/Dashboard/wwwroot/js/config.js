@@ -228,7 +228,7 @@ views.connectors = () => {
             <label class="field wide"><span class="name">Arguments (one per line)</span><textarea data-bind="${p}.Arguments" data-kind="lines" rows="3">${h(lines(c.Arguments))}</textarea><span class="hint">Presets: extra flags appended (e.g. <code>--effort</code> / <code>low</code>). Custom: the full template with <code>{model}</code> and <code>{prompt}</code>.</span></label>
             <label class="field"><span class="name">Quota error patterns</span><textarea data-bind="${p}.QuotaErrorPatterns" data-kind="lines" rows="3">${h(lines(c.QuotaErrorPatterns))}</textarea><span class="hint">Output fragments that mean “out of quota” (added to the preset's).</span></label>
             <label class="field"><span class="name">Environment variables (KEY=value)</span><textarea data-bind="${p}.EnvironmentVariables" data-kind="kv" rows="3">${h(kv(c.EnvironmentVariables))}</textarea></label>
-            <label class="field"><span class="name">Remove environment variables</span><textarea data-bind="${p}.RemoveEnvironmentVariables" data-kind="lines" rows="3">${h(lines(c.RemoveEnvironmentVariables))}</textarea><span class="hint">Empty = preset defaults (API keys that would switch billing away from your subscription).</span></label>
+            <label class="field"><span class="name">Remove environment variables</span><textarea data-bind="${p}.RemoveEnvironmentVariables" data-kind="lines" data-nullable="1" rows="3">${h(lines(c.RemoveEnvironmentVariables))}</textarea><span class="hint">Empty = preset defaults (API keys that would switch billing away from your subscription).</span></label>
             <label class="check wide"><input type="checkbox" data-bind="${p}.AllowRemoteClients" data-kind="bool" ${c.AllowRemoteClients ? 'checked' : ''}> Allow remote clients <span class="muted">— read docs/TERMS.md first; a personal subscription must not serve other people</span></label>`
           : type === 'Copilot' ? `
             <label class="field"><span class="name">Copilot CLI</span><input type="text" data-bind="${p}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="copilot (from PATH)"><span class="hint">The SDK runs it as its runtime: <code>npm install -g @github/copilot</code>, then sign in once with <code>copilot</code> (/login) or <code>gh auth login</code>.</span></label>
@@ -306,7 +306,9 @@ views.embeddings = () => {
   const e = state.config.Embeddings || {};
   const provider = e.Provider || 'Hashing';
   const st = state.status.embeddings || {};
-  const available = st.available || ['Hashing', 'OpenAICompatible'];
+  const unavailable = st.unavailable || {};
+  // A provider that cannot run here is offered only while it is the one configured, so the page can say why.
+  const available = (st.available || ['Hashing', 'OpenAICompatible']).filter((x) => !unavailable[x] || x === provider);
   const onnxModels = (st.models || []).filter((m) => m.provider === 'Onnx');
   const chosen = onnxModels.find((m) => m.name.toLowerCase() === (e.Model || 'all-MiniLM-L6-v2').toLowerCase());
   const mb = (b) => Math.round(b / 1e6) + ' MB';
@@ -319,6 +321,8 @@ views.embeddings = () => {
     <div class="section-head"><h1>Embeddings</h1><span class="muted">How prompts and utterances are turned into vectors.</span></div>
     <div class="card section"><div class="form-grid">
       <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${available.map((x) => `<option ${x === provider ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only). Onnx runs a real embedding model in this process; OpenAICompatible calls a server (LM Studio, Ollama, OpenAI).</span></label>
+      ${unavailable[provider] ? `<div class="field wide"><span class="name">Not available here</span><span class="small">${h(unavailable[provider])}</span></div>` : ''}
+      ${!unavailable[provider] && unavailable.Onnx ? `<p class="field wide muted small">${h(unavailable.Onnx)}</p>` : ''}
       ${provider === 'Onnx' ? onnxFields() : provider === 'Hashing' ? numField({ bind: 'Embeddings.Dimensions', value: e.Dimensions, def: 512, label: 'Dimensions', min: 16, step: 1, hint: 'More dimensions, fewer accidental matches between unrelated words.' }) : `
         <label class="field"><span class="name">Endpoint</span><input type="url" data-bind="Embeddings.Endpoint" data-kind="nulltext" value="${h(e.Endpoint || '')}" placeholder="http://localhost:1234"></label>
         <label class="field"><span class="name">Model</span><input type="text" data-bind="Embeddings.Model" data-kind="nulltext" value="${h(e.Model || '')}" placeholder="text-embedding-nomic-embed-text-v1.5"></label>

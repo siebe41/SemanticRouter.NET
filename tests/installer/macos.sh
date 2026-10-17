@@ -37,6 +37,17 @@ logs() {
   launchctl print "gui/$(id -u)/$label" 2>&1 | head -40 || true
 }
 
+# A release build takes SEMANTICROUTER_UPDATE_SOURCE only when the machine policy allows a custom feed.
+policy="/Library/Managed Preferences/io.github.siebe41.semantic-router.plist"
+trap 'sudo rm -f "$policy"' EXIT
+sudo mkdir -p "$(dirname "$policy")"
+sudo tee "$policy" >/dev/null <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>Updates</key><dict><key>AllowCustomFeed</key><true/></dict></dict></plist>
+PLIST
+sudo chmod 644 "$policy"
+
 echo "::group::Install 1.0.0"
 installer -pkg "$pkg" -target CurrentUserHomeDirectory
 [ -x "$exe" ] || { echo "::error::Not installed at $app"; ls -la "$HOME/Applications" /Applications | head -40; exit 1; }

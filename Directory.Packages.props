@@ -12,8 +12,13 @@
     <PackageVersion Include="Microsoft.ML.Tokenizers" Version="2.0.1" />
   </ItemGroup>
   <ItemGroup>
-    <!-- SemanticRouter.Connectors.Copilot only. -->
-    <PackageVersion Include="GitHub.Copilot.SDK" Version="1.0.22" />
+    <!--
+      SemanticRouter.Connectors.Copilot only. A range with an upper bound, which the package's nuspec carries too: the
+      connector uses SDK APIs marked experimental (GHCP001, subject to change or removal), so a newer minor version is
+      not assumed to work. Raise the bound after testing the connector against it (CONTRIBUTING.md, Package versions
+      and dependencies).
+    -->
+    <PackageVersion Include="GitHub.Copilot.SDK" Version="[1.0.22, 1.1)" />
   </ItemGroup>
   <ItemGroup>
     <!-- SemanticRouter.Desktop only: the tray icon and the dashboard window (the platform's own web view). -->

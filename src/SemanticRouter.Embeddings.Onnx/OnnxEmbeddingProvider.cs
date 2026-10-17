@@ -26,11 +26,18 @@ public sealed class OnnxEmbeddingProvider : IEmbeddingProvider, IDisposable
     /// <param name="vocabFile">The model's <c>vocab.txt</c> (uncased WordPiece).</param>
     /// <param name="pooling">How token vectors become the sentence vector.</param>
     /// <param name="maxTokens">Longest input in tokens.</param>
+    /// <exception cref="InvalidOperationException">ONNX Runtime cannot load on this machine (<see cref="OnnxRuntimeEnvironment.Unavailable"/>).</exception>
     public OnnxEmbeddingProvider(string modelFile, string vocabFile, EmbeddingPooling pooling = EmbeddingPooling.Mean, int maxTokens = DefaultMaxTokens)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelFile);
         ArgumentException.ThrowIfNullOrWhiteSpace(vocabFile);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxTokens, 8);
+
+        // Loads ONNX Runtime with its telemetry off (OnnxRuntimeEnvironment), or says why it cannot run here.
+        if (OnnxRuntimeEnvironment.Unavailable is { } unavailable)
+        {
+            throw new InvalidOperationException(unavailable);
+        }
 
         using var options = new SessionOptions
         {
