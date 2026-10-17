@@ -285,7 +285,7 @@ public static partial class RouterDashboardEndpoints
                 return unreadable!;
             }
 
-            return Results.Json(Validation([.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)], candidate), ApiJson);
+            return Results.Json(Validation([.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration, DashboardAccess.IsLocal(context))], candidate), ApiJson);
         }).Audited("validated a configuration");
 
         // baseVersion: the version the caller's draft started from. When another version runs by now, nothing is applied
@@ -306,7 +306,7 @@ public static partial class RouterDashboardEndpoints
                 return unreadable!;
             }
 
-            IReadOnlyList<string> errors = [.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)];
+            IReadOnlyList<string> errors = [.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration, DashboardAccess.IsLocal(context))];
             if (errors.Count > 0)
             {
                 return Results.Json(Validation(errors, candidate), ApiJson, statusCode: StatusCodes.Status400BadRequest);
@@ -500,12 +500,14 @@ public static partial class RouterDashboardEndpoints
 
         api.MapGet("/usage", (RouterRuntimeProvider provider, IUsageLedger ledger, BudgetGate budgets, string? window, string? by) =>
         {
-            UsageOptions usage = provider.Current.Configuration.Usage;
+            RouterConfiguration configuration = provider.Current.Configuration;
+            UsageOptions usage = configuration.Usage;
             TimeZoneInfo zone = BudgetGate.ZoneOf(usage);
             (DateTimeOffset since, DateTimeOffset until) = UsageWindow(window, zone, DateTimeOffset.UtcNow);
             UsageGrouping grouping = Enum.TryParse(by, ignoreCase: true, out UsageGrouping parsed) ? parsed : UsageGrouping.Model;
             return Results.Json(new UsageResponse(
-                since, until, grouping, usage.ReferenceModel, ledger.Total(since, until), ledger.Summarize(since, until, grouping, zone), budgets.Status(usage)), ApiJson);
+                since, until, grouping, usage.ReferenceModel, ledger.TotalAtCurrentPrices(configuration, since, until),
+                ledger.SummarizeAtCurrentPrices(configuration, since, until, grouping, zone), budgets.Status(usage)), ApiJson);
         }).WithMetadata(DashboardMetricsMetadata.Instance);
 
         api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, IServiceProvider services, CancellationToken cancellationToken) =>
@@ -573,6 +575,18 @@ public static partial class RouterDashboardEndpoints
             return Results.Json(DiscoverResponse.From(report), ApiJson);
         }).WithMetadata(DashboardWriteMetadata.Instance).Audited("discovered a connector's models");
 
+        // Cloud models' list prices, for the dashboard to write into the draft: one answer per model asked, null where the
+        // list has none. Applies nothing.
+        api.MapPost("/prices/lookup", async (PriceLookupRequest request, ModelPriceSource prices, CancellationToken cancellationToken) =>
+        {
+            (ModelPriceList? list, string? problem) = await prices.GetAsync(cancellationToken).ConfigureAwait(false);
+            PriceLookupResult?[] found = [.. (request.Models ?? []).Select(m => list?.Find(
+                    new ConnectorOptions { Type = m.Type, Preset = m.Preset, BaseAddress = m.BaseAddress }, m.Model ?? string.Empty) is { } match
+                ? new PriceLookupResult(match.Price.Id, match.SameProvider, match.Price.Input, match.Price.Output, match.Price.CacheRead, match.Price.CacheWrite, match.Price.ContextWindow)
+                : null)];
+            return Results.Json(new PriceLookupResponse(ModelPriceList.DefaultSource.Host, list?.Fetched, problem, found), ApiJson);
+        }).WithMetadata(DashboardWriteMetadata.Instance).Audited("looked up model prices");
+
         // The same for a connector in the dashboard's draft that is not applied yet: {"name", "settings"} and optionally the
         // draft's "models", to mark what is already in the catalog. Held to the checks applying it would meet; applies nothing.
         api.MapPost("/connectors/discover", async (HttpContext context, RouterRuntimeProvider provider, IServiceProvider services, CancellationToken cancellationToken) =>
@@ -601,10 +615,10 @@ public static partial class RouterDashboardEndpoints
             errors.AddRange(candidate.MaskedSecretErrors());
             errors.AddRange(ProcessSettingErrors(candidate, provider, options));
 
-            // The same reference rules as PUT api/config, on purpose: a new connector may name an ${env:…} key, a moved one
-            // may not. Whoever can discover here can apply the same draft there, so being stricter here would protect
-            // nothing; the audit detail records where the key went instead.
-            errors.AddRange(candidate.ReferenceErrors(current));
+            // The same reference rules as PUT api/config, on purpose: only this machine may name an ${env:…} key the
+            // connector did not have (or a preset's own key for its provider), and a moved connector none at all. Whoever
+            // can discover here can apply the same draft there; the audit detail records where the key went.
+            errors.AddRange(candidate.ReferenceErrors(current, DashboardAccess.IsLocal(context)));
             if (errors.Count > 0)
             {
                 return Results.Json(Validation(errors, candidate), ApiJson, statusCode: StatusCodes.Status400BadRequest);
@@ -1259,6 +1273,34 @@ public static partial class RouterDashboardEndpoints
     public sealed record MemoryNodeResponse(
         string Id, string Title, string Source, string Path, string Folder, IReadOnlyList<string> Tags, IReadOnlyList<string> Aliases,
         int Size, DateTimeOffset? Modified, int Fingerprints, bool Missing);
+
+    /// <summary>Models to price: <c>POST api/prices/lookup</c>.</summary>
+    /// <param name="Models">Each model and the connector that serves it.</param>
+    public sealed record PriceLookupRequest(IReadOnlyList<PriceLookupModel>? Models);
+
+    /// <summary>A model to price, with what of its connector says whose price it pays.</summary>
+    /// <param name="Model">The provider's model id.</param>
+    /// <param name="Type">The connector type.</param>
+    /// <param name="Preset">A CLI connector's preset.</param>
+    /// <param name="BaseAddress">An HTTP connector's address (only its host is used).</param>
+    public sealed record PriceLookupModel(string? Model, ConnectorType Type = ConnectorType.OpenAICompatible, CliPreset Preset = CliPreset.Custom, Uri? BaseAddress = null);
+
+    /// <summary>The prices found.</summary>
+    /// <param name="Source">The price list's host.</param>
+    /// <param name="Fetched">When the list was fetched; <see langword="null"/> when there is none.</param>
+    /// <param name="Problem">Why the list could not be fetched (an older one may still have answered).</param>
+    /// <param name="Prices">One per model asked, in order; <see langword="null"/> where the list has no price.</param>
+    public sealed record PriceLookupResponse(string Source, DateTimeOffset? Fetched, string? Problem, IReadOnlyList<PriceLookupResult?> Prices);
+
+    /// <summary>A model's list prices, USD per million tokens.</summary>
+    /// <param name="Id">The price list's id for it.</param>
+    /// <param name="SameProvider">Whether it is the connector's own provider's price (see <see cref="ModelPriceMatch.SameProvider"/>).</param>
+    /// <param name="Input">Input.</param>
+    /// <param name="Output">Output.</param>
+    /// <param name="CacheRead">Prompt-cache reads, when listed.</param>
+    /// <param name="CacheWrite">Prompt-cache writes, when listed.</param>
+    /// <param name="ContextWindow">The context window, when listed.</param>
+    public sealed record PriceLookupResult(string Id, bool SameProvider, decimal Input, decimal Output, decimal? CacheRead, decimal? CacheWrite, int? ContextWindow);
 
     /// <summary>Request for the embeddings probe.</summary>
     public sealed record EmbeddingTestRequest(string? Text);

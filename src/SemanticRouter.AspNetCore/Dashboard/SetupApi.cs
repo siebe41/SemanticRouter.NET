@@ -183,6 +183,16 @@ internal static partial class SetupApi
     internal sealed record SetupPreset(
         string Id, string Title, string Detail, string Kind, string Name, ConnectorOptions Connector, string? KeyVariable = null, string? Consent = null);
 
+    /// <summary>
+    /// Whether <paramref name="variable"/> is the key of a preset whose address is <paramref name="destination"/>'s scheme,
+    /// host and port: <c>OPENAI_API_KEY</c> for <c>https://api.openai.com</c>, as the setup writes it.
+    /// </summary>
+    internal static bool IsPresetKey(string variable, Uri? destination) =>
+        destination is { IsAbsoluteUri: true }
+        && Presets(copilotSdk: false).Any(p => string.Equals(p.KeyVariable, variable, StringComparison.Ordinal)
+            && p.Connector.BaseAddress is { } address
+            && Uri.Compare(address, destination, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0);
+
     /// <summary>The providers the setup offers. With the Copilot SDK package, GitHub Copilot goes through it (docs/providers.md prefers it).</summary>
     internal static IReadOnlyList<SetupPreset> Presets(bool copilotSdk) =>
     [

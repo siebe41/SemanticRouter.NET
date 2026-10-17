@@ -57,6 +57,7 @@ For an air-gapped or locked-down network, `SemanticRouter:Network:Offline` makes
 
 - **Connectors, the embeddings endpoint and webhooks** reach only this machine (loopback) and `AllowedHosts` (host names, `*.domain` or IP addresses, each with an optional `:port`). Models on any other connector are turned off at start-up and listed with the warnings on the dashboard; turning one back on, on the dashboard or through the admin API, is refused. Remote embeddings fall back to the in-process hashing provider; a webhook elsewhere is not used.
 - **CLI and Copilot connectors are off.** They always reach their vendor over the internet, whatever the router does.
+- **Prices are not looked up** (the dashboard's Look up prices, and the prices Discover models fills in from OpenRouter's list), unless `openrouter.ai` is in `AllowedHosts`.
 - **The ONNX embedding model is never downloaded.** If it is not on disk, classification fails with a message naming the file, where to put it and its SHA-256: download it on another machine (`semantic-router doctor` prints the URLs' host and the folder) or set `Embeddings:ModelPath` to a folder with `model.onnx` and `vocab.txt`.
 - `semantic-router doctor` shows what is still contacted, and what is never contacted and why.
 
@@ -70,7 +71,8 @@ For an egress allowlist, list:
 2. `huggingface.co` for the first start with ONNX embeddings, or pre-seed `models/` and leave it out;
 3. your webhook hosts;
 4. for subscription CLIs, the hosts their vendors document;
-5. for desktop updates, `api.github.com`, `github.com` and `objects.githubusercontent.com`.
+5. for desktop updates, `api.github.com`, `github.com` and `objects.githubusercontent.com`;
+6. for the dashboard's price lookup, `openrouter.ai` (optional: without it, prices are entered by hand).
 
 `semantic-router doctor` prints this list for the current configuration, one `egress` line per destination:
 
@@ -80,6 +82,7 @@ For an egress allowlist, list:
 [ OK ] egress: connector claude: CLI: claude, which contacts Anthropic.
 [ OK ] egress: embeddings: huggingface.co, once, to download ONNX model all-MiniLM-L6-v2 into /data/models/all-MiniLM-L6-v2 (copy it there to skip the download).
 [ OK ] egress: webhook ops: hooks.slack.com.
+[ OK ] egress: price list: openrouter.ai, only when the dashboard looks up cloud models' prices (Look up prices, Discover models); nothing but the request for the list is sent.
 [ OK ] egress: desktop app updates: api.github.com, github.com and objects.githubusercontent.com (only the installed desktop app; untick Check for updates automatically in its tray menu to turn this off).
 ```
 

@@ -448,12 +448,9 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
     }
 
-    private static bool IsLocalRequest(HttpContext context)
-    {
-        // In-process callers (e.g. TestServer) have no remote address.
-        IPAddress? remote = context.Connection.RemoteIpAddress;
-        return remote is null || IPAddress.IsLoopback(remote);
-    }
+    // This machine and the router's own account (another account counts as remote); in-process callers, such as TestServer,
+    // have no remote address.
+    private static bool IsLocalRequest(HttpContext context) => DashboardAccess.IsLocal(context);
 
     /// <summary>
     /// What the logs and the activity log keep of a failed run's output (the model's reply and the CLI's errors), as

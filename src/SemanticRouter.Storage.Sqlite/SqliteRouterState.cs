@@ -949,6 +949,9 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
             .Select(g => g.Count() == 1 ? g.First() : new UsageGroup(g.Key, Merge(g.Select(x => x.Totals))))
             .ToArray();
 
+    public IReadOnlyList<UsageRecord> Records(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
+        [.. Read(since, until, model, connector, profile), .. _fallback.Records(since, until, model, connector, profile)];
+
     private static UsageTotals Merge(IEnumerable<UsageTotals> totals) => totals.Aggregate(UsageTotals.Zero, (a, b) => new UsageTotals(
         a.Requests + b.Requests, a.InputTokens + b.InputTokens, a.OutputTokens + b.OutputTokens, a.CacheReadTokens + b.CacheReadTokens,
         a.CacheWriteTokens + b.CacheWriteTokens, a.CostUsd + b.CostUsd, a.ReferenceCostUsd + b.ReferenceCostUsd, a.SubscriptionValueUsd + b.SubscriptionValueUsd));

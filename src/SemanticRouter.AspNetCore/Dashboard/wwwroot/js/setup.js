@@ -4,6 +4,7 @@ import { lineupPanel } from './config.js';
 import { $, api, h, isDirty, lineupFor, readOnly, state, toast } from './core.js';
 import { advanced, closeSection, openAttr } from './fields.js';
 import { plural } from './labels.js';
+import { applyPrice, describePrice, lookUpPrices } from './prices.js';
 import { pageActions } from './page-actions.js';
 import { render } from './shell.js';
 
@@ -148,6 +149,24 @@ function choose(id, detected) {
  * POST api/connectors/discover asks a connector as the draft describes it, so a connector added a moment ago works
  * without Apply. An older router without it asks the running connector by name, which needs the draft applied first.
  */
+/* Cloud suggestions get the price list's prices in place of the built-in table's or none. Without the list (offline,
+   no answer) they keep what the server suggested. */
+async function pricesFor(connector, settings, lineup) {
+  const cloud = lineup.filter((e) => e.suggestion && !e.suggestion.IsLocal);
+  if (!cloud.length) return;
+  let found;
+  try { found = await lookUpPrices(connector, cloud.map((e) => e.suggestion)); } catch { return; }
+  cloud.forEach((e, i) => {
+    const p = found.prices[i];
+    if (!p) return;
+    applyPrice(e.suggestion, p, settings);
+    const kept = String(e.reason || '').replace(/\.$/, '').split('; ').filter((r) => r && !/^(set its prices|Anthropic list price|its use valued at)/.test(r));
+    const whose = settings && (settings.Type === 'Cli' || settings.Type === 'Copilot') ? 'its use valued at the API price' : 'list price';
+    kept.push(`${whose} ${describePrice(p)} from ${found.source}${p.sameProvider ? '' : ` (${p.id}; ${connector} may charge differently)`}`);
+    e.reason = kept.join('; ') + '.';
+  });
+}
+
 export async function discoverDraft(connector) {
   let l = lineupFor(connector);
   if (!l) { l = { connector }; state.lineups.push(l); }
@@ -170,6 +189,7 @@ export async function discoverDraft(connector) {
       const inCatalog = own ? own.Name : e.inCatalog;
       return { ...e, inCatalog, selected: !!(e.recommended && e.suggestion && !inCatalog) };
     });
+    await pricesFor(connector, settings, lineup);
     Object.assign(l, r, { busy: false, lineup });
   } catch (e) {
     Object.assign(l, { busy: false, error: e.status === 404 && isDirty() ? `${e.message} Apply the draft first: this router asks its running connectors.` : e.message });

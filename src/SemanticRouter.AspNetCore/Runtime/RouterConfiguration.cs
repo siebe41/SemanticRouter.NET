@@ -739,14 +739,23 @@ public sealed class RouterConfiguration : SemanticRouterOptions
     /// <summary>
     /// Errors for secret references a request to the admin API may not carry, checked against the running
     /// configuration: a <c>${secret:…}</c> reference to another setting's stored secret, a stored secret in a connector
-    /// that has none yet, and any reference in a connector (or the embeddings) that now has another type, address or
-    /// program. Otherwise a caller who cannot see a key could have it sent to an address of its choosing by naming it.
+    /// that has none yet, any reference in a connector (or the embeddings) that now has another type, address or
+    /// program, and an <c>${env:…}</c> reference a setting did not have before, unless the caller is
+    /// <paramref name="fromThisMachine"/> (the router's own account, which can read its environment anyway) or it names a
+    /// provider preset's key for that provider's address. Otherwise a caller who cannot see a key could have it sent to an
+    /// address of its choosing by naming it. Every value that is resolved is checked, not only the ones that look secret.
     /// </summary>
-    internal IReadOnlyList<string> ReferenceErrors(RouterConfiguration current)
+    internal IReadOnlyList<string> ReferenceErrors(RouterConfiguration current, bool fromThisMachine = false)
     {
         ArgumentNullException.ThrowIfNull(current);
         var errors = new List<string>();
-        foreach (SecretSlot slot in Slots(secretsOnly: true))
+        var before = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (SecretSlot slot in current.Slots(secretsOnly: false))
+        {
+            before.TryAdd(slot.Setting, slot.Get());
+        }
+
+        foreach (SecretSlot slot in Slots(secretsOnly: false))
         {
             (string Scheme, string Name)[] references = [.. SecretReference.References(slot.Get())];
             if (references.Length == 0)
@@ -773,6 +782,27 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 errors.Add(
                     $"{slot.Setting}: enter the secret itself. A {(moved ? "connector that now has another type, address or program" : "new connector")} " +
                     "cannot take a stored or environment secret over the admin API; change the configuration file to do that.");
+                continue;
+            }
+
+            // A gateway key is only compared with what clients send; it goes nowhere, so naming a variable for it reveals nothing.
+            if (fromThisMachine || parts[0] == "Middleware")
+            {
+                continue;
+            }
+
+            HashSet<string> had = [.. SecretReference.References(before.GetValueOrDefault(slot.Setting)).Where(r => r.Scheme == "env").Select(r => r.Name)];
+            Uri? destination = parts[0] switch
+            {
+                "Connectors" => Connectors[parts[1]].BaseAddress,
+                "Embeddings" => Embeddings.Endpoint,
+                _ => null,
+            };
+            if (references.FirstOrDefault(r => r.Scheme == "env" && !had.Contains(r.Name) && !SetupApi.IsPresetKey(r.Name, destination)) is { Name: { } variable })
+            {
+                errors.Add(
+                    $"{slot.Setting}: only this machine can name an environment variable (${{env:{variable}}}) over the admin API, other than a " +
+                    "provider preset's key for that provider. Enter the key itself, or change the configuration file.");
             }
         }
 

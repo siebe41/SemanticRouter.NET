@@ -277,6 +277,28 @@ test('discovering a connector\'s models adds the chosen ones on the chosen tier'
   expect(config.Models.find((m) => m.Name === 'local-big')).toMatchObject({ Connector: 'local', Model: 'stub-large', Tier: 3, IsLocal: true });
 });
 
+test('looking up prices fills in a connector\'s cloud models, cache prices included', async ({ page, request }) => {
+  // The router would ask openrouter.ai; the test answers for it.
+  let asked = null;
+  await page.route('**/router/api/prices/lookup', (r) => {
+    asked = r.request().postDataJSON();
+    return r.fulfill({ json: { source: 'openrouter.ai', fetched: new Date().toISOString(), problem: null, prices: [{ id: 'openai/stub-large', sameProvider: false, input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5, contextWindow: 400000 }] } });
+  });
+  await open(page, 'models');
+  const local = page.locator('section.model-group', { has: page.locator('h2', { hasText: /^local$/ }) });
+  await expect(local.locator('[data-action="prices-lookup"]'), 'local models are never looked up').toHaveCount(0);
+  const cloud = page.locator('section.model-group', { has: page.locator('h2', { hasText: /^cloud$/ }) });
+  await cloud.locator('[data-action="prices-lookup"]').click();
+  await expect(page.locator('#toast')).toContainText('Prices from openrouter.ai: cloud-large $2 / $10 per M (cache read $0.2, write $2.5)');
+  await expect(page.locator('#toast')).toContainText('cloud may charge differently');
+  expect(asked).toEqual({ models: [{ model: 'stub-large', type: 'OpenAICompatible', preset: 'Custom', baseAddress: expect.stringContaining('http://127.0.0.1:') }] });
+  await expect(cloud.locator('.item', { hasText: 'cloud-large' })).toContainText('$2/$10 per M');
+  await page.locator('#save-bar [data-action="apply"]').click();
+  await expect(page.locator('#toast')).toContainText('Applied');
+  const config = (await (await request.get('/router/api/config')).json()).config;
+  expect(config.Models.find((m) => m.Name === 'cloud-large')).toMatchObject({ InputCostPerMillionTokens: 2, OutputCostPerMillionTokens: 10, CacheReadCostPerMillionTokens: 0.2, CacheWriteCostPerMillionTokens: 2.5 });
+});
+
 test('renaming a connector renames it in the models that use it', async ({ page, request }) => {
   await open(page, 'connectors');
   await page.locator('.item-head', { hasText: 'local' }).first().click();

@@ -110,6 +110,15 @@ internal static class GatewayAuthentication
                     "(ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY or OPENAI_API_KEY in most clients).");
             }
 
+            if (!options.AllowUnauthenticatedRemoteClients && DashboardAccess.IsOtherLocalAccount(context))
+            {
+                return new GatewayAdmission(
+                    null, StatusCodes.Status401Unauthorized, "Gateway key required",
+                    "This request comes from another account on this machine, which the router serves only with a gateway key, and none " +
+                    "is configured. Set SemanticRouter:Middleware:GatewayKeys and send the key as 'Authorization: Bearer <key>' or " +
+                    "'x-api-key: <key>', or set SemanticRouter:Network:TrustOtherLocalAccounts.");
+            }
+
             if (!options.AllowUnauthenticatedRemoteClients)
             {
                 return new GatewayAdmission(

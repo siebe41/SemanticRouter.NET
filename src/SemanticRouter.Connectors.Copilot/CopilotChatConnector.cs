@@ -48,7 +48,7 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
-        if (!_options.AllowRemoteClients && context.Connection.RemoteIpAddress is { } remote && !IPAddress.IsLoopback(remote))
+        if (!_options.AllowRemoteClients && !DashboardAccess.IsLocal(context))
         {
             return ConnectorResult.Skipped("the Copilot connector only serves requests from this machine (AllowRemoteClients is false)");
         }

@@ -415,7 +415,7 @@ internal sealed partial class PromptRoutingMiddleware
         bool automatic = requestedModel is null && !explicitTurn;
         Stream responseBody = context.Response.Body;
         AnswerCapture? answer = options.Mode == PromptRouterMode.Dispatch && _judge is not null && classifiedTurn && clientTurn is null
-            && _judge.Sample(runtime, plan, automatic)
+            && _judge.Sample(runtime, plan, automatic, remoteClient)
             ? new AnswerCapture(responseBody, AnswerJudge.CaptureLimit)
             : null;
 
@@ -505,7 +505,7 @@ internal sealed partial class PromptRoutingMiddleware
         {
             using (answer)
             {
-                _judge!.Enqueue(runtime, entry, prompt, protocol, answer, highestTier);
+                _judge!.Enqueue(runtime, entry, prompt, protocol, answer, highestTier, remoteClient);
             }
         }
     }

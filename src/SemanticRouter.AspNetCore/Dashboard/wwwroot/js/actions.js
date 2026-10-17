@@ -8,6 +8,7 @@ import { loadTuning } from './learned.js';
 import { loadReliability } from './reliability.js';
 import { graph, loadMemory, updateMemorySide } from './memory.js';
 import { adoptConfig, fieldFor, noteConflict, refreshStatus, render, renderChrome, setConfig } from './shell.js';
+import { applyPrice, describePrice, lookUpPrices } from './prices.js';
 import { discoverDraft } from './setup.js';
 import { loadUsage } from './usage.js';
 
@@ -443,6 +444,29 @@ export const actions = {
   },
   // Discover models asks with the draft's settings (setup.js), so a connector added a moment ago works without Apply.
   async 'lineup-discover'(el) { await discoverDraft(el.dataset.connector); },
+  // Look up prices: the connector's cloud models get the price list's prices in the draft (a subscription its API prices).
+  async 'prices-lookup'(el) {
+    const connector = el.dataset.connector;
+    const conn = (state.config.Connectors || {})[connector];
+    const models = (state.config.Models || []).filter((m) => (m.Connector || '').toLowerCase() === connector.toLowerCase() && !m.IsLocal);
+    if (!models.length) { toast(`${connector} has no cloud models to price.`); return; }
+    el.disabled = true;
+    try {
+      const { source, problem, prices } = await lookUpPrices(connector, models);
+      const found = []; const missing = []; const elsewhere = [];
+      models.forEach((m, i) => {
+        const p = prices[i];
+        if (!p) { missing.push(m.Name); return; }
+        applyPrice(m, p, conn);
+        found.push(`${m.Name} ${describePrice(p)}`);
+        if (!p.sameProvider) elsewhere.push(`${m.Name} (${p.id})`);
+      });
+      render();
+      if (!found.length) { toast(problem || `${source} has no price for ${missing.join(', ')}.`, problem ? 'danger' : ''); return; }
+      const what = conn && (conn.Type === 'Cli' || conn.Type === 'Copilot') ? 'API prices' : 'prices';
+      toast(`${what[0].toUpperCase() + what.slice(1)} from ${source}: ${found.join('; ')}.${missing.length ? ` None for ${missing.join(', ')}.` : ''}${elsewhere.length ? ` Check ${elsewhere.join(', ')}: that is the model maker's price, and ${connector} may charge differently.` : ''} Apply & save to use them; past usage is priced again too.`, 'ok', { sticky: true });
+    } catch (e) { toast("Couldn't look up prices: " + e.message, 'danger'); } finally { el.disabled = false; }
+  },
   'lineup-close'(el) { state.lineups = state.lineups.filter((l) => l.connector !== el.dataset.connector); render(); },
   'lineup-all'(el) {
     const l = state.lineups[+el.dataset.index];

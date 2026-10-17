@@ -31,7 +31,7 @@ internal static class DigestApi
     {
         TimeZoneInfo zone = BudgetGate.ZoneOf(configuration.Usage);
         (DateTimeOffset since, DateTimeOffset until) = RouterDashboardEndpoints.UsageWindow(window, zone, now);
-        UsageTotals totals = ledger.Total(since, until);
+        UsageTotals totals = ledger.TotalAtCurrentPrices(configuration, since, until);
         long local = ledger.Summarize(since, until, UsageGrouping.Location, zone).FirstOrDefault(g => g.Key == "local")?.Totals.Requests ?? 0;
         RoutingActivityEntry[] decisions = [.. activity.Between(since, until)];
         IReadOnlyList<RoutingFeedback> signals = feedback.Between(since, until);
