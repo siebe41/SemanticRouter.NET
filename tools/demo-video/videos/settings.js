@@ -35,7 +35,7 @@ module.exports = async function settings(k) {
 
   // 1. Where settings live.
   line = k.say('where');
-  await k.stage('caption', 'One file, and every page edits it', 'draft → Apply: live, no restart → Apply &amp; save: written to the file');
+  await k.stage('caption', 'One file, and every page edits it', 'a draft → Apply only: live, no restart → Apply &amp; save: written to the file');
   await k.highlight('#json-editor');
   await sleep(5500);
   await k.dashClick('summary:has-text("Where does the configuration come from?")');
@@ -62,9 +62,15 @@ module.exports = async function settings(k) {
 
   // 3. A paid API: the connector.
   line = k.say('connector');
-  await k.stage('caption', 'A paid API too', 'Connectors → Add connector · paid-api.example stands in for any OpenAI-compatible API');
+  await k.stage('caption', 'A paid API too', 'Connectors → Add connector → Blank connector · paid-api.example stands in for any OpenAI-compatible API');
   await k.nav('connectors');
-  await k.dashClick('[data-action="connector-add"]');
+  // Add connector is a menu: the presets (and what is on this machine), then a blank connector.
+  const menu = 'details[data-setup-menu]';
+  await k.dashClick(`${menu} > summary`);
+  await k.frame().locator(`${menu} [data-action="connector-add"]`).first().waitFor();
+  await sleep(1200);
+  await k.dashClick(`${menu} [data-action="connector-add"]`);
+  if (await k.frame().locator(`${menu}[open]`).count()) await k.frame().locator(`${menu} > summary`).first().click();
   await k.dashType('.item.open [data-action-input="connector-rename"]', 'paid-api');
   await k.dashType('[data-bind="Connectors.paid-api.BaseAddress"]', 'http://paid-api.example:4000');
   await k.dashType('[data-bind="Connectors.paid-api.ApiKey"]', fakeKey);
@@ -97,6 +103,8 @@ module.exports = async function settings(k) {
   await k.nav('evaluate');
   await k.dashClick('[data-action="eval-run"]:not([data-calibrate])');
   await k.frame().locator('.card.stat').first().waitFor();
+  // "N of M" right: after the fix it says one more, whatever the set's size.
+  const [, right, total] = (await k.frame().locator('.card.stat >> nth=0').innerText()).match(/(\d+) of (\d+)/);
   await k.highlight('.card.stat >> nth=0');
   await sleep(2500);
   const miss = `tr:has-text("${MISROUTED}")`;
@@ -107,7 +115,7 @@ module.exports = async function settings(k) {
   await k.dashClick(`${miss} [data-action="eval-add-open"]`);
   await k.dashSelect('#add-route', 'deep-reasoning');
   await k.dashClick('[data-action="eval-add-save"]');
-  await k.frame().locator('.card.stat:has-text("85 of 88")').first().waitFor({ timeout: 30000 });
+  await k.frame().locator(`.card.stat:has-text("${+right + 1} of ${total}")`).first().waitFor({ timeout: 30000 });
   await k.dashScroll('.card.stat >> nth=0');
   await k.highlight('.card.stat >> nth=0');
   await line;
@@ -139,8 +147,10 @@ module.exports = async function settings(k) {
   await k.highlight('.card.stat:has-text("subscription use")');
   await sleep(3500);
   await k.unhighlight();
-  await k.dashClick('[data-action="budget-add"]');
+  // A new budget covers a model: switch it to the connector.
+  await k.dashClick('[data-action="budget-new"]');
   await k.dashType('[data-bind="Usage.Budgets.0.Name"]', 'paid-api-daily');
+  await k.dashCheck('input[data-budget-scope="Connector"][data-index="0"]');
   await k.dashSelect('[data-bind="Usage.Budgets.0.Connector"]', 'paid-api');
   await k.dashType('[data-bind="Usage.Budgets.0.MaxCostUsd"]', '2');
   await applyAndSave();

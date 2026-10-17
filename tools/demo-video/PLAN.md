@@ -9,8 +9,10 @@ they can be re-recorded whenever the product changes.
 | 2 | **Deep dive: how a prompt gets routed** ([videos/deep-dive.js](videos/deep-dive.js), recorded) | ~3 min | developers deciding whether to trust it | Why did *this* prompt go to *that* model, and what happens when things go wrong? |
 | 3 | **How-to: the settings** ([videos/settings.js](videos/settings.js), recorded) | ~2:10 | new users after `init` | How do I make it fit my models, my budget and my privacy rules? |
 
-Later candidates, each 1–2 minutes: per-client setup clips (Codex CLI, GitHub Copilot, Open WebUI, the OpenAI SDK);
-the memory map and privacy; a vertical short for social media (those two are made: see the README).
+Next, so the videos stop being only about Claude Code: GitHub Copilot CLI, VS Code (Copilot's chat and agent mode, and
+the CLIs in its terminal), the GitHub Copilot app, and a short "every tool, one router" cut. Their narration is
+written (sections 4–7 below); none is recorded yet. Later candidates, each 1–2 minutes: Codex CLI on its own, Open
+WebUI, the OpenAI SDK. The memory map and privacy video and the vertical short are made: see the README.
 
 ## Voice
 
@@ -86,6 +88,160 @@ doctor`. Each section opens with the question a user has.
 Kit work needed: typing into dashboard forms from `record.js` (Playwright `fill` and `click` in the iframe, slowed
 down to human speed with a visible cursor), a cursor overlay on the stage, and an OpenRouter-like stub (an
 OpenAI-compatible stub with a model list and prices).
+
+## Re-recording 1–3, savings, privacy and the short on the new dashboard
+
+The dashboard's sidebar became a section rail with page tabs, and `init`, the template and the admin API changed after
+these were recorded. The scripts are updated, and each one was rehearsed end to end with stand-in narration
+(`placeholder-voice.js`, `stills.js`; see the README) on 2026-10-17. All six run. What changed:
+
+- **Kit:** `nav()` clicks the section in the rail, then the page's tab; scrolls and highlights keep clear of the taller
+  sticky top bar; the off-camera `init` enables Claude with `--enable-cli claude` (without a terminal it now adds it
+  disabled).
+- **Intro:** `init` asks before enabling Claude; the script answers `y` on camera. Narration unchanged.
+- **Deep dive:** the template has nine routes now. The caption says 9, and the `routes` line says "nine": **redo that
+  one line** (`TTS_ONLY=routes`). "Overview → Endpoints" is "Connector endpoints". The tester still shows complex code
+  at tier 4 and the regex at tier 2, as the narration says.
+- **Settings:** Add connector is a menu of presets (the script picks Blank connector); budgets are added with "Add
+  budget" and switched to the connector; Evaluate's set is 116 prompts (112 right before the fix), and the script now
+  waits for one more right instead of "85 of 88". The save bar says "Apply only". Narration unchanged.
+- **Savings:** narration unchanged, but the figures moved a lot in the rehearsal ($97.56 saved and $48.48 of
+  subscription use, against $42.14 and $18.59 in the published take), most likely from usage now being priced at the
+  catalog's current prices (0819d04). Check they are right before recording, then update `onScreen` from the take.
+- **Privacy:** a memory source is a process setting now; the script starts the router with
+  `SemanticRouter__Dashboard__AllowProcessSettings=true`. Narration unchanged.
+- **Short:** narration unchanged.
+
+So with the voice folders from the first recordings, only the deep dive's `routes` line needs new speech.
+
+## 4. GitHub Copilot CLI (narration written, ~1:30)
+
+Narration: [narration/copilot-cli.json](narration/copilot-cli.json). The intro's story, told with Copilot CLI instead
+of Claude Code, on the same kit: two terminals, then the Live page beside Copilot. The router is installed and started
+off camera (as the deep dive does), so it opens on the title card.
+
+| Line | On screen | Caption |
+|---|---|---|
+| `title` | Title card: "SemanticRouter.NET + GitHub Copilot CLI" | |
+| `connect` | Second terminal: the four variables typed, then `copilot` and its start screen | **Point Copilot CLI at it** · its own provider settings · "semantic-router" as the model |
+| `hello` | Split: Copilot left, Live right. `hi! what can you do?` | from `k.describe(e)`: → local small model |
+| `code` | `write a unit test for the InvoiceTotal function` | → local coder |
+| `hard` | `the invoice job deadlocks under load, find the root cause` | → a subscription's frontier model (whichever the router picked: the caption reads it from Activity) |
+| `local` | `@local why does the cache serve stale data after a deploy?`, then a follow-up without the tag | `@local` → local models for the rest of the conversation · "@local (earlier in the conversation)" |
+| `live` | The Live page full screen, Copilot's turns next to a few OpenAI-client prompts (`k.send`) | **Every decision, live** |
+| `end` | End card | |
+
+What is typed in the second terminal (the values the router's banner prints):
+
+```bash
+export COPILOT_PROVIDER_BASE_URL=http://localhost:5080/v1
+export COPILOT_PROVIDER_API_KEY=semantic-router
+export COPILOT_MODEL=semantic-router
+export COPILOT_PROVIDER_MAX_PROMPT_TOKENS=131072
+copilot
+```
+
+Kit work: install the real `copilot` (`npm install -g @github/copilot`) into the demo user's prefix, and a `waitFor`
+pattern for its start screen and for the end of each answer. The router's own `copilot-cli` connector stays disabled
+(what `init` does), so no stand-in Copilot is needed; the hard turn goes to the stand-in Claude as in the intro.
+
+## 5. VS Code: Copilot's chat, agent mode and the terminal (narration written, ~2:15)
+
+Narration: [narration/vscode.json](narration/vscode.json). VS Code on the left two thirds of the stage, the Live page on
+the right. The router runs off camera; the project is the intro's `~/billing`.
+
+| Line | On screen | Caption |
+|---|---|---|
+| `title` | Title card | |
+| `add` | Chat view → model picker → **Manage Language Models** → **Add Models** → **Custom Endpoint**; group name "Semantic Router", key `semantic-router`, API type **Chat Completions** | **Add the router as a custom endpoint** · Chat Completions, Responses or Messages: the router speaks all three |
+| `models` | `chatLanguageModels.json` filled in (below), saved | `auto` · `auto:best` · tool calling on |
+| `pick` | The model picker shows "Auto (router)" and "Best (router)"; pick Auto | inline completions stay with Copilot |
+| `ask` | Ask mode, `InvoiceTotal.cs` open: "what does this function do?" | → local small model |
+| `agent` | Agent mode: "add a currency parameter to InvoiceTotal and update its callers" — reads files, edits two, runs the tests | → tier 4 · tool results: `ConversationAffinity` |
+| `utility` | Activity filtered to the last minutes: the chat's title request on tier 1 | `ClientHousekeeping` → tier 1 |
+| `terminal` | The integrated terminal: the Claude Code line from the banner, `claude --model semantic-router`, one prompt; then `copilot` with the variables above | one router behind the chat and the terminal |
+| `live` | Live page full width: rows from VS Code, Claude Code and Copilot CLI | **Every tool, every decision** |
+| `end` | End card | |
+
+The models file (typed by pasting; VS Code's auto-closing brackets would garble typed JSON):
+
+```json
+[
+  {
+    "name": "Semantic Router",
+    "vendor": "customendpoint",
+    "apiKey": "${input:semanticRouterKey}",
+    "apiType": "chat-completions",
+    "models": [
+      { "id": "auto", "name": "Auto (router)", "url": "http://localhost:5080/v1/chat/completions", "toolCalling": true, "maxInputTokens": 114688, "maxOutputTokens": 16384 },
+      { "id": "auto:best", "name": "Best (router)", "url": "http://localhost:5080/v1/chat/completions", "toolCalling": true, "maxInputTokens": 114688, "maxOutputTokens": 16384 }
+    ]
+  }
+]
+```
+
+`maxInputTokens + maxOutputTokens` is the context window the banner prints for Claude Code (131072 here).
+With no GitHub sign-in, VS Code's own small jobs need `chat.utilityModel` and `chat.utilitySmallModel` set to a BYOK
+model: set both to the router's `auto` in the throw-away profile, so the `utility` line is true.
+
+Kit work, the most of any video here:
+
+- VS Code on the stage. First try `code serve-web` (the official VS Code server, in the stage's iframe like the
+  dashboard, driven with `frameLocator`); if Copilot Chat or the Custom Endpoint provider doesn't work there, launch
+  the desktop VS Code with Playwright's Electron support and draw its screenshots into the stage.
+- A throw-away `--user-data-dir` and `--extensions-dir` under `DEMO_HOME`, with the Copilot Chat extension installed
+  and no GitHub account signed in (BYOK models work without one), so no account shows on screen.
+- `replies.js`: answers for the ask and agent prompts, and tool calls (read file, edit, run tests) in the
+  OpenAI-compatible stub so agent mode has a real tool loop to show.
+
+## 6. The GitHub Copilot app (narration written, ~1:00)
+
+Narration: [narration/copilot-app.json](narration/copilot-app.json). The Copilot app (public preview) takes an
+OpenAI-compatible provider under **Settings → Model providers → Add provider**: base URL `http://localhost:5080/v1`,
+any key. The router already sets aside the blocks the app wraps around each message (`<system_reminder>`,
+`<current_datetime>`, `<copilot_tauri_workspace>`), which is what the `context` line shows: an Activity entry whose
+prompt is only what was typed.
+
+| Line | On screen |
+|---|---|
+| `title` | Title card |
+| `add` | The app's Settings → Model providers → Add provider → OpenAI-compatible, filled in, saved |
+| `pick` | The session's model picker → `semantic-router` |
+| `context` | Activity: the entry's prompt, and the request as sent with its injected blocks (zoomed callout) |
+| `turns` | Two prompts in the app, the Live page beside it: local, then frontier |
+| `end` | End card |
+
+The kit can't drive it: it is a native app and needs a GitHub sign-in. Record it by hand with a demo GitHub account,
+cut to the narration (`tts.py`, then the line lengths in `durations.json`), and take the dashboard shots with the kit.
+
+## 7. Every tool, one router (narration written, ~0:50)
+
+Narration: [narration/clients.json](narration/clients.json). A cut for the top of the README and social media: one
+line per client, each showing its setup for a second and one turn landing on the Live page, then all four at once.
+
+| Line | On screen |
+|---|---|
+| `hook` | Title card: the four tools' names around the router |
+| `claude` | The intro's Claude Code terminal: the one-line setup, one turn |
+| `copilot` | Copilot CLI: its variables, one turn |
+| `codex` | Codex: `~/.codex/config.toml` from [docs/clients.md](../../docs/clients.md#openai-codex-cli), one turn |
+| `vscode` | VS Code's chat with "Auto (router)" picked, one turn |
+| `live` | Live page full width while all four send turns |
+| `end` | End card |
+
+Record it last, in one take with three terminals (`shells` of the kit) and the VS Code stage from video 5.
+
+## Before recording 4–7
+
+- Try each client against the router by hand first and look at Activity: the router has wording for Claude Code's and
+  Codex's side requests (`client-turns.json`), not for Copilot CLI's or VS Code's. Any of their titles or summaries
+  that land above tier 1 need an entry there before the `utility` line in video 5 is true.
+- Copilot CLI can't send custom headers, so it has no `X-Router-Project`: the `local` line uses `@local`, which needs
+  no configuration. A local-only profile for it is picked by model name instead (`COPILOT_MODEL=auto@private`).
+- [docs/clients.md](../../docs/clients.md) has no Copilot CLI, VS Code or Copilot app section yet; the end cards say
+  "everything you saw is in the docs", so add them (with the snippets above) before these go out.
+- VS Code: check whether Chatterbox says "VS Code" as two letters; if not, spell it "V S Code" and teach
+  `captions.js`'s `written()` to put it back, as it does for "C L I".
 
 ## Production notes
 

@@ -71,6 +71,22 @@ function serveStage() {
   });
 }
 
+/** The rail's section of each dashboard page, as in the dashboard's core.js (SECTIONS). */
+const SECTION_OF = {
+  overview: 'monitor', live: 'monitor', activity: 'monitor', usage: 'monitor', memory: 'monitor',
+  tiers: 'routing', routes: 'routing', routing: 'routing', profiles: 'routing', evaluate: 'routing', learned: 'routing',
+  models: 'providers', connectors: 'providers', embeddings: 'providers',
+  gateway: 'gateway', clients: 'gateway',
+  service: 'admin', json: 'admin', audit: 'admin',
+};
+
+/** Whether a dashboard element is on screen, and not under the top bar that stays at the top as the page scrolls. */
+const onScreen = (e) => {
+  const b = e.getBoundingClientRect();
+  const bar = document.querySelector('.topbar')?.getBoundingClientRect().bottom ?? 0;
+  return b.top >= bar && b.bottom <= innerHeight;
+};
+
 /**
  * Scrolls the dashboard so the element is at the top ('start'), middle or bottom ('end'), eased, setting the position
  * every frame: the browser's own smooth scroll stops short when the dashboard re-renders mid-way, which shows as a jump.
@@ -79,7 +95,9 @@ function glide(locator, block) {
   return locator.evaluate((e, b) => new Promise((done) => {
     const r = e.getBoundingClientRect();
     const margin = 12;
-    const offset = b === 'start' ? r.top - margin : b === 'end' ? r.bottom - innerHeight + margin : r.top - (innerHeight - r.height) / 2;
+    // The top bar (status and page tabs) stays at the top as the page scrolls: aim below it.
+    const bar = document.querySelector('.topbar')?.getBoundingClientRect().bottom ?? 0;
+    const offset = b === 'start' ? r.top - bar - margin : b === 'end' ? r.bottom - innerHeight + margin : r.top - bar - (innerHeight - bar - r.height) / 2;
     const from = scrollY;
     const to = Math.max(0, Math.min(document.documentElement.scrollHeight - innerHeight, from + offset));
     if (Math.abs(to - from) < 2) { done(); return; }
@@ -258,12 +276,16 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
     /** Runs a command at once, for setup the camera doesn't need to watch. */
     run: (id, command) => shells[id].write(`${command}\r`),
 
-    /** Installs the tool, runs init and starts the router off camera, then lets `configure` adjust the configuration. */
+    /**
+     * Installs the tool, runs init and starts the router off camera, then lets `configure` adjust the configuration.
+     * Without a terminal init adds the subscription CLIs it finds disabled: --enable-cli turns Claude on, as answering
+     * its question would.
+     */
     async startRouter(configure) {
       const shellEnv = { ...env };
       // Asynchronously: init probes LM Studio, and the stand-in answers from this process.
       await new Promise((resolve, reject) => {
-        spawn('bash', ['-c', 'dotnet tool install -g SemanticRouter.Host >/dev/null && semantic-router init >/dev/null'], { cwd: project, env: shellEnv, stdio: 'inherit' })
+        spawn('bash', ['-c', 'dotnet tool install -g SemanticRouter.Host >/dev/null && semantic-router init --enable-cli claude >/dev/null'], { cwd: project, env: shellEnv, stdio: 'inherit' })
           .on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`install/init exited with ${code}`))));
       });
       background = spawn('semantic-router', [], { cwd: project, env: shellEnv, stdio: 'ignore' });
@@ -356,10 +378,20 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       await k.point(target);
       await target.selectOption(value);
     },
-    /** Opens a dashboard page from the sidebar, as a person would. */
+    /**
+     * Opens a dashboard page as a person would: its section in the rail, then its tab. A section opens on the page last
+     * shown in it (or its first), so that tab may already be the one.
+     */
     async nav(view) {
       await k.unhighlight();
-      await k.dashClick(`#nav a[href="#/${view}"]`);
+      const tab = `#tabs a[data-view="${view}"]`;
+      if (!(await k.frame().locator(tab).count())) {
+        await k.dashClick(`#nav a[data-section="${SECTION_OF[view]}"]`);
+        await k.frame().locator(tab).first().waitFor();
+        await sleep(400);
+      }
+      if (!(await k.frame().locator(`${tab}.active`).count())) await k.dashClick(tab);
+      await k.frame().waitForFunction((v) => location.hash === `#/${v}`, view);
       await k.stage('url', `${router}/router/#/${view}`);
       await glideTo(0);
       await sleep(700);
@@ -369,7 +401,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
     /** Moves the pointer onto an element (a locator in the dashboard), scrolling it into view first if need be. */
     async point(target) {
       if (!k.pointer) return;
-      const visible = await target.evaluate((e) => { const b = e.getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; });
+      const visible = await target.evaluate(onScreen);
       // A scroll takes the page away from what a highlight outlines: drop it first.
       if (!visible) { await k.unhighlight(); await glide(target, 'center'); await k.settle(); }
       const scale = await dashScale();
@@ -417,7 +449,7 @@ async function start({ out, voiceDir, shells: shellSpecs = [['router', 96, 26], 
       if (tracker) await k.unhighlight();
       // Bring it into view first: the box follows a scroll, but a still page reads better.
       const target = k.frame().locator(selector).first();
-      const visible = await target.evaluate((e) => { const b = e.getBoundingClientRect(); return b.top >= 0 && b.bottom <= innerHeight; });
+      const visible = await target.evaluate(onScreen);
       if (!visible) await glide(target, 'center');
       await k.settle();
       const scale = await dashScale();

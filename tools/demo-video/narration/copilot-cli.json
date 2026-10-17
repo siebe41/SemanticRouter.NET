@@ -1,0 +1,13 @@
+{
+  "voice": "af_heart",
+  "lines": {
+    "title": "Semantic Router dot net isn't just for Claude Code. This one's GitHub Copilot C L I. Every prompt goes to the cheapest model that can handle it, and Copilot works just like before.",
+    "connect": "Copilot C L I can use your own model provider. Point it at the router: its address, any key, and semantic router as the model. Add the context window, so Copilot knows when to compact. Then start copilot as usual.",
+    "hello": "A simple question goes to a small local model. It's free, and it never leaves your machine.",
+    "code": "A small coding task? The local coder takes it.",
+    "hard": "But a hard debugging question goes to a frontier model, on a subscription you already pay for.",
+    "local": "Working on something private? Start the message with at-local, and the rest of the conversation stays on this machine.",
+    "live": "Every turn is on the dashboard, next to your other tools: which route matched, which model answered, and why.",
+    "end": "That's Semantic Router dot net with Copilot. It's open source and MIT licensed, and it works with the tools you already use."
+  }
+}

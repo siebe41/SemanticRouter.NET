@@ -129,7 +129,32 @@ pip install faster-whisper
 NARRATION=narration/intro.json python check_narration.py out/voice
 ```
 
-[PLAN.md](PLAN.md) outlines the next videos: a deep dive on routing and a how-to on the settings.
+[PLAN.md](PLAN.md) has the next videos: GitHub Copilot CLI, VS Code, the GitHub Copilot app and an "every tool"
+cut, with their narration already in `narration/`.
+
+### Re-recording after a product change
+
+The narration is the slow part, and it doesn't need to change when only the screen does. A re-take reuses the voice
+folder, so keep `out/voice-<video>` from the first recording (it is the only copy: the release has only the finished
+MP4s and captions).
+
+1. **Rehearse** the script against the current product, with silent stand-in narration of the right lengths (no TTS),
+   and look at a still of every beat:
+
+   ```bash
+   node placeholder-voice.js narration/settings.json out/voice-draft
+   DEMO_FEED=out/feed node record.js settings out/frames-draft out/voice-draft
+   node stills.js out/frames-draft out/stills narration/settings.json     # out/stills/index.html
+   ```
+
+   A selector the dashboard no longer has stops the take with the line it was on; the stills show what changed on
+   screen. The same stills serve as fresh screenshots for the docs.
+2. **Fix** the script and captions, and any narration line whose words no longer match the screen.
+3. **Redo only those lines** in the existing voice folder: `TTS_ONLY=routes NARRATION=narration/deep-dive.json python
+   tts.py chatterbox out/voice-deep-dive out/voice-sample/me.wav`. Every other line keeps its take.
+4. **Record and build** as usual with that voice folder. Update the narration file's `onScreen` figures from the new
+   take.
+
 
 ### Claude Code's header
 

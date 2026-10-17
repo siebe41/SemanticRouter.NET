@@ -15,6 +15,8 @@ module.exports = async function privacy(k) {
 
   // Off camera: the notes, the router reading them, secret detection on, Claude Code started with the notes folder.
   writeNotes(path.join(k.home, 'notes'));
+  // A memory source is a folder the router reads, which the admin API changes only when the router allows it.
+  k.env.SemanticRouter__Dashboard__AllowProcessSettings = 'true';
   await k.startRouter((config) => {
     config.Memory = config.Memory || {};
     config.Memory.Sources = [{ Name: 'notes', Type: 'Markdown', Path: '~/notes' }];

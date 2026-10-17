@@ -25,6 +25,10 @@ module.exports = async function intro(k) {
   await k.stage('caption', '2. init finds your models', 'LM Studio · Ollama · the claude, codex and copilot CLIs · writes a starting configuration');
   await sleep(400);
   await k.type('router', 'semantic-router init');
+  // It asks before it puts a subscription CLI to work on your account.
+  await k.waitFor('router', /\[y\/N\]/);
+  await sleep(700);
+  await k.type('router', 'y');
   await k.waitFor('router', /Next: /);
   await line;
 
