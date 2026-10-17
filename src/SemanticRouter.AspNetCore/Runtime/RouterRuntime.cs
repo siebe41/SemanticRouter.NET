@@ -522,6 +522,12 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         _services.GetService<IStateRetention>()?.Apply(configuration.State.Retention);
 
         var warnings = new List<string>(enforced);
+        if (_services.GetService<IStateStorageHealth>()?.Problem is { } state)
+        {
+            // Budgets that count from zero and an audit log kept in memory must not go unnoticed: listed on every apply.
+            warnings.Add(state);
+        }
+
         if (configuration.Middleware.Mode == PromptRouterMode.Dispatch && !configuration.Models.Any(m => m.Enabled))
         {
             // Allowed so a fresh install can start and be set up from the dashboard; until then every request is refused.

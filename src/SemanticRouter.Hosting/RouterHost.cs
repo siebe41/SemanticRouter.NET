@@ -204,6 +204,12 @@ internal static partial class RouterHost
     public const int AddressInUseExitCode = 3;
 
     /// <summary>
+    /// The exit code when the state database was written by a newer release: the usage-error code, which a service
+    /// manager does not restart on either (a person has to choose between upgrading and the backup).
+    /// </summary>
+    public const int StateTooNewExitCode = 2;
+
+    /// <summary>
     /// Runs the router until it is stopped. With <paramref name="lifecycle"/>, the dashboard can restart it (it starts
     /// again in this process), stop it, or hand it over to the background service.
     /// </summary>
@@ -218,7 +224,17 @@ internal static partial class RouterHost
         IReadOnlyList<string>? previous = null;
         while (true)
         {
-            RunningRouter? router = await StartAsync(settings, output, build).ConfigureAwait(false);
+            RunningRouter? router;
+            try
+            {
+                router = await StartAsync(settings, output, build).ConfigureAwait(false);
+            }
+            catch (StateTooNewException ex)
+            {
+                await output.WriteLineAsync(ex.Message).ConfigureAwait(false);
+                return StateTooNewExitCode;
+            }
+
             if (router is null && previous is { Count: > 0 })
             {
                 // Restarted from the dashboard onto an address that is taken: listen where it did before, not nowhere.
@@ -257,9 +273,17 @@ internal static partial class RouterHost
     /// explaining it on <paramref name="output"/> when the address is already taken. Disposing the result stops it.
     /// </summary>
     /// <param name="environment">Reads environment variables (the API keys a container seeds connectors from); the process's by default.</param>
+    /// <exception cref="StateTooNewException">The state database was written by a newer release (usually after a downgrade).</exception>
     public static async Task<RunningRouter?> StartAsync(
         HostSettings settings, TextWriter output, Action<WebApplicationBuilder>? configure = null, Func<string, string?>? environment = null)
     {
+        // Not started at all, rather than with budgets that count from zero and an audit log that is not kept: after a
+        // downgrade, the way back is the copy the upgrade made, and the message says where it is.
+        if (SqliteRouterDatabase.NewerSchemaProblem(Path.Combine(settings.ConfigurationDirectory, HostSettings.StateFileName)) is { } newer)
+        {
+            throw new StateTooNewException(newer);
+        }
+
         // Only the start that creates the file seeds connectors from the API keys: on a later start, a template without them
         // may be one someone deleted them from, and that must stick.
         if (!File.Exists(settings.ConfigurationFile))
@@ -495,6 +519,9 @@ internal static partial class RouterHost
         return uri.IsLoopback || (IPAddress.TryParse(uri.Host.Trim('[', ']'), out IPAddress? address) && IPAddress.IsLoopback(address));
     }
 }
+
+/// <summary>The state database was written by a newer release than this one, so the router does not start on it.</summary>
+internal sealed class StateTooNewException(string message) : InvalidOperationException(message);
 
 /// <summary>A started router: the web application and its instance record, removed when it is disposed.</summary>
 internal sealed class RunningRouter(WebApplication app, RouterInstance instance, string configurationDirectory, IDisposable? stopListener) : IAsyncDisposable

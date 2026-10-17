@@ -124,6 +124,7 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | Configuration directory | `SEMANTIC_ROUTER_HOME` if set; otherwise `%APPDATA%\semantic-router` (Windows), `~/Library/Application Support/semantic-router` (macOS) or `$XDG_CONFIG_HOME/semantic-router`, default `~/.config/semantic-router` (Linux). |
 | `semantic-router.json` | The configuration. The dashboard's **Apply & save** writes it. |
 | `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. See [What the router stores](#what-the-router-stores). |
+| `semantic-router.db.v<N>.bak` | The state database as it was before an upgrade migrated it from schema `N`, so the release that wrote it can be started on it again. See [Upgrading and going back](#upgrading-and-going-back). |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [Keeping secrets out of the file](dashboard.md#keeping-secrets-out-of-the-file). |
 | `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [Routing quality](routing-quality.md). |
 | `semantic-router.instance.json` | The running router's process id, addresses, start time and version. Removed when it stops. |
@@ -142,6 +143,7 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | `semantic-router.db`, table `config_history` | Every applied configuration, with secrets masked, and who applied it | 200 versions (`State:Retention:ConfigurationVersions`) | Delete the file |
 | `semantic-router.db`, table `audit` | The [audit log](dashboard.md#audit-log): each change made through the dashboard or admin API, sign-in and sign-out, with when, who, the client's address, the request path and status, and a short summary; no request bodies, tokens or prompt text | 365 days (`State:Retention:AuditDays`); never changed, and not deleted by an activity purge or capped by the machine policy's `MaxRetentionDays` | Delete the file |
 | `semantic-router.db`, tables `cooldowns`, `affinity`, `warm_caches`, `tuning_changes` | Model cooldowns, which model issued each tool call (ids only), the size of each conversation's prompt cache per model (conversation hashes only), learned routing changes (which can include short utterances learned from prompt previews) | Until they expire, 24 hours, until they expire, until undone | Undo on **Router learned**, or delete the file |
+| `semantic-router.db.v<N>.bak` | The state database as it was before the last upgrade that migrated it: the same tables, including prompt previews, at mode 0600 | Until the next upgrade from the same schema replaces it | Delete the file once you will not go back |
 | `semantic-router.evaluation.jsonl` | Prompts you labelled, in full | Until you remove them | Edit or delete the file (the **Evaluate** page) |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted | Until removed from the configuration | Remove the key on the dashboard |
 | The data-protection key ring (see [The key ring](#the-key-ring)) | The keys that decrypt `semantic-router.secrets.json`; a new one every 90 days | Kept, so older secrets stay readable | Only with the secrets file: without its keys, the file cannot be read |
@@ -193,6 +195,31 @@ It is a host setting, read at start-up: put it in `appsettings.json` in the conf
 - **Existing secrets keep working.** ASP.NET Core reads each key as it was written, encrypted or not. At the next start the router adds a key encrypted to the certificate (or with DPAPI, for `SEMANTIC_ROUTER_KEYS_DIR` on Windows) and uses it from then on, and it re-encrypts each saved secret with that key when it reads it. The older keys stay in the folder, unencrypted, and `doctor` lists them. Once the router has started with the certificate they protect nothing it needs, and can be deleted, unless another ASP.NET Core app on your account uses the same folder.
 - **Keep the certificate.** Keys encrypted to it can be read only with its private key. Replace or lose it, and the secrets saved under those keys can no longer be decrypted: the router then treats them as missing, and you type them again on the dashboard. Its expiry date is not checked.
 - **Not the macOS Keychain or the Linux Secret Service.** .NET has no built-in access to either, and the packages that add it bring native dependencies or are not maintained. On a desktop, full-disk encryption (FileVault, BitLocker, LUKS) covers the key ring at rest; use a certificate where that is not enough.
+
+## Upgrading and going back
+
+Install the new version over the old one (`dotnet tool update -g SemanticRouter.Host`, a new image on the same volume, or the desktop app's own update) and restart the router. It keeps the configuration directory as it is, with two exceptions:
+
+- **The state database** (`semantic-router.db`) is migrated in place when the new version uses a newer schema; the log says so. Before it is changed, the file as it was is copied to `semantic-router.db.v<old schema>.bak` next to it. One copy is kept per schema; a later upgrade from the same schema replaces it.
+- **Nothing else is migrated:** `semantic-router.json`, `semantic-router.secrets.json` and the key ring are read as they are, and every release since 0.1.0 can still decrypt the secrets.
+
+| Release | State schema |
+|---|---|
+| 0.1.0 – 0.3.0 | 2 |
+| 0.4.0 and later | 3 |
+
+**Going back to an older version.** A version can't use a state database that a newer one migrated: the schema is newer than it knows. From this version on, the router then doesn't start: it says which file it is, its schema, and where the copy from before the upgrade is (exit code 2, so a service manager doesn't restart it). `semantic-router doctor` reports it as `[FAIL] state:`. To go back:
+
+1. Stop the router.
+2. Move `semantic-router.db` aside, and remove any `semantic-router.db-wal` and `semantic-router.db-shm` next to it.
+3. Rename `semantic-router.db.v<N>.bak` to `semantic-router.db`, where `N` is the schema of the version you go back to.
+4. Start the older version.
+
+What was recorded since the upgrade (usage, activity, configuration history, the audit log) stays only in the file you moved aside; upgrading again with that file migrates it as before.
+
+Releases up to 0.5.0 don't refuse such a file: they log one warning and keep everything in memory, so budgets count from zero and the audit log is lost on restart. They leave the file untouched, so upgrading again brings it all back.
+
+**A database that can't be used for another reason** (a corrupt or locked file, a full disk) doesn't stop the router: it routes with its state in memory. That is listed with the configuration warnings in `GET /router/api/status`, on the dashboard, and as `[FAIL] state:` in `doctor`, because budgets then count from zero and nothing is kept past a restart.
 
 ## Listening beyond this machine
 

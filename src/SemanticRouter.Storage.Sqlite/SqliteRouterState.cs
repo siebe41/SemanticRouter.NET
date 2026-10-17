@@ -42,7 +42,9 @@ public static class SqliteStateBuilderExtensions
     /// <summary>
     /// Keeps model cooldowns, tool-call affinity, conversations' warm prompt caches, the activity log, feedback, usage,
     /// learned changes, connector incidents, the configuration history and the audit log in one SQLite file, so they survive restarts. Several router instances on one machine may share the file (cooldowns and affinity
-    /// are then shared); a database that cannot be opened or written falls back to memory with a warning.
+    /// are then shared); a database that cannot be opened or written falls back to memory, with a warning in the log and
+    /// in the runtime's warnings. Before an older file is migrated, a copy is kept next to it
+    /// (<c>semantic-router.db.v2.bak</c>), so the release that wrote it can be started on it again.
     /// </summary>
     public static SemanticRouterBuilder UseSqliteState(this SemanticRouterBuilder builder, string path, Action<SqliteStateOptions>? configure = null)
     {
@@ -56,6 +58,7 @@ public static class SqliteStateBuilderExtensions
         });
         services.TryAddSingleton<SqliteRouterDatabase>();
         services.TryAddSingleton<IStateRetention>(provider => provider.GetRequiredService<SqliteRouterDatabase>());
+        services.TryAddSingleton<IStateStorageHealth>(provider => provider.GetRequiredService<SqliteRouterDatabase>());
         services.Replace(ServiceDescriptor.Singleton<ICooldownStore, SqliteCooldownStore>());
         services.Replace(ServiceDescriptor.Singleton<IToolCallAffinity, SqliteToolCallAffinity>());
         services.Replace(ServiceDescriptor.Singleton<IWarmCacheStore, SqliteWarmCaches>());
@@ -74,11 +77,11 @@ public static class SqliteStateBuilderExtensions
 /// The shared database: schema, connections and failure handling. Every operation degrades to a fallback value when
 /// the database is unavailable, so routing never fails because of state storage.
 /// </summary>
-internal sealed partial class SqliteRouterDatabase : IStateRetention
+internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStorageHealth
 {
     // 2: usage.profile (routing profiles). 3: usage.subscription_value (subscriptions at API prices). Older files are
-    // migrated in place.
-    private const int SchemaVersion = 3;
+    // migrated in place, after a copy of the file is kept (BackupFile).
+    public const int SchemaVersion = 3;
 
     private readonly string _connectionString;
     private readonly ILogger _logger;
@@ -103,7 +106,7 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
             using SqliteConnection connection = Open();
-            Migrate(connection);
+            int? from = Migrate(connection, path);
             Available = true;
 
             // The activity log holds prompt previews. SQLite gives the -wal and -shm files the database's mode.
@@ -111,13 +114,82 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
             {
                 OwnerOnly.Restrict(file);
             }
+
+            if (from is int version)
+            {
+                string backup = BackupFile(path, version);
+                LogMigrated(_logger, path, version, SchemaVersion, backup);
+            }
+        }
+        catch (NewerSchemaException ex)
+        {
+            Available = false;
+            Problem = $"{ex.Message} {InMemoryConsequence}";
+            LogUnavailable(_logger, path, ex.Message);
         }
         catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException)
         {
             Available = false;
+            Problem = $"The router's state database {path} cannot be used ({ex.Message}). {InMemoryConsequence}";
             LogUnavailable(_logger, path, ex.Message);
         }
     }
+
+    /// <summary>What running without the database means, for <see cref="Problem"/>.</summary>
+    private const string InMemoryConsequence =
+        "Until it can, budgets count from zero, and usage, activity, feedback, cooldowns, learned changes, the configuration " +
+        "history and the audit log are kept in memory only and lost on restart.";
+
+    /// <summary>
+    /// The copy of the database kept before it is migrated from <paramref name="version"/>: the release that wrote it can
+    /// be started on it again. One per schema version; a later migration from the same version replaces it.
+    /// </summary>
+    public static string BackupFile(string path, int version) => $"{path}.v{version.ToString(CultureInfo.InvariantCulture)}.bak";
+
+    /// <summary>
+    /// The schema version recorded in the database at <paramref name="path"/>, read without changing the file;
+    /// <see langword="null"/> when there is no file, or it cannot be read (opening it for use says why).
+    /// </summary>
+    public static int? StoredSchemaVersion(string path)
+    {
+        string full = System.IO.Path.GetFullPath(path);
+        if (!File.Exists(full))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = full, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+            connection.Open();
+            using SqliteCommand read = Command(connection, "SELECT value FROM meta WHERE key = 'schema_version';");
+            return read.ExecuteScalar() is string value && int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int version) ? version : null;
+        }
+        catch (SqliteException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Why this build cannot use the database at <paramref name="path"/> because a newer release wrote it (usually after
+    /// a downgrade), with the way back; <see langword="null"/> when that is not the case. Read without changing the file.
+    /// </summary>
+    public static string? NewerSchemaProblem(string path) =>
+        StoredSchemaVersion(path) is int version && version > SchemaVersion ? NewerSchema(System.IO.Path.GetFullPath(path), version) : null;
+
+    private static string NewerSchema(string path, int version)
+    {
+        string backup = BackupFile(path, SchemaVersion);
+        string wayBack = File.Exists(backup)
+            ? $"Start the newer release again, or, to go back to this one, move {backup} (the copy made before the upgrade) to {path}; what was recorded since the upgrade is then lost."
+            : $"Start the newer release again. No copy from before the upgrade was found ({backup}); to start this release with empty state, move {path} aside.";
+        return $"The router's state database {path} was written by a newer SemanticRouter (state schema {version.ToString(CultureInfo.InvariantCulture)}; " +
+               $"this version reads schema {SchemaVersion.ToString(CultureInfo.InvariantCulture)} and older). {wayBack}";
+    }
+
+    /// <summary>A database written by a newer release.</summary>
+    private sealed class NewerSchemaException(string message) : Exception(message);
 
     public SqliteStateOptions Options { get; }
 
@@ -147,6 +219,9 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
 
     /// <summary>Whether the database opened; when not, every store keeps its state in memory only.</summary>
     public bool Available { get; private set; }
+
+    /// <inheritdoc />
+    public string? Problem { get; private set; }
 
     /// <summary>Runs <paramref name="operation"/>, or returns <paramref name="fallback"/> when the database fails.</summary>
     public T Run<T>(string what, T fallback, Func<SqliteConnection, T> operation)
@@ -264,8 +339,24 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
         }
     }
 
-    private static void Migrate(SqliteConnection connection)
+    /// <summary>
+    /// Creates the tables, or brings an older file up to <see cref="SchemaVersion"/> after keeping a copy of it
+    /// (<see cref="BackupFile"/>). Returns the version it migrated from, or <see langword="null"/> when nothing was migrated.
+    /// </summary>
+    private static int? Migrate(SqliteConnection connection, string path)
     {
+        // Checked before anything is written: a file from a newer release is left exactly as it is.
+        int? stored = StoredVersion(connection);
+        if (stored > SchemaVersion)
+        {
+            throw new NewerSchemaException(NewerSchema(path, stored.Value));
+        }
+
+        if (stored < SchemaVersion)
+        {
+            Backup(connection, BackupFile(path, stored.Value));
+        }
+
         // WAL lets readers and one writer (possibly another instance) work at the same time.
         using (SqliteCommand wal = Command(connection, "PRAGMA journal_mode=WAL;"))
         {
@@ -311,7 +402,7 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
         {
             check.Transaction = transaction;
             string? version = check.ExecuteScalar() as string;
-            if (version is "1" or "2")
+            if (stored is 1 or 2)
             {
                 // Only the columns the file lacks: a file with no usage table yet just got the current one above.
                 string add = (HasColumn(connection, transaction, "usage", "profile") ? string.Empty : "ALTER TABLE usage ADD COLUMN profile TEXT;")
@@ -335,6 +426,42 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
             using SqliteCommand vacuum = Command(connection, "VACUUM; PRAGMA wal_checkpoint(TRUNCATE);");
             vacuum.ExecuteNonQuery();
         }
+
+        return stored < SchemaVersion ? stored : null;
+    }
+
+    /// <summary>The schema version the file records; <see langword="null"/> for a new file, which has no meta table yet.</summary>
+    private static int? StoredVersion(SqliteConnection connection)
+    {
+        using SqliteCommand exists = Command(connection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'meta';");
+        if (Convert.ToInt64(exists.ExecuteScalar(), CultureInfo.InvariantCulture) == 0)
+        {
+            return null;
+        }
+
+        using SqliteCommand read = Command(connection, "SELECT value FROM meta WHERE key = 'schema_version';");
+        string? value = read.ExecuteScalar() as string;
+        return value is null ? null
+            : int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int version) ? version
+            : throw new InvalidDataException($"Unsupported state schema version {value}.");
+    }
+
+    /// <summary>
+    /// Copies the database, as it is before the migration, to <paramref name="backup"/>: written next to it and then
+    /// moved into place, so a copy that was cut short never replaces a good one. It holds prompt previews, so only the
+    /// owner can read it.
+    /// </summary>
+    private static void Backup(SqliteConnection connection, string backup)
+    {
+        string temp = backup + ".tmp";
+        File.Delete(temp);
+        using (SqliteCommand copy = Command(connection, "VACUUM INTO $file;", ("$file", temp)))
+        {
+            copy.ExecuteNonQuery();
+        }
+
+        OwnerOnly.Restrict(temp);
+        File.Move(temp, backup, overwrite: true);
     }
 
     /// <summary>
@@ -408,6 +535,9 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Router state database {Path} cannot be used ({Error}); cooldowns, tool-call affinity, activity and configuration history stay in memory and are lost on restart.")]
     private static partial void LogUnavailable(ILogger logger, string path, string error);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Router state database {Path} was migrated from schema {From} to {To}; the file as it was is kept as {Backup}.")]
+    private static partial void LogMigrated(ILogger logger, string path, int from, int to, string backup);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Router state database: {What} failed for {Path} ({Error}); continuing in memory.")]
     private static partial void LogOperationFailed(ILogger logger, string what, string path, string error);

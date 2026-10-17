@@ -62,3 +62,17 @@ internal interface IStateRetention
 {
     void Apply(StateRetentionOptions retention);
 }
+
+/// <summary>
+/// Whether durable state storage works (implemented by durable state stores). When it does not, every store keeps its
+/// state in memory: budgets count from zero and the audit log is lost on restart, so the problem is listed with the
+/// runtime's warnings.
+/// </summary>
+internal interface IStateStorageHealth
+{
+    /// <summary>Where the state is kept, e.g. a file path.</summary>
+    string Location { get; }
+
+    /// <summary>Why the state cannot be kept there, in words for the person running the router; <see langword="null"/> when it can.</summary>
+    string? Problem { get; }
+}

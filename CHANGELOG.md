@@ -37,6 +37,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - `semantic-router init --enable-cli claude,codex` enables just the subscription CLIs named, without asking; the others found are added disabled. Without a terminal, `init` now says that it skipped the questions and how to choose (`--yes`, `--enable-cli`, `--no-cli`).
 - Dashboard: **Admin → Service** for the `semantic-router` tool: who can connect (this machine only, or other machines too, and the port, saved to `semantic-router.host.json` and applied by a restart, with what serving other machines needs), **Restart** and **Stop**, and the background service (**Install and hand over**, **Reinstall**, **Remove the service**, its definition and logs). A restart happens in the same process; one onto a port that is taken goes back to the old address and says so. It says when `--urls`, an environment variable, `Kestrel:Endpoints` or a container decides where the router listens, and an application that hosts the router itself (or the desktop app) keeps its own controls. API: `GET api/service`, `PUT api/service/listen`, `POST api/service/{restart|stop|install|reinstall|uninstall}`, admin only and audited; hosts plug in through `IRouterServiceControl`.
 - Documentation site: each video has a transcript (its narration, plus figures shown on screen that the narration doesn't say), a link to its captions file, and a download link that names the video. The build fails when a video is published without captions, unless `site/videos.json` marks it `"speech": false`.
+- Before the state database is migrated to a newer schema, the file as it was is kept as `semantic-router.db.v<old schema>.bak`, so the previous release can be started on it again. [Upgrading and going back](docs/host.md#upgrading-and-going-back) describes both directions ([#205](https://github.com/siebe41/SemanticRouter.NET/issues/205)).
 
 ### Changed
 - Dashboard: **Admin** opens on the new **Service** tab, and the Overview's "this machine only" note points there. The live event stream ends when the router stops, so an open Live view no longer holds up a restart.
@@ -73,6 +74,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Dashboard: Label starts with no tier picked and warns when it is the tier the prompt was routed to.
 - Desktop app: the tray's **Check for updates** is now **Check for updates automatically**, next to **Check for updates now…**.
 - Dashboard: links in running text are underlined, and a few theme colours are slightly stronger so status badges, faint text and links keep 4.5:1 on every surface, hovered rows included. A theme file is now checked against `--bg-hover` too.
+- The `semantic-router` tool and the desktop app don't start on a state database written by a newer release (after a downgrade), instead of running with budgets that count from zero and an audit log kept in memory. The message names the file, its schema and the copy to restore; the tool exits with code 2 ([#205](https://github.com/siebe41/SemanticRouter.NET/issues/205)).
 
 ### Fixed
 
@@ -98,6 +100,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Desktop app accessibility: the About, welcome and new Settings windows have headings, links that read as links, a logo hidden as decoration, and explanations read with their checkboxes; the update status and the router's problems are announced when they change; the focus moves to **Restart to update** after **Check now** finds one; the welcome window closes with Escape; the windows scroll instead of running off a short screen with large text; secondary text keeps full strength under high contrast; opening the dashboard window puts the focus in the page.
 - Documentation site: the brand buttons' white text has at least 4.5:1 contrast in both themes, including on hover. The screenshots' alt text describes what they show (the memory map's colours included), the Mermaid diagrams have accessible titles and descriptions, links show page or section names instead of file names, and `semantic-router models` writes "why:" instead of an arrow glyph.
 - Releases: a tag with a version suffix (`v1.0.0-rc.1`) is published as a GitHub prerelease with prerelease desktop update feeds, which installed desktop apps do not take, and its image is not tagged `:latest` ([#207](https://github.com/siebe41/SemanticRouter.NET/issues/207)).
+- A state database that can't be used (corrupt, locked, or newer than the router) was reported only in the log. It is now one of the configuration warnings in `GET api/status` and on the dashboard, and `doctor` has a `state` line that fails on it ([#205](https://github.com/siebe41/SemanticRouter.NET/issues/205)).
 
 ### Security
 

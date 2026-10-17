@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SemanticRouter.Tests" />
+    <InternalsVisibleTo Include="SemanticRouter.Hosting" />
   </ItemGroup>
 
 </Project>
