@@ -69,7 +69,7 @@ internal static class Program
             return 0;
         }
 
-        using TextWriter log = RouterLog.RedirectConsole(directory);
+        using TextWriter log = RouterLog.RedirectConsole(options.Host);
         ShellEnvironment.AdoptLoginShellPath();
         return AppBuilder.Configure(() => new App(options, instance, log))
             .UsePlatformDetect()
@@ -85,7 +85,7 @@ internal static class Program
     /// </summary>
     private static async Task<int> UpdateAsync(DesktopOptions options)
     {
-        string log = RouterLog.FileIn(options.Host.ConfigurationDirectory);
+        string log = RouterLog.FileOf(options.Host);
         Directory.CreateDirectory(Path.GetDirectoryName(log)!);
         await using StreamWriter writer = AppendTo(log);
         DesktopUpdater updater = DesktopUpdater.Create(options.Host, Environment.GetEnvironmentVariable, writer);
@@ -145,7 +145,7 @@ internal static class Program
         }
 
         Console.WriteLine(message);
-        string log = RouterLog.FileIn(options.Host.ConfigurationDirectory);
+        string log = RouterLog.FileOf(options.Host);
         Directory.CreateDirectory(Path.GetDirectoryName(log)!);
         await using (StreamWriter writer = AppendTo(log))
         {

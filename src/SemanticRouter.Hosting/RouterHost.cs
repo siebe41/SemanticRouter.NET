@@ -91,9 +91,9 @@ internal static partial class RouterHost
             .UseConfigurationFile(settings.ConfigurationFile)
             .UseMachinePolicy()
             .UseSecretFile()
-            .AddOnnxEmbeddings()
+            .AddOnnxEmbeddings(onnx => onnx.ModelsDirectory ??= LocalData.ModelsDirectory(settings))
             .AddCopilotConnector()
-            .UseSqliteState(Path.Combine(settings.ConfigurationDirectory, HostSettings.StateFileName));
+            .UseSqliteState(LocalData.StateFile(settings));
 
         builder.Services.AddSingleton<IRouterSetupDetector, SetupDetector>(); // the dashboard's first-run setup finds what init would
         bool behindProxy = ConfigureForwardedHeaders(builder);
@@ -277,9 +277,15 @@ internal static partial class RouterHost
     public static async Task<RunningRouter?> StartAsync(
         HostSettings settings, TextWriter output, Action<WebApplicationBuilder>? configure = null, Func<string, string?>? environment = null)
     {
+        // On Windows, an install from before keeps its state database, models and logs in the roaming profile: moved out.
+        if (LocalData.MoveFromConfigurationDirectory(settings) is { Count: > 0 } moved)
+        {
+            await output.WriteLineAsync($"Moved {string.Join(", ", moved)} from {settings.ConfigurationDirectory} to {settings.LocalDataDirectory}, which does not roam.").ConfigureAwait(false);
+        }
+
         // Not started at all, rather than with budgets that count from zero and an audit log that is not kept: after a
         // downgrade, the way back is the copy the upgrade made, and the message says where it is.
-        if (SqliteRouterDatabase.NewerSchemaProblem(Path.Combine(settings.ConfigurationDirectory, HostSettings.StateFileName)) is { } newer)
+        if (SqliteRouterDatabase.NewerSchemaProblem(LocalData.StateFile(settings)) is { } newer)
         {
             throw new StateTooNewException(newer);
         }

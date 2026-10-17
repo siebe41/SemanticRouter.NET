@@ -102,9 +102,11 @@ internal static class DoctorCommand
     /// the check (the runtime's warning about it is left out, as this says the same).
     /// </summary>
     internal static RouterCheck StateCheck(IStateStorageHealth state) =>
-        state.Problem is { } problem
-            ? new RouterCheck("state", RouterCheckStatus.Failed, problem)
-            : new RouterCheck("state", RouterCheckStatus.Ok, $"{state.Location}: budgets, usage, history and the audit log are kept.");
+        state.Problem is { } problem ? new RouterCheck("state", RouterCheckStatus.Failed, problem)
+        : LocalData.OnNetworkPath(state.Location) ? new RouterCheck("state", RouterCheckStatus.Warning,
+            $"{state.Location} is on a network drive, where SQLite's write-ahead log is not safe when two processes (the tray and the background service) use it. " +
+            $"Set {HostSettings.HomeVariable} to a folder on this machine.")
+        : new RouterCheck("state", RouterCheckStatus.Ok, $"{state.Location}: budgets, usage, history and the audit log are kept.");
 
     /// <summary>The runtime's own warning about the same thing, which <see cref="ModelsCheck"/> replaces.</summary>
     private static bool IsNoModelWarning(RouterCheck check) =>

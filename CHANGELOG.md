@@ -76,6 +76,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Desktop app: the tray's **Check for updates** is now **Check for updates automatically**, next to **Check for updates now…**.
 - Dashboard: links in running text are underlined, and a few theme colours are slightly stronger so status badges, faint text and links keep 4.5:1 on every surface, hovered rows included. A theme file is now checked against `--bg-hover` too.
 - The `semantic-router` tool and the desktop app don't start on a state database written by a newer release (after a downgrade), instead of running with budgets that count from zero and an audit log kept in memory. The message names the file, its schema and the copy to restore; the tool exits with code 2 ([#205](https://github.com/siebe41/SemanticRouter.NET/issues/205)).
+- Windows: the state database, downloaded models, logs and the desktop app's WebView2 profile moved from the roaming `%APPDATA%\semantic-router` to `%LOCALAPPDATA%\semantic-router`, so a roaming or redirected profile neither copies them at every sign-out nor puts SQLite's write-ahead log on a file share. The configuration stays where it was. An existing install is moved on its next start; with `SEMANTIC_ROUTER_HOME` everything stays in that folder, and `doctor` warns when the database is on a network drive ([#216](https://github.com/siebe41/SemanticRouter.NET/issues/216)).
 
 ### Fixed
 

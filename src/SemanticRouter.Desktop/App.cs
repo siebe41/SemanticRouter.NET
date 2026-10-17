@@ -195,7 +195,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _atSignIn = new NativeMenuItem("Start at sign-in") { ToggleType = MenuItemToggleType.CheckBox, IsEnabled = _signIn is not null };
         _atSignIn.Click += (_, _) => ToggleSignIn();
         var logs = new NativeMenuItem("Show the log");
-        logs.Click += (_, _) => Shell.Open(Path.GetDirectoryName(RouterLog.FileIn(_directory))!);
+        logs.Click += (_, _) => Shell.Open(Path.GetDirectoryName(RouterLog.FileOf(options.Host))!);
         var configuration = new NativeMenuItem("Show the configuration folder");
         configuration.Click += (_, _) => Shell.Open(_directory);
         var settings = new NativeMenuItem("Settings…");
@@ -268,7 +268,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         {
             // Started by hand and it failed: say why rather than leave only a tray icon behind.
             _openWhenReady = false;
-            Shell.Open(RouterLog.FileIn(_directory));
+            Shell.Open(RouterLog.FileOf(options.Host));
         }
     }
 
@@ -509,7 +509,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             _openWhenReady = _router.State == RouterState.Starting;
             if (!_openWhenReady)
             {
-                Shell.Open(RouterLog.FileIn(_directory));
+                Shell.Open(RouterLog.FileOf(options.Host));
             }
 
             return;
@@ -524,7 +524,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
 
         if (_window is null)
         {
-            _window = new DashboardWindow(dashboard, Path.Combine(_directory, "webview"), _icon, _preferences.Window, placement =>
+            _window = new DashboardWindow(dashboard, Path.Combine(options.Host.LocalDataDirectory, "webview"), _icon, _preferences.Window, placement =>
             {
                 _preferences = _preferences with { Window = placement };
                 _preferences.Save(_directory);
@@ -564,7 +564,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             _settings.BackgroundChanged += on => _ = SetBackgroundAsync(on);
             _settings.SignInChanged += SetSignIn;
             _settings.SurfaceChanged += SetSurface;
-            _settings.ShowLogRequested += () => Shell.Open(Path.GetDirectoryName(RouterLog.FileIn(_directory))!);
+            _settings.ShowLogRequested += () => Shell.Open(Path.GetDirectoryName(RouterLog.FileOf(options.Host))!);
             _settings.ShowFolderRequested += () => Shell.Open(_directory);
             UpdateMenu();
         }

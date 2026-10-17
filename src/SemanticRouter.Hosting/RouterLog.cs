@@ -5,18 +5,24 @@ namespace SemanticRouter.Host;
 
 /// <summary>
 /// The log file of a router without a console (the Windows background router, the desktop app):
-/// <c>logs/semantic-router.log</c> in the configuration directory, rolled over to <c>.1</c> at start past 10 MB.
+/// <c>logs/semantic-router.log</c> in the local data directory (<see cref="HostSettings.LocalDataDirectory"/>), rolled
+/// over to <c>.1</c> at start past 10 MB.
 /// </summary>
 internal static class RouterLog
 {
     private const long RollOverBytes = 10 * 1024 * 1024;
 
-    public static string FileIn(string configurationDirectory) => Path.Combine(configurationDirectory, "logs", "semantic-router.log");
+    public static string FileIn(string localDataDirectory) => Path.Combine(localDataDirectory, "logs", "semantic-router.log");
+
+    /// <summary>The log file for <paramref name="settings"/>.</summary>
+    public static string FileOf(HostSettings settings) => FileIn(settings.LocalDataDirectory);
 
     /// <summary>Sends everything written to the console (the banner, the console logger) to the log file.</summary>
-    public static TextWriter RedirectConsole(string configurationDirectory)
+    public static TextWriter RedirectConsole(HostSettings settings)
     {
-        string log = FileIn(configurationDirectory);
+        // Before the log is opened, so an earlier install's logs folder can move out of the roaming profile with it.
+        LocalData.MoveFromConfigurationDirectory(settings);
+        string log = FileOf(settings);
         Directory.CreateDirectory(Path.GetDirectoryName(log)!);
         if (File.Exists(log) && new FileInfo(log).Length > RollOverBytes)
         {
@@ -38,7 +44,7 @@ internal static class RouterLog
     /// <param name="lifecycle">What the dashboard may do to this process (the tool's background router), or <see langword="null"/>.</param>
     public static async Task<int> RunAsync(HostSettings settings, RouterLifecycle? lifecycle = null)
     {
-        await using TextWriter log = RedirectConsole(settings.ConfigurationDirectory);
+        await using TextWriter log = RedirectConsole(settings);
         try
         {
             return await RouterHost.RunAsync(settings, log, Configure, lifecycle).ConfigureAwait(false);

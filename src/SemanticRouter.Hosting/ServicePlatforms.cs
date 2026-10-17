@@ -420,12 +420,18 @@ internal sealed class WindowsSignInService : ServicePlatform
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     private readonly string _configurationDirectory;
+    private readonly string _logDirectory;
     private readonly string _runKey;
     private readonly string _valueName;
 
-    public WindowsSignInService(string configurationDirectory, string runKey = DefaultRunKey, string valueName = DefaultValueName)
+    /// <param name="configurationDirectory">Where <see cref="DefinitionFileName"/> is kept.</param>
+    /// <param name="runKey">The registry key of the sign-in entry.</param>
+    /// <param name="valueName">The sign-in entry's value name.</param>
+    /// <param name="localDataDirectory">Where the router logs (<see cref="HostSettings.LocalDataDirectory"/>); the configuration directory by default.</param>
+    public WindowsSignInService(string configurationDirectory, string runKey = DefaultRunKey, string valueName = DefaultValueName, string? localDataDirectory = null)
     {
         _configurationDirectory = configurationDirectory;
+        _logDirectory = localDataDirectory ?? configurationDirectory;
         _runKey = runKey;
         _valueName = valueName;
     }
@@ -436,7 +442,7 @@ internal sealed class WindowsSignInService : ServicePlatform
 
     public string DefinitionFile => Path.Combine(_configurationDirectory, DefinitionFileName);
 
-    public override string LogHint => $"Get-Content -Wait \"{RouterLog.FileIn(_configurationDirectory)}\"";
+    public override string LogHint => $"Get-Content -Wait \"{RouterLog.FileIn(_logDirectory)}\"";
 
     public override string EnvironmentAdvice =>
         "The router started at sign-in sees your user environment variables (set with `setx` or in System Properties), not ones set only in a PowerShell session or profile.";

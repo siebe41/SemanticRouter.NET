@@ -123,6 +123,10 @@ To turn updates off instead (and deploy new versions with your MDM): `<key>Updat
 
 The router reads the managed preferences with macOS's own `plutil` and ignores the `Payload…` keys.
 
+## Roaming profiles
+
+On Windows the configuration (`semantic-router.json`, the encrypted secrets, `desktop.json`) is in `%APPDATA%\semantic-router` and roams with the profile. The state database, the downloaded embedding models, the logs and the desktop app's WebView2 profile are in `%LOCALAPPDATA%\semantic-router`, which does not: SQLite's write-ahead log is not safe on a file share, and caches should not be copied at every sign-in. Installs from before are moved there on their next start. To keep everything in one folder instead, set `SEMANTIC_ROUTER_HOME` to a folder on the machine; `semantic-router doctor` warns when the state database is on a network drive. See [Windows and roaming profiles](host.md#windows-and-roaming-profiles).
+
 ## Update publisher
 
 With `Updates:Publisher` set, the desktop app checks an update's code signature after downloading it and before applying it. It unpacks the app from the downloaded package (`*-full.nupkg`, a zip) into a temporary folder and asks the operating system:

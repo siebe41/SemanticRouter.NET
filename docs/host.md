@@ -122,16 +122,27 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | | Default |
 |---|---|
 | Configuration directory | `SEMANTIC_ROUTER_HOME` if set; otherwise `%APPDATA%\semantic-router` (Windows), `~/Library/Application Support/semantic-router` (macOS) or `$XDG_CONFIG_HOME/semantic-router`, default `~/.config/semantic-router` (Linux). |
+| Local data directory | Where `semantic-router.db` (with its `-wal`, `-shm` and `.bak` files), `models/`, `logs/` and the desktop app's `webview/` live. The configuration directory, except on Windows with the default one: `%APPDATA%` roams, so they go to `%LOCALAPPDATA%\semantic-router` (see [Windows and roaming profiles](#windows-and-roaming-profiles)). |
 | `semantic-router.json` | The configuration. The dashboard's **Apply & save** writes it. |
 | `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. See [What the router stores](#what-the-router-stores). |
 | `semantic-router.db.v<N>.bak` | The state database as it was before an upgrade migrated it from schema `N`, so the release that wrote it can be started on it again. See [Upgrading and going back](#upgrading-and-going-back). |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [Keeping secrets out of the file](dashboard.md#keeping-secrets-out-of-the-file). |
 | `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [Routing quality](routing-quality.md). |
 | `semantic-router.instance.json` | The running router's process id, addresses, start time and version. Removed when it stops. |
-| `semantic-router.service.json`, `logs/` | Windows background service only: what the sign-in entry starts, and what it logs. |
-| `models/` | Downloaded ONNX embedding models, one directory per model. Copy a `models/{name}` directory here to run without internet access. |
+| `semantic-router.service.json`, `logs/` | Windows background service only: what the sign-in entry starts (in the configuration directory), and what it logs (in the local data directory). |
+| `models/` | Downloaded ONNX embedding models, one directory per model, in the local data directory. Copy a `models/{name}` directory there to run without internet access. |
 | `appsettings.json` (optional) | Host settings: logging, Kestrel, `SemanticRouter:Dashboard`, overrides. |
 | `semantic-router.host.json` (optional) | Where to listen (`Urls`), as **Admin → Service** saves it. Read right after `appsettings.json`, so environment variables and `--urls` still win. |
+
+### Windows and roaming profiles
+
+On Windows the default configuration directory, `%APPDATA%\semantic-router`, is in the **roaming** profile: a managed machine copies it to a server at every sign-out, or redirects it to a file share. That suits the configuration (`semantic-router.json`, `semantic-router.secrets.json`, `desktop.json`), which can follow you between machines. It does not suit the rest:
+- SQLite's write-ahead log does not work on a network file system, and the tray and the background service open the same database;
+- the downloaded models, the logs and the desktop window's WebView2 profile are tens to hundreds of MB that would be copied at every sign-in and sign-out.
+
+So these live in `%LOCALAPPDATA%\semantic-router`, which does not roam. A router started on an install from before moves them there and says so; a database another router still has open is moved on a later start, and used where it is until then. With `SEMANTIC_ROUTER_HOME` (or `--config-dir` naming another folder) everything stays in that one folder; if that folder is on a network drive, `doctor` warns, so point it at a local folder.
+
+The data-protection keys that decrypt the secrets file are ASP.NET Core's (see [The key ring](#the-key-ring)), not in either folder.
 
 ### What the router stores
 

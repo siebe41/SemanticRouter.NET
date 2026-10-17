@@ -374,7 +374,7 @@ internal abstract class ServicePlatform
     {
         if (OperatingSystem.IsWindows())
         {
-            return new WindowsSignInService(settings.ConfigurationDirectory);
+            return new WindowsSignInService(settings.ConfigurationDirectory, localDataDirectory: settings.LocalDataDirectory);
         }
 
         string home = System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile);
