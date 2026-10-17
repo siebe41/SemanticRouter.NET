@@ -208,7 +208,8 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem $env:LOCALAPPDATA\SemanticRouter -Recurse -ErrorAction SilentlyContinue | Select-Object -First 50 FullName
-          Get-Content $env:APPDATA\semantic-router\logs\semantic-router.log -Tail 60 -ErrorAction SilentlyContinue
+          Get-Content $env:LOCALAPPDATA\semantic-router\logs\semantic-router.log -Tail 60 -ErrorAction SilentlyContinue
+          Get-Content $env:RUNNER_TEMP\app-config\logs\semantic-router.log -Tail 60 -ErrorAction SilentlyContinue
           Get-ChildItem $env:TEMP -Filter 'velopack*.log' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 80 }
           Get-ChildItem $env:LOCALAPPDATA\SemanticRouter -Filter '*.log' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "== $($_.FullName)"; Get-Content $_.FullName -Tail 80 }
 
@@ -239,7 +240,7 @@ jobs:
           cp installers/SemanticRouter-osx-arm64-Setup.pkg SemanticRouter-1.0.0.pkg
           deploy/package-installer.sh osx-arm64 1.0.1 installers
 
-      - name: Install and update
+      - name: Install, run the service and update
         run: tests/installer/macos.sh SemanticRouter-1.0.0.pkg installers
 
   # The Linux AppImage: runs 1.0.0 and updates it to 1.0.1 from a local feed (tests/installer/linux.sh).

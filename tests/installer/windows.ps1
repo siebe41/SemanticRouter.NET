@@ -1,5 +1,6 @@
 # Exercises the Windows installer (#50): install 1.0.0 per user, set up the background service and the sign-in entry,
-# update to 1.0.1 from a local feed, then uninstall, and checks that nothing is left behind but the configuration.
+# start the app and hand a second launch over to it (#212), update to 1.0.1 from a local feed, then uninstall, and
+# checks that nothing is left behind but the configuration.
 #
 #   pwsh tests/installer/windows.ps1 -Setup installers/SemanticRouter-win-x64-Setup-1.0.0.exe -Feed installers
 #
@@ -14,6 +15,8 @@ $root = Join-Path $env:LOCALAPPDATA 'SemanticRouter'
 $exe = Join-Path $root 'current\SemanticRouter.exe'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $config = Join-Path $env:APPDATA 'semantic-router'
+# The state database, models and logs: out of the roaming profile (#216).
+$local = Join-Path $env:LOCALAPPDATA 'semantic-router'
 
 function Step($text) { Write-Host "::group::$text" }
 function Done { Write-Host '::endgroup::' }
@@ -75,12 +78,29 @@ Wait-Until { (Router-Processes).Count -ge 1 } 60 'the background service to run'
 
 # The app's own sign-in entry (the tray's "Start at sign-in"), as the app writes it.
 New-ItemProperty -Path $runKey -Name 'SemanticRouter Desktop' -Value "`"$exe`" --background --config-dir `"$config`"" -PropertyType String -Force | Out-Null
+Wait-Until { Test-Path (Join-Path $local 'semantic-router.db') } 60 "the service's state database in $local"
+Done
+
+Step 'The app starts in the background, takes a second launch and quits'
+# Its own configuration directory and port: the background service has the default ones.
+$other = Join-Path $env:RUNNER_TEMP 'app-config'
+$appArgs = @('--background', '--config-dir', "`"$other`"", '--urls', 'http://127.0.0.1:5291')
+$app = Start-Process -FilePath $exe -ArgumentList $appArgs -PassThru
+Wait-Until { Test-Path (Join-Path $other 'semantic-router.instance.json') } 90 "the app's router to listen"
+$code = Invoke-Program $exe $appArgs 30
+if ($code -ne 0) { Fail "A second launch exited with $code instead of handing over" }
+if ($app.HasExited) { Fail 'The running app exited when a second launch handed over to it' }
+$code = Invoke-Program $exe @('--quit', '--config-dir', "`"$other`"") 30
+if ($code -ne 0) { Fail "--quit exited with $code" }
+if (-not $app.WaitForExit(30000)) { Stop-Process -Id $app.Id -Force; Fail '--quit did not stop the running app' }
+if (Test-Path (Join-Path $other 'semantic-router.instance.json')) { Fail "The app quit but left its router's instance file" }
+Write-Host 'Started, handed a second launch over, and quit.'
 Done
 
 Step 'Update to 1.0.1'
 $env:SEMANTICROUTER_UPDATE_SOURCE = (Resolve-Path $Feed).Path
 $code = Invoke-Program $exe @('--update') 300
-if ($code -ne 0) { Get-Content (Join-Path $config 'logs\semantic-router.log') -Tail 20 -ErrorAction SilentlyContinue; Fail "--update exited with $code" }
+if ($code -ne 0) { Get-Content (Join-Path $local 'logs\semantic-router.log') -Tail 20 -ErrorAction SilentlyContinue; Fail "--update exited with $code" }
 Wait-Until { (Installed-Version) -eq '1.0.1' } 120 'version 1.0.1 to be installed'
 Remove-Item Env:SEMANTICROUTER_UPDATE_SOURCE
 
