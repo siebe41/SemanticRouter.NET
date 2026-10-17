@@ -77,8 +77,10 @@ internal sealed class LoadGenerator(HttpClient http)
     private async Task<Sample> SendAsync(Uri target, bool stream, bool keepBodies, TimeSpan? cancelAfterFirstByte, TimeSpan at)
     {
         // A different prompt every time, as from many unrelated clients: every one is classified, and none is a retry.
+        // Plain numbers: a run of hex digits could pass for a secret, which keeps a prompt local (and this setup has
+        // no local model).
         int n = Interlocked.Increment(ref _sequence);
-        string prompt = string.Create(CultureInfo.InvariantCulture, $"Summarize the status of work item {n} for the weekly report, ticket {Guid.NewGuid():N}.");
+        string prompt = string.Create(CultureInfo.InvariantCulture, $"Summarize the status of work item {n} for the weekly report, ticket {Random.Shared.Next(100_000)}.");
         string json = $$"""{"model":"auto","stream":{{(stream ? "true" : "false")}},"messages":[{"role":"user","content":"{{prompt}}"}]}""";
         using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(target, "/v1/chat/completions"))
         {
@@ -95,7 +97,7 @@ internal sealed class LoadGenerator(HttpClient http)
             Stream body = await response.Content.ReadAsStreamAsync(cancel.Token);
             await using (body)
             {
-                var text = keepBodies ? new MemoryStream() : null;
+                var text = keepBodies || response.StatusCode != System.Net.HttpStatusCode.OK ? new MemoryStream() : null;
                 byte[] buffer = new byte[16 * 1024];
                 bool first = true;
                 int read;

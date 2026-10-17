@@ -13,6 +13,8 @@
 //   --json <file>         write the results, for a baseline
 //   --baseline <file>     compare with an earlier --json; regressions are reported (as GitHub warnings in Actions)
 //   --host <dll>          the semantic-router.dll to run (default: the one the solution build produced)
+//   --memory-state        the latency table with the router's state in memory (the database cannot be opened), to see
+//                         what the database costs
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -47,7 +49,7 @@ internal static class GatewayBenchmark
         bool passed = true;
         if (args.Contains("--latency") || (soak == 0 && !faults))
         {
-            results["latency"] = await LatencyAsync(repository, host, stub, quick ? TimeSpan.FromSeconds(4) : TimeSpan.FromSeconds(10));
+            results["latency"] = await LatencyAsync(repository, host, stub, quick ? TimeSpan.FromSeconds(4) : TimeSpan.FromSeconds(10), args.Contains("--memory-state"));
         }
 
         if (soak > 0)
@@ -78,14 +80,15 @@ internal static class GatewayBenchmark
         return passed ? 0 : 1;
     }
 
-    private static async Task<JsonArray> LatencyAsync(string repository, string host, StubBackend stub, TimeSpan duration)
+    private static async Task<JsonArray> LatencyAsync(string repository, string host, StubBackend stub, TimeSpan duration, bool memoryState)
     {
-        string home = RouterProcess.Prepare(repository, stub.Address, "ok");
+        string home = RouterProcess.Prepare(repository, stub.Address, "ok", memoryState);
         await using RouterProcess router = await RouterProcess.StartAsync(host, home);
         using HttpClient http = LoadGenerator.Client();
         var load = new LoadGenerator(http);
         var rows = new JsonArray();
-        Console.WriteLine($"Short prompt, not streamed, every prompt different, {duration.TotalSeconds:0} s per row after 2 s of warm-up. Times in ms.");
+        var failures = new List<string>();
+        Console.WriteLine($"Short prompt, not streamed, every prompt different, {duration.TotalSeconds:0} s per row after 2 s of warm-up, state {(memoryState ? "in memory" : "in SQLite")}. Times in ms.");
         Console.WriteLine();
         Console.WriteLine("| c | Stub direct, total p50 / p95 / p99 | Router, first byte p50 / p95 / p99 | Router, total p50 / p95 / p99 | Router requests/s | Errors | Router RSS |");
         Console.WriteLine("|---|---|---|---|---|---|---|");
@@ -94,6 +97,7 @@ internal static class GatewayBenchmark
             List<Sample> direct = await load.RunAsync(stub.Address, c, duration, TimeSpan.FromSeconds(2));
             List<Sample> routed = await load.RunAsync(router.Address, c, duration, TimeSpan.FromSeconds(2));
             int errors = routed.Count(r => r.Status != 200);
+            failures.AddRange(routed.Where(r => r.Status != 200).Select(r => $"c={c}: {(r.Status == 0 ? r.Body : $"HTTP {r.Status}: {r.Body?[..Math.Min(r.Body.Length, 300)]}")}"));
             double rps = routed.Count / duration.TotalSeconds;
             double rss = router.ResidentMegabytes;
             Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
@@ -113,6 +117,11 @@ internal static class GatewayBenchmark
         }
 
         Console.WriteLine();
+        foreach (string failure in failures.Distinct().Take(5))
+        {
+            Console.WriteLine("Error: " + failure);
+        }
+
         await router.StopAsync();
         return rows;
     }
@@ -199,7 +208,7 @@ internal static class GatewayBenchmark
 
         foreach ((string fault, bool stream) in new[] { ("500", false), ("429", false), ("hang", false), ("stall", true), ("drop", true) })
         {
-            string home = RouterProcess.Prepare(repository, stub.Address, fault);
+            string home = RouterProcess.Prepare(repository, stub.Address, fault, keepAll: true);
             List<Sample> samples;
             await using (RouterProcess router = await RouterProcess.StartAsync(host, home))
             {
@@ -232,7 +241,7 @@ internal static class GatewayBenchmark
 
         // Clients that go away mid-reply.
         {
-            string home = RouterProcess.Prepare(repository, stub.Address, "slowstream");
+            string home = RouterProcess.Prepare(repository, stub.Address, "slowstream", keepAll: true);
             await using (RouterProcess router = await RouterProcess.StartAsync(host, home))
             {
                 await load.SendAsync(router.Address, C, N, stream: true, cancelAfterFirstByte: TimeSpan.FromMilliseconds(300));
@@ -249,7 +258,7 @@ internal static class GatewayBenchmark
 
         // Two routers on one database (the service and the desktop app, or two hosts on a shared home).
         {
-            string home = RouterProcess.Prepare(repository, stub.Address, "ok");
+            string home = RouterProcess.Prepare(repository, stub.Address, "ok", keepAll: true);
             List<Sample>[] runs;
             await using (RouterProcess first = await RouterProcess.StartAsync(host, home))
             await using (RouterProcess second = await RouterProcess.StartAsync(host, home))

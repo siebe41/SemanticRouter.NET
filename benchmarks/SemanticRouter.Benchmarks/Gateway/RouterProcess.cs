@@ -39,9 +39,16 @@ internal sealed class RouterProcess : IAsyncDisposable
     }
 
     /// <summary>Writes the configuration for a scenario: <paramref name="primary"/> is what the stub does for the first model.</summary>
-    public static string Prepare(string repository, Uri stub, string primary)
+    /// <param name="keepAll">Keep every activity entry, so a scenario can count them (the default keeps 10,000).</param>
+    public static string Prepare(string repository, Uri stub, string primary, bool memoryState = false, bool keepAll = false)
     {
         string home = Directory.CreateTempSubdirectory("gateway-bench").FullName;
+        if (memoryState)
+        {
+            // A directory where the database would be: the router cannot open it and keeps its state in memory.
+            Directory.CreateDirectory(Path.Combine(home, "semantic-router.db"));
+        }
+
         string template = File.ReadAllText(Path.Combine(repository, "src", "SemanticRouter.Hosting", "Templates", "semantic-router.template.json"));
         JsonObject root = JsonNode.Parse(template, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true })!.AsObject();
         root["Connectors"] = new JsonObject
@@ -56,8 +63,11 @@ internal sealed class RouterProcess : IAsyncDisposable
         };
         root["Models"] = new JsonArray(Model("primary", primary, 0.1m), Model("backup", "ok", 1m));
 
-        // Every entry is kept, so the scenarios can count them.
-        root["State"] = new JsonObject { ["Retention"] = new JsonObject { ["ActivityEntries"] = 10_000_000 } };
+        if (keepAll)
+        {
+            root["State"] = new JsonObject { ["Retention"] = new JsonObject { ["ActivityEntries"] = 10_000_000 } };
+        }
+
         File.WriteAllText(Path.Combine(home, "semantic-router.json"), root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         return home;
     }
@@ -70,6 +80,9 @@ internal sealed class RouterProcess : IAsyncDisposable
         ["Tier"] = 5,
         ["InputCostPerMillionTokens"] = price,
         ["OutputCostPerMillionTokens"] = price,
+
+        // What the template's routes can ask for, so every prompt has a model.
+        ["Capabilities"] = new JsonArray("code", "tools"),
     };
 
     public static async Task<RouterProcess> StartAsync(string hostAssembly, string home)
@@ -86,7 +99,6 @@ internal sealed class RouterProcess : IAsyncDisposable
             start.ArgumentList.Add(argument);
         }
 
-        start.Environment["DOTNET_gcServer"] = "0";
         Process process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the router.");
         var router = new RouterProcess(process, new Uri($"http://127.0.0.1:{port.ToString(CultureInfo.InvariantCulture)}"), home);
         process.OutputDataReceived += (_, e) => router.Keep(e.Data);
