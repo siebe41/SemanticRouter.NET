@@ -49,4 +49,32 @@
     </ItemGroup>
   </Target>
 
+  <!--
+    Files the app never uses, left out where they are resolved so the deps.json manifest does not list them either: the
+    native debug symbols and import libraries that SkiaSharp, HarfBuzzSharp and ONNX Runtime carry (105 MB on Windows;
+    -p:DebugType=none drops only the managed ones) and ASP.NET Core's IIS in-process module (the app is never hosted by
+    IIS). Velopack's packer already leaves the symbols out of the installers; this keeps them out of the zip and tar.gz
+    archives too.
+  -->
+  <Target Name="DropUnusedNativeAssets" AfterTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <NativeCopyLocalItems Remove="@(NativeCopyLocalItems)" Condition="'%(Extension)' == '.pdb' Or '%(Extension)' == '.lib'" />
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)" Condition="'%(Extension)' == '.pdb' Or '%(Extension)' == '.lib'" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="DropIisModule" AfterTargets="ResolveRuntimePackAssets">
+    <ItemGroup>
+      <RuntimePackAsset Remove="@(RuntimePackAsset)" Condition="'%(Filename)' == 'aspnetcorev2_inprocess'" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The libraries' XML documentation, which only an IDE reads, and the IIS module's file, published by another route. -->
+  <Target Name="DropUnusedFromPublish" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(Filename)' == 'aspnetcorev2_inprocess' Or ('%(Extension)' == '.xml' And $([System.String]::Copy('%(Filename)').StartsWith('SemanticRouter.')))" />
+    </ItemGroup>
+  </Target>
+
 </Project>
