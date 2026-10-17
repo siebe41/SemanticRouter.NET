@@ -16,6 +16,21 @@
   </PropertyGroup>
 
   <!--
+    Package validation: `dotnet pack` compares each library package with the last release on nuget.org and fails on
+    a public API that was removed or changed (CP0002 and the other CP diagnostics), so a break is caught in the pull
+    request that makes it. Here, not in Directory.Build.props, because IsPackable and PackAsTool are set in the project
+    files, which come after it; the tool has no API to compare. The baseline is downloaded by restore. Bump it to each
+    new release, together with VersionPrefix (docs/releases.md#after-a-release); a deliberate break is suppressed in the
+    project's CompatibilitySuppressions.xml (CONTRIBUTING.md, Public API and package validation). A new package with
+    no release yet sets DisablePackageBaselineValidation to true in its project file until its first release.
+  -->
+  <PropertyGroup Label="Package validation" Condition="'$(IsPackable)' == 'true' and '$(PackAsTool)' != 'true'">
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <!-- The last version on nuget.org. -->
+    <PackageValidationBaselineVersion>0.5.0</PackageValidationBaselineVersion>
+  </PropertyGroup>
+
+  <!--
     The first-party packages are versioned together and depend on each other exactly (CONTRIBUTING.md, Package
     versions and dependencies): Storage.Sqlite, Embeddings.Onnx and Connectors.Copilot are compiled against one build
     of SemanticRouter.AspNetCore, internals included, and AspNetCore against one build of SemanticRouter.Core. By

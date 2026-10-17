@@ -87,8 +87,9 @@ For the maintainer. A release is published by one workflow run, which only the r
 
 1. **Optional:** rename **Unreleased** in the [changelog](../CHANGELOG.md) to `[<version>] - <date>` in a pull request, and merge it. The release notes are that section; without it, they are the Unreleased section.
 2. Wait for CI to pass on `main`'s latest commit.
-3. **Actions > Cut a release > Run workflow**, on `main`, with the version (`0.3.0`: three numbers, no `v`).
+3. **Actions > Cut a release > Run workflow**, on `main`, with the version (`0.3.0`: three numbers, no `v`). Normally that is `VersionPrefix` in [`Directory.Build.props`](../Directory.Build.props), the version CI has been packing.
 4. Approve the `release` environment when asked (if it requires a reviewer), once for this run and once for the release run it starts.
+5. Once nuget.org lists the new packages, move the package validation baseline and the next version on ([After a release](#after-a-release)).
 
 [`cut-release.yml`](../.github/workflows/cut-release.yml) refuses to tag when:
 - it wasn't started by the owner, or not from `main`;
@@ -107,6 +108,15 @@ Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag st
   - If you limit its deployment branches and tags, allow both `main` (where "Cut a release" runs) and `v*` tags (where the release runs).
   - Add yourself as a required reviewer to approve each release before anything is published.
 - **`NUGET_USER`** and the signing settings, or `ALLOW_UNSIGNED_RELEASE`, as described in [Code signing](#code-signing) and [Signing the desktop app](desktop.md#signing).
+
+### After a release
+
+`dotnet pack` validates each library package against the last release on nuget.org, the baseline, and fails when a public API was removed or changed ([CONTRIBUTING.md](../CONTRIBUTING.md#public-api-and-package-validation)). After each release, in one pull request:
+
+1. Set `PackageValidationBaselineVersion` in [`Directory.Build.targets`](../Directory.Build.targets) to the version just released. Restore downloads it from nuget.org, so wait until nuget.org lists the packages.
+2. Set `VersionPrefix` in [`Directory.Build.props`](../Directory.Build.props) to the next version: `0.7.0` after `0.6.0`, or `1.0.0` when that is next. CI packs without a version, so its packages carry `VersionPrefix`, which must be above the baseline: below it, every pack fails with CP0003.
+3. Delete every `src/*/CompatibilitySuppressions.xml`. The breaks they approved are in the new baseline, and a suppression that no longer matches anything fails the pack ("Unnecessary suppressions found").
+4. Run `dotnet pack -c Release`; it must pass with no CP diagnostic. CI runs the same pack on the pull request.
 
 ## Code signing
 
