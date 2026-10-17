@@ -2,8 +2,9 @@
 // Endpoints newer than the router under test (GET api/setup, POST api/connectors/discover) are answered with
 // page.route, so these tests pass against routers with and without them.
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const { test: base, expect } = require('@playwright/test');
+const { test: base, expect, chromium } = require('@playwright/test');
 
 const stub = `http://127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`;
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'semantic-router.json'), 'utf8').replace(/__STUB__/g, stub));
@@ -317,6 +318,38 @@ test('capabilities are ticked, a refused rename says why, and Gateway keeps Dele
   const stored = page.locator('.card', { has: page.locator('h2', { hasText: 'Stored activity' }) });
   await expect(stored.locator('[data-action="activity-purge"]')).toBeVisible();
   await expect(page.locator('.card', { has: page.locator('h2', { hasText: 'Stored prompts' }) }).locator('[data-action="activity-purge"]')).toHaveCount(0);
+});
+
+// The dashboard's API answers are sent no-store: deleting activity leaves no prompt preview in the browser's profile.
+test('deleted activity is not left in the browser profile\'s cache', async ({ baseURL, request, launchOptions }) => {
+  const marker = 'cachemarker-4471';
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'router-e2e-profile-'));
+  try {
+    const context = await chromium.launchPersistentContext(profile, { ...launchOptions, baseURL });
+    try {
+      await route(request, `${marker} the salary review for bob`);
+      const page = await context.newPage();
+      await page.goto('/router#/activity');
+      await expect(page.locator('#view')).toContainText(marker);
+      const purge = await request.delete('/router/api/activity');
+      expect(purge.ok(), await purge.text()).toBeTruthy();
+      await page.close();
+    } finally {
+      await context.close();
+    }
+    const holding = [];
+    const visit = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const file = path.join(dir, entry.name);
+        if (entry.isDirectory()) visit(file);
+        else if (entry.isFile() && fs.readFileSync(file).includes(marker)) holding.push(path.relative(profile, file));
+      }
+    };
+    visit(profile);
+    expect(holding, 'files in the browser profile that still hold the prompt').toEqual([]);
+  } finally {
+    fs.rmSync(profile, { recursive: true, force: true });
+  }
 });
 
 test('chart axes count in whole numbers without repeating a label', async ({ page, request }) => {

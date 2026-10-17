@@ -147,6 +147,8 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | `semantic-router.evaluation.jsonl` | Prompts you labelled, in full | Until you remove them | Edit or delete the file (the **Evaluate** page) |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted | Until removed from the configuration | Remove the key on the dashboard |
 | The data-protection key ring (see [The key ring](#the-key-ring)) | The keys that decrypt `semantic-router.secrets.json`; a new one every 90 days | Kept, so older secrets stay readable | Only with the secrets file: without its keys, the file cannot be read |
+| `webview/` (desktop app only) | The app window's web view profile: the dashboard's sign-in cookie, the theme and a dismissed banner, and the web view's caches. API answers are sent `no-store`, so the caches hold no prompt previews, configuration or learned examples; the HTTP cache is emptied when the window first opens | Until the app is uninstalled | Delete the folder while the app is not running |
+| A browser's cache | Nothing from the dashboard's API: its answers, and the activity export, are sent with `Cache-Control: no-store`. Only the page's own scripts, styles and fonts | As the browser keeps them | Clear the browser's cache |
 | Logs (console, `logs/` for the Windows service) | Routing decisions and errors, with keys redacted. No prompt text. A CLI run that fails logs the start of what it wrote, which can quote the model's reply, only as `State:StorePrompts` allows (see below) | As your log setup keeps them | Delete the files |
 
 **Prompt previews.** `State:StorePrompts` decides how much of each prompt the activity log keeps:

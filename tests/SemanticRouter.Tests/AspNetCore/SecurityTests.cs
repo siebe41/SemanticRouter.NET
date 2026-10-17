@@ -691,6 +691,23 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Api_answers_are_never_kept_in_a_browser_cache()
+    {
+        HttpClient client = await StartAsync(remote: false);
+
+        foreach (string path in new[]
+                 {
+                     "/router/api/activity", "/router/api/activity/export?prompts=true", "/router/api/config", "/router/api/evaluation/set",
+                     "/router/api/tuning", "/router/api/status",
+                 })
+        {
+            HttpResponseMessage response = await client.GetAsync(path);
+            response.StatusCode.Should().Be(HttpStatusCode.OK, path);
+            response.Headers.CacheControl!.NoStore.Should().BeTrue(path);
+        }
+    }
+
+    [Fact]
     public async Task Unauthenticated_remote_access_must_be_asked_for_explicitly()
     {
         HttpClient client = await StartAsync(o =>

@@ -197,6 +197,14 @@ public static partial class RouterDashboardEndpoints
         group.MapGet("/graph.js", (HttpContext context) => Asset(context, "graph.js", "text/javascript; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
 
         RouteGroupBuilder api = group.MapGroup("/api");
+
+        // API answers hold prompt previews, the masked configuration and learned examples: a browser or the desktop app's
+        // web view must not keep them in its disk cache, where deleting the activity cannot reach them.
+        api.AddEndpointFilter((invocation, next) =>
+        {
+            invocation.HttpContext.Response.Headers.CacheControl = "no-store";
+            return next(invocation);
+        });
         api.MapGet("/themes", () => Results.Json(new ThemesResponse(themes.Directory, ThemeCatalog.RequiredTokens, themes.List()), ApiJson))
             .WithMetadata(DashboardMetricsMetadata.Instance);
         api.MapGet("/session", (HttpContext context) =>
@@ -734,7 +742,7 @@ public static partial class RouterDashboardEndpoints
         void OnUpdated(RoutingActivityEntry entry) => channel.Writer.TryWrite(entry);
 
         context.Response.ContentType = "text/event-stream";
-        context.Response.Headers.CacheControl = "no-cache";
+        context.Response.Headers.CacheControl = "no-store";
         context.Response.Headers["X-Accel-Buffering"] = "no";
         context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
 

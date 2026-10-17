@@ -20,6 +20,27 @@ public sealed class DesktopTests : IDisposable
     }
 
     [Fact]
+    public void The_web_views_http_cache_is_emptied_and_the_rest_of_its_profile_kept()
+    {
+        string profile = Path.Combine(_directory, "webview");
+        foreach (string cache in WebViewProfile.CacheDirectories)
+        {
+            Directory.CreateDirectory(Path.Combine(profile, cache, "entries"));
+            File.WriteAllText(Path.Combine(profile, cache, "entries", "d11f2a5e84980648_0"), "/router/api/activity {\"promptPreview\":\"cachemarker\"}");
+        }
+
+        string cookies = Path.Combine(profile, "WebView2", "EBWebView", "Default", "Network", "Cookies");
+        Directory.CreateDirectory(Path.GetDirectoryName(cookies)!);
+        File.WriteAllText(cookies, "session");
+
+        WebViewProfile.ClearHttpCache(profile, TextWriter.Null);
+        WebViewProfile.ClearHttpCache(Path.Combine(_directory, "never-opened"), TextWriter.Null);
+
+        WebViewProfile.CacheDirectories.Should().OnlyContain(c => !Directory.Exists(Path.Combine(profile, c)));
+        File.Exists(cookies).Should().BeTrue("the sign-in stays");
+    }
+
+    [Fact]
     public void Options_take_the_host_options_plus_background_and_quit()
     {
         DesktopOptions options = DesktopOptions.Parse(["--background", "--config-dir", _directory, "--urls", "http://localhost:6000"], _ => null);

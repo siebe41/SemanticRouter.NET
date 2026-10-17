@@ -137,7 +137,7 @@ Everything is in the router's [configuration directory](host.md#where-things-liv
 |---|---|
 | `desktop.json` | The app's own settings: where the dashboard opens, where its window was, whether the welcome window was shown, and the two update switches. |
 | `logs/semantic-router.log` | What the router logged (the app has no console). Rolled over to `.1` past 10 MB. |
-| `webview/` | The app window's web view profile. |
+| `webview/` | The app window's web view profile (WebView2 on Windows, WebKitGTK on Linux; on macOS the system keeps WKWebView's data under `~/Library`): the dashboard's sign-in cookie, its `localStorage` (the theme and a dismissed banner) and the web view's caches. The router marks its API answers `no-store`, so no prompt preview, configuration or learned example is cached, and the HTTP cache is emptied each time the app window first opens. |
 
 **Start at sign-in** writes `~/.config/autostart/semantic-router.desktop` (Linux), `~/Library/LaunchAgents/io.github.siebe41.semantic-router.desktop.plist` (macOS) or the value `SemanticRouter Desktop` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (Windows; listed in Task Manager → Startup apps). Moving the app afterwards needs the item turned off and on again.
 
