@@ -108,6 +108,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Over the admin API, every value the router resolves is held to the secret-reference rules, not only header names that look secret, and an `${env:…}` reference a setting did not have before is accepted only from this machine or as a provider preset's key for that provider's address. (#235)
 - `GET api/routes/health`, which embeds every utterance, is refused from other sites and to the read-only role, and is recorded in the audit log, like the other endpoints that spend embedding calls. (#235)
 - The judge does not send a remote client's request and answer to a subscription CLI or Copilot connector that does not allow remote clients. (#235)
+- Desktop app: the app window hands only `https` and `http` links to your browser. A link or navigation to any other scheme (`file:`, a network share, `ms-msdt:`, `search-ms:`, `javascript:`, `data:` or another program's protocol) is dropped and noted in the app's log instead of being passed to the operating system, and the app acts on a message from the page only while the window shows the router. (#PRNUM)
 
 ## [0.4.0] - 2026-10-16
 
