@@ -40,7 +40,7 @@ internal static class DoctorCommand
                 IReadOnlyList<RouterCheck> egress = EgressList.For(app.Services, settings.ConfigurationDirectory);
                 IReadOnlyList<RouterCheck> router = await RouterDoctor.CheckAsync(app.Services).ConfigureAwait(false);
                 RouterCheck? models = ModelsCheck(app.Services.GetRequiredService<RouterRuntimeProvider>().Current.Configuration, settings);
-                checks = [.. HostChecks(app), .. egress, .. models is null ? [] : new[] { models }, .. router.Where(c => models is null || !IsNoModelWarning(c))];
+                checks = [.. HostChecks(app, settings), .. egress, .. models is null ? [] : new[] { models }, .. router.Where(c => models is null || !IsNoModelWarning(c))];
             }
             catch (InvalidOperationException ex)
             {
@@ -96,15 +96,45 @@ internal static class DoctorCommand
     private static bool IsNoModelWarning(RouterCheck check) =>
         check.Subject == "configuration" && check.Message.StartsWith("No model is enabled", StringComparison.OrdinalIgnoreCase);
 
-    private static IEnumerable<RouterCheck> HostChecks(WebApplication app)
+    /// <summary>
+    /// On Windows, a warning when <paramref name="directory"/> lets <c>Users</c>, <c>Everyone</c> or <c>Authenticated
+    /// Users</c> read what is in it (<paramref name="holds"/>): a custom folder the router did not create, or one made
+    /// before it set an ACL of its own (<see cref="OwnerOnly.Directory(string)"/>). <see langword="null"/> otherwise,
+    /// and on macOS and Linux, where the router keeps the folder at 0700 itself.
+    /// </summary>
+    internal static RouterCheck? FolderAccessCheck(string subject, string directory, string holds)
+    {
+        if (!OperatingSystem.IsWindows() || !Directory.Exists(directory) || OwnerOnly.BroadReaders(directory) is not { Count: > 0 } readers)
+        {
+            return null;
+        }
+
+        return new RouterCheck(subject, RouterCheckStatus.Warning,
+            $"{directory} can be read by {string.Join(", ", readers)}, so other accounts on this machine can read {holds}. " +
+            $"Limit it to your account, SYSTEM and Administrators (in cmd: icacls \"{directory}\" /inheritance:r /grant:r \"%USERNAME%:(OI)(CI)F\" *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F), " +
+            "or use a folder in your profile.");
+    }
+
+    private static IEnumerable<RouterCheck> HostChecks(WebApplication app, HostSettings settings)
     {
         MachinePolicy policy = app.Services.GetRequiredService<RouterRuntimeProvider>().Policy;
         yield return new RouterCheck("policy", RouterCheckStatus.Ok, policy.IsEmpty
             ? "no machine-wide policy is set."
             : $"set by your organization in {policy.Source}: {System.Text.Json.Nodes.JsonNode.Parse(policy.ToJson())!.ToJsonString()}");
-        foreach (RouterCheck check in app.Services.GetRequiredService<KeyRing>().Checks())
+        KeyRing keyRing = app.Services.GetRequiredService<KeyRing>();
+        foreach (RouterCheck check in keyRing.Checks())
         {
             yield return check;
+        }
+
+        if (FolderAccessCheck("configuration folder", settings.ConfigurationDirectory, "the configuration, the activity log with its prompt previews, and the logs") is { } home)
+        {
+            yield return home;
+        }
+
+        if (keyRing.CustomDirectory && FolderAccessCheck("key ring folder", keyRing.Directory!, "the data-protection keys (encrypted for your account, but they can be copied)") is { } keys)
+        {
+            yield return keys;
         }
 
         string urls = app.Configuration[WebHostDefaults.ServerUrlsKey] ?? HostSettings.DefaultUrl;

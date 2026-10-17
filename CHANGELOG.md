@@ -111,6 +111,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Desktop app: the app window hands only `https` and `http` links to your browser. A link or navigation to any other scheme (`file:`, a network share, `ms-msdt:`, `search-ms:`, `javascript:`, `data:` or another program's protocol) is dropped and noted in the app's log instead of being passed to the operating system, and the app acts on a message from the page only while the window shows the router. (#PRNUM)
 - Desktop app: a release build ignores `SEMANTICROUTER_UPDATE_SOURCE` unless the machine policy sets the new `Updates:AllowCustomFeed`, and an update feed (from the policy or the variable) must be HTTPS or a folder; plain HTTP is accepted only to this machine, and other schemes are refused. (#PRNUM)
 - Desktop app: with `Updates:Publisher` set on Windows, an update is also refused when its `*.runtimeconfig.json` or `*.deps.json` would make the .NET host load code from outside the package (`additionalProbingPaths`, `STARTUP_HOOKS` and the host's other properties, paths that leave the app's folder) or it has a `*.runtimeconfig.dev.json`. (#PRNUM)
+- On Windows, a `SEMANTIC_ROUTER_HOME` or `SEMANTIC_ROUTER_KEYS_DIR` folder the router creates outside your profile is readable only by your account, SYSTEM and Administrators, instead of inheriting permissions that usually let every user read it; `doctor` warns when an existing configuration or key ring folder can be read by `Users`, `Everyone` or `Authenticated Users`. (#PRNUM)
 
 ## [0.4.0] - 2026-10-16
 
