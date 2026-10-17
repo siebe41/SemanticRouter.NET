@@ -147,6 +147,10 @@ internal static class InitCommand
             await File.WriteAllTextAsync(evaluation, RouterHost.EvaluationTemplate(), cancellationToken).ConfigureAwait(false);
             await output.WriteLineAsync($"Wrote {evaluation}").ConfigureAwait(false);
         }
+        else if (TemplateMigration.UpgradeEvaluationSet(evaluation) is { } updated)
+        {
+            await output.WriteLineAsync(updated).ConfigureAwait(false);
+        }
 
         if (document.Models.Count > 0)
         {

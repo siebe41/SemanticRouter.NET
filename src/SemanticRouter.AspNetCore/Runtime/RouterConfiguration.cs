@@ -25,6 +25,14 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         NewLine = "\n", // the same file on every OS, so it diffs cleanly and survives a copy between machines
     };
 
+    /// <summary>
+    /// Which built-in template of the <c>semantic-router</c> host this document started from, so an upgrade can bring
+    /// the parts nobody changed up to a newer template; <see langword="null"/> for a document that did not come from one,
+    /// or that was written before the template was numbered.
+    /// </summary>
+    [JsonPropertyOrder(-1)]
+    public int? TemplateVersion { get; set; }
+
     /// <summary>How to reach each provider, by connector name.</summary>
     public IDictionary<string, ConnectorOptions> Connectors { get; } = new Dictionary<string, ConnectorOptions>(StringComparer.OrdinalIgnoreCase);
 

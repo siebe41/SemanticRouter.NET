@@ -25,7 +25,7 @@ internal static partial class RouterHost
     /// <summary>Labelled prompts for the template's routes, written next to the configuration by <c>init</c>.</summary>
     public static string EvaluationTemplate() => Resource("semantic-router.evaluation.jsonl");
 
-    private static string Resource(string name)
+    internal static string Resource(string name)
     {
         using Stream stream = typeof(RouterHost).Assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException($"The embedded {name} is missing.");
@@ -294,7 +294,14 @@ internal static partial class RouterHost
             await output.WriteLineAsync(FirstRun.Describe(settings.ConfigurationFile, seeded)).ConfigureAwait(false);
         }
 
-        WebApplication app = Build(settings, configure);
+        // A file an earlier release wrote from its template gets the current template's fixes wherever it still has the
+        // earlier template's values; the history records what changed.
+        string? upgraded = await TemplateMigration.UpgradeFilesAsync(settings.ConfigurationFile, output).ConfigureAwait(false);
+        WebApplication app = Build(settings, upgraded is null ? configure : builder =>
+        {
+            builder.Services.AddSingleton(new StartupConfigurationNote(TemplateMigration.HistorySource, upgraded));
+            configure?.Invoke(builder);
+        });
         StartingQuietly starting = app.Services.GetRequiredService<StartingQuietly>();
         starting.On = true;
         try

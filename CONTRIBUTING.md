@@ -36,6 +36,7 @@ Every pull request runs CI ([`.github/workflows/ci.yml`](.github/workflows/ci.ym
 - **Package versions** are set centrally in `Directory.Packages.props`. Each project's `packages.lock.json` records every package it restores, transitive ones included, with a content hash. After changing a version or a package reference, run `dotnet restore` and commit the changed lock files: CI, the release and the container build restore with `--locked-mode` and fail when a lock file is out of date. The desktop app and the libraries it references also record the runtimes it is published for (`DesktopRuntimeIdentifiers` in `Directory.Build.props`); add a runtime there before publishing for it.
 - **Add tests** for behaviour you change. Tests must not need the network, a model or a vendor CLI; the existing tests show how to use `TestServer` and the stand-in CLI in `tests/SemanticRouter.FakeCli`.
 - **Update the documentation** (README or `docs/`) when you change configuration, endpoints or behaviour.
+- **Changing the built-in template** (`src/SemanticRouter.Hosting/Templates/semantic-router.template.json`) reaches existing installs only through a template upgrade. The first change after a release raises its `TemplateVersion` (and `TemplateMigration.Current`) and adds the released files to `Templates/Previous` as `semantic-router.template.<old version>.json` and `semantic-router.evaluation.<old version>.jsonl`. `TemplateMigrationTests` fails until the fingerprint it keeps for the current template is updated, as a reminder.
 
 ## Changelog
 

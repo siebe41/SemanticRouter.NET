@@ -1,6 +1,10 @@
 {
   // The neutral starting configuration of `semantic-router`. `semantic-router init` writes it to your configuration
   // directory with the models it found on this machine; the dashboard edits it from there.
+  // Which template this file started from: on start, the router brings the parts you never changed up to a newer
+  // template (TemplateMigration). Raise it with every change to this file, and keep the released one in Previous/.
+  "TemplateVersion": 2,
+
   // Tuned for the in-process Hashing embeddings. A real embedding model needs a higher threshold (see the README).
   "DefaultSimilarityThreshold": 0.30,
   "FallbackTier": 3,
