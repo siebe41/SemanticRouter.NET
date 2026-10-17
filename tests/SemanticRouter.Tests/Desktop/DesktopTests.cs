@@ -5,6 +5,7 @@ using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using SemanticRouter.Desktop;
 using SemanticRouter.Host;
+using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.Desktop;
 
@@ -15,7 +16,7 @@ public sealed class DesktopTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         Directory.Delete(_directory, recursive: true);
     }
 

@@ -17,7 +17,7 @@ public sealed class BudgetScalingTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         Directory.Delete(_directory, recursive: true);
     }
 

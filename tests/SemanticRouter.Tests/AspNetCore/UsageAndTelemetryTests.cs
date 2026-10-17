@@ -436,7 +436,7 @@ public sealed class UsageAndTelemetryTests : RouterHostTest
         }
         finally
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            SqliteFiles.Release(directory);
             Directory.Delete(directory, recursive: true);
         }
     }

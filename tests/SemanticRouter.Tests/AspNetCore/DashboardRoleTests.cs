@@ -444,7 +444,7 @@ public sealed class DashboardSessionsTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         Directory.Delete(_directory, recursive: true);
     }
 
