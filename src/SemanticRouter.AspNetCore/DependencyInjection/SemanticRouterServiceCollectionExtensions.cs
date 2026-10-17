@@ -71,7 +71,8 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<IAuditLog>(_ => new InMemoryAuditLog());
         services.TryAddSingleton(sp => new BudgetGate(
             sp.GetRequiredService<IUsageLedger>(), sp.GetService<TimeProvider>() ?? TimeProvider.System,
-            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BudgetGate>>()));
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BudgetGate>>(),
+            () => sp.GetService<RouterRuntimeProvider>()?.Current.Configuration));
         services.TryAddSingleton<IToolCallAffinity, ToolCallAffinity>();
         services.TryAddSingleton<IWarmCacheStore>(sp => new WarmCacheStore(sp.GetService<TimeProvider>()));
         services.TryAddSingleton<RoutingActivityLog>();

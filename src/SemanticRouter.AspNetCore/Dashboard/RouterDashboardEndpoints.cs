@@ -499,12 +499,14 @@ public static partial class RouterDashboardEndpoints
 
         api.MapGet("/usage", (RouterRuntimeProvider provider, IUsageLedger ledger, BudgetGate budgets, string? window, string? by) =>
         {
-            UsageOptions usage = provider.Current.Configuration.Usage;
+            RouterConfiguration configuration = provider.Current.Configuration;
+            UsageOptions usage = configuration.Usage;
             TimeZoneInfo zone = BudgetGate.ZoneOf(usage);
             (DateTimeOffset since, DateTimeOffset until) = UsageWindow(window, zone, DateTimeOffset.UtcNow);
             UsageGrouping grouping = Enum.TryParse(by, ignoreCase: true, out UsageGrouping parsed) ? parsed : UsageGrouping.Model;
             return Results.Json(new UsageResponse(
-                since, until, grouping, usage.ReferenceModel, ledger.Total(since, until), ledger.Summarize(since, until, grouping, zone), budgets.Status(usage)), ApiJson);
+                since, until, grouping, usage.ReferenceModel, ledger.TotalAtCurrentPrices(configuration, since, until),
+                ledger.SummarizeAtCurrentPrices(configuration, since, until, grouping, zone), budgets.Status(usage)), ApiJson);
         }).WithMetadata(DashboardMetricsMetadata.Instance);
 
         api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, IServiceProvider services, CancellationToken cancellationToken) =>
