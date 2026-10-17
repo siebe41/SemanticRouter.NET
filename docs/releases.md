@@ -98,6 +98,8 @@ For the maintainer. A release is published by one workflow run, which only the r
 
 Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag starts [`release.yml`](../.github/workflows/release.yml), which builds, tests, signs and publishes everything, creates the GitHub release with its notes, and attaches the assets and `SHA256SUMS`. Follow it under **Actions > Release**. It also refuses a tag that someone other than the owner pushed.
 
+**After each release,** add its upgrade fixture in a pull request: `tools/upgrade-fixtures/make-fixture.sh <version>` installs the release from nuget.org into a throwaway home, sets it up and uses it through its own API against a stub server, and writes `tests/fixtures/upgrade/<version>.zip`. `UpgradeFromReleasedVersionsTests` then starts every build on every released version's home, on every pull request: it fails when the build cannot start on one, loses a row, cannot decrypt the release's API key, refuses its gateway key, cannot roll back to its first configuration, or leaves its template behind.
+
 **A release candidate** (`v1.0.0-rc.1`) is a tag you push yourself on a commit on `main`: "Cut a release" makes stable versions only. `release.yml` publishes a version with a suffix as a prerelease everywhere:
 - the GitHub release and the desktop update feeds in it are marked as a prerelease, so installed desktop apps, which only take stable releases, never update to it;
 - the image is pushed as `:1.0.0-rc.1` only, never as `:latest`;
