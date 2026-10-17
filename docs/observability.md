@@ -109,7 +109,7 @@ Failed attempts are marked with error status. HTTP backends receive `traceparent
 | `semantic_router.classification.duration` | s | `reason` |
 | `semantic_router.classification.cache_hits` | {decision} | `reason` (decisions reused from the classification cache, with no embedding call) |
 | `semantic_router.attempts` | {attempt} | `model`, `outcome` |
-| `semantic_router.request.duration` | s | `model`, `connector`, `outcome` (`served`, `failed`) |
+| `semantic_router.request.duration` | s | `model`, `connector`, `outcome` (`served`, `failed`, or `cancelled` when the client went away) |
 | `semantic_router.time_to_first_byte` | s | `model`, `connector` (the serving one; the time counts from routing, so it includes attempts that failed before it) |
 | `semantic_router.attempt.time_to_first_byte` | s | `model`, `connector` (from the start of the serving attempt only) |
 | `semantic_router.tokens` | {token} | `model`, `connector`, `type` (`input`, `output`, `cache_read`, `cache_write`) |

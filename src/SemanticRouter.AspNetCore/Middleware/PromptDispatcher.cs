@@ -10,7 +10,9 @@ namespace SemanticRouter.AspNetCore;
 /// producing output is put into cooldown and the next candidate is tried, up to
 /// <see cref="ModelSelectionOptions.MaxAttempts"/>. Models whose budget is spent are not tried. Each attempt is a
 /// <c>semantic_router.attempt</c> span; the usage the backend reports is recorded in the activity entry, the usage
-/// ledger and the metrics.
+/// ledger and the metrics. A request that ends early is recorded too: <c>cancelled</c> when the client went away, and
+/// <c>failed</c>, with the model cooled down, when the backend stopped after the reply had started (the client gets an
+/// error event, or a broken connection for a reply that is not streamed).
 /// </summary>
 internal sealed partial class PromptDispatcher
 {
@@ -148,7 +150,45 @@ internal sealed partial class PromptDispatcher
                 span?.SetTag("semantic_router.model", model.Name);
                 span?.SetTag("semantic_router.connector", connector.Name);
                 span?.SetTag("semantic_router.attempt", tried);
-                result = await connector.SendAsync(new ConnectorRequest(chat, model, body), context, context.RequestAborted).ConfigureAwait(false);
+                try
+                {
+                    result = await connector.SendAsync(new ConnectorRequest(chat, model, body), context, context.RequestAborted).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is OperationCanceledException or IOException && context.RequestAborted.IsCancellationRequested)
+                {
+                    // The client went away (closed the connection, or stopped the turn): nothing more to send, and the
+                    // model is not to blame, but the backend may have charged for what it did meanwhile.
+                    span?.SetTag("semantic_router.outcome", "Cancelled");
+                    _metrics.RecordRequest(model.Name, connector.Name, "cancelled", _time.GetElapsedTime(started));
+                    LogCancelled(_logger, model.Name, connector.Name);
+                    EndedEarly("cancelled", "the client went away before the reply was finished");
+                    return;
+                }
+                catch (Exception ex) when (ex is IOException or HttpRequestException or TimeoutException)
+                {
+                    string why = ex is TimeoutException ? ex.Message : $"connection dropped ({runtime.Redactor.Redact(ex.Message)})";
+                    if (!context.Response.HasStarted)
+                    {
+                        // Nothing reached the client yet: the next model can still answer.
+                        result = ConnectorResult.Failed(ModelFailureKind.Unavailable, why);
+                    }
+                    else
+                    {
+                        // Too late to fail over: say so in the client's protocol, and hold it against the model.
+                        span?.SetTag("semantic_router.outcome", "Interrupted");
+                        span?.SetTag("semantic_router.failure.detail", why);
+                        span?.SetStatus(ActivityStatusCode.Error, "interrupted");
+                        ReportFailure(model, ConnectorResult.Failed(ModelFailureKind.Unavailable, why));
+                        _incidents?.Failed(connector.Name, ModelFailureKind.Unavailable, why);
+                        _metrics.RecordFailover(model.Name, ModelFailureKind.Unavailable);
+                        _metrics.RecordRequest(model.Name, connector.Name, "failed", _time.GetElapsedTime(started));
+                        LogInterrupted(_logger, model.Name, connector.Name, why);
+                        EndedEarly("failed", $"{model.Name}: stopped mid-reply: {why}");
+                        await ProtocolErrors.EndStreamWithErrorAsync(context, chat, $"{model.Name} stopped mid-reply: {why}").ConfigureAwait(false);
+                        return;
+                    }
+                }
+
                 span?.SetTag("semantic_router.outcome", result.Outcome.ToString());
                 if (dropped.Names.Count > 0)
                 {
@@ -178,6 +218,28 @@ internal sealed partial class PromptDispatcher
             }
 
             _metrics.RecordAttempt(model.Name, result.Outcome);
+
+            // An attempt the client or the backend ended after it began: what the backend reported so far, or the
+            // request's estimated input when it reported nothing, is recorded as usage.
+            void EndedEarly(string outcome, string detail)
+            {
+                activity?.SentTo.Add(model.Name);
+                RecordUsage(runtime, model, connector.Name, capture.Usage ?? new ChatUsage(chat.EstimatedInputTokens, null), activity, plan.Requirements.Profile);
+                if (activity is not null)
+                {
+                    activity.AttemptMilliseconds = Math.Round(_time.GetElapsedTime(current.Started).TotalMilliseconds, 1);
+                    activity.ServedBy = model.Name;
+                    activity.Connector = connector.Name;
+                    activity.Attempt = tried;
+                    activity.Degraded = !candidate.MeetsRequiredTier;
+                    activity.Outcome = outcome;
+                    activity.Detail = string.Join("; ", attempts.Append(detail));
+                    activity.Budget = budgetsHit.Count > 0 ? string.Join(", ", budgetsHit.Distinct(StringComparer.OrdinalIgnoreCase)) : null;
+                    activity.Dropped = dropped.Names.Count > 0 ? string.Join(", ", dropped.Names) : null;
+                    activity.Notes = notes.Notes.Count > 0 ? string.Join("; ", notes.Notes) : null;
+                }
+            }
+
             if (result.Outcome != ConnectorOutcome.Skipped)
             {
                 activity?.SentTo.Add(model.Name);
@@ -377,4 +439,10 @@ internal sealed partial class PromptDispatcher
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Model {Model} skipped: {Detail}.")]
     private static partial void LogSkipped(ILogger logger, string model, string detail);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "The client went away while {Model} ({Connector}) was answering.")]
+    private static partial void LogCancelled(ILogger logger, string model, string connector);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Model {Model} ({Connector}) stopped mid-reply: {Detail}. The client got an error; the model cools down.")]
+    private static partial void LogInterrupted(ILogger logger, string model, string connector, string detail);
 }

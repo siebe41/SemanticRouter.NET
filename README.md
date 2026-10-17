@@ -476,7 +476,8 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `MaxArgumentLength` | CLI | `24000` | With `PromptInput: Argument`, longer prompts are sent on stdin. Longer Claude Code system prompts are moved into the conversation. |
 | `Executable`, `HomeDirectory` | Copilot | `copilot`, `~/.copilot` | The Copilot CLI the SDK runs as its runtime, and its `COPILOT_HOME`. |
 | `AllowRemoteClients` | CLI, Copilot | `false` | See [Subscription CLI terms](docs/TERMS.md) before changing this. |
-| `Timeout` | all | HTTP 100 s · CLI 5 min | Time to first output. Streams are not cut off. |
+| `Timeout` | all | HTTP 100 s · CLI 5 min | Time to first output. |
+| `StallTimeout` | HTTP, CLI | the `Timeout` | Time allowed between two pieces of a reply once it has started. A backend that stops sending for longer is given up on: before anything reached the client the next model answers; after, the client gets an error event and the model cools down. A reply that keeps coming is never cut off. |
 
 ### `Embeddings`, `Middleware` and the other sections
 

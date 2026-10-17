@@ -133,6 +133,45 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             }
         }
 
+        // From here on the reply is read as it arrives: a backend that stops sending is given up on (StallTimeout).
+        using var stall = new StallGuard(_options.EffectiveStallTimeout, cancellationToken);
+        response.Content = stall.Guard(response.Content);
+        var copied = new List<string>();
+        try
+        {
+            return await RelayAsync(request, context, response, passThrough, copied, stall.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested
+                                   && (stall.Stalled || ex is IOException or HttpRequestException))
+        {
+            if (context.Response.HasStarted)
+            {
+                // Too late to fail over: the dispatcher ends the reply with an error and cools the model down.
+                if (stall.Stalled)
+                {
+                    throw new TimeoutException(stall.Describe(), ex);
+                }
+
+                throw;
+            }
+
+            string why = stall.Stalled ? stall.Describe() : $"connection dropped ({_redactor.Redact(ex.Message)})";
+
+            // Nothing reached the client: undo what was set for it, and let the next model answer.
+            foreach (string header in copied)
+            {
+                context.Response.Headers.Remove(header);
+            }
+
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            LogUpstreamFailure(_logger, Name, message.RequestUri!, why);
+            return ConnectorResult.Failed(ModelFailureKind.Unavailable, why);
+        }
+    }
+
+    private async Task<ConnectorResult> RelayAsync(
+        ConnectorRequest request, HttpContext context, HttpResponseMessage response, bool passThrough, List<string> copied, CancellationToken cancellationToken)
+    {
         using (response)
         {
             int status = (int)response.StatusCode;
@@ -164,7 +203,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
             if (passThrough)
             {
-                await CopyResponseAsync(context, response, request.Model.Name, cancellationToken).ConfigureAwait(false);
+                await CopyResponseAsync(context, response, request.Model.Name, copied, cancellationToken).ConfigureAwait(false);
                 return ConnectorResult.Completed;
             }
 
@@ -268,7 +307,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         }
     }
 
-    private async Task CopyResponseAsync(HttpContext context, HttpResponseMessage response, string modelName, CancellationToken cancellationToken)
+    private async Task CopyResponseAsync(HttpContext context, HttpResponseMessage response, string modelName, List<string> copied, CancellationToken cancellationToken)
     {
         HttpResponse outgoing = context.Response;
         outgoing.StatusCode = (int)response.StatusCode;
@@ -281,6 +320,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             }
 
             // "Server" holds space-separated product tokens, which a parsed header splits into separate values.
+            copied.Add(header.Key);
             outgoing.Headers[header.Key] = string.Equals(header.Key, "Server", StringComparison.OrdinalIgnoreCase)
                 ? string.Join(' ', header.Value)
                 : header.Value.ToArray();
@@ -415,6 +455,39 @@ internal static class ProtocolErrors
                 },
                 ConnectorJsonContext.Default.JsonObject);
         await context.Response.Body.WriteAsync(body, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Ends a reply that has started but cannot be finished (the backend stalled or dropped the connection). A streamed
+    /// reply gets an error event in the client's protocol, which the OpenAI and Anthropic SDKs raise as an error. A reply
+    /// that is not streamed has no way to say so: the connection is broken off, so the client does not take a truncated
+    /// body for an answer.
+    /// </summary>
+    public static async Task EndStreamWithErrorAsync(HttpContext context, ChatCompletionRequest chat, string message)
+    {
+        if (context.Response.ContentType?.StartsWith("text/event-stream", StringComparison.OrdinalIgnoreCase) != true)
+        {
+            context.Abort();
+            return;
+        }
+
+        string data = chat.Protocol switch
+        {
+            ChatProtocol.Anthropic => "event: error\ndata: " + JsonSerializer.Serialize(
+                new AnthropicErrorEnvelope("error", new AnthropicError("api_error", message)), ConnectorJsonContext.Default.AnthropicErrorEnvelope),
+            ChatProtocol.Responses => "event: error\ndata: " + JsonSerializer.Serialize(
+                new JsonObject { ["type"] = "error", ["code"] = "server_error", ["message"] = message, ["param"] = null }, ConnectorJsonContext.Default.JsonObject),
+            _ => "data: " + JsonSerializer.Serialize(new OpenAIErrorEnvelope(new OpenAIError(message, "server_error")), ConnectorJsonContext.Default.OpenAIErrorEnvelope),
+        };
+        try
+        {
+            await context.Response.Body.WriteAsync(Encoding.UTF8.GetBytes(data + "\n\n"), context.RequestAborted).ConfigureAwait(false);
+            await context.Response.Body.FlushAsync(context.RequestAborted).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or OperationCanceledException)
+        {
+            context.Abort(); // the client is gone too
+        }
     }
 
     public static async Task WriteAsync(HttpContext context, ChatProtocol protocol, int statusCode, string title, string detail, CancellationToken cancellationToken)

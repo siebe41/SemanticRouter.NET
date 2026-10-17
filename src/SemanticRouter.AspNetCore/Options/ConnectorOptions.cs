@@ -275,6 +275,15 @@ public sealed class ConnectorOptions
     internal TimeSpan EffectiveTimeout =>
         Timeout > TimeSpan.Zero ? Timeout : Type is ConnectorType.Cli or ConnectorType.Copilot ? TimeSpan.FromMinutes(5) : TimeSpan.FromSeconds(100);
 
+    /// <summary>
+    /// Time allowed between two pieces of a reply once it has started (HTTP: reads of the response body; CLI: lines of
+    /// output). A backend that stops sending for longer is given up on: before anything reached the client the next model
+    /// answers; after, the client gets an error and the model cools down. Default: the same as <see cref="Timeout"/>.
+    /// </summary>
+    public TimeSpan StallTimeout { get; set; }
+
+    internal TimeSpan EffectiveStallTimeout => StallTimeout > TimeSpan.Zero ? StallTimeout : EffectiveTimeout;
+
     /// <summary>The wire protocol an HTTP connector speaks.</summary>
     internal ChatProtocol Protocol => Type switch
     {
