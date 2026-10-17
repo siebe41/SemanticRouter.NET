@@ -104,7 +104,9 @@ public sealed class CliProcessIntegrationTests : IDisposable
 
             result.Outcome.Should().Be(ConnectorOutcome.Completed);
             using JsonDocument report = JsonDocument.Parse(Content(body));
-            report.RootElement.GetProperty("inherited").GetString()!.Split(',').Should().BeEquivalentTo(
+            // Only the variables this test set: tests running alongside set SR_TEST_ variables of their own.
+            string[] ours = [.. names, "SR_TEST_SET"];
+            report.RootElement.GetProperty("inherited").GetString()!.Split(',').Where(n => ours.Contains(n, StringComparer.OrdinalIgnoreCase)).Should().BeEquivalentTo(
                 ["SR_TEST_PLAIN", "SR_TEST_SET"],
                 "what configures the router and any variable holding a secret it resolved are removed; what the connector sets stays");
         }
