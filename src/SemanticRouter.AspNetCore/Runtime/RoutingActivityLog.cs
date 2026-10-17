@@ -262,14 +262,19 @@ public readonly record struct ActivityPurgeResult(int Removed, bool Complete = t
 /// </summary>
 public sealed class RoutingActivityLog
 {
-    // Ids are reserved from a shared store this many at a time, so routers sharing it never hand out the same one.
-    internal const int IdBlock = 32;
+    // Ids are reserved from a shared store this many at a time, so routers sharing it never hand out the same one. Enough
+    // for half a second at a few thousand requests a second: the next block is asked for halfway through this one, and
+    // a reservation can wait for another writer of the file. A restart leaves at most two blocks unused.
+    internal const int IdBlock = 1024;
     private readonly RoutingActivityEntry?[] _entries;
     private readonly IRoutingActivityStore? _store;
     private readonly Lock _gate = new();
     private readonly List<(DateTimeOffset Since, DateTimeOffset Until, long Below)> _purges = [];
     private long _next;
     private long _blockEnd;
+
+    // The next block of ids, asked for while the current one is half used: a request does not wait for the store.
+    private Task<long>? _nextBlock;
     private long _added;
 
     /// <summary>Creates a log keeping the latest <paramref name="capacity"/> entries, seeded from <paramref name="store"/>.</summary>
@@ -436,9 +441,14 @@ public sealed class RoutingActivityLog
             if (_next >= _blockEnd)
             {
                 // A store that only this log uses (or that failed) reserves nothing: then the log counts on.
-                long first = _store?.ReserveIds(IdBlock) ?? -1;
+                long first = _nextBlock is { } ahead ? ahead.GetAwaiter().GetResult() : _store?.ReserveIds(IdBlock) ?? -1;
+                _nextBlock = null;
                 _next = first >= 0 ? first : _next;
                 _blockEnd = _next + IdBlock;
+            }
+            else if (_store is { } store && _nextBlock is null && _blockEnd - _next == IdBlock / 2)
+            {
+                _nextBlock = Task.Run(() => store.ReserveIds(IdBlock));
             }
 
             return _next++;

@@ -420,10 +420,13 @@ public sealed class UsageAndTelemetryTests : RouterHostTest
         {
             var options = Microsoft.Extensions.Options.Options.Create(new SqliteStateOptions { Path = Path.Combine(directory, "state.db") });
             using var factory = LoggerFactory.Create(_ => { });
-            var first = new SqliteUsageLedger(new SqliteRouterDatabase(options, factory.CreateLogger<SqliteRouterDatabase>()));
             DateTimeOffset now = DateTimeOffset.UtcNow;
-            first.Record(new UsageRecord(now, "cloud", "openai", "complex-code", "laptop", false, 100, 50, 10, 0, 0.0012m, 0.01m));
-            first.Record(new UsageRecord(now, "local", "lmstudio", "smalltalk", null, true, 30, 20, 0, 0, 0m, 0.002m));
+            using (var database = new SqliteRouterDatabase(options, factory.CreateLogger<SqliteRouterDatabase>()))
+            {
+                var first = new SqliteUsageLedger(database);
+                first.Record(new UsageRecord(now, "cloud", "openai", "complex-code", "laptop", false, 100, 50, 10, 0, 0.0012m, 0.01m));
+                first.Record(new UsageRecord(now, "local", "lmstudio", "smalltalk", null, true, 30, 20, 0, 0, 0m, 0.002m));
+            } // stopping saves what is still waiting
 
             var restarted = new SqliteUsageLedger(new SqliteRouterDatabase(options, factory.CreateLogger<SqliteRouterDatabase>()));
             UsageTotals totals = restarted.Total(now.AddMinutes(-1), now.AddMinutes(1));

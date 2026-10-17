@@ -125,13 +125,15 @@ The same file also keeps feedback, learned routing changes, revoked dashboard se
 
 History documents are stored as applied. They keep `${…}` references where the configuration uses them, and literal keys where the configuration file holds them too. With a secret store registered, typed keys never reach either.
 
-**Failures never stop routing.** A file that cannot be opened (corrupt, wrong schema, no permission) leaves everything in memory, with one warning at start-up. An operation that fails later, for example a database locked longer than `BusyTimeout` by another process, is logged at most once a minute and the in-memory state carries on.
+**Requests never wait for the file.** What requests write (usage, activity, feedback, warm caches, tool-call affinity, cooldowns) goes to one background writer, which saves it in batches, one transaction each, in the order it was written. Reads that must see this instance's own writes (the dashboard's activity, usage and budgets) wait for the writer first; reads on the request path (warm caches, affinity, other instances' cooldowns) use the in-memory copies and do not. Stopping the router saves what is still waiting; a crash loses at most the last few milliseconds of writes. The latency and cache-share figures the latency-aware strategies use are recomputed from the activity in the background, never by a request.
+
+**Failures never stop routing.** A file that cannot be opened (corrupt, wrong schema, no permission) leaves everything in memory, with one warning at start-up. A write that fails later, for example while another process holds the file longer than `BusyTimeout`, is logged at most once a minute and counted: the dashboard's status warns how many were lost, and the `semantic_router.state.dropped_writes` metric counts them. The in-memory state carries on.
 
 **Several instances.** Instances on one machine can share the file: SQLite in WAL mode serialises writers.
 - Cooldowns are re-read every `ModelHealthTracker.RefreshInterval` (5 s), so an account limit one instance hits is honoured by the others within seconds.
 - Affinity lookups fall through to the file, so a tool turn can continue on another instance.
 - Budgets count every instance's usage: each reads the rows the others added at most every 2 s (`SqliteUsageLedger.RefreshInterval`).
-- Activity and feedback ids come from a counter in the file, which each instance takes 32 at a time, so no two requests get the same id. Ids therefore skip ahead after a restart, and two instances' ids interleave in blocks. The shared file mixes their entries; give each instance its own file if you want separate logs.
+- Activity and feedback ids come from a counter in the file, which each instance takes 1,024 at a time (the next block is fetched halfway through the last), so no two requests get the same id. Ids therefore skip ahead after a restart, and two instances' ids interleave in blocks. The shared file mixes their entries; give each instance its own file if you want separate logs.
 
 Do not put the file on a network share: SQLite's locking is unreliable there. For instances on different machines, implement `ICooldownStore` and `IToolCallAffinity` over a shared cache such as Redis.
 

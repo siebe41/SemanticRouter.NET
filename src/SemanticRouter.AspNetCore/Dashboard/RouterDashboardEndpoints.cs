@@ -264,6 +264,12 @@ public static partial class RouterDashboardEndpoints
                     services.GetService<IModelCacheShare>(), Listening(services), options.PublicOrigins);
                 status = status with { Unsaved = provider.Unsaved, Instance = provider.Instance };
 
+                // State writes that failed after the configuration was applied (a locked or full disk): shown as they happen.
+                if (services.GetService<IStateStorageHealth>()?.Problem is { } state && !status.Warnings.Contains(state))
+                {
+                    status = status with { Warnings = [.. status.Warnings, state] };
+                }
+
                 // A connector's last error comes from the activity log's details, which can quote a reply.
                 return Results.Json(
                     DashboardAccess.RoleOf(context) == RouterDashboardRole.Metrics ? status with { Endpoints = [.. status.Endpoints.Select(e => e with { LastError = null })] } : status,

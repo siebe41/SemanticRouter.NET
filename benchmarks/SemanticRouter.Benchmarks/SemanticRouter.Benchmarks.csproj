@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The gateway benchmark reads what the router stored. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\SemanticRouter.AspNetCore\SemanticRouter.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\SemanticRouter.Embeddings.Onnx\SemanticRouter.Embeddings.Onnx.csproj" />
   </ItemGroup>

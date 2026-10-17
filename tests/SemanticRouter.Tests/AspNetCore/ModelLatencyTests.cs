@@ -51,6 +51,36 @@ public sealed class ModelLatencyTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_request_gets_the_last_figures_while_new_ones_are_worked_out_in_the_background()
+    {
+        var clock = new ManualTimeProvider();
+        var activity = new RoutingActivityLog();
+        for (int i = 0; i < 5; i++)
+        {
+            activity.Add(Served("quick", 300, clock.GetUtcNow().AddMinutes(-5)));
+        }
+
+        var tracker = new ModelLatencyTracker(activity, clock);
+        tracker.Typical()["quick"].Should().Be(TimeSpan.FromMilliseconds(300), "the first figures are worked out while the caller waits");
+
+        for (int i = 0; i < 20; i++)
+        {
+            activity.Add(Served("quick", 900, clock.GetUtcNow().AddMinutes(-1)));
+        }
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        tracker.Typical()["quick"].Should().Be(TimeSpan.FromMilliseconds(300), "the stale figures are returned at once");
+
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        while (tracker.Typical()["quick"] != TimeSpan.FromMilliseconds(900) && System.Diagnostics.Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(10))
+        {
+            await Task.Delay(10);
+        }
+
+        tracker.Typical()["quick"].Should().Be(TimeSpan.FromMilliseconds(900), "the refresh landed");
+    }
+
+    [Fact]
     public async Task Auto_fastest_takes_the_quicker_capable_model_and_says_why()
     {
         // "cloud" (tier 4, cost 3) is slow, "quick" (tier 4, cost 5) is fast; both can do the work.

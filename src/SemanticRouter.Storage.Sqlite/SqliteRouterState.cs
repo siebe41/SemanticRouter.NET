@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -75,10 +78,26 @@ public static class SqliteStateBuilderExtensions
 
 /// <summary>
 /// The shared database: schema, connections and failure handling. Every operation degrades to a fallback value when
-/// the database is unavailable, so routing never fails because of state storage.
+/// the database is unavailable, so routing never fails because of state storage. What requests write (usage, activity,
+/// feedback, warm caches, tool-call affinity, cooldowns) goes through <see cref="Write"/>: one background writer saves
+/// it in batches, one transaction each, so no request waits for the file or for another router holding it.
 /// </summary>
 internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStorageHealth, IDisposable
 {
+    /// <summary>Writes waiting at most; beyond, a write is made by its caller (nothing is dropped for lack of room).</summary>
+    private const int QueueCapacity = 10_000;
+
+    /// <summary>Writes saved in one transaction at most.</summary>
+    private const int BatchSize = 256;
+
+    private static readonly Meter Meter = new(SemanticRouterDiagnostics.MeterName);
+
+    private static readonly Counter<long> DroppedWrites = Meter.CreateCounter<long>(
+        "semantic_router.state.dropped_writes", "{write}", "State writes the database refused or could not take in time: they are lost.");
+
+    // The physical connections (pooled) the pragmas already ran on.
+    private static readonly ConditionalWeakTable<object, object> Prepared = new();
+
     /// <summary>How often everything past its retention is deleted, besides at start-up and when retention changes.</summary>
     internal static readonly TimeSpan PruneInterval = TimeSpan.FromHours(1);
 
@@ -251,7 +270,7 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         using (SqliteCommand command = Command(
             connection,
             "DELETE FROM activity WHERE timestamp_ticks < $activity;" +
-            "DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY id DESC LIMIT $entries);" +
+            "DELETE FROM activity WHERE id < (SELECT id FROM activity ORDER BY id DESC LIMIT 1 OFFSET $entries - 1);" +
             "DELETE FROM feedback WHERE timestamp_ticks < $activity;" +
             "DELETE FROM usage WHERE timestamp_ticks < $usage;" +
             "DELETE FROM audit WHERE timestamp_ticks < $audit;" +
@@ -281,7 +300,6 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         return (long)command.ExecuteScalar()!;
     }
 
-    public void Dispose() => _pruning?.Dispose();
 
     public TimeProvider Time { get; }
 
@@ -290,11 +308,276 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     /// <summary>Whether the database opened; when not, every store keeps its state in memory only.</summary>
     public bool Available { get; private set; }
 
-    /// <inheritdoc />
-    public string? Problem { get; private set; }
+    private string? _problem;
 
-    /// <summary>Runs <paramref name="operation"/>, or returns <paramref name="fallback"/> when the database fails.</summary>
+    /// <inheritdoc />
+    public string? Problem
+    {
+        get
+        {
+            if (_problem is not null)
+            {
+                return _problem;
+            }
+
+            long dropped = Interlocked.Read(ref _dropped);
+            return dropped == 0 ? null : string.Create(CultureInfo.InvariantCulture,
+                $"{dropped} write(s) to the router's state database {Location} failed since the router started and were lost ({Volatile.Read(ref _lastDrop)}). Usage, activity and feedback may be missing them; see the router's log.");
+        }
+
+        private set => _problem = value;
+    }
+
+    private readonly BlockingCollection<PendingWrite> _queue = new(QueueCapacity);
+    private readonly object _progress = new();
+    private readonly Lock _start = new();
+    private Thread? _writer;
+    private long _enqueued;
+    private long _written;
+    private long _dropped;
+    private string? _lastDrop;
+
+    /// <summary>Writes that failed and were lost since the router started.</summary>
+    public long Dropped => Interlocked.Read(ref _dropped);
+
+    /// <summary>A write waiting for the background writer.</summary>
+    /// <param name="What">What it is, for the log.</param>
+    /// <param name="Operation">The write.</param>
+    /// <param name="Done">Told, once the batch is committed or failed, whether the write is in the file.</param>
+    /// <param name="Alone">Runs outside a transaction (a checkpoint).</param>
+    private sealed record PendingWrite(string What, Action<SqliteConnection> Operation, Action<bool>? Done, bool Alone);
+
+    /// <summary>
+    /// Saves <paramref name="operation"/> in the background: it joins the next batch, and <paramref name="done"/> hears
+    /// whether it was saved. Writes are saved in the order they were made. With <paramref name="alone"/>, it runs on its
+    /// own, outside a transaction (a checkpoint cannot run inside one). When the database is unavailable, or the queue
+    /// full, nothing waits: it is reported unsaved, or made right here.
+    /// </summary>
+    public void Write(string what, Action<SqliteConnection> operation, Action<bool>? done = null, bool alone = false)
+    {
+        if (!Available)
+        {
+            done?.Invoke(false);
+            return;
+        }
+
+        StartWriter();
+        var write = new PendingWrite(what, operation, done, alone);
+        Interlocked.Increment(ref _enqueued);
+        bool queued;
+        try
+        {
+            queued = _queue.TryAdd(write);
+        }
+        catch (InvalidOperationException)
+        {
+            queued = false; // the router is stopping
+        }
+
+        if (!queued)
+        {
+            bool saved = Execute("saving state", false, connection =>
+            {
+                write.Operation(connection);
+                return true;
+            });
+            if (!saved)
+            {
+                Drop(write.What, "it failed");
+            }
+
+            write.Done?.Invoke(saved);
+            Progress(1);
+        }
+    }
+
+    /// <summary>
+    /// Waits until every write made before this call is in the file, or failed: a read that must see this router's own
+    /// writes calls it first (<see cref="Run{T}"/> does). Returns at once when nothing is waiting.
+    /// </summary>
+    public void WaitForWrites()
+    {
+        long target = Interlocked.Read(ref _enqueued);
+        if (Interlocked.Read(ref _written) >= target || Thread.CurrentThread == _writer)
+        {
+            return;
+        }
+
+        long deadline = Environment.TickCount64 + (long)((Options.BusyTimeout.TotalMilliseconds * 2) + 5000);
+        lock (_progress)
+        {
+            while (Interlocked.Read(ref _written) < target)
+            {
+                long left = deadline - Environment.TickCount64;
+                if (left <= 0 || (_writer is { IsAlive: false }))
+                {
+                    return;
+                }
+
+                Monitor.Wait(_progress, TimeSpan.FromMilliseconds(left));
+            }
+        }
+    }
+
+    /// <summary>Stops the retention timer, saves what is still waiting, then stops the writer.</summary>
+    public void Dispose()
+    {
+        _pruning?.Dispose();
+        _queue.CompleteAdding();
+        _writer?.Join(TimeSpan.FromSeconds(30));
+    }
+
+    private void StartWriter()
+    {
+        if (_writer is not null)
+        {
+            return;
+        }
+
+        lock (_start)
+        {
+            if (_writer is null)
+            {
+                var writer = new Thread(WriteAll) { IsBackground = true, Name = "SemanticRouter state writer" };
+                writer.Start();
+                _writer = writer;
+            }
+        }
+    }
+
+    private void WriteAll()
+    {
+        var batch = new List<PendingWrite>(BatchSize);
+        foreach (PendingWrite first in _queue.GetConsumingEnumerable())
+        {
+            batch.Add(first);
+            while (batch.Count < BatchSize && !batch[^1].Alone && _queue.TryTake(out PendingWrite? next))
+            {
+                batch.Add(next);
+            }
+
+            // A write to run on its own goes after the batch it would have ended.
+            PendingWrite? alone = batch[^1].Alone ? batch[^1] : null;
+            if (alone is not null)
+            {
+                batch.RemoveAt(batch.Count - 1);
+            }
+
+            if (batch.Count > 0)
+            {
+                Save(batch);
+            }
+
+            if (alone is not null)
+            {
+                Save([alone]);
+            }
+
+            batch.Clear();
+        }
+    }
+
+    private void Save(List<PendingWrite> batch)
+    {
+        bool[] saved = new bool[batch.Count];
+        bool[] failed = new bool[batch.Count];
+        try
+        {
+            using SqliteConnection connection = Open();
+            SqliteTransaction? transaction = batch is [{ Alone: true }] ? null : connection.BeginTransaction();
+            using var statements = new Batch(connection, transaction);
+            t_batch = statements;
+            try
+            {
+                for (int i = 0; i < batch.Count; i++)
+                {
+                    try
+                    {
+                        batch[i].Operation(connection);
+                        saved[i] = true;
+                    }
+                    catch (Exception ex) when (ex is SqliteException or InvalidOperationException or JsonException)
+                    {
+                        // One bad write (a constraint) does not undo the batch: SQLite rolls back only its statement.
+                        Warn(batch[i].What, ex.Message);
+                        Drop(batch[i].What, ex.Message);
+                        failed[i] = true;
+                    }
+                }
+
+                transaction?.Commit();
+            }
+            finally
+            {
+                t_batch = null;
+                transaction?.Dispose();
+            }
+        }
+        catch (Exception ex) when (ex is SqliteException or InvalidOperationException)
+        {
+            // The batch could not be saved (the file is locked past the busy timeout, or broken).
+            Warn(batch[0].What, ex.Message);
+            for (int i = 0; i < batch.Count; i++)
+            {
+                if (!failed[i])
+                {
+                    saved[i] = false;
+                    Drop(batch[i].What, ex.Message);
+                }
+            }
+        }
+
+        // The callbacks first (the usage ledger adds the rows to its running totals), then readers waiting for these
+        // writes go on. So a callback must never wait for writes: the ledger reads under its locks with Peek.
+        for (int i = 0; i < batch.Count; i++)
+        {
+            try
+            {
+                batch[i].Done?.Invoke(saved[i]);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            {
+                Warn(batch[i].What, ex.Message);
+            }
+        }
+
+        Progress(batch.Count);
+    }
+
+    private void Progress(int count)
+    {
+        lock (_progress)
+        {
+            Interlocked.Add(ref _written, count);
+            Monitor.PulseAll(_progress);
+        }
+    }
+
+    private void Drop(string what, string error)
+    {
+        Interlocked.Increment(ref _dropped);
+        Volatile.Write(ref _lastDrop, $"last: {what}, {error}");
+        DroppedWrites.Add(1);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="operation"/> once this router's waiting writes are saved (<see cref="WaitForWrites"/>), so
+    /// it sees them; or returns <paramref name="fallback"/> when the database fails.
+    /// </summary>
     public T Run<T>(string what, T fallback, Func<SqliteConnection, T> operation)
+    {
+        WaitForWrites();
+        return Execute(what, fallback, operation, settleLog: true);
+    }
+
+    /// <summary>
+    /// Like <see cref="Run{T}"/>, without waiting for this router's writes: for reads on the request path that this
+    /// router's own writes reach another way (an in-memory copy), and for reads under a lock a write's callback takes.
+    /// </summary>
+    public T Peek<T>(string what, T fallback, Func<SqliteConnection, T> operation) => Execute(what, fallback, operation, settleLog: false);
+
+    // settleLog: also empty a log a purge or prune could not empty earlier (not for a request-path read).
+    private T Execute<T>(string what, T fallback, Func<SqliteConnection, T> operation, bool settleLog = false)
     {
         if (!Available)
         {
@@ -305,7 +588,7 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         {
             using SqliteConnection connection = Open();
             T result = operation(connection);
-            if (_logOwed)
+            if (settleLog && _logOwed)
             {
                 try
                 {
@@ -321,15 +604,19 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         }
         catch (Exception ex) when (ex is SqliteException or InvalidOperationException or JsonException)
         {
-            // At most one warning a minute: a locked or broken database must not flood the log.
-            long now = Time.GetUtcNow().UtcTicks;
-            long last = Interlocked.Read(ref _lastWarningTicks);
-            if (now - last > TimeSpan.TicksPerMinute && Interlocked.CompareExchange(ref _lastWarningTicks, now, last) == last)
-            {
-                LogOperationFailed(_logger, what, Location, ex.Message);
-            }
-
+            Warn(what, ex.Message);
             return fallback;
+        }
+    }
+
+    /// <summary>At most one warning a minute: a locked or broken database must not flood the log.</summary>
+    private void Warn(string what, string error)
+    {
+        long now = Time.GetUtcNow().UtcTicks;
+        long last = Interlocked.Read(ref _lastWarningTicks);
+        if (now - last > TimeSpan.TicksPerMinute && Interlocked.CompareExchange(ref _lastWarningTicks, now, last) == last)
+        {
+            LogOperationFailed(_logger, what, Location, error);
         }
     }
 
@@ -403,7 +690,7 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     /// The counter is in <c>meta</c>, so routers sharing the file never hand out the same id.
     /// </summary>
     public long ReserveIds(string table, int count) =>
-        Run("reserving ids", -1L, connection =>
+        Peek("reserving ids", -1L, connection =>
         {
             // One statement, so it is atomic. The table's newest id counts too: rows written before the counter existed.
             using SqliteCommand command = Command(
@@ -438,14 +725,72 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
 
     public static SqliteCommand Command(SqliteConnection connection, string sql, params (string Name, object? Value)[] parameters)
     {
-        SqliteCommand command = connection.CreateCommand();
-        command.CommandText = sql;
+        SqliteCommand command;
+        if (t_batch is { } batch && batch.Connection == connection)
+        {
+            // In the writer's batch the same few statements run hundreds of times: each is prepared once.
+            if (!batch.Statements.TryGetValue(sql, out BatchCommand? kept))
+            {
+                kept = new BatchCommand { Connection = connection, CommandText = sql, Transaction = batch.Transaction };
+                batch.Statements[sql] = kept;
+            }
+
+            kept.Parameters.Clear();
+            command = kept;
+        }
+        else
+        {
+            command = connection.CreateCommand();
+            command.CommandText = sql;
+        }
+
         foreach ((string name, object? value) in parameters)
         {
             command.Parameters.AddWithValue(name, value ?? DBNull.Value);
         }
 
         return command;
+    }
+
+    // The batch the writer thread is saving, for Command.
+    [ThreadStatic]
+    private static Batch? t_batch;
+
+    private sealed class Batch(SqliteConnection connection, SqliteTransaction? transaction) : IDisposable
+    {
+        public SqliteConnection Connection { get; } = connection;
+
+        public SqliteTransaction? Transaction { get; } = transaction;
+
+        public Dictionary<string, BatchCommand> Statements { get; } = new(StringComparer.Ordinal);
+
+        public void Dispose()
+        {
+            foreach (BatchCommand command in Statements.Values)
+            {
+                command.Release();
+            }
+        }
+    }
+
+    /// <summary>A statement kept for the rest of a batch: disposing it (the caller's <c>using</c>) keeps it prepared.</summary>
+    private sealed class BatchCommand : SqliteCommand
+    {
+        private bool _released;
+
+        public void Release()
+        {
+            _released = true;
+            Dispose();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (_released)
+            {
+                base.Dispose(disposing);
+            }
+        }
     }
 
     private SqliteConnection Open()
@@ -455,15 +800,26 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         {
             connection.Open();
 
+            // Once per physical connection: the pool hands the same one out again.
             // With WAL, NORMAL still never corrupts the file and loses nothing when the process crashes, but it does
             // not flush to disk on every commit. FULL did, holding the write lock for each flush: on Windows, where
             // flushes are slow, a burst of writes (two routers sharing the file) queued past the busy timeout and was
             // dropped.
             // secure_delete: a deleted row (a pruned or purged prompt preview) is overwritten with zeros, not left in a
             // free page where a copy of the file would still hold it.
-            using (SqliteCommand pragmas = Command(connection, "PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;"))
+            // busy_timeout: a write that finds the file locked (another router) waits in SQLite, which retries within
+            // milliseconds, rather than in Microsoft.Data.Sqlite's retry loop, which sleeps 150 ms at a time.
+            if (connection.Handle is { } handle && !Prepared.TryGetValue(handle, out _))
             {
-                pragmas.ExecuteNonQuery();
+                using (SqliteCommand pragmas = Command(
+                    connection,
+                    "PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON; PRAGMA busy_timeout=" +
+                    ((long)Options.BusyTimeout.TotalMilliseconds).ToString(CultureInfo.InvariantCulture) + ";"))
+                {
+                    pragmas.ExecuteNonQuery();
+                }
+
+                Prepared.AddOrUpdate(handle, handle);
             }
 
             return connection;
@@ -747,8 +1103,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
 /// <summary>Cooldowns with absolute expiry, so a restart during a quota cooldown keeps the model cooling down.</summary>
 internal sealed class SqliteCooldownStore(SqliteRouterDatabase database) : ICooldownStore
 {
+    // Peek: the health tracker reloads these on a request every few seconds, for other routers' cooldowns; its own it
+    // keeps in memory, so it need not wait for them to be saved.
     public IReadOnlyDictionary<string, DateTimeOffset> LoadCooldowns() =>
-        database.Run<IReadOnlyDictionary<string, DateTimeOffset>>("reading cooldowns", new Dictionary<string, DateTimeOffset>(), connection =>
+        database.Peek<IReadOnlyDictionary<string, DateTimeOffset>>("reading cooldowns", new Dictionary<string, DateTimeOffset>(), connection =>
         {
             var result = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
             using SqliteCommand command = SqliteRouterDatabase.Command(
@@ -763,7 +1121,7 @@ internal sealed class SqliteCooldownStore(SqliteRouterDatabase database) : ICool
         });
 
     public void SaveCooldown(string model, DateTimeOffset until) =>
-        database.Run("saving a cooldown", connection =>
+        database.Write("saving a cooldown", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
@@ -774,14 +1132,14 @@ internal sealed class SqliteCooldownStore(SqliteRouterDatabase database) : ICool
         });
 
     public void RemoveCooldown(string model) =>
-        database.Run("removing a cooldown", connection =>
+        database.Write("removing a cooldown", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(connection, "DELETE FROM cooldowns WHERE model = $model;", ("$model", model));
             command.ExecuteNonQuery();
         });
 
     public void ClearCooldowns() =>
-        database.Run("clearing cooldowns", connection =>
+        database.Write("clearing cooldowns", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(connection, "DELETE FROM cooldowns;");
             command.ExecuteNonQuery();
@@ -807,7 +1165,7 @@ internal sealed class SqliteToolCallAffinity(SqliteRouterDatabase database) : IT
         _cache.Remember(toolUseId, modelName);
         bool prune = Interlocked.Increment(ref _writes) % 200 == 0;
         long now = database.Time.GetUtcNow().UtcTicks;
-        database.Run("saving tool-call affinity", connection =>
+        database.Write("saving tool-call affinity", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
@@ -833,7 +1191,7 @@ internal sealed class SqliteToolCallAffinity(SqliteRouterDatabase database) : IT
             return cached;
         }
 
-        return database.Run<string?>("reading tool-call affinity", null, connection =>
+        return database.Peek<string?>("reading tool-call affinity", null, connection =>
         {
             long oldest = database.Time.GetUtcNow().UtcTicks - database.Options.AffinityWindow.Ticks;
             foreach (string id in ids)
@@ -870,7 +1228,7 @@ internal sealed class SqliteWarmCaches(SqliteRouterDatabase database) : IWarmCac
             return cached;
         }
 
-        IReadOnlyList<WarmCache> stored = database.Run<IReadOnlyList<WarmCache>>("reading warm prompt caches", [], connection =>
+        IReadOnlyList<WarmCache> stored = database.Peek<IReadOnlyList<WarmCache>>("reading warm prompt caches", [], connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
@@ -899,7 +1257,7 @@ internal sealed class SqliteWarmCaches(SqliteRouterDatabase database) : IWarmCac
         ArgumentNullException.ThrowIfNull(cache);
         _cache.Remember(conversation, cache);
         bool prune = Interlocked.Increment(ref _writes) % 200 == 0;
-        database.Run("saving a warm prompt cache", connection =>
+        database.Write("saving a warm prompt cache", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
@@ -914,8 +1272,14 @@ internal sealed class SqliteWarmCaches(SqliteRouterDatabase database) : IWarmCac
 
     public void Forget(string conversation, string? model = null)
     {
-        _cache.Forget(conversation, model);
-        database.Run("forgetting a warm prompt cache", connection =>
+        // Nothing to delete when this router holds no cache for the conversation: Lookup brings what the file has into
+        // memory first. Most turns of a backend without prompt caching come here, and the delete found nothing.
+        if (!_cache.Remove(conversation, model))
+        {
+            return;
+        }
+
+        database.Write("forgetting a warm prompt cache", connection =>
         {
             using SqliteCommand command = model is null
                 ? SqliteRouterDatabase.Command(connection, "DELETE FROM warm_caches WHERE conversation = $conversation;", ("$conversation", conversation))
@@ -936,7 +1300,7 @@ internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRout
     {
         ArgumentNullException.ThrowIfNull(feedback);
         bool prune = Interlocked.Increment(ref _writes) % 100 == 0;
-        database.Run("saving feedback", connection =>
+        database.Write("saving feedback", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
@@ -949,7 +1313,8 @@ internal sealed class SqliteFeedbackStore(SqliteRouterDatabase database) : IRout
                     connection, "DELETE FROM feedback WHERE timestamp_ticks < $oldest;", ("$oldest", Oldest()));
                 if (old.ExecuteNonQuery() > 0)
                 {
-                    database.EmptyLog(connection);
+                    // Not here, inside the writer's transaction: on its own, next.
+                    database.Write("emptying the log", c => database.EmptyLog(c), alone: true);
                 }
             }
         });
@@ -1103,30 +1468,41 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
     public void Append(RoutingActivityEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        bool prune = Interlocked.Increment(ref _writes) % 100 == 0;
-        database.Run("saving activity", connection =>
+
+        // Every tenth of the cap (at least every 100 entries): the cap holds within 10%, and the checkpoint that follows
+        // a prune (it writes the whole log into the file) does not run dozens of times a second on a busy router.
+        bool prune = Interlocked.Increment(ref _writes) % Math.Max(100, database.ActivityMaxEntries / 10) == 0;
+        string json = JsonSerializer.Serialize(entry, Json); // as it is now: the entry may still change
+        database.Write("saving activity", connection =>
         {
             // A plain insert: an id that is already there is a bug to hear about, not an entry to overwrite.
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
                 "INSERT INTO activity (id, timestamp_ticks, entry) VALUES ($id, $ts, $entry);",
-                ("$id", entry.Id), ("$ts", entry.Timestamp.UtcTicks), ("$entry", JsonSerializer.Serialize(entry, Json)));
+                ("$id", entry.Id), ("$ts", entry.Timestamp.UtcTicks), ("$entry", json));
             command.ExecuteNonQuery();
             if (prune)
             {
                 Prune(connection);
             }
         });
+
+        if (prune)
+        {
+            // The write-ahead log still holds the pages as they were before; move them into the file and empty it.
+            database.Write("emptying the log", connection => database.EmptyLog(connection), alone: true);
+        }
     }
 
     public void Replace(RoutingActivityEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        database.Run("saving activity", connection =>
+        string json = JsonSerializer.Serialize(entry, Json);
+        database.Write("saving activity", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection, "UPDATE activity SET timestamp_ticks = $ts, entry = $entry WHERE id = $id;",
-                ("$id", entry.Id), ("$ts", entry.Timestamp.UtcTicks), ("$entry", JsonSerializer.Serialize(entry, Json)));
+                ("$id", entry.Id), ("$ts", entry.Timestamp.UtcTicks), ("$entry", json));
             command.ExecuteNonQuery();
         });
     }
@@ -1179,14 +1555,14 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
         using (SqliteCommand command = SqliteRouterDatabase.Command(
             connection,
             "DELETE FROM activity WHERE timestamp_ticks < $oldest;" +
-            "DELETE FROM activity WHERE id NOT IN (SELECT id FROM activity ORDER BY id DESC LIMIT $max);",
+            "DELETE FROM activity WHERE id < (SELECT id FROM activity ORDER BY id DESC LIMIT 1 OFFSET $max - 1);",
             ("$oldest", (database.Time.GetUtcNow() - database.ActivityMaxAge).UtcTicks), ("$max", database.ActivityMaxEntries)))
         {
             command.ExecuteNonQuery();
         }
 
-        // The write-ahead log still holds the pages as they were before; move them into the file and empty it.
-        database.EmptyLog(connection);
+        // The write-ahead log still holds the pages as they were before: the store empties it next, on its own (a
+        // checkpoint cannot run inside the writer's transaction).
     }
 
     public IReadOnlyList<long> IdsBetween(DateTimeOffset since, DateTimeOffset until) =>
@@ -1325,7 +1701,8 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
         bool prune = Interlocked.Increment(ref _writes) % 500 == 0;
         DateTimeOffset oldest = record.Timestamp - database.UsageRetention;
         (long? cost, long? reference, long? value) = Picodollars(record.CostUsd, record.ReferenceCostUsd, record.SubscriptionValueUsd);
-        long id = database.Run<long>("recording usage", -1, connection =>
+        long id = -1;
+        database.Write("recording usage", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
                 connection,
@@ -1340,9 +1717,13 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
                 ("$oldest", oldest.UtcTicks), ("$profile", record.Profile),
                 ("$value", record.SubscriptionValueUsd.ToString(CultureInfo.InvariantCulture)),
                 ("$costPico", cost), ("$referencePico", reference), ("$valuePico", value));
-            return (long)command.ExecuteScalar()!;
-        });
+            id = (long)command.ExecuteScalar()!;
+        }, done: saved => Saved(saved ? id : -1, record, prune, oldest));
+    }
 
+    /// <summary>Once the background writer saved <paramref name="record"/> as row <paramref name="id"/> (-1: it could not).</summary>
+    private void Saved(long id, UsageRecord record, bool prune, DateTimeOffset oldest)
+    {
         if (id < 0)
         {
             _fallback.Record(record);
@@ -1370,6 +1751,8 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
     public IReadOnlyList<UsageModelTotals> ModelTotals(
         DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null, string? model = null, string? connector = null, string? profile = null)
     {
+        // Before any lock is taken: this router's own rows are counted once they are in the file.
+        database.WaitForWrites();
         var range = new UsageRange(since, until, model, connector, profile);
         IReadOnlyList<UsageModelTotals> stored;
         if (by == UsageGrouping.Model && database.Available)
@@ -1429,7 +1812,8 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
     /// the file; with <paramref name="after"/>, only of the rows after that id. <see langword="null"/> when the database failed.
     /// </summary>
     private (IReadOnlyList<UsageModelTotals> Totals, long Newest)? Read(UsageRange range, UsageGrouping by, TimeZoneInfo zone, long? after) =>
-        database.Run<(IReadOnlyList<UsageModelTotals>, long)?>("reading usage", null, connection =>
+        // Peek, not Run: the running totals read under their lock, which the writer's callback (Saved) takes.
+        database.Peek<(IReadOnlyList<UsageModelTotals>, long)?>("reading usage", null, connection =>
         {
             Interlocked.Increment(ref _reads);
             using SqliteTransaction snapshot = connection.BeginTransaction(deferred: true);
