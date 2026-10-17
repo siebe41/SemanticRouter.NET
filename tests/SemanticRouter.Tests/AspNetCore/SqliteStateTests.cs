@@ -320,7 +320,7 @@ public sealed class SqliteStateTests : IDisposable
             ((long)count.ExecuteScalar()!).Should().Be(1);
         }
 
-        Task<ActivityPurgeResult> purge = Task.Run(() => store.Purge(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1)));
+        Task<ActivityPurgeResult> purge = Task.Run(() => store.PurgeWithResult(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1)));
         await Task.Delay(300);
         read.Commit();
 
@@ -345,7 +345,7 @@ public sealed class SqliteStateTests : IDisposable
                 count.ExecuteScalar();
             }
 
-            store.Purge(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1))
+            store.PurgeWithResult(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1))
                 .Should().Be(new ActivityPurgeResult(1, Complete: false), "the rows are gone, but the log still holds them");
             _logs.Messages.Should().Contain(m => m.Contains("could not be emptied", StringComparison.Ordinal));
             read.Commit();

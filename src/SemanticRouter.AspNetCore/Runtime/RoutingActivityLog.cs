@@ -230,9 +230,15 @@ public interface IRoutingActivityStore
 
     /// <summary>
     /// Deletes the entries with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/> so they cannot be
-    /// recovered from the store's files, and returns how many there were and whether they are gone from the files.
+    /// recovered from the store's files, and returns how many there were.
     /// </summary>
-    ActivityPurgeResult Purge(DateTimeOffset since, DateTimeOffset until) => new(0);
+    int Purge(DateTimeOffset since, DateTimeOffset until) => 0;
+
+    /// <summary>
+    /// As <see cref="Purge"/>, and says whether the entries are gone from the store's files too. A store that does not
+    /// implement it reports what <see cref="Purge"/> removed as complete.
+    /// </summary>
+    ActivityPurgeResult PurgeWithResult(DateTimeOffset since, DateTimeOffset until) => new(Purge(since, until));
 
     /// <summary>
     /// The ids of every stored entry with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/>, including
@@ -365,7 +371,10 @@ public sealed class RoutingActivityLog
     /// store, and returns how many the store held (or memory, without a store). An entry in that range whose request is
     /// still running, or that the judge grades later, is not stored again.
     /// </summary>
-    public ActivityPurgeResult Purge(DateTimeOffset since, DateTimeOffset until) => Purge(since, until, beforeStore: null);
+    public int Purge(DateTimeOffset since, DateTimeOffset until) => PurgeWithResult(since, until).Removed;
+
+    /// <summary>As <see cref="Purge(DateTimeOffset, DateTimeOffset)"/>, and says whether the entries are gone from the store's files too.</summary>
+    public ActivityPurgeResult PurgeWithResult(DateTimeOffset since, DateTimeOffset until) => Purge(since, until, beforeStore: null);
 
     /// <summary>
     /// As <see cref="Purge(DateTimeOffset, DateTimeOffset)"/>; <paramref name="beforeStore"/> gets the ids of the
@@ -395,7 +404,7 @@ public sealed class RoutingActivityLog
         }
 
         beforeStore?.Invoke(ids);
-        return _store?.Purge(since, until) ?? new ActivityPurgeResult(inMemory);
+        return _store?.PurgeWithResult(since, until) ?? new ActivityPurgeResult(inMemory);
     }
 
     /// <summary>Whether <paramref name="entry"/> was deleted by a purge (it was added before the purge and is in its range).</summary>

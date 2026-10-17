@@ -1205,8 +1205,10 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
             return ids;
         });
 
+    public int Purge(DateTimeOffset since, DateTimeOffset until) => PurgeWithResult(since, until).Removed;
+
     // A database that is not in use holds nothing to purge; one that fails during the purge may still hold it.
-    public ActivityPurgeResult Purge(DateTimeOffset since, DateTimeOffset until) => !database.Available ? new ActivityPurgeResult(0) :
+    public ActivityPurgeResult PurgeWithResult(DateTimeOffset since, DateTimeOffset until) => !database.Available ? new ActivityPurgeResult(0) :
         database.Run("purging activity", new ActivityPurgeResult(0, Complete: false), connection =>
         {
             int removed;
