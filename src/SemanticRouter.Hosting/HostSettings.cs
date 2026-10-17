@@ -28,6 +28,20 @@ internal sealed record HostSettings
     /// <summary>Where <c>semantic-router.json</c>, its secrets file and an optional <c>appsettings.json</c> live.</summary>
     public required string ConfigurationDirectory { get; init; }
 
+    /// <summary>
+    /// Where what belongs to this machine lives (<see cref="LocalData"/>): the state database, downloaded models, logs and
+    /// the desktop window's WebView2 profile. The configuration directory, except on Windows when neither
+    /// <c>--config-dir</c> nor <c>SEMANTIC_ROUTER_HOME</c> chose it: then <c>%LOCALAPPDATA%\semantic-router</c>, since the
+    /// default configuration directory is in the roaming profile.
+    /// </summary>
+    public string LocalDataDirectory
+    {
+        get => _localDataDirectory ?? ConfigurationDirectory;
+        init => _localDataDirectory = value;
+    }
+
+    private readonly string? _localDataDirectory;
+
     /// <summary><c>init</c>: overwrite an existing configuration file.</summary>
     public bool Force { get; init; }
 
@@ -174,10 +188,12 @@ internal sealed record HostSettings
                 : $"Unknown service action '{serviceAction}'. Use {string.Join(", ", ServiceActions)}.";
         }
 
+        string configuration = Path.GetFullPath(directory ?? DefaultConfigurationDirectory(environment, OperatingSystem.IsWindows(), OperatingSystem.IsMacOS()));
         return new HostSettings
         {
             Command = command,
-            ConfigurationDirectory = Path.GetFullPath(directory ?? DefaultConfigurationDirectory(environment, OperatingSystem.IsWindows(), OperatingSystem.IsMacOS())),
+            ConfigurationDirectory = configuration,
+            LocalDataDirectory = LocalDataDirectoryFor(configuration, environment, OperatingSystem.IsWindows()),
             Force = force,
             NoDetect = noDetect,
             Yes = yes,
@@ -219,6 +235,24 @@ internal sealed record HostSettings
         }
 
         return names;
+    }
+
+    /// <summary>
+    /// The local data directory for <paramref name="configurationDirectory"/>: <c>%LOCALAPPDATA%\semantic-router</c> when
+    /// it is Windows' default, roaming one (however it was given: the background service names it with
+    /// <c>--config-dir</c>); otherwise the configuration directory itself.
+    /// </summary>
+    internal static string LocalDataDirectoryFor(string configurationDirectory, Func<string, string?> environment, bool windows)
+    {
+        if (!windows || environment(HomeVariable) is { Length: > 0 }
+            || !string.Equals(Path.GetFullPath(configurationDirectory), Path.GetFullPath(DefaultConfigurationDirectory(environment, windows, macOS: false)), StringComparison.OrdinalIgnoreCase))
+        {
+            return configurationDirectory;
+        }
+
+        string localAppData = environment("LOCALAPPDATA") is { Length: > 0 } l ? l
+            : Path.Combine(environment("USERPROFILE") is { Length: > 0 } h ? h : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "AppData", "Local");
+        return Path.GetFullPath(Path.Combine(localAppData, "semantic-router"));
     }
 
     /// <summary>

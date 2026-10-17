@@ -676,4 +676,52 @@ public sealed class HostTests : IDisposable
         broken.Configuration["SemanticRouter:ForwardedHeaders:KnownNetworks:0"] = "everyone";
         FluentActions.Invoking(() => RouterHost.ConfigureForwardedHeaders(broken)).Should().Throw<InvalidOperationException>().WithMessage("*KnownNetworks*everyone*");
     }
+
+    [Fact]
+    public async Task A_state_database_from_a_newer_release_stops_the_router_and_fails_doctor()
+    {
+        string state = Path.Combine(_directory, HostSettings.StateFileName);
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={state};Pooling=False"))
+        {
+            connection.Open();
+            using Microsoft.Data.Sqlite.SqliteCommand create = connection.CreateCommand();
+            create.CommandText = "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO meta (key, value) VALUES ('schema_version', '99');";
+            create.ExecuteNonQuery();
+        }
+
+        var output = new StringWriter();
+        (await RouterHost.RunAsync(Settings("--urls", "http://127.0.0.1:0"), output, b => b.Logging.ClearProviders())).Should().Be(RouterHost.StateTooNewExitCode);
+        output.ToString().Should().Contain($"The router's state database {state} was written by a newer SemanticRouter (state schema 99");
+        await FluentActions.Awaiting(() => RouterHost.StartAsync(Settings("--urls", "http://127.0.0.1:0"), TextWriter.Null, b => b.Logging.ClearProviders()))
+            .Should().ThrowAsync<InvalidOperationException>("the desktop app shows the message of an InvalidOperationException as why it could not start");
+        File.Exists(RouterInstance.PathIn(_directory)).Should().BeFalse();
+
+        var report = new StringWriter();
+        (await DoctorCommand.RunAsync(Settings("doctor"), report)).Should().Be(1);
+        report.ToString().Should().Contain($"[FAIL] state: The router's state database {state} was written by a newer SemanticRouter")
+            .And.NotContain("[WARN] configuration: The router's state database", "the state line says it once");
+    }
+
+    [Fact]
+    public async Task A_state_database_that_cannot_be_used_is_a_runtime_warning_and_a_doctor_failure()
+    {
+        string state = Path.Combine(_directory, HostSettings.StateFileName);
+        await File.WriteAllTextAsync(state, new string('x', 4096));
+
+        await using (WebApplication app = RouterHost.Build(Settings(), b => b.Logging.ClearProviders()))
+        {
+            app.Services.GetRequiredService<RouterRuntimeProvider>().Current.Warnings
+                .Should().Contain(w => w.StartsWith($"The router's state database {state} cannot be used", StringComparison.Ordinal) && w.Contains("budgets count from zero", StringComparison.Ordinal));
+        }
+
+        var report = new StringWriter();
+        (await DoctorCommand.RunAsync(Settings("doctor"), report)).Should().Be(1);
+        report.ToString().Should().Contain($"[FAIL] state: The router's state database {state} cannot be used");
+
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        File.Delete(state);
+        var healthy = new StringWriter();
+        await DoctorCommand.RunAsync(Settings("doctor"), healthy);
+        healthy.ToString().Should().Contain($"[ OK ] state: {state}: budgets, usage, history and the audit log are kept.");
+    }
 }

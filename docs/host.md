@@ -42,7 +42,7 @@ The console shows the router's own lines: one per request (the tier it needed, t
 | Command | What it does |
 |---|---|
 | `semantic-router` (or `run`) | Starts the router and the dashboard. Creates the configuration file from the built-in template on first run (no models yet). |
-| `semantic-router init [--force] [--no-detect] [--yes \| --enable-cli <names> \| --no-cli]` | Writes a starting configuration. It probes LM Studio (`localhost:1234`) and Ollama (`localhost:11434`) for chat and embedding models and looks for `claude`, `codex` and `copilot` on `PATH`, asking before it enables a subscription CLI (see [What `init` adds](#what-init-adds)). `--yes` enables them without asking; `--enable-cli claude,codex` enables only the ones named, without asking; `--no-cli` adds no subscription CLI connector. A file that still holds the built-in template (as the router writes it on its first start, or an `init` that found nothing left it) is replaced; any other file only with `--force`, including a template whose embeddings someone changed. |
+| `semantic-router init [--force] [--no-detect] [--yes \| --enable-cli <names> \| --no-cli]` | Writes a starting configuration. It probes LM Studio (`localhost:1234`) and Ollama (`localhost:11434`) for chat and embedding models and looks for `claude`, `codex` and `copilot` on `PATH`, asking before it enables a subscription CLI (see [What `init` adds](#what-init-adds)). `--yes` enables them without asking; `--enable-cli claude,codex` enables only the ones named, without asking; `--no-cli` adds no subscription CLI connector. A file that still holds a built-in template, this release's or an earlier one's (as the router writes it on its first start, or an `init` that found nothing left it), is replaced; any other file only with `--force`, including a template whose embeddings someone changed. |
 | `semantic-router doctor` | Loads the configuration exactly as `run` would and checks it without calling a model. It prints the [machine-wide policy](enterprise.md), if an administrator set one, flags unresolved `${env:…}` references, tests the embeddings, and checks each HTTP connector (reachable, credentials accepted, configured model ids offered) and each CLI connector (installed, starts and, for Claude Code and Codex, signed in). No enabled model is a failure. Every failure says what to do: start LM Studio's server, the setting to change and where it is on the dashboard (for example *Providers → Connectors → openai → API key*), how to sign in. It also lists every host the router will contact with this configuration, for a firewall allowlist ([Allowing it through a firewall](network.md#allowing-it-through-a-firewall)). Exit code 1 when anything failed. |
 | `semantic-router models [connector]` | Asks every connector (or the one named) which models it offers, and prints them with their load state, context length and size, the catalog model that already uses each, and a suggested name, tier (and where it came from: the family table, the size or the name) and capabilities for the rest (see [Model lineups](providers.md#model-lineups-several-models-per-provider)). A `model-families.json` in the configuration directory adds or changes families. LM Studio and Ollama also say whether they load models on demand. Changes nothing; add models on the dashboard. |
 | `semantic-router service install\|uninstall\|start\|stop\|restart\|status` | Runs the router in the background whenever you sign in. See [Run it in the background](#run-it-in-the-background). |
@@ -99,7 +99,7 @@ While it runs, the router records its process id and addresses in `semantic-rout
 | `codex` on PATH | `codex-cli` (concurrency 1) and a tier-4 `codex` model. |
 | `copilot` on PATH | `copilot-cli` and a tier-4 `copilot` model, **disabled**: it spends your plan's premium requests, so you turn it on. |
 
-On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not used, because the router never starts a CLI through `cmd.exe`. Everything else (API-key providers, tiers, routes) is edited on the dashboard.
+On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not used, because the router never starts a CLI through `cmd.exe`; [CLIs on Windows](providers.md#clis-on-windows) says where each `.exe` comes from. Everything else (API-key providers, tiers, routes) is edited on the dashboard.
 
 **Subscription CLIs are enabled only on a yes.** A CLI connector answers with whatever account that CLI is signed in to, which on a work machine may be a personal plan under consumer terms (see [Using it at work](TERMS.md#using-it-at-work)). So `init` lists the `claude` and `codex` it found and asks about each one (`[y/N]`, no by default):
 
@@ -122,15 +122,27 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | | Default |
 |---|---|
 | Configuration directory | `SEMANTIC_ROUTER_HOME` if set; otherwise `%APPDATA%\semantic-router` (Windows), `~/Library/Application Support/semantic-router` (macOS) or `$XDG_CONFIG_HOME/semantic-router`, default `~/.config/semantic-router` (Linux). |
+| Local data directory | Where `semantic-router.db` (with its `-wal`, `-shm` and `.bak` files), `models/`, `logs/` and the desktop app's `webview/` live. The configuration directory, except on Windows with the default one: `%APPDATA%` roams, so they go to `%LOCALAPPDATA%\semantic-router` (see [Windows and roaming profiles](#windows-and-roaming-profiles)). |
 | `semantic-router.json` | The configuration. The dashboard's **Apply & save** writes it. |
 | `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. See [What the router stores](#what-the-router-stores). |
+| `semantic-router.db.v<N>.bak` | The state database as it was before an upgrade migrated it from schema `N`, so the release that wrote it can be started on it again. See [Upgrading and going back](#upgrading-and-going-back). |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [Keeping secrets out of the file](dashboard.md#keeping-secrets-out-of-the-file). |
 | `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [Routing quality](routing-quality.md). |
 | `semantic-router.instance.json` | The running router's process id, addresses, start time and version. Removed when it stops. |
-| `semantic-router.service.json`, `logs/` | Windows background service only: what the sign-in entry starts, and what it logs. |
-| `models/` | Downloaded ONNX embedding models, one directory per model. Copy a `models/{name}` directory here to run without internet access. |
+| `semantic-router.service.json`, `logs/` | Windows background service only: what the sign-in entry starts (in the configuration directory), and what it logs (in the local data directory). |
+| `models/` | Downloaded ONNX embedding models, one directory per model, in the local data directory. Copy a `models/{name}` directory there to run without internet access. |
 | `appsettings.json` (optional) | Host settings: logging, Kestrel, `SemanticRouter:Dashboard`, overrides. |
 | `semantic-router.host.json` (optional) | Where to listen (`Urls`), as **Admin → Service** saves it. Read right after `appsettings.json`, so environment variables and `--urls` still win. |
+
+### Windows and roaming profiles
+
+On Windows the default configuration directory, `%APPDATA%\semantic-router`, is in the **roaming** profile: a managed machine copies it to a server at every sign-out, or redirects it to a file share. That suits the configuration (`semantic-router.json`, `semantic-router.secrets.json`, `desktop.json`), which can follow you between machines. It does not suit the rest:
+- SQLite's write-ahead log does not work on a network file system, and the tray and the background service open the same database;
+- the downloaded models, the logs and the desktop window's WebView2 profile are tens to hundreds of MB that would be copied at every sign-in and sign-out.
+
+So these live in `%LOCALAPPDATA%\semantic-router`, which does not roam. A router started on an install from before moves them there and says so; a database another router still has open is moved on a later start, and used where it is until then. With `SEMANTIC_ROUTER_HOME` (or `--config-dir` naming another folder) everything stays in that one folder; if that folder is on a network drive, `doctor` warns, so point it at a local folder.
+
+The data-protection keys that decrypt the secrets file are ASP.NET Core's (see [The key ring](#the-key-ring)), not in either folder.
 
 ### What the router stores
 
@@ -142,6 +154,7 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | `semantic-router.db`, table `config_history` | Every applied configuration, with secrets masked, and who applied it | 200 versions (`State:Retention:ConfigurationVersions`) | Delete the file |
 | `semantic-router.db`, table `audit` | The [audit log](dashboard.md#audit-log): each change made through the dashboard or admin API, sign-in and sign-out, with when, who, the client's address, the request path and status, and a short summary; no request bodies, tokens or prompt text | 365 days (`State:Retention:AuditDays`); never changed, and not deleted by an activity purge or capped by the machine policy's `MaxRetentionDays` | Delete the file |
 | `semantic-router.db`, tables `cooldowns`, `affinity`, `warm_caches`, `tuning_changes` | Model cooldowns, which model issued each tool call (ids only), the size of each conversation's prompt cache per model (conversation hashes only), learned routing changes (which can include short utterances learned from prompt previews) | Until they expire, 24 hours, until they expire, until undone | Undo on **Router learned**, or delete the file |
+| `semantic-router.db.v<N>.bak` | The state database as it was before the last upgrade that migrated it: the same tables, including prompt previews, at mode 0600 | Until the next upgrade from the same schema replaces it | Delete the file once you will not go back |
 | `semantic-router.evaluation.jsonl` | Prompts you labelled, in full | Until you remove them | Edit or delete the file (the **Evaluate** page) |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted | Until removed from the configuration | Remove the key on the dashboard |
 | The data-protection key ring (see [The key ring](#the-key-ring)) | The keys that decrypt `semantic-router.secrets.json`; a new one every 90 days | Kept, so older secrets stay readable | Only with the secrets file: without its keys, the file cannot be read |
@@ -193,6 +206,37 @@ It is a host setting, read at start-up: put it in `appsettings.json` in the conf
 - **Existing secrets keep working.** ASP.NET Core reads each key as it was written, encrypted or not. At the next start the router adds a key encrypted to the certificate (or with DPAPI, for `SEMANTIC_ROUTER_KEYS_DIR` on Windows) and uses it from then on, and it re-encrypts each saved secret with that key when it reads it. The older keys stay in the folder, unencrypted, and `doctor` lists them. Once the router has started with the certificate they protect nothing it needs, and can be deleted, unless another ASP.NET Core app on your account uses the same folder.
 - **Keep the certificate.** Keys encrypted to it can be read only with its private key. Replace or lose it, and the secrets saved under those keys can no longer be decrypted: the router then treats them as missing, and you type them again on the dashboard. Its expiry date is not checked.
 - **Not the macOS Keychain or the Linux Secret Service.** .NET has no built-in access to either, and the packages that add it bring native dependencies or are not maintained. On a desktop, full-disk encryption (FileVault, BitLocker, LUKS) covers the key ring at rest; use a certificate where that is not enough.
+
+## Upgrading and going back
+
+Install the new version over the old one (`dotnet tool update -g SemanticRouter.Host`, a new image on the same volume, or the desktop app's own update) and restart the router. On its first start it brings the configuration directory up to date:
+
+- **The routing defaults.** `init` and the first start copy the whole built-in template into `semantic-router.json`: routes and their utterances, model aliases and defaults. When a newer release fixes the template, the router applies those fixes to your file wherever it still has the old template's value, and leaves alone everything you changed. A list of utterances combines: the template's new ones are added to yours, and the ones you removed stay removed. The start prints what changed, and **Configuration history** has it as an `upgrade` entry, with the version before it to roll back to. The file records its template as `"TemplateVersion"`, so this happens once.
+  - From 0.1.0–0.2.1 (template 1), for example: the `*opus*` alias becomes `auto` (with `opus-pinned` for asking for Opus), and the `quick-answers` route and new utterances are added.
+  - A setting you changed that the template changed too stays as yours; the history entry lists it under "Kept as you had them". Compare it with the template on the dashboard if you want the new default.
+- **The sample evaluation set** (`semantic-router.evaluation.jsonl`) is replaced by the current one while it still holds exactly the prompts an earlier `init` wrote. Once you have labelled or removed a prompt, it is yours and stays.
+- **The state database** (`semantic-router.db`) is migrated in place when the new version uses a newer schema; the log says so. Before it is changed, the file as it was is copied to `semantic-router.db.v<old schema>.bak` next to it. One copy is kept per schema; a later upgrade from the same schema replaces it.
+
+`semantic-router.secrets.json` and the key ring are read as they are: every release since 0.1.0 can still decrypt the secrets.
+
+| Release | State schema |
+|---|---|
+| 0.1.0 – 0.3.0 | 2 |
+| 0.4.0 – 0.5.0 | 3 |
+| The next release | 4 |
+
+**Going back to an older version.** A version can't use a state database that a newer one migrated: the schema is newer than it knows. From this version on, the router then doesn't start: it says which file it is, its schema, and where the copy from before the upgrade is (exit code 2, so a service manager doesn't restart it). `semantic-router doctor` reports it as `[FAIL] state:`. To go back:
+
+1. Stop the router.
+2. Move `semantic-router.db` aside, and remove any `semantic-router.db-wal` and `semantic-router.db-shm` next to it.
+3. Rename `semantic-router.db.v<N>.bak` to `semantic-router.db`, where `N` is the schema of the version you go back to.
+4. Start the older version.
+
+What was recorded since the upgrade (usage, activity, configuration history, the audit log) stays only in the file you moved aside; upgrading again with that file migrates it as before.
+
+Releases up to 0.5.0 don't refuse such a file: they log one warning and keep everything in memory, so budgets count from zero and the audit log is lost on restart. They leave the file untouched, so upgrading again brings it all back.
+
+**A database that can't be used for another reason** (a corrupt or locked file, a full disk) doesn't stop the router: it routes with its state in memory. That is listed with the configuration warnings in `GET /router/api/status`, on the dashboard, and as `[FAIL] state:` in `doctor`, because budgets then count from zero and nothing is kept past a restart.
 
 ## Listening beyond this machine
 

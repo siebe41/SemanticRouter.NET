@@ -133,6 +133,25 @@ test('a tool found on this machine comes first, once, and the other presets fold
   await expect(page.locator('#view .empty-state .choice')).toHaveText([/Claude Code/, /LM Studio/, /OpenAI/, /Blank connector/]);
 });
 
+test('a CLI found only as a script wrapper says what to do, with no Enable button, and keeps its preset', async ({ page, request }) => {
+  expect((await request.put('/router/api/config?persist=false', { data: empty })).ok()).toBeTruthy();
+  const codex = {
+    id: 'codex', title: 'Codex', kind: 'cli', detail: 'Found C:\\Users\\ada\\AppData\\Roaming\\npm\\codex.cmd', models: [],
+    problem: 'only a script wrapper was found (C:\\Users\\ada\\AppData\\Roaming\\npm\\codex.cmd). Install the native binary (codex.exe).',
+    connector: { name: 'codex-cli', settings: { Type: 'Cli', Preset: 'Codex' } },
+  };
+  const presetCodex = { ...codex, problem: undefined, detail: 'Your ChatGPT plan through the codex CLI' };
+  await page.route('**/router/api/setup', (r) => r.fulfill({ json: { ...SETUP, detected: [codex], presets: [...SETUP.presets, presetCodex] } }));
+  await open(page, 'overview');
+  const card = page.locator('#setup');
+  const found = card.locator('.choice', { hasText: 'codex.cmd' });
+  await expect(found).toContainText("can't be used as installed");
+  await expect(found).toContainText('Install the native binary (codex.exe)');
+  await expect(found.locator('[data-action="setup-choose"]')).toHaveCount(0);
+  await card.locator('details.advanced summary', { hasText: 'Other providers (3)' }).click();
+  await expect(card.locator('.choice', { hasText: 'Your ChatGPT plan' }).locator('[data-action="setup-choose"]')).toHaveText('Add');
+});
+
 test('the setup card lists the router\'s own presets, and a gateway refusal says where to fix it', async ({ page, request }) => {
   expects4xx.add(page); // the gateway refuses the Send with a 400
   const setup = await request.get('/router/api/setup');
@@ -394,4 +413,46 @@ test('in the desktop app the dashboard opens About and offers an update until No
   await expect(banner).toBeHidden();
   await page.evaluate(desktopState, { ...ready, offer: '0.7.0', headline: 'Version 0.7.0 is ready to install.' });
   await expect(banner).toContainText('Version 0.7.0');
+});
+
+// In the app window on a Mac there is no Edit menu, so WebKit does nothing with ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z: the page does
+// them (#210). Chromium on Linux does not act on ⌘ either, so it stands in for that web view here.
+test('on a Mac, the app window does the editing shortcuts itself', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => {
+    window.invokeCSharpAction = () => {};
+    Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' });
+  });
+  await open(page, 'overview');
+  await page.evaluate(() => {
+    for (const [id, type] of [['field', 'text'], ['secret', 'password']]) {
+      const input = Object.assign(document.createElement('input'), { id, type, value: 'sk-pasted-key' });
+      document.body.prepend(input);
+    }
+  });
+  const field = page.locator('#field');
+  const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
+
+  await field.focus();
+  await page.keyboard.press('Meta+a');
+  expect(await field.evaluate((e) => [e.selectionStart, e.selectionEnd])).toEqual([0, 13]);
+  await page.keyboard.press('Meta+c');
+  await expect.poll(clipboard).toBe('sk-pasted-key');
+
+  await field.evaluate((e) => e.setSelectionRange(13, 13));
+  await page.keyboard.press('Meta+v');
+  await expect(field).toHaveValue('sk-pasted-keysk-pasted-key');
+  await page.keyboard.press('Meta+z');
+  await expect(field).toHaveValue('sk-pasted-key');
+
+  await field.evaluate((e) => e.setSelectionRange(0, 3));
+  await page.keyboard.press('Meta+x');
+  await expect(field).toHaveValue('pasted-key');
+  await expect.poll(clipboard).toBe('sk-');
+
+  // A password field is not copied from.
+  await page.locator('#secret').focus();
+  await page.keyboard.press('Meta+a');
+  await page.keyboard.press('Meta+c');
+  expect(await clipboard()).toBe('sk-');
 });

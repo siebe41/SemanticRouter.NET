@@ -195,7 +195,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _atSignIn = new NativeMenuItem("Start at sign-in") { ToggleType = MenuItemToggleType.CheckBox, IsEnabled = _signIn is not null };
         _atSignIn.Click += (_, _) => ToggleSignIn();
         var logs = new NativeMenuItem("Show the log");
-        logs.Click += (_, _) => Shell.Open(Path.GetDirectoryName(RouterLog.FileIn(_directory))!);
+        logs.Click += (_, _) => Shell.Open(Path.GetDirectoryName(RouterLog.FileOf(options.Host))!);
         var configuration = new NativeMenuItem("Show the configuration folder");
         configuration.Click += (_, _) => Shell.Open(_directory);
         var settings = new NativeMenuItem("Settings…");
@@ -207,18 +207,43 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
 
         var tray = _tray = new TrayIcon
         {
-            Icon = _icon,
+            Icon = TrayIconImage(),
             ToolTipText = "SemanticRouter",
             Menu = [open, _setUp, _needs, _update, _week, _learned, new NativeMenuItemSeparator(), _status, _problem, _restart, new NativeMenuItemSeparator(), openIn, _inBackground, _atSignIn, _checkUpdates, _checkUpdatesNow, _applyOnQuit, logs, configuration, new NativeMenuItemSeparator(), settings, about, quit],
         };
+        if (OperatingSystem.IsMacOS())
+        {
+            // Drawn by macOS in the menu bar's own colours: light, dark, and highlighted while the menu is open.
+            MacOSProperties.SetIsTemplateIcon(tray, true);
+        }
+
         tray.Clicked += (_, _) => OpenDashboard();
         UpdateMenu();
         return tray;
     }
 
     /// <summary>
-    /// The application menu, which macOS shows in the menu bar while the dashboard window is in front (other
-    /// platforms do not show it): About, Check for updates now and Settings (⌘,), where a Mac app has them.
+    /// The tray icon: the app's pulse glyph without its dark tile, which nearly disappears on a dark menu bar or taskbar
+    /// (deploy/make-tray-icons.py makes them from the app icon). On macOS a black template image, at twice the menu
+    /// bar's size so it stays sharp on a Retina screen; on Windows an icon with every size the notification area uses.
+    /// Elsewhere the app's own tile, as tray hosts on Linux draw icons on many backgrounds.
+    /// </summary>
+    private WindowIcon TrayIconImage()
+    {
+        string? asset = OperatingSystem.IsMacOS() ? "tray-template@2x.png" : OperatingSystem.IsWindows() ? "tray.ico" : null;
+        if (asset is null)
+        {
+            return _icon;
+        }
+
+        using Stream stream = AssetLoader.Open(new Uri($"avares://SemanticRouter/Assets/{asset}"));
+        return new WindowIcon(stream);
+    }
+
+    /// <summary>
+    /// The application menu: About, Check for updates now and Settings (⌘,), where a Mac app has them. The app runs as a
+    /// menu-bar (accessory) app, which macOS gives no menu bar, so it is not shown today; the tray menu and the
+    /// dashboard's More have the same entries, and the dashboard does the editing shortcuts itself (desktop.js).
     /// </summary>
     private NativeMenu BuildApplicationMenu()
     {
@@ -268,7 +293,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         {
             // Started by hand and it failed: say why rather than leave only a tray icon behind.
             _openWhenReady = false;
-            Shell.Open(RouterLog.FileIn(_directory));
+            Shell.Open(RouterLog.FileOf(options.Host));
         }
     }
 
@@ -282,6 +307,8 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _restart.IsEnabled = !_switching
             && (_router.State is RouterState.Hosting or RouterState.Stopped or RouterState.Failed || (_router.State == RouterState.Attached && serviceOn));
         _inBackground.IsChecked = serviceOn;
+        string? otherProgram = _service.OtherProgram;
+        _inBackground.Header = RouterService.BackgroundLabel(otherProgram);
         _inBackground.IsEnabled = _service.Available && !_switching;
         DashboardSurface surface = EffectiveSurface;
         _inWindow.IsChecked = surface == DashboardSurface.Window;
@@ -304,7 +331,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         _about?.Updates.Show(updates);
         _settings?.Show(new SettingsState(
             _status.Header ?? string.Empty, _lastProblem, _restart.IsEnabled, serviceOn, _service.Available, _signIn?.IsEnabled() == true, _signIn is not null,
-            surface, Shell.WebViewAvailable, Shell.WebViewRequirement, _switching));
+            surface, Shell.WebViewAvailable, Shell.WebViewRequirement, _switching, otherProgram));
         _window?.Push(DesktopPageState.Of(updates, _updater.Offer, _downloadingUpdate));
         if (_tray is not null)
         {
@@ -507,7 +534,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             _openWhenReady = _router.State == RouterState.Starting;
             if (!_openWhenReady)
             {
-                Shell.Open(RouterLog.FileIn(_directory));
+                Shell.Open(RouterLog.FileOf(options.Host));
             }
 
             return;
@@ -522,7 +549,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
 
         if (_window is null)
         {
-            _window = new DashboardWindow(dashboard, Path.Combine(_directory, "webview"), _icon, _preferences.Window, placement =>
+            _window = new DashboardWindow(dashboard, Path.Combine(options.Host.LocalDataDirectory, "webview"), _icon, _preferences.Window, placement =>
             {
                 _preferences = _preferences with { Window = placement };
                 _preferences.Save(_directory);
@@ -562,7 +589,7 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             _settings.BackgroundChanged += on => _ = SetBackgroundAsync(on);
             _settings.SignInChanged += SetSignIn;
             _settings.SurfaceChanged += SetSurface;
-            _settings.ShowLogRequested += () => Shell.Open(Path.GetDirectoryName(RouterLog.FileIn(_directory))!);
+            _settings.ShowLogRequested += () => Shell.Open(Path.GetDirectoryName(RouterLog.FileOf(options.Host))!);
             _settings.ShowFolderRequested += () => Shell.Open(_directory);
             UpdateMenu();
         }

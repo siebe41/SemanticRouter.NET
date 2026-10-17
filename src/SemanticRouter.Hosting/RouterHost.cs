@@ -25,7 +25,7 @@ internal static partial class RouterHost
     /// <summary>Labelled prompts for the template's routes, written next to the configuration by <c>init</c>.</summary>
     public static string EvaluationTemplate() => Resource("semantic-router.evaluation.jsonl");
 
-    private static string Resource(string name)
+    internal static string Resource(string name)
     {
         using Stream stream = typeof(RouterHost).Assembly.GetManifestResourceStream(name)
             ?? throw new InvalidOperationException($"The embedded {name} is missing.");
@@ -91,9 +91,9 @@ internal static partial class RouterHost
             .UseConfigurationFile(settings.ConfigurationFile)
             .UseMachinePolicy()
             .UseSecretFile()
-            .AddOnnxEmbeddings()
+            .AddOnnxEmbeddings(onnx => onnx.ModelsDirectory ??= LocalData.ModelsDirectory(settings))
             .AddCopilotConnector()
-            .UseSqliteState(Path.Combine(settings.ConfigurationDirectory, HostSettings.StateFileName));
+            .UseSqliteState(LocalData.StateFile(settings));
 
         builder.Services.AddSingleton<IRouterSetupDetector, SetupDetector>(); // the dashboard's first-run setup finds what init would
         bool behindProxy = ConfigureForwardedHeaders(builder);
@@ -204,6 +204,12 @@ internal static partial class RouterHost
     public const int AddressInUseExitCode = 3;
 
     /// <summary>
+    /// The exit code when the state database was written by a newer release: the usage-error code, which a service
+    /// manager does not restart on either (a person has to choose between upgrading and the backup).
+    /// </summary>
+    public const int StateTooNewExitCode = 2;
+
+    /// <summary>
     /// Runs the router until it is stopped. With <paramref name="lifecycle"/>, the dashboard can restart it (it starts
     /// again in this process), stop it, or hand it over to the background service.
     /// </summary>
@@ -218,7 +224,17 @@ internal static partial class RouterHost
         IReadOnlyList<string>? previous = null;
         while (true)
         {
-            RunningRouter? router = await StartAsync(settings, output, build).ConfigureAwait(false);
+            RunningRouter? router;
+            try
+            {
+                router = await StartAsync(settings, output, build).ConfigureAwait(false);
+            }
+            catch (StateTooNewException ex)
+            {
+                await output.WriteLineAsync(ex.Message).ConfigureAwait(false);
+                return StateTooNewExitCode;
+            }
+
             if (router is null && previous is { Count: > 0 })
             {
                 // Restarted from the dashboard onto an address that is taken: listen where it did before, not nowhere.
@@ -257,9 +273,23 @@ internal static partial class RouterHost
     /// explaining it on <paramref name="output"/> when the address is already taken. Disposing the result stops it.
     /// </summary>
     /// <param name="environment">Reads environment variables (the API keys a container seeds connectors from); the process's by default.</param>
+    /// <exception cref="StateTooNewException">The state database was written by a newer release (usually after a downgrade).</exception>
     public static async Task<RunningRouter?> StartAsync(
         HostSettings settings, TextWriter output, Action<WebApplicationBuilder>? configure = null, Func<string, string?>? environment = null)
     {
+        // On Windows, an install from before keeps its state database, models and logs in the roaming profile: moved out.
+        if (LocalData.MoveFromConfigurationDirectory(settings) is { Count: > 0 } moved)
+        {
+            await output.WriteLineAsync($"Moved {string.Join(", ", moved)} from {settings.ConfigurationDirectory} to {settings.LocalDataDirectory}, which does not roam.").ConfigureAwait(false);
+        }
+
+        // Not started at all, rather than with budgets that count from zero and an audit log that is not kept: after a
+        // downgrade, the way back is the copy the upgrade made, and the message says where it is.
+        if (SqliteRouterDatabase.NewerSchemaProblem(LocalData.StateFile(settings)) is { } newer)
+        {
+            throw new StateTooNewException(newer);
+        }
+
         // Only the start that creates the file seeds connectors from the API keys: on a later start, a template without them
         // may be one someone deleted them from, and that must stick.
         if (!File.Exists(settings.ConfigurationFile))
@@ -270,7 +300,14 @@ internal static partial class RouterHost
             await output.WriteLineAsync(FirstRun.Describe(settings.ConfigurationFile, seeded)).ConfigureAwait(false);
         }
 
-        WebApplication app = Build(settings, configure);
+        // A file an earlier release wrote from its template gets the current template's fixes wherever it still has the
+        // earlier template's values; the history records what changed.
+        string? upgraded = await TemplateMigration.UpgradeFilesAsync(settings.ConfigurationFile, output).ConfigureAwait(false);
+        WebApplication app = Build(settings, upgraded is null ? configure : builder =>
+        {
+            builder.Services.AddSingleton(new StartupConfigurationNote(TemplateMigration.HistorySource, upgraded));
+            configure?.Invoke(builder);
+        });
         StartingQuietly starting = app.Services.GetRequiredService<StartingQuietly>();
         starting.On = true;
         try
@@ -495,6 +532,9 @@ internal static partial class RouterHost
         return uri.IsLoopback || (IPAddress.TryParse(uri.Host.Trim('[', ']'), out IPAddress? address) && IPAddress.IsLoopback(address));
     }
 }
+
+/// <summary>The state database was written by a newer release than this one, so the router does not start on it.</summary>
+internal sealed class StateTooNewException(string message) : InvalidOperationException(message);
 
 /// <summary>A started router: the web application and its instance record, removed when it is disposed.</summary>
 internal sealed class RunningRouter(WebApplication app, RouterInstance instance, string configurationDirectory, IDisposable? stopListener) : IAsyncDisposable

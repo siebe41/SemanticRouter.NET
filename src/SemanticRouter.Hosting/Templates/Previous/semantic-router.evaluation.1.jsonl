@@ -1,0 +1,93 @@
+# Labelled prompts for the starting routes: run them on the dashboard's Evaluate page or POST /router/api/evaluate.
+# One JSON object per line: prompt, the tier it should get, and optionally the route it should match.
+# Written in the style of chat and agentic-client turns (Claude Code, Codex); CI checks that the default ONNX
+# embeddings route at least 90% of them to their tier. Approvals ("go ahead") are labelled with the continuation
+# route's tier: in a conversation, the conversation's floor keeps them at the task's tier.
+{"prompt":"hey, how is it going?","tier":1,"route":"smalltalk"}
+{"prompt":"thank you so much, that helped","tier":1,"route":"smalltalk"}
+{"prompt":"good evening!","tier":1,"route":"smalltalk"}
+{"prompt":"what are you able to help me with?","tier":1,"route":"smalltalk"}
+{"prompt":"summarize this report in two sentences","tier":1,"route":"rewrite-summarize"}
+{"prompt":"translate this paragraph to German","tier":1,"route":"rewrite-summarize"}
+{"prompt":"rewrite this email so it sounds friendlier","tier":1,"route":"rewrite-summarize"}
+{"prompt":"fix the spelling mistakes in this text","tier":1,"route":"rewrite-summarize"}
+{"prompt":"write a regex that matches phone numbers","tier":2,"route":"simple-code"}
+{"prompt":"write unit tests for this helper function","tier":2,"route":"simple-code"}
+{"prompt":"convert this yaml file to json","tier":2,"route":"simple-code"}
+{"prompt":"write a bash one-liner that finds the largest files","tier":2,"route":"simple-code"}
+{"prompt":"design the architecture for a multi-region payment platform","tier":4,"route":"deep-reasoning"}
+{"prompt":"compare the trade-offs between microservices and a modular monolith","tier":4,"route":"deep-reasoning"}
+{"prompt":"evaluate the security risks of this login flow","tier":4,"route":"deep-reasoning"}
+{"prompt":"explain step by step how to shard this database","tier":4,"route":"deep-reasoning"}
+{"prompt":"debug this deadlock in my async code","tier":4,"route":"complex-code"}
+{"prompt":"find the memory leak in this background worker","tier":4,"route":"complex-code"}
+{"prompt":"review this pull request for concurrency bugs","tier":4,"route":"complex-code"}
+{"prompt":"optimize this slow SQL query","tier":4,"route":"complex-code"}
+{"prompt":"implement this feature and update every caller","tier":4,"route":"agentic-coding"}
+{"prompt":"fix the failing tests so the build passes","tier":4,"route":"agentic-coding"}
+{"prompt":"migrate the project to the new framework version","tier":4,"route":"agentic-coding"}
+{"prompt":"add an endpoint and wire it into the service layer","tier":4,"route":"agentic-coding"}
+{"prompt":"write a short title for this chat","tier":1,"route":"agent-housekeeping"}
+{"prompt":"summarize our conversation so far","tier":1,"route":"agent-housekeeping"}
+{"prompt":"describe what this shell command does","tier":1,"route":"agent-housekeeping"}
+{"prompt":"what is the capital of Australia?","tier":3}
+{"prompt":"recommend a good book about the history of Rome","tier":3}
+{"prompt":"how do vaccines train the immune system?","tier":3}
+{"prompt":"hi! quick question before we start","tier":1,"route":"smalltalk"}
+{"prompt":"thanks, that's perfect","tier":1,"route":"smalltalk"}
+{"prompt":"good night, talk tomorrow","tier":1,"route":"smalltalk"}
+{"prompt":"are you a bot?","tier":1,"route":"smalltalk"}
+{"prompt":"make this paragraph more concise","tier":1,"route":"rewrite-summarize"}
+{"prompt":"give me the key points of this meeting transcript","tier":1,"route":"rewrite-summarize"}
+{"prompt":"turn these notes into a polite email to the team","tier":1,"route":"rewrite-summarize"}
+{"prompt":"translate this message into Spanish","tier":1,"route":"rewrite-summarize"}
+{"prompt":"proofread this cover letter","tier":1,"route":"rewrite-summarize"}
+{"prompt":"generate a title for this session","tier":1,"route":"agent-housekeeping"}
+{"prompt":"summarize what we have done in this session for the next agent","tier":1,"route":"agent-housekeeping"}
+{"prompt":"explain in five words what this terminal command does","tier":1,"route":"agent-housekeeping"}
+{"prompt":"list the file names that were mentioned in the transcript","tier":1,"route":"agent-housekeeping"}
+{"prompt":"does this message start a new topic?","tier":1,"route":"agent-housekeeping"}
+{"prompt":"write a git commit message for this change","tier":1,"route":"agent-housekeeping"}
+{"prompt":"add type hints to this python function","tier":2,"route":"simple-code"}
+{"prompt":"write a SQL query that counts orders per customer","tier":2,"route":"simple-code"}
+{"prompt":"what does this error message mean: NullReferenceException","tier":2,"route":"simple-code"}
+{"prompt":"rename this method and its usages in this file","tier":2,"route":"simple-code"}
+{"prompt":"write a dockerfile for a small node app","tier":2,"route":"simple-code"}
+{"prompt":"add a comment explaining what this loop does","tier":2,"route":"simple-code"}
+{"prompt":"parse this CSV line in C#","tier":2,"route":"simple-code"}
+{"prompt":"write a jq filter that extracts the ids","tier":2,"route":"simple-code"}
+{"prompt":"format this JSON nicely","tier":2,"route":"simple-code"}
+{"prompt":"go ahead","tier":3,"route":"continuation"}
+{"prompt":"yes, proceed with the plan","tier":3,"route":"continuation"}
+{"prompt":"continue from where you stopped","tier":3,"route":"continuation"}
+{"prompt":"keep going","tier":3,"route":"continuation"}
+{"prompt":"looks good, implement it","tier":3,"route":"continuation"}
+{"prompt":"approved, carry on","tier":3,"route":"continuation"}
+{"prompt":"what is the difference between TCP and UDP?","tier":3}
+{"prompt":"explain how compound interest works","tier":3}
+{"prompt":"what should I pack for a week of hiking in Scotland?","tier":3}
+{"prompt":"why is the sky blue?","tier":3}
+{"prompt":"give me ideas for a team offsite","tier":3}
+{"prompt":"what are the pros and cons of electric cars?","tier":3}
+{"prompt":"how does a bill become law in the US?","tier":3}
+{"prompt":"suggest a weekly workout plan for a beginner","tier":3}
+{"prompt":"plan the data model for a multi-tenant analytics product","tier":4,"route":"deep-reasoning"}
+{"prompt":"assess the risks of moving our on-prem database to the cloud","tier":4,"route":"deep-reasoning"}
+{"prompt":"work out a strategy to make this system survive a full region outage","tier":4,"route":"deep-reasoning"}
+{"prompt":"prove that this scheduling algorithm always terminates","tier":4,"route":"deep-reasoning"}
+{"prompt":"weigh GraphQL against REST for our public API and recommend one","tier":4,"route":"deep-reasoning"}
+{"prompt":"threat-model our file upload feature","tier":4,"route":"deep-reasoning"}
+{"prompt":"this goroutine leaks under load, find out why","tier":4,"route":"complex-code"}
+{"prompt":"the service crashes with a stack overflow in production, investigate","tier":4,"route":"complex-code"}
+{"prompt":"why does this test pass locally but fail on CI intermittently?","tier":4,"route":"complex-code"}
+{"prompt":"profile this endpoint and make it twice as fast","tier":4,"route":"complex-code"}
+{"prompt":"untangle this class that does five things into smaller ones","tier":4,"route":"complex-code"}
+{"prompt":"track down why the cache returns stale data after a deploy","tier":4,"route":"complex-code"}
+{"prompt":"add pagination to the orders API and update the frontend that calls it","tier":4,"route":"agentic-coding"}
+{"prompt":"the build is broken after the dependency upgrade, get it green again","tier":4,"route":"agentic-coding"}
+{"prompt":"implement the export to CSV feature described in the issue","tier":4,"route":"agentic-coding"}
+{"prompt":"replace the old logging library with the new one across the repository","tier":4,"route":"agentic-coding"}
+{"prompt":"write end-to-end tests for the checkout flow and make them pass","tier":4,"route":"agentic-coding"}
+{"prompt":"split this service into two projects and fix all the references","tier":4,"route":"agentic-coding"}
+{"prompt":"add a feature flag around the new search and wire it through the UI","tier":4,"route":"agentic-coding"}
+{"prompt":"set up continuous integration for this repository","tier":4,"route":"agentic-coding"}

@@ -148,6 +148,10 @@ internal static class InitCommand
             await File.WriteAllTextAsync(evaluation, RouterHost.EvaluationTemplate(), cancellationToken).ConfigureAwait(false);
             await output.WriteLineAsync($"Wrote {evaluation}").ConfigureAwait(false);
         }
+        else if (TemplateMigration.UpgradeEvaluationSet(evaluation) is { } updated)
+        {
+            await output.WriteLineAsync(updated).ConfigureAwait(false);
+        }
 
         if (document.Models.Count > 0)
         {
@@ -314,7 +318,8 @@ internal static class InitCommand
             }
             else if (lookup.ScriptPath is not null)
             {
-                notes.Add($"{executable}: only a script wrapper was found ({lookup.ScriptPath}); install the native {executable}.exe to use it.");
+                notes.Add($"{executable}: only a script wrapper was found ({lookup.ScriptPath}); install the native {executable}.exe to use it" +
+                          (CliExecutableLocator.NativeWindowsInstall(executable) is { } install ? $" ({install})." : "."));
                 explained.Add(executable);
             }
         }

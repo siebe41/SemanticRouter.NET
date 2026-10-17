@@ -34,7 +34,8 @@ internal sealed class DesktopUpdater(
     IReadOnlyList<string>? hostArguments = null,
     UpdateApply apply = UpdateApply.Default,
     UpdatePublisher? publisher = null,
-    string? off = null)
+    string? off = null,
+    string? executable = null)
 {
     /// <summary>The argument the updated app is started with to start the service again, then carry on as usual.</summary>
     public const string ResumeService = "--resume-service";
@@ -57,7 +58,7 @@ internal sealed class DesktopUpdater(
         {
             // An administrator set a policy that cannot be read: do not update past it.
             log.WriteLine($"Updates are off: {ex.Message}");
-            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings), off: "your organization's policy cannot be read");
+            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings), off: "your organization's policy cannot be read", executable: Installation.Executable(environment));
         }
 
         bool variable = SourceVariableAllowed(policy);
@@ -70,7 +71,7 @@ internal sealed class DesktopUpdater(
         if (off is not null)
         {
             log.WriteLine($"Updates are off: {off}.");
-            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings), off: off);
+            return new DesktopUpdater(null, ServicePlatform.ForThisMachine(settings), log, HostArgumentsOf(settings), off: off, executable: Installation.Executable(environment));
         }
 
         UpdateManager? manager = null;
@@ -98,7 +99,8 @@ internal sealed class DesktopUpdater(
             HostArgumentsOf(settings),
             policy.Apply,
             UpdatePublisher.ForThisMachine(policy.Publisher),
-            broken);
+            broken,
+            Installation.Executable(environment));
     }
 
     /// <summary>The environment variable that points the updater at another feed, for testing.</summary>
@@ -315,7 +317,9 @@ internal sealed class DesktopUpdater(
     /// <summary>
     /// Hands the waiting update to the updater, which applies it once this process exits. The background service is
     /// stopped first; after the update it starts again: the app restarts with <see cref="ResumeService"/> when
-    /// <paramref name="restartApp"/>, otherwise the new version reinstalls and starts the service on its own.
+    /// <paramref name="restartApp"/>, otherwise the new version reinstalls and starts the service on its own. A service
+    /// that runs another program (the <c>semantic-router</c> tool, installed with <c>service install</c>) is not this
+    /// app's to stop or reinstall: the update does not replace that program, so it is left running as it is.
     /// Returns <see langword="false"/> when there was nothing to apply, or it was refused.
     /// </summary>
     private async Task<bool> ApplyAsync(bool restartApp)
@@ -327,6 +331,12 @@ internal sealed class DesktopUpdater(
         }
 
         bool serviceOn = platform?.IsInstalled() == true;
+        if (serviceOn && executable is not null && !platform!.Runs(executable))
+        {
+            log.WriteLine($"{Now} The background service runs {platform.InstalledProgram()}, not this app: the update leaves it as it is.");
+            serviceOn = false;
+        }
+
         if (serviceOn)
         {
             ServiceOutcome stopped = await platform!.StopAsync().ConfigureAwait(false);

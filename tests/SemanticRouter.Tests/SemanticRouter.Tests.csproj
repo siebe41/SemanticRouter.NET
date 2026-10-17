@@ -30,6 +30,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Configuration directories made by each release (tools/upgrade-fixtures), for UpgradeFromReleasedVersionsTests. -->
+    <None Include="..\fixtures\upgrade\*.zip" Link="fixtures\upgrade\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="FluentAssertions" />
   </ItemGroup>

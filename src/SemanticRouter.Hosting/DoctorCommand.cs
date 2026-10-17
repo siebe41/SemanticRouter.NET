@@ -40,7 +40,12 @@ internal static class DoctorCommand
                 IReadOnlyList<RouterCheck> egress = EgressList.For(app.Services, settings.ConfigurationDirectory);
                 IReadOnlyList<RouterCheck> router = await RouterDoctor.CheckAsync(app.Services).ConfigureAwait(false);
                 RouterCheck? models = ModelsCheck(app.Services.GetRequiredService<RouterRuntimeProvider>().Current.Configuration, settings);
-                checks = [.. HostChecks(app, settings), .. egress, .. models is null ? [] : new[] { models }, .. router.Where(c => models is null || !IsNoModelWarning(c))];
+                IStateStorageHealth? state = app.Services.GetService<IStateStorageHealth>();
+                checks =
+                [
+                    .. HostChecks(app, settings), .. state is null ? [] : new[] { StateCheck(state) }, .. egress, .. models is null ? [] : new[] { models },
+                    .. router.Where(c => (models is null || !IsNoModelWarning(c)) && !(c.Subject == "configuration" && c.Message == state?.Problem)),
+                ];
             }
             catch (InvalidOperationException ex)
             {
@@ -91,6 +96,17 @@ internal static class DoctorCommand
         return new RouterCheck("models", RouterCheckStatus.Failed,
             $"no model is enabled{(configuration.Models.Count > 0 ? $" ({configuration.Models.Count} configured, all disabled)" : string.Empty)}, so the router cannot answer any prompt. {fix}");
     }
+
+    /// <summary>
+    /// The state database: a router that cannot use it keeps budgets, usage and the audit log in memory only, so it fails
+    /// the check (the runtime's warning about it is left out, as this says the same).
+    /// </summary>
+    internal static RouterCheck StateCheck(IStateStorageHealth state) =>
+        state.Problem is { } problem ? new RouterCheck("state", RouterCheckStatus.Failed, problem)
+        : LocalData.OnNetworkPath(state.Location) ? new RouterCheck("state", RouterCheckStatus.Warning,
+            $"{state.Location} is on a network drive, where SQLite's write-ahead log is not safe when two processes (the tray and the background service) use it. " +
+            $"Set {HostSettings.HomeVariable} to a folder on this machine.")
+        : new RouterCheck("state", RouterCheckStatus.Ok, $"{state.Location}: budgets, usage, history and the audit log are kept.");
 
     /// <summary>The runtime's own warning about the same thing, which <see cref="ModelsCheck"/> replaces.</summary>
     private static bool IsNoModelWarning(RouterCheck check) =>

@@ -48,11 +48,13 @@ Independently of code signing, every installer, archive and update package has a
 
 ### Updates
 
-An installed app updates itself from GitHub Releases. It looks a minute after it starts and then twice a day, and downloads a new version in the background (only the changes when it can). The tray menu then offers **Restart to update to …**; otherwise the update is applied the next time you quit the app. When the background service runs, it is stopped for the update and started again with the new version, with the same configuration directory and options. **Check for updates automatically** in the tray menu turns the checks off (kept in `desktop.json`).
+An installed app updates itself from GitHub Releases. It looks a minute after it starts and then twice a day, and downloads a new version in the background (only the changes when it can). The tray menu then offers **Restart to update to …**; otherwise the update is applied the next time you quit the app. When the background service runs the app, it is stopped for the update and started again with the new version, with the same configuration directory and options; a service that runs the `semantic-router` tool is left alone ([a service the tool installed](#the-app-and-the-background-service)). **Check for updates automatically** in the tray menu turns the checks off (kept in `desktop.json`).
 
 **About SemanticRouter** (or **Check for updates now…** in the tray menu, which also checks at once) shows where updates stand: up to date and when it last checked, checking, a version ready to install or available, why a check or download failed, or why updates are off. Its **Check now** looks straight away, even with the automatic checks off; **Restart to update** and the two switches below are the tray menu's own.
 
-The dashboard in the app window says so too: a banner under the tabs when an update is ready or available, with **Restart to update** and **Not now** (which hides it until the next version), and while it downloads. **About SemanticRouter** is also under **More** at the foot of the dashboard's rail, and on macOS in the app menu (with **Check for Updates…**). In a web browser the dashboard shows neither: only the app window can reach the app.
+The dashboard in the app window says so too: a banner under the tabs when an update is ready or available, with **Restart to update** and **Not now** (which hides it until the next version), and while it downloads. **About SemanticRouter** is also under **More** at the foot of the dashboard's rail. In a web browser the dashboard shows neither: only the app window can reach the app.
+
+On macOS the app lives in the menu bar, with no Dock icon and no menu bar of its own, so **About SemanticRouter**, **Check for updates now…** and **Settings…** are in its menu-bar menu and under **More** on the dashboard. Without an Edit menu, macOS's web view would not act on ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z, so the dashboard in the app window handles them itself: copying, pasting (macOS may ask once to allow it), cutting, selecting all and undo work in its fields as usual.
 
 Untick **Install updates when quitting** to decide yourself: the app then only says a new version is available (in the tray menu, and once as a system notification) and downloads nothing until you choose **Restart to update to …**, which downloads it, applies it and starts the app again. Quitting never applies it.
 
@@ -66,7 +68,7 @@ An administrator can turn updates off, take them from an internal feed, make the
 
 ### Uninstall
 
-- **Windows:** **Settings → Apps → SemanticRouter → Uninstall** (or `%LOCALAPPDATA%\SemanticRouter\Update.exe uninstall`). It removes the background service and the app's sign-in entry first, then the program and the Start menu entry.
+- **Windows:** **Settings → Apps → SemanticRouter → Uninstall** (or `%LOCALAPPDATA%\SemanticRouter\Update.exe uninstall`). It removes the background service (unless it runs the `semantic-router` tool) and the app's sign-in entry first, then the program and the Start menu entry.
 - **macOS and Linux** have no uninstaller: turn off **Keep the router running in the background** and **Start at sign-in** in the tray menu (or run `SemanticRouter --uninstall-service`), quit, then delete `SemanticRouter.app` or the AppImage.
 
 The configuration directory (your configuration, the state database, the logs) stays; delete it yourself if you no longer want it (see [the tool's docs](host.md) for where it is).
@@ -108,7 +110,7 @@ The tray menu:
 | **Check for updates now…** | Installed app only: opens the Updates section of **About SemanticRouter** and checks at once. |
 | **Install updates when quitting** | Installed app only: whether a downloaded update is applied when you quit. Unticked, an update is only announced and applied when you choose **Restart to update**. Greyed out when your organization's policy makes updates notify-only. |
 | **Show the log**, **Show the configuration folder** | The router's log (`logs/semantic-router.log`) and its files. |
-| **Settings…** | The router's status and what last went wrong, **Restart router**, the background service, start at sign-in, where the dashboard opens, and **Show the log** / **Show the configuration folder**: the tray menu's settings in a window. Also under **More** on the dashboard (as **App settings**, in the app window) and in the macOS app menu (⌘,). |
+| **Settings…** | The router's status and what last went wrong, **Restart router**, the background service, start at sign-in, where the dashboard opens, and **Show the log** / **Show the configuration folder**: the tray menu's settings in a window. Also under **More** on the dashboard (as **App settings**, in the app window). |
 | **About SemanticRouter** | The version, where [updates](#updates) stand (with **Check now**, **Restart to update** and the update switches), and links to the GitHub repository, the documentation, issues, releases and the licence. |
 | **Quit SemanticRouter** | Stops the app's router and quits. |
 
@@ -126,6 +128,12 @@ The router can run in two places, and the app shows it either way:
 Switching hands the port over: the app stops its own router before the service starts, and starts it again when the service is removed. If the service cannot be set up (no systemd user session, for example), the app keeps running the router itself and the tray menu says why.
 
 If a router already runs for the configuration directory when the app starts (the service, or `semantic-router` in a terminal), the app uses it rather than competing for the port.
+
+**A service the tool installed.** The app and `semantic-router service install` set up the same service, so the app can sit in front of the tool's: the box is ticked, and its label names the program the service runs (`the service runs semantic-router`). The app treats that service as the tool's:
+- an app update leaves it alone, since the update does not replace the tool (update the tool with `dotnet tool update`);
+- uninstalling the app on Windows leaves it in place.
+
+Unticking the box still removes it, as `semantic-router service uninstall` would. Ticking it again installs the app's own service in its place.
 
 For scripts and installers, without the tray:
 

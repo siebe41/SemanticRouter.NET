@@ -82,3 +82,11 @@ public sealed class InMemoryRouterConfigurationHistory : IRouterConfigurationHis
         }
     }
 }
+
+/// <summary>
+/// A change the host made to the stored configuration before the router loaded it (an upgrade to a newer template),
+/// recorded with the start-up version in the configuration history.
+/// </summary>
+/// <param name="Source">The history entry's source, e.g. <c>upgrade</c>.</param>
+/// <param name="Note">What changed, in words.</param>
+internal sealed record StartupConfigurationNote(string Source, string Note);

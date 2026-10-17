@@ -54,8 +54,43 @@ internal sealed class SetupDetector(IServiceProvider services) : IRouterSetupDet
                 : Task.FromResult(Local(name, connector, models, notes)));
         }
 
-        return await Task.WhenAll(detections).ConfigureAwait(false);
+        return [.. await Task.WhenAll(detections).ConfigureAwait(false), .. ScriptOnly(found, probes)];
     }
+
+    /// <summary>
+    /// The CLIs installed only as a script wrapper (on Windows, npm's <c>.cmd</c> shims), which init leaves out with a
+    /// note: shown with what to do, so the setup does not just go without them. Not those the policy turns off.
+    /// </summary>
+    private static IEnumerable<SetupDetection> ScriptOnly(RouterConfiguration found, InitProbes probes)
+    {
+        foreach ((string executable, string connector, CliPreset preset) in new[]
+                 {
+                     ("claude", "claude-cli", CliPreset.ClaudeCode), ("codex", "codex-cli", CliPreset.Codex), ("copilot", "copilot-cli", CliPreset.GitHubCopilot),
+                 })
+        {
+            var options = new ConnectorOptions { Type = ConnectorType.Cli, Preset = preset };
+            if (found.Connectors.ContainsKey(connector) || probes.Policy?.Blocks(options) is not null
+                || CliExecutableLocator.Find(executable, probes.SearchPath, probes.Windows) is not { Found: false, ScriptPath: { } script } lookup)
+            {
+                continue;
+            }
+
+            (string id, string title) = Identify(connector, preset);
+            yield return new SetupDetection(id, title, "cli", connector, options)
+            {
+                Detail = $"Found {script}",
+                Problem = lookup.Problem(connector),
+            };
+        }
+    }
+
+    private static (string Id, string Title) Identify(string name, CliPreset? preset) => preset switch
+    {
+        CliPreset.ClaudeCode => ("claude-code", "Claude Code"),
+        CliPreset.Codex => ("codex", "Codex"),
+        CliPreset.GitHubCopilot => ("copilot-cli", "GitHub Copilot CLI"),
+        _ => (name, name),
+    };
 
     private static SetupDetection Local(string name, ConnectorOptions connector, ModelDefinition[] models, List<string> notes)
     {
@@ -80,13 +115,7 @@ internal sealed class SetupDetector(IServiceProvider services) : IRouterSetupDet
         string executable = CliAdapter.For(connector.Preset).DefaultExecutable;
         string? path = CliExecutableLocator.Find(executable, probes.SearchPath, probes.Windows).Path;
         string detail = path is null ? executable : await SetupApi.DescribeCliAsync(executable, path, connector, runner, cancellationToken).ConfigureAwait(false);
-        (string id, string title) = connector.Preset switch
-        {
-            CliPreset.ClaudeCode => ("claude-code", "Claude Code"),
-            CliPreset.Codex => ("codex", "Codex"),
-            CliPreset.GitHubCopilot => ("copilot-cli", "GitHub Copilot CLI"),
-            _ => (name, name),
-        };
+        (string id, string title) = Identify(name, connector.Preset);
 
         // init adds Copilot switched off because it spends premium requests; here the person enables it after reading
         // the consent text, which says so.

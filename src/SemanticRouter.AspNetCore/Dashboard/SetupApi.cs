@@ -41,6 +41,12 @@ public sealed record SetupDetection(string Id, string Title, string Kind, string
 
     /// <summary>Model aliases that go with it (client model name to target), e.g. Claude Code's model names.</summary>
     public IReadOnlyDictionary<string, string> Aliases { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// Why it was found but cannot be used as it is, and what to do: a CLI installed only as a script wrapper (an npm
+    /// <c>.cmd</c> shim on Windows), which the router never starts. Such a detection cannot be enabled.
+    /// </summary>
+    public string? Problem { get; init; }
 }
 
 /// <summary>

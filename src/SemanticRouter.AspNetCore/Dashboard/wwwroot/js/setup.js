@@ -65,6 +65,13 @@ const KIND = { cli: 'your sign-in', local: 'this machine', cloud: 'cloud API', c
 
 /* One detected tool or preset, with what enabling it means. */
 function choice(c, detected) {
+  if (c.problem) {
+    // Found, but not in a form the router starts (an npm .cmd shim on Windows): what to do instead of an Enable button.
+    return `<li class="choice">
+    <div class="choice-text"><b>${h(c.title)}</b> <span class="badge warn">can't be used as installed</span>
+      ${c.detail ? `<div class="small muted">${h(c.detail)}</div>` : ''}<div class="small">${h(c.problem)}</div></div>
+  </li>`;
+  }
   const added = setup().added.includes(c.id);
   const key = c.keyVariable ? `<span class="mono">${h(c.keyVariable)}</span>` : 'its API key variable';
   const note = [c.consent ? h(c.consent) : '',
@@ -86,7 +93,8 @@ export function presetList(blank) {
   const s = setup();
   if (!s.data) { loadSetup(); return '<p class="muted small">Looking for providers on this machine…</p>'; }
   const detected = s.data.detected || [];
-  const found = (p) => detected.some((d) => d.id === p.id || (d.id === 'copilot-cli' && p.id === 'copilot'));
+  // A tool found in a form that cannot be used keeps its preset, to add it by hand once the .exe is there.
+  const found = (p) => detected.some((d) => !d.problem && (d.id === p.id || (d.id === 'copilot-cli' && p.id === 'copilot')));
   const presets = (s.data.presets || []).filter((p) => !found(p));
   const blankEntry = blank ? `<li class="choice"><div class="choice-text"><b>Blank connector</b><div class="small muted">Any OpenAI-compatible server, the Anthropic API or a CLI, set up by hand.</div></div><button class="btn small" data-action="connector-add">Add</button></li>` : '';
   const others = `<ul class="choices">${presets.map((c) => choice(c, false)).join('')}${blankEntry}</ul>`;

@@ -70,6 +70,100 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void A_migration_keeps_a_copy_of_the_file_the_older_release_can_open()
+    {
+        CreateVersion1File();
+
+        SqliteRouterDatabase database = Open();
+
+        database.Available.Should().BeTrue();
+        database.Problem.Should().BeNull();
+        string backup = SqliteRouterDatabase.BackupFile(DbPath, 1);
+        File.Exists(backup).Should().BeTrue();
+        SqliteRouterDatabase.StoredSchemaVersion(backup).Should().Be(1, "the copy is the file as it was before the migration");
+        SqliteRouterDatabase.StoredSchemaVersion(DbPath).Should().Be(SqliteRouterDatabase.SchemaVersion);
+        using (var connection = new SqliteConnection($"Data Source={backup};Mode=ReadOnly;Pooling=False"))
+        {
+            connection.Open();
+            using SqliteCommand count = connection.CreateCommand();
+            count.CommandText = "SELECT COUNT(*) FROM usage;";
+            Convert.ToInt64(count.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture).Should().Be(1);
+            using SqliteCommand columns = connection.CreateCommand();
+            columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('usage') WHERE name = 'profile';";
+            Convert.ToInt64(columns.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture).Should().Be(0, "the copy keeps the old schema");
+        }
+
+        File.Exists(backup + ".tmp").Should().BeFalse();
+        _logs.All.Should().Contain($"migrated from schema 1 to {SqliteRouterDatabase.SchemaVersion}").And.Contain(backup);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.GetUnixFileMode(backup).Should().Be(UnixFileMode.UserRead | UnixFileMode.UserWrite, "the copy holds prompt previews too");
+        }
+    }
+
+    [Fact]
+    public void A_new_or_current_database_is_not_copied()
+    {
+        Open().Available.Should().BeTrue();
+        SqliteConnection.ClearAllPools();
+        Open().Available.Should().BeTrue();
+
+        Directory.GetFiles(_directory, "*.bak").Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_database_from_a_newer_release_is_left_as_it_is_and_reported()
+    {
+        CreateVersion1File(version: SqliteRouterDatabase.SchemaVersion + 1);
+        byte[] before = File.ReadAllBytes(DbPath);
+
+        SqliteRouterDatabase.NewerSchemaProblem(DbPath).Should()
+            .Contain($"written by a newer SemanticRouter (state schema {SqliteRouterDatabase.SchemaVersion + 1}; this version reads schema {SqliteRouterDatabase.SchemaVersion} and older)")
+            .And.Contain("No copy from before the upgrade was found");
+        SqliteRouterDatabase database = Open();
+
+        database.Available.Should().BeFalse();
+        database.Problem.Should().Contain($"state schema {SqliteRouterDatabase.SchemaVersion + 1}").And.Contain("budgets count from zero").And.Contain("audit log");
+        SqliteConnection.ClearAllPools();
+        File.ReadAllBytes(DbPath).Should().Equal(before, "nothing is written to a file this release does not understand");
+        Directory.GetFiles(_directory).Should().ContainSingle("no copy is made and no WAL is started");
+
+        File.WriteAllBytes(SqliteRouterDatabase.BackupFile(DbPath, SqliteRouterDatabase.SchemaVersion), before);
+        SqliteRouterDatabase.NewerSchemaProblem(DbPath).Should().Contain($"move {SqliteRouterDatabase.BackupFile(DbPath, SqliteRouterDatabase.SchemaVersion)} (the copy made before the upgrade) to {DbPath}");
+    }
+
+    [Fact]
+    public void A_database_that_cannot_be_used_says_so_and_what_it_means()
+    {
+        File.WriteAllBytes(DbPath, Encoding.UTF8.GetBytes(new string('x', 4096)));
+
+        SqliteRouterDatabase database = Open();
+
+        database.Problem.Should().StartWith($"The router's state database {DbPath} cannot be used (").And.Contain("budgets count from zero");
+        SqliteRouterDatabase.NewerSchemaProblem(DbPath).Should().BeNull("a broken file is not a newer one");
+        SqliteRouterDatabase.NewerSchemaProblem(Path.Combine(_directory, "none.db")).Should().BeNull();
+        SqliteConnection.ClearAllPools();
+        File.Delete(DbPath);
+    }
+
+    private void CreateVersion1File(int version = 1)
+    {
+        using var connection = new SqliteConnection($"Data Source={DbPath};Pooling=False");
+        connection.Open();
+        using SqliteCommand create = connection.CreateCommand();
+        create.CommandText = $"""
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO meta (key, value) VALUES ('schema_version', '{version}');
+            CREATE TABLE usage (
+                timestamp_ticks INTEGER NOT NULL, model TEXT NOT NULL, connector TEXT NOT NULL, route TEXT, client TEXT,
+                is_local INTEGER NOT NULL, input INTEGER NOT NULL, output INTEGER NOT NULL, cache_read INTEGER NOT NULL,
+                cache_write INTEGER NOT NULL, cost TEXT NOT NULL, reference_cost TEXT NOT NULL);
+            INSERT INTO usage VALUES (1, 'old', 'c', NULL, NULL, 0, 10, 5, 0, 0, '0.1', '0.1');
+            """;
+        create.ExecuteNonQuery();
+    }
+
+    [Fact]
     public void Configuration_history_written_with_keys_in_plain_text_is_masked_once()
     {
         var history = new SqliteConfigurationHistory(Open());
