@@ -1,0 +1,70 @@
+name: Gateway benchmark
+
+# The router's own latency, throughput and memory in front of a stub backend, and how it handles faults
+# (benchmarks/SemanticRouter.Benchmarks/Gateway). Shared runners are noisy, so on pull requests the short run only
+# reports: regressions against benchmarks/gateway-baseline.json are warnings, and the job never blocks a merge. The
+# nightly run adds a soak and the fault scenarios, which fail the run when the gateway drifts or mishandles a fault.
+
+on:
+  pull_request:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gateway:
+    name: gateway (${{ github.event_name == 'pull_request' && 'short' || 'soak and faults' }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', '**/packages.lock.json', 'global.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore --locked-mode
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Short run
+        if: github.event_name == 'pull_request'
+        run: |
+          set -o pipefail
+          dotnet run -c Release --no-build --project benchmarks/SemanticRouter.Benchmarks -- \
+            gateway --quick --baseline benchmarks/gateway-baseline.json --json gateway.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Latency, soak and faults
+        if: github.event_name != 'pull_request'
+        run: |
+          set -o pipefail
+          dotnet run -c Release --no-build --project benchmarks/SemanticRouter.Benchmarks -- \
+            gateway --latency --soak 300 --faults --baseline benchmarks/gateway-baseline.json --json gateway.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # The results, to compare runs or to refresh the baseline from (copy the latency rows of a nightly run).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: gateway-benchmark
+          path: gateway.json
+          if-no-files-found: ignore
