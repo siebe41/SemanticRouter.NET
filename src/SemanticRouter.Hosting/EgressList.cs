@@ -12,8 +12,11 @@ internal static class EgressList
 {
     public const string Subject = "egress";
 
-    /// <summary>The hosts GitHub Releases updates come from.</summary>
-    public const string UpdateHosts = "api.github.com, github.com and objects.githubusercontent.com";
+    /// <summary>
+    /// The hosts GitHub Releases updates come from: the API, and the release download, which redirects to
+    /// <c>release-assets.githubusercontent.com</c> (<c>objects.githubusercontent.com</c> for older assets).
+    /// </summary>
+    public const string UpdateHosts = "api.github.com, github.com, release-assets.githubusercontent.com and objects.githubusercontent.com";
 
     /// <summary>
     /// Lists the destinations. Call it before the embeddings check, which may download the ONNX model.
@@ -152,7 +155,7 @@ internal static class EgressList
 
                 return policy.Refuses(model.ModelUrl) is { } refused
                     ? ($"ONNX model {model.Name} is not in {directory} and is not downloaded ({refused}): place model.onnx and vocab.txt there", true)
-                    : ($"{model.ModelUrl.Host}, once, to download ONNX model {model.Name} into {directory} (copy it there to skip the download)", false);
+                    : ($"{OnnxEmbeddingModels.DownloadHosts}, once, to download ONNX model {model.Name} into {directory} (copy it there to skip the download)", false);
             case EmbeddingProviderKind.Hashing:
                 return ("Hashing, on this machine; nothing is sent", false);
             default:

@@ -96,7 +96,7 @@ public static class OnnxModelDownloader
                 ? "its TLS certificate is not trusted here: " + tls.Message.TrimEnd('.')
                 : ex.Message.TrimEnd('.');
             throw new HttpRequestException(
-                $"Could not download {Path.GetFileName(path)} from {url.Host} ({reason}). Behind a proxy, set HTTPS_PROXY; if the proxy inspects TLS, " +
+                $"Could not download {Path.GetFileName(path)} from {Hosts(url)} ({reason}). Behind a proxy, set HTTPS_PROXY; if the proxy inspects TLS, " +
                 $"set SemanticRouter:Network:CaBundle to its root certificate. Or download {url} on a machine that can, and copy it to {path} " +
                 $"(SHA-256 {sha256}); or set Embeddings:ModelPath to a folder holding model.onnx and vocab.txt.",
                 ex, ex.StatusCode);
@@ -109,6 +109,10 @@ public static class OnnxModelDownloader
             }
         }
     }
+
+    /// <summary>The hosts a download from <paramref name="url"/> reaches, for messages: Hugging Face redirects to its CDN.</summary>
+    private static string Hosts(Uri url) =>
+        string.Equals(url.Host, "huggingface.co", StringComparison.OrdinalIgnoreCase) ? OnnxEmbeddingModels.DownloadHosts : url.Host;
 
     private static async Task<string> HashAsync(string path, CancellationToken cancellationToken)
     {

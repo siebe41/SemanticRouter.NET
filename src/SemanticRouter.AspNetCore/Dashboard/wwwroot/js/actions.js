@@ -199,12 +199,16 @@ export const actions = {
     if (here || page === state.view) render(); else location.hash = '#/' + page;
   },
   async 'activity-purge'() {
-    const ok = await ask({ title: 'Delete every activity entry?', body: '<p>With their prompt previews. This cannot be undone; usage, budgets and the configuration history are kept.</p>', actions: [{ label: 'Delete all activity', value: true, kind: 'danger' }, { label: 'Cancel', value: false, focus: true }] });
+    const ok = await ask({ title: 'Delete every activity entry?', body: '<p>With their prompt previews, the feedback about them, the prompts learned changes quote as examples and the latest connector error messages. This cannot be undone; usage, budgets and the configuration history are kept.</p>', actions: [{ label: 'Delete all activity', value: true, kind: 'danger' }, { label: 'Cancel', value: false, focus: true }] });
     if (!ok) return;
     const result = await api('DELETE', '/activity');
     state.activity = [];
     render();
-    toast(`Deleted ${result.removed} activity entries.`, 'ok');
+    if (result.complete === false) {
+      toast(`Deleted ${result.removed} activity entries, but another program reading the state file (a second router, an open dashboard) kept a copy in its write-ahead log. Close it and delete again to remove that copy.`, 'danger');
+    } else {
+      toast(`Deleted ${result.removed} activity entries.`, 'ok');
+    }
   },
   'activity-show'() { state.activityNew = 0; render(); },
   async 'memory-refresh'() { await loadMemory(true); },
