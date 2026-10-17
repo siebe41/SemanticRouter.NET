@@ -18,7 +18,7 @@ switch (settings.Command)
         Console.WriteLine(Help());
         return 0;
 
-    case "init":
+    case "init" when settings.Error is null:
     {
         using var http = new HttpClient();
         // It asks before enabling a subscription CLI only at a terminal; scripted, it leaves them disabled.
@@ -64,14 +64,14 @@ static string Help() => $"""
 
     Usage:
       semantic-router [run] [options]   Start the router and the dashboard (default http://localhost:5080).
-      semantic-router init [--force] [--yes | --no-cli]
+      semantic-router init [--force] [--yes | --enable-cli <names> | --no-cli]
                                         Write a starting configuration with the models found on this machine
                                         (LM Studio, Ollama, and the claude / codex / copilot CLIs on PATH).
                                         It asks before enabling each subscription CLI, since that CLI answers
                                         on whatever account it is signed in to (at work, see
                                         {SiteLinks.WorkUse}); without a terminal they are added
-                                        disabled. A file that still holds the built-in template is replaced
-                                        without --force.
+                                        disabled unless --yes or --enable-cli says otherwise. A file that still
+                                        holds the built-in template is replaced without --force.
       semantic-router doctor            Check every connector, model and the embeddings, and list every host the
                                         router will contact. Exit code 1 on failure.
       semantic-router models [name]     List the models each connector (or the one named) offers: loaded or not,
@@ -97,7 +97,10 @@ static string Help() => $"""
                            needs a dashboard token for remote dashboard use; see {SiteLinks.DashboardAccess}.
       --no-detect          init: write the template without probing this machine.
       --yes, -y            init: enable the claude and codex CLIs it finds without asking.
-      --no-cli             init: add no subscription CLI connectors (claude, codex, copilot).
+      --enable-cli <names> init: enable only the CLIs named, without asking, e.g. --enable-cli claude,codex
+                           (claude, codex, copilot); the others it finds are added disabled.
+      --no-cli             init: add no subscription CLI connectors (claude, codex, copilot). Wins over
+                           --yes and --enable-cli.
       --SemanticRouter:<key>=<value>
                            Override any setting, like the SemanticRouter__<key> environment variables.
 

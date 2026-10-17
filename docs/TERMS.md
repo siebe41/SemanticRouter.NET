@@ -115,7 +115,7 @@ GitHub's official **Copilot SDK** (NuGet `GitHub.Copilot.SDK`, generally availab
 - The Gemini CLI [terms page](https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/tos-privacy.md) says: "Directly accessing the services powering Gemini CLI … using third-party software, tools, or services … is a violation of applicable terms and policies."
 - The [FAQ](https://github.com/google-gemini/gemini-cli/blob/main/docs/resources/faq.md) says: "If you would like to use a third-party coding agent with Gemini, the supported and secure method is to use a Vertex AI or Google AI Studio API key."
 
-Use the **Gemini API** with a key through the `OpenAICompatible` connector instead (see [providers.md](providers.md#google-gemini-api)).
+Use the **Gemini API** with a key through the `OpenAICompatible` connector instead (see [Google Gemini API](providers.md#google-gemini-api)).
 
 ## Session reuse and long-lived processes
 

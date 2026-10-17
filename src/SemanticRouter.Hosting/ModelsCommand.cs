@@ -101,7 +101,8 @@ internal static class ModelsCommand
                 $"{(model.ParametersBillions is { } b ? b.ToString("0.#", CultureInfo.InvariantCulture) + "B" : "-"),6}  {catalog}").ConfigureAwait(false);
             if (entry.InCatalog is null && entry.Suggestion is not null)
             {
-                await output.WriteLineAsync($"  {string.Empty.PadRight(width)}  ↳ {entry.Reason}").ConfigureAwait(false);
+                // Plain words rather than an arrow glyph, which a screen reader reads out by name.
+                await output.WriteLineAsync($"  {string.Empty.PadRight(width)}  why: {entry.Reason}").ConfigureAwait(false);
             }
         }
     }

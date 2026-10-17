@@ -29,7 +29,7 @@ SemanticRouter 0.3.0 is listening on http://localhost:5080
   OpenAI clients: base URL http://localhost:5080/v1, model "auto"
 ```
 
-The Claude Code line sets its variables for that one command, so it changes nothing else in your shell. `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is the smallest context window among your enabled tool-capable models; the line leaves it out when one of them has no `ContextWindow`. On Windows the lines use PowerShell (`Invoke-RestMethod`, and `$env:` variables for the session). [clients.md](clients.md#claude-code) explains each variable, and the Codex and SDK setups.
+The Claude Code line sets its variables for that one command, so it changes nothing else in your shell. `CLAUDE_CODE_MAX_CONTEXT_TOKENS` is the smallest context window among your enabled tool-capable models; the line leaves it out when one of them has no `ContextWindow`. On Windows the lines use PowerShell (`Invoke-RestMethod`, and `$env:` variables for the session). [Connecting Claude Code](clients.md#claude-code) explains each variable, and the Codex and SDK setups.
 
 While no model is enabled, the banner says so instead, with a link to the setup on the dashboard's Overview (`http://localhost:5080/router#/overview`): it lists the CLIs and local servers it finds and the providers you can add, and adds them for you.
 
@@ -42,8 +42,8 @@ The console shows the router's own lines: one per request (the tier it needed, t
 | Command | What it does |
 |---|---|
 | `semantic-router` (or `run`) | Starts the router and the dashboard. Creates the configuration file from the built-in template on first run (no models yet). |
-| `semantic-router init [--force] [--no-detect] [--yes \| --no-cli]` | Writes a starting configuration. It probes LM Studio (`localhost:1234`) and Ollama (`localhost:11434`) for chat and embedding models and looks for `claude`, `codex` and `copilot` on `PATH`, asking before it enables a subscription CLI (see [What `init` adds](#what-init-adds)). `--yes` enables them without asking; `--no-cli` adds no subscription CLI connector. A file that still holds the built-in template (as the router writes it on its first start, or an `init` that found nothing left it) is replaced; any other file only with `--force`, including a template whose embeddings someone changed. |
-| `semantic-router doctor` | Loads the configuration exactly as `run` would and checks it without calling a model. It prints the [machine-wide policy](enterprise.md), if an administrator set one, flags unresolved `${env:…}` references, tests the embeddings, and checks each HTTP connector (reachable, credentials accepted, configured model ids offered) and each CLI connector (installed, starts and, for Claude Code and Codex, signed in). No enabled model is a failure. Every failure says what to do: start LM Studio's server, the setting to change and where it is on the dashboard (for example *Providers → Connectors → openai → API key*), how to sign in. It also lists every host the router will contact with this configuration, for a firewall allowlist ([network.md](network.md#allowing-it-through-a-firewall)). Exit code 1 when anything failed. |
+| `semantic-router init [--force] [--no-detect] [--yes \| --enable-cli <names> \| --no-cli]` | Writes a starting configuration. It probes LM Studio (`localhost:1234`) and Ollama (`localhost:11434`) for chat and embedding models and looks for `claude`, `codex` and `copilot` on `PATH`, asking before it enables a subscription CLI (see [What `init` adds](#what-init-adds)). `--yes` enables them without asking; `--enable-cli claude,codex` enables only the ones named, without asking; `--no-cli` adds no subscription CLI connector. A file that still holds the built-in template (as the router writes it on its first start, or an `init` that found nothing left it) is replaced; any other file only with `--force`, including a template whose embeddings someone changed. |
+| `semantic-router doctor` | Loads the configuration exactly as `run` would and checks it without calling a model. It prints the [machine-wide policy](enterprise.md), if an administrator set one, flags unresolved `${env:…}` references, tests the embeddings, and checks each HTTP connector (reachable, credentials accepted, configured model ids offered) and each CLI connector (installed, starts and, for Claude Code and Codex, signed in). No enabled model is a failure. Every failure says what to do: start LM Studio's server, the setting to change and where it is on the dashboard (for example *Providers → Connectors → openai → API key*), how to sign in. It also lists every host the router will contact with this configuration, for a firewall allowlist ([Allowing it through a firewall](network.md#allowing-it-through-a-firewall)). Exit code 1 when anything failed. |
 | `semantic-router models [connector]` | Asks every connector (or the one named) which models it offers, and prints them with their load state, context length and size, the catalog model that already uses each, and a suggested name, tier (and where it came from: the family table, the size or the name) and capabilities for the rest (see [Model lineups](providers.md#model-lineups-several-models-per-provider)). A `model-families.json` in the configuration directory adds or changes families. LM Studio and Ollama also say whether they load models on demand. Changes nothing; add models on the dashboard. |
 | `semantic-router service install\|uninstall\|start\|stop\|restart\|status` | Runs the router in the background whenever you sign in. See [Run it in the background](#run-it-in-the-background). |
 | `semantic-router --version`, `--help` | |
@@ -104,11 +104,12 @@ On Windows only the native `.exe` counts. An npm `.cmd` shim is reported and not
 | How `init` runs | `claude-cli` and `codex-cli` |
 |---|---|
 | At a terminal | Asked about one by one. Yes: added enabled, as in the table above. No: added with every model disabled, so you can turn them on later on the dashboard's **Models** page. When nothing else was found (no LM Studio or Ollama with a model), the question says that without a yes the router has no model to use. |
-| Without a terminal (input or output redirected: a script, CI, an installer) | Added with every model disabled, with a note saying how to enable them. |
+| Without a terminal (input or output redirected: a script, CI, an installer) | Added with every model disabled. A line where the questions would have been says so, and how to choose: `--yes`, `--enable-cli` or `--no-cli`. |
 | `--yes` | Added enabled without asking. |
-| `--no-cli` | Not added. Neither is `copilot-cli`. |
+| `--enable-cli <names>` | The CLIs named (comma-separated: `claude`, `codex`, `copilot`) are added enabled without asking; the others found are added disabled. It wins over `--yes`. A name that is not on `PATH` is reported. |
+| `--no-cli` | Not added. Neither is `copilot-cli`. It wins over `--yes` and `--enable-cli`. |
 
-`copilot-cli` is never asked about: it is always added disabled, as above.
+`copilot-cli` is never asked about: it is added disabled, as above, unless `--enable-cli` names it.
 
 After writing the file, `init` prints what it added, with a one-line legend of the tiers, and the next step: with a model enabled, `doctor` and the one-line Claude Code command (as in the banner); with none, the dashboard's setup (`http://localhost:5080/router#/overview`), or starting LM Studio's server or Ollama and running `init` again.
 
@@ -121,8 +122,8 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | Configuration directory | `SEMANTIC_ROUTER_HOME` if set; otherwise `%APPDATA%\semantic-router` (Windows), `~/Library/Application Support/semantic-router` (macOS) or `$XDG_CONFIG_HOME/semantic-router`, default `~/.config/semantic-router` (Linux). |
 | `semantic-router.json` | The configuration. The dashboard's **Apply & save** writes it. |
 | `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. See [What the router stores](#what-the-router-stores). |
-| `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [dashboard.md](dashboard.md#keeping-secrets-out-of-the-file). |
-| `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [routing-quality.md](routing-quality.md). |
+| `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [Keeping secrets out of the file](dashboard.md#keeping-secrets-out-of-the-file). |
+| `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [Routing quality](routing-quality.md). |
 | `semantic-router.instance.json` | The running router's process id, addresses, start time and version. Removed when it stops. |
 | `semantic-router.service.json`, `logs/` | Windows background service only: what the sign-in entry starts, and what it logs. |
 | `models/` | Downloaded ONNX embedding models, one directory per model. Copy a `models/{name}` directory here to run without internet access. |
@@ -194,8 +195,8 @@ It is a host setting, read at start-up: put it in `appsettings.json` in the conf
 
 The tool binds to `http://localhost:5080`. With `--urls http://0.0.0.0:5080` (or any non-loopback address) it prints what that changes:
 
-- **Subscription CLI connectors still answer only local requests.** Remote callers fall through to API-key or local models ([TERMS.md](TERMS.md)).
-- **The dashboard refuses remote callers** until you set `SemanticRouter:Dashboard:AdminToken` and `RequireLocalClient: false` ([dashboard.md](dashboard.md#access-and-security)).
+- **Subscription CLI connectors still answer only local requests.** Remote callers fall through to API-key or local models ([Subscription CLI terms](TERMS.md)).
+- **The dashboard refuses remote callers** until you set `SemanticRouter:Dashboard:AdminToken` and `RequireLocalClient: false` ([Access and security](dashboard.md#access-and-security)).
 - **The gateway refuses other machines** with `401` until you set `SemanticRouter:Middleware:GatewayKeys`. Each client then sends its key as its API key (`ANTHROPIC_AUTH_TOKEN`, `OPENAI_API_KEY`), and its name shows in Activity. Without this, anyone who can reach the port could spend your API keys. Clients on this machine need no key unless `RequireGatewayKeyForLocalClients` is on.
 
 `semantic-router doctor` reports the same.
@@ -254,8 +255,8 @@ ROUTER_ADMIN_TOKEN=$(openssl rand -hex 24) ROUTER_GATEWAY_KEY=$(openssl rand -he
 - The image is Ubuntu chiseled: no shell or package manager, so `docker exec … sh` does not work. Use `docker cp` to read or replace files on the volume, and `docker logs` for the log. Base images are pinned by digest and scanned before each release.
 - Keep API keys in the environment and refer to them from the configuration: `"ApiKey": "${env:OPENAI_API_KEY}"`.
 - A model server on the host machine is `http://host.docker.internal:1234` (LM Studio) or `:11434` (Ollama).
-- Behind a proxy that inspects TLS, mount its root certificate and set `SemanticRouter__Network__CaBundle` to it; the image cannot run `update-ca-certificates`. See [network.md](network.md#proxies-and-certificates).
+- Behind a proxy that inspects TLS, mount its root certificate and set `SemanticRouter__Network__CaBundle` to it; the image cannot run `update-ca-certificates`. See [Proxies and certificates](network.md#proxies-and-certificates).
 
-**Subscription CLI connectors do not work in a container.** The image has no vendor CLIs, and the CLIs' logins on your machine must not be copied or mounted into one: the router never handles vendor credentials ([TERMS.md](TERMS.md), rule 2). Run the dotnet tool on the machine itself for those.
+**Subscription CLI connectors do not work in a container.** The image has no vendor CLIs, and the CLIs' logins on your machine must not be copied or mounted into one: the router never handles vendor credentials ([Subscription CLI terms](TERMS.md), rule 2). Run the dotnet tool on the machine itself for those.
 
-Images are published as `ghcr.io/siebe41/semantic-router:<version>` when a version tag is pushed, signed with keyless cosign and with provenance and SBOM attestations: [releases.md](releases.md#check-the-container-image) shows how to verify one. To build one yourself: `docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router .`
+Images are published as `ghcr.io/siebe41/semantic-router:<version>` when a version tag is pushed, signed with keyless cosign and with provenance and SBOM attestations: [Check the container image](releases.md#check-the-container-image) shows how to verify one. To build one yourself: `docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router .`

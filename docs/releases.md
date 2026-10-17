@@ -7,7 +7,7 @@ Every release on [GitHub Releases](https://github.com/siebe41/SemanticRouter.NET
 | Asset | What it is |
 |---|---|
 | `SHA256SUMS` | The SHA-256 checksum of every other asset. |
-| `SemanticRouter-<version>-<platform>.zip` / `.tar.gz`, the installers, the update feed (`releases.<channel>.json`, `*-full.nupkg`, `*-delta.nupkg`) | The desktop app ([desktop.md](desktop.md)). |
+| `SemanticRouter-<version>-<platform>.zip` / `.tar.gz`, the installers, the update feed (`releases.<channel>.json`, `*-full.nupkg`, `*-delta.nupkg`) | The desktop app ([Desktop app](desktop.md)). |
 | `SemanticRouter.*.<version>.nupkg` | The NuGet packages and the `semantic-router` tool, exactly as pushed to nuget.org. |
 | `SemanticRouter-<version>-packages.cdx.json` | CycloneDX SBOM of the NuGet packages and the tool. |
 | `SemanticRouter-<version>-desktop.cdx.json` | CycloneDX SBOM of the desktop app, for every platform (the archives and installers ship the same app). |
@@ -85,7 +85,7 @@ The SBOMs are [CycloneDX](https://cyclonedx.org/) JSON, generated with [Syft](ht
 
 For the maintainer. A release is published by one workflow run, which only the repository owner can start:
 
-1. **Optional:** rename **Unreleased** in [CHANGELOG.md](../CHANGELOG.md) to `[<version>] - <date>` in a pull request, and merge it. The release notes are that section; without it, they are the Unreleased section.
+1. **Optional:** rename **Unreleased** in the [changelog](../CHANGELOG.md) to `[<version>] - <date>` in a pull request, and merge it. The release notes are that section; without it, they are the Unreleased section.
 2. Wait for CI to pass on `main`'s latest commit.
 3. **Actions > Cut a release > Run workflow**, on `main`, with the version (`0.3.0`: three numbers, no `v`).
 4. Approve the `release` environment when asked (if it requires a reviewer), once for this run and once for the release run it starts.
@@ -106,13 +106,13 @@ Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag st
 - **The `release` environment:**
   - If you limit its deployment branches and tags, allow both `main` (where "Cut a release" runs) and `v*` tags (where the release runs).
   - Add yourself as a required reviewer to approve each release before anything is published.
-- **`NUGET_USER`** and the signing settings, or `ALLOW_UNSIGNED_RELEASE`, as described in [Code signing](#code-signing) and [desktop.md](desktop.md#signing).
+- **`NUGET_USER`** and the signing settings, or `ALLOW_UNSIGNED_RELEASE`, as described in [Code signing](#code-signing) and [Signing the desktop app](desktop.md#signing).
 
 ## Code signing
 
 Windows SmartScreen and macOS Gatekeeper check a publisher's code signature, not these attestations. Provenance shows where a file came from; it does not stop the warnings on first start.
 
-The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([desktop.md](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true`; until the signing certificates exist, that variable is what lets a release through, and those installers are unsigned. The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before anything is uploaded.
+The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([Signing the desktop app](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true`; until the signing certificates exist, that variable is what lets a release through, and those installers are unsigned. The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before anything is uploaded.
 
 To check an installer you downloaded:
 

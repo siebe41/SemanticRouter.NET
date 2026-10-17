@@ -16,6 +16,9 @@ internal sealed record HostSettings
     public const string StateFileName = "semantic-router.db";
     public const string DefaultUrl = "http://localhost:5080";
 
+    /// <summary>The subscription CLIs <c>init</c> looks for, by executable name: what <c>--enable-cli</c> takes.</summary>
+    public static readonly IReadOnlyList<string> CliNames = ["claude", "codex", "copilot"];
+
     /// <summary>What <c>semantic-router service</c> can do.</summary>
     public static readonly IReadOnlyList<string> ServiceActions = ["install", "uninstall", "start", "stop", "restart", "status"];
 
@@ -36,6 +39,12 @@ internal sealed record HostSettings
 
     /// <summary><c>init</c>: add no subscription CLI connectors.</summary>
     public bool NoCli { get; init; }
+
+    /// <summary>
+    /// <c>init --enable-cli claude,codex</c>: enable just these of the CLIs it finds, without asking (names from
+    /// <see cref="CliNames"/>); <see langword="null"/> when not given.
+    /// </summary>
+    public IReadOnlySet<string>? EnableCli { get; init; }
 
     /// <summary><c>models</c>: the one connector to list; <see langword="null"/> lists them all.</summary>
     public string? Connector { get; init; }
@@ -72,6 +81,7 @@ internal sealed record HostSettings
         bool force = false, noDetect = false, yes = false, noCli = false, dryRun = false, noWait = false;
         var hostArguments = new List<string>();
         string? error = null;
+        HashSet<string>? enableCli = null;
 
         for (int i = 0; i < args.Count; i++)
         {
@@ -99,6 +109,17 @@ internal sealed record HostSettings
                 case "--no-cli":
                     noCli = true;
                     break;
+                case "--enable-cli":
+                    if (i + 1 >= args.Count || args[i + 1].StartsWith('-'))
+                    {
+                        error = "--enable-cli needs the CLIs to enable, e.g. --enable-cli claude,codex.";
+                    }
+                    else
+                    {
+                        enableCli = ParseCliNames(args[++i], enableCli, ref error);
+                    }
+
+                    break;
                 case "--dry-run" when command == "service":
                     dryRun = true;
                     break;
@@ -120,6 +141,10 @@ internal sealed record HostSettings
                     if (arg.StartsWith("--config-dir=", StringComparison.Ordinal))
                     {
                         directory = arg["--config-dir=".Length..];
+                    }
+                    else if (arg.StartsWith("--enable-cli=", StringComparison.Ordinal))
+                    {
+                        enableCli = ParseCliNames(arg["--enable-cli=".Length..], enableCli, ref error);
                     }
                     else if (i == 0 && !arg.StartsWith('-'))
                     {
@@ -157,6 +182,7 @@ internal sealed record HostSettings
             NoDetect = noDetect,
             Yes = yes,
             NoCli = noCli,
+            EnableCli = enableCli,
             Connector = connector,
             ServiceAction = serviceAction,
             DryRun = dryRun,
@@ -165,6 +191,34 @@ internal sealed record HostSettings
             HostArguments = hostArguments,
             Error = error,
         };
+    }
+
+    /// <summary>
+    /// The CLIs in a comma-separated <c>--enable-cli</c> value, added to <paramref name="names"/> (the option may be
+    /// given more than once). Sets <paramref name="error"/> for an empty list or a name that is not in <see cref="CliNames"/>.
+    /// </summary>
+    private static HashSet<string> ParseCliNames(string value, HashSet<string>? names, ref string? error)
+    {
+        names ??= new HashSet<string>(StringComparer.Ordinal);
+        string[] given = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (given.Length == 0)
+        {
+            error ??= "--enable-cli needs the CLIs to enable, e.g. --enable-cli claude,codex.";
+        }
+
+        foreach (string name in given)
+        {
+            if (CliNames.FirstOrDefault(n => string.Equals(n, name, StringComparison.OrdinalIgnoreCase)) is { } known)
+            {
+                names.Add(known);
+            }
+            else
+            {
+                error ??= $"Unknown CLI '{name}' for --enable-cli. Use {string.Join(", ", CliNames)}.";
+            }
+        }
+
+        return names;
     }
 
     /// <summary>

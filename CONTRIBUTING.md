@@ -1,8 +1,8 @@
 # Contributing
 
-Thanks for helping. Bug reports, fixes and documentation changes are welcome as issues and pull requests. For a larger change, open an issue first so the approach can be agreed before you write it; planned work is in [docs/roadmap.md](docs/roadmap.md).
+Thanks for helping. Bug reports, fixes and documentation changes are welcome as issues and pull requests. For a larger change, open an issue first so the approach can be agreed before you write it; planned work is in the [roadmap](docs/roadmap.md).
 
-Who maintains the project, how decisions are made and who can release is in [GOVERNANCE.md](GOVERNANCE.md).
+Who maintains the project, how decisions are made and who can release is in [Governance](GOVERNANCE.md).
 
 ## Reporting routing quality
 
@@ -26,7 +26,7 @@ SEMANTIC_ROUTER_FUZZ_ITERATIONS=5000 SEMANTIC_ROUTER_FUZZ_SEED=42 dotnet test --
 
 A failure lists each distinct crash site with the seed, the iteration and the body that caused it.
 
-Builds send no telemetry from Avalonia: [`Directory.Build.targets`](Directory.Build.targets) replaces its build-telemetry target, so you don't need `AVALONIA_TELEMETRY_OPTOUT`. The .NET SDK has its own; set `DOTNET_CLI_TELEMETRY_OPTOUT=1` to turn it off. [docs/network.md](docs/network.md) lists what the router itself contacts.
+Builds send no telemetry from Avalonia: [`Directory.Build.targets`](Directory.Build.targets) replaces its build-telemetry target, so you don't need `AVALONIA_TELEMETRY_OPTOUT`. The .NET SDK has its own; set `DOTNET_CLI_TELEMETRY_OPTOUT=1` to turn it off. [Network traffic](docs/network.md) lists what the router itself contacts.
 
 Every pull request runs CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): build, test and pack on Linux, Windows and macOS, the dashboard end-to-end tests, the installers, the container image, a secret scan of the git history, a check for NuGet packages with known vulnerabilities and the formatting check. The README's [Building and testing](README.md#building-and-testing) section says what each check does and how to run it locally.
 
@@ -39,7 +39,7 @@ Every pull request runs CI ([`.github/workflows/ci.yml`](.github/workflows/ci.ym
 
 ## Changelog
 
-[CHANGELOG.md](CHANGELOG.md) lists every user-visible change. If your pull request changes what someone using the packages, the tool, the container image or the desktop app sees (a setting, an endpoint, a default, a fix to behaviour they could notice, a security fix), add one line under **Unreleased**, in the right group:
+The [changelog](CHANGELOG.md) lists every user-visible change. If your pull request changes what someone using the packages, the tool, the container image or the desktop app sees (a setting, an endpoint, a default, a fix to behaviour they could notice, a security fix), add one line under **Unreleased**, in the right group:
 
 - **Security** for anything that changes what can be read, reached or run, or by whom;
 - **Added**, **Changed** or **Fixed** for the rest.
@@ -78,4 +78,4 @@ There is no contributor licence agreement and no DCO sign-off (`Signed-off-by`) 
 
 ## Security issues
 
-Do not report vulnerabilities in public issues or pull requests. Follow [SECURITY.md](SECURITY.md) and use GitHub's private vulnerability reporting.
+Do not report vulnerabilities in public issues or pull requests. Follow the [security policy](SECURITY.md) and use GitHub's private vulnerability reporting.

@@ -169,7 +169,7 @@ Any server with `POST /v1/chat/completions` works the same way. Set `BaseAddress
 
 ## Claude Code CLI
 
-Uses your own Claude subscription. **Read [TERMS.md](TERMS.md#anthropic-claude-code) first.** In short: personal, local use, with the unmodified binary and your own login.
+Uses your own Claude subscription. **Read [Claude Code's terms](TERMS.md#anthropic-claude-code) first.** In short: personal, local use, with the unmodified binary and your own login.
 
 1. Install Claude Code. On Windows use the native installer, so that `claude.exe` is on `PATH`.
 2. Run `claude` once and sign in with `/login`.
@@ -206,7 +206,7 @@ Your user-level Claude settings (for example `~/.claude/CLAUDE.md`) still apply.
 
 ## GitHub Copilot CLI
 
-Uses your Copilot plan's AI credits. See [TERMS.md](TERMS.md#github-copilot-cli).
+Uses your Copilot plan's AI credits. See [Copilot CLI's terms](TERMS.md#github-copilot-cli).
 
 1. Install the Copilot CLI (`npm install -g @github/copilot`, or a native package; on Windows make sure `copilot.exe` is on `PATH` or set `Executable`).
 2. Sign in once with `copilot login`.
@@ -225,7 +225,7 @@ The preset runs `copilot -s --no-color --stream off --no-ask-user --deny-tool=sh
 
 ## GitHub Copilot SDK
 
-Uses your Copilot plan through GitHub's official [Copilot SDK](https://github.com/github/copilot-sdk) (`GitHub.Copilot.SDK`), the supported way for an application to use a person's Copilot subscription. Prefer it to the CLI preset above: replies stream, the client's tools are real tool calls instead of text in a prompt, usage is reported, and **Discover** lists the models your account can use. See [TERMS.md](TERMS.md#github-copilot-sdk).
+Uses your Copilot plan through GitHub's official [Copilot SDK](https://github.com/github/copilot-sdk) (`GitHub.Copilot.SDK`), the supported way for an application to use a person's Copilot subscription. Prefer it to the CLI preset above: replies stream, the client's tools are real tool calls instead of text in a prompt, usage is reported, and **Discover** lists the models your account can use. See [Copilot SDK's terms](TERMS.md#github-copilot-sdk).
 
 1. Install the Copilot CLI (`npm install -g @github/copilot`). The SDK runs it as its runtime.
 2. Sign in once with `copilot` and `/login`, or with `gh auth login`.
@@ -249,7 +249,7 @@ Uses your Copilot plan through GitHub's official [Copilot SDK](https://github.co
 
 ## OpenAI Codex CLI
 
-Uses your ChatGPT plan. See [TERMS.md](TERMS.md#openai-codex-cli).
+Uses your ChatGPT plan. See [Codex CLI's terms](TERMS.md#openai-codex-cli).
 
 1. Install Codex (`npm install -g @openai/codex`).
 2. Sign in with `codex login`, choosing "Sign in with ChatGPT".
@@ -262,7 +262,7 @@ Uses your ChatGPT plan. See [TERMS.md](TERMS.md#openai-codex-cli).
 ]
 ```
 
-- **Command line.** The preset runs `codex exec --json --sandbox read-only --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules --color never -c features.shell_tool=false -c web_search="disabled" -c check_for_update_on_startup=false -c analytics.enabled=false -c otel.metrics_exporter="none" [-m …] -`, with the prompt on stdin. The last three keep a run from checking for updates or sending analytics and metrics to OpenAI (see [network.md](network.md)).
+- **Command line.** The preset runs `codex exec --json --sandbox read-only --skip-git-repo-check --ephemeral --ignore-user-config --ignore-rules --color never -c features.shell_tool=false -c web_search="disabled" -c check_for_update_on_startup=false -c analytics.enabled=false -c otel.metrics_exporter="none" [-m …] -`, with the prompt on stdin. The last three keep a run from checking for updates or sending analytics and metrics to OpenAI (see [Network traffic](network.md)).
 - **Billing.** It removes `CODEX_API_KEY`, which would otherwise take precedence and bill the API instead of your plan.
 - **Limits.** "You've hit your usage limit" is treated as a quota error.
 - **Concurrency.** Keep `MaxConcurrency` at 1. OpenAI's guidance for ChatGPT-login automation is one machine or a serialized job stream per login.
@@ -338,7 +338,7 @@ Anthropic only caches what a request marks with `cache_control`. Claude Code mar
 - **Only above the model's cacheable minimum:** 4,096 estimated tokens on Opus 4.5 and 4.6 and Haiku 4.5, 512 on other models. A shorter prompt gets no markers.
 - **`CacheTtl`:** `5m` (default) or `1h`, on both markers. Writing a one-hour entry costs twice the input price instead of 1.25 times, so it only pays off when turns are often more than five minutes apart. [Conversation routing](routing-quality.md#conversations) counts the cache warm for the same time (for an Anthropic client's own markers, their longest `ttl`).
 
-The first turn above the minimum pays the cache-write price on its prompt; later turns read it. The activity entry and the Usage page show the reads and writes ([observability.md](observability.md)). A request from an Anthropic client that the router rebuilds keeps that client's own markers, and the router adds none. Set `PromptCaching: Off` for an Anthropic-compatible server that rejects `cache_control`.
+The first turn above the minimum pays the cache-write price on its prompt; later turns read it. The activity entry and the Usage page show the reads and writes ([Usage, budgets and observability](observability.md)). A request from an Anthropic client that the router rebuilds keeps that client's own markers, and the router adds none. Set `PromptCaching: Off` for an Anthropic-compatible server that rejects `cache_control`.
 
 ## Google Gemini API
 
@@ -353,7 +353,7 @@ The first turn above the minimum pays the cache-write price on its prompt; later
 ]
 ```
 
-Put your AI Studio key in `ApiKey`. The Gemini **CLI** is not supported; [TERMS.md](TERMS.md#google-gemini-cli-deliberately-not-included) explains why.
+Put your AI Studio key in `ApiKey`. The Gemini **CLI** is not supported; [Subscription CLI terms](TERMS.md#google-gemini-cli-deliberately-not-included) explains why.
 
 ## Azure OpenAI
 
@@ -393,7 +393,7 @@ Agentic clients (Claude Code, Codex CLI, agent frameworks) send every turn with 
 | `Cli` with `ToolCalling: None` (default) | Skipped; the request falls through to the next candidate. |
 | `Cli` with `ToolCalling: Prompted` | The tools are described in the system prompt with a fixed call format; the CLI's reply is parsed for fenced `tool_call-<token>` blocks, which become structured tool calls for the client. Earlier tool calls and results are rendered into the transcript of the next run. Declare `tools` on the model to make it a candidate. |
 
-Prompted tool calling keeps the CLI text-in/text-out (the vendor CLI's own tools stay disabled; the **client** runs the tools), so it fits the design rules in [TERMS.md](TERMS.md). It costs more than native tool use: every turn re-sends the whole context, there is no prompt caching, and it depends on the model following the format, which frontier models do and small ones often do not.
+Prompted tool calling keeps the CLI text-in/text-out (the vendor CLI's own tools stay disabled; the **client** runs the tools), so it fits the design rules in [Subscription CLI terms](TERMS.md). It costs more than native tool use: every turn re-sends the whole context, there is no prompt caching, and it depends on the model following the format, which frontier models do and small ones often do not.
 
 Across a tool-calling turn the router pins follow-up requests (those carrying tool results) to the model that issued the calls (`Middleware:PinToolCallingTurns`), so a turn never changes models halfway.
 
@@ -422,7 +422,7 @@ Across a tool-calling turn the router pins follow-up requests (those carrying to
   | buffered | 2 (answer after the tool result) | 2936 ms | 2939 ms | 392 |
   | streaming | 2 | 1594 ms | 2924 ms | 392 |
 
-  Total time and input tokens do not change: every turn still starts a CLI process and re-sends the transcript. [TERMS.md](TERMS.md#session-reuse-and-long-lived-processes) explains why session reuse and long-lived processes are not used. Real CLIs start more slowly and write longer replies than the simulation, so the gain in time to first output is larger. Run the benchmark against your own models to see it.
+  Total time and input tokens do not change: every turn still starts a CLI process and re-sends the transcript. [Session reuse and long-lived processes](TERMS.md#session-reuse-and-long-lived-processes) explains why session reuse and long-lived processes are not used. Real CLIs start more slowly and write longer replies than the simulation, so the gain in time to first output is larger. Run the benchmark against your own models to see it.
 
 ### Forged tool calls
 

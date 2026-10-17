@@ -6,5 +6,20 @@
     "paid": "Then the session limit hit. Instead of stopping, the last two sessions moved to a paid API. That's the only money actually spent today.",
     "saved": "Compared with running the whole day on a frontier model through its API, this is what routing saved. And the overview keeps a running total for the week.",
     "end": "Semantic Router dot net. Spend frontier money only where it counts. It's open source, and MIT licensed."
+  },
+  "onScreen": {
+    "local": [
+      "16 quick questions answered on this machine: a local model, free, no Claude limits used."
+    ],
+    "subscription": [
+      "$18.59 of Claude use, at API prices: 3 agent sessions, 250 requests, 24M tokens in the day, included in your subscription."
+    ],
+    "paid": [
+      "$0.73 actually spent: 2 agent sessions after Claude's session limit, on paid-api-deepseek-chat-v3, 73 requests."
+    ],
+    "saved": [
+      "$42.14 saved: $42.86 if all 339 requests went to Opus through its API, minus $0.73 spent (Usage:ReferenceModel).",
+      "The Overview, this week: 339 prompts routed, 5% served locally (16), $42.14 saved against claude-opus-api, $0.7256 spent, $18.59 of subscription use at API prices."
+    ]
   }
 }

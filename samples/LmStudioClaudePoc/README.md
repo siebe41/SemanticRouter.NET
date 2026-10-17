@@ -85,7 +85,7 @@ Keep using Claude Code as before, pointed at the router:
 ANTHROPIC_BASE_URL=http://localhost:5090 ANTHROPIC_AUTH_TOKEN=semantic-router claude --model semantic-router
 ```
 
-`--model semantic-router` is the router's own name for `auto`, so Claude Code shows that the router picks the model. Every turn is routed on your latest message: easy and private ones go to LM Studio, hard ones to Claude. The `claude-cli` connector has `ToolCalling: Prompted`, so Claude Code's tool-bearing turns can land on your subscription too: the router describes Claude Code's tools to the inner `claude -p` run, parses the tool call it answers with, and hands it back to your Claude Code, which runs the tool. If your LM Studio model supports function calling (e.g. `qwen3-coder`), add `"tools"` to the `lmstudio` model's capabilities and easy agentic turns stay local. See [docs/clients.md](../../docs/clients.md).
+`--model semantic-router` is the router's own name for `auto`, so Claude Code shows that the router picks the model. Every turn is routed on your latest message: easy and private ones go to LM Studio, hard ones to Claude. The `claude-cli` connector has `ToolCalling: Prompted`, so Claude Code's tool-bearing turns can land on your subscription too: the router describes Claude Code's tools to the inner `claude -p` run, parses the tool call it answers with, and hands it back to your Claude Code, which runs the tool. If your LM Studio model supports function calling (e.g. `qwen3-coder`), add `"tools"` to the `lmstudio` model's capabilities and easy agentic turns stay local. See [Connect your tools](../../docs/clients.md).
 
 Then send requests (`poc.http` has more examples):
 
@@ -161,4 +161,4 @@ Nothing directly. The router runs your installed `claude` binary, which uses its
 - runs every request in an empty temporary folder, with Claude Code's tools disabled;
 - only listens on `localhost`, and only answers local callers through the CLI.
 
-See [docs/TERMS.md](../../docs/TERMS.md) for why it is built this way and how that relates to Anthropic's terms.
+See [Subscription CLI terms](../../docs/TERMS.md) for why it is built this way and how that relates to Anthropic's terms.

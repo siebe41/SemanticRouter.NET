@@ -1,6 +1,6 @@
 # Architecture
 
-How a request moves through the router, how configuration reloads without dropping requests, and where to plug in your own code. For setup and options see the [README](../README.md), [providers.md](providers.md) and [dashboard.md](dashboard.md).
+How a request moves through the router, how configuration reloads without dropping requests, and where to plug in your own code. For setup and options see the [README](../README.md), [Provider setup](providers.md) and [Dashboard](dashboard.md).
 
 ## Projects
 
@@ -9,8 +9,8 @@ How a request moves through the router, how configuration reloads without droppi
 | `SemanticRouter.Core` | nothing | Vector math, token estimator, complexity heuristics, the route index, `DefaultRouteSelector`, `DefaultModelSelector`, `ModelHealthTracker`, `PromptRouter`, and the option types (`SemanticRouterOptions`, `RouteDefinition`, `ModelDefinition`, `TierDefinition`). Zero package references, AOT-compatible. |
 | `SemanticRouter.AspNetCore` | Core, ASP.NET Core | Everything that touches HTTP and processes: the middleware and dispatcher, the three wire protocols, connectors, the runtime and configuration store, the dashboard and its embedded assets. |
 | `SemanticRouter.Hosting` | AspNetCore, Storage.Sqlite, Embeddings.Onnx, Connectors.Copilot | What the tool and the desktop app share: `run`, `init` (detects local servers and CLIs), `doctor` (`RouterDoctor`), `models`, `service`, the embedded starting template and evaluation set, the per-OS configuration directory and the key ring. |
-| `SemanticRouter.Host` | Hosting | The `semantic-router` .NET tool and container image: the command line over `SemanticRouter.Hosting`. See [host.md](host.md). |
-| `SemanticRouter.Desktop` | Hosting, Avalonia | The desktop app: tray icon, dashboard window, welcome window, start at sign-in and updates. See [desktop.md](desktop.md). |
+| `SemanticRouter.Host` | Hosting | The `semantic-router` .NET tool and container image: the command line over `SemanticRouter.Hosting`. See [Install and run](host.md). |
+| `SemanticRouter.Desktop` | Hosting, Avalonia | The desktop app: tray icon, dashboard window, welcome window, start at sign-in and updates. See [Desktop app](desktop.md). |
 | `SemanticRouter.Storage.Sqlite` | AspNetCore, `Microsoft.Data.Sqlite` | Durable state in one SQLite file: cooldowns, tool-call affinity, activity, configuration history (`UseSqliteState`). |
 | `SemanticRouter.Embeddings.Onnx` | AspNetCore, `Microsoft.ML.OnnxRuntime`, `Microsoft.ML.Tokenizers` | In-process sentence embeddings (`Embeddings:Provider = Onnx`): pinned, checksum-verified model downloads, and one loaded model shared across configuration reloads (`AddOnnxEmbeddings`, `UseOnnxEmbeddings`). |
 | `SemanticRouter.Connectors.Copilot` | AspNetCore, `GitHub.Copilot.SDK` | The `Copilot` connector type on GitHub's Copilot SDK (`AddCopilotConnector`): one runtime process shared across configuration reloads, a fresh session per turn, native tool calls returned to the client. |
@@ -23,6 +23,8 @@ How a request moves through the router, how configuration reloads without droppi
 
 ```mermaid
 flowchart TD
+    accTitle: One request, end to end
+    accDescr: PromptRoutingMiddleware takes a request from any of the three front doors, picks the protocol by its path, parses it and maps the model name through ModelAliases. A request with tool results from a known tool call tries the model that issued the call first. Any other request is classified in SemanticRouter.Core, and the models are ranked by tier, capabilities, local-only, context window, cost and cooldown. In Annotate mode the next endpoint reads the plan. In Dispatch mode the PromptDispatcher tries the candidates in order through an HTTP or CLI connector, and the response is written in the client's protocol.
     C1[Claude Code · Anthropic SDKs<br/>POST /v1/messages] --> M
     C2[OpenAI SDKs · chat UIs<br/>POST /v1/chat/completions] --> M
     C3[Codex CLI · Agents SDK<br/>POST /v1/responses] --> M
@@ -52,7 +54,7 @@ flowchart TD
 6. **Rank.** `DefaultModelSelector` filters by enabled, available, local (if required), capabilities (the request adds `tools` and `vision` itself), and context window, then orders by strategy. Models below the required tier follow when `AllowBelowRequiredTier` is on.
 7. **Dispatch or annotate.** In Annotate mode the plan is attached to the request and the next endpoint decides. In Dispatch mode `PromptDispatcher` tries up to `MaxAttempts` candidates. A failure before any output cools the model down and moves on; once output has started the connector owns the response. An account-wide limit cools down every model on that connector. When every candidate failed or is cooling down, the client gets `503` (`overloaded_error` for Anthropic clients), which SDKs retry. When no model could serve the request even ignoring cooldowns (none is enabled, or none has the tier, capabilities, locality or profile it needs), the configuration is the problem and retrying cannot help: the client gets `400 invalid_request_error` in its protocol's error shape, which the OpenAI and Anthropic SDKs and Claude Code do not retry, with what to do and where, e.g. `SemanticRouter has no model that can answer this (no model is enabled). Add one on the dashboard: http://localhost:5080/router#/overview`. Two cases stay a retryable `503`, because waiting can help: the prompt could not be classified (the embeddings did not answer, so the fallback plan found no model), and the only models that would fit are outside their `ActiveHours` (the message then says no model is in its active hours right now).
 8. **Write the reply in the client's protocol.** See the next section.
-9. **Record.** A `RoutingActivityEntry` (decision, then outcome, timing, tokens and cost) goes into the activity log behind the dashboard's Activity page; the reported usage goes into the `IUsageLedger` that budgets read; spans, metrics and routing headers (including `X-Prompt-Route-Id`) are emitted. The finished entry is also pushed to the Live page over `api/events`. When memory sources are configured, the body was checked against the `MemoryIndex` while parsing, and the notes it carried are counted against every model in `SentTo` by the `MemoryExposureLog` ([memory.md](memory.md)). See [observability.md](observability.md).
+9. **Record.** A `RoutingActivityEntry` (decision, then outcome, timing, tokens and cost) goes into the activity log behind the dashboard's Activity page; the reported usage goes into the `IUsageLedger` that budgets read; spans, metrics and routing headers (including `X-Prompt-Route-Id`) are emitted. The finished entry is also pushed to the Live page over `api/events`. When memory sources are configured, the body was checked against the `MemoryIndex` while parsing, and the notes it carried are counted against every model in `SentTo` by the `MemoryExposureLog` ([Memory map](memory.md)). See [Usage, budgets and observability](observability.md).
 
 ## Three protocols, any backend
 
@@ -70,12 +72,14 @@ A connector either passes the client's body through or translates it.
 
 `IChatResponseWriter` is the single seam for output: `WriteTextAsync`, `StartToolCallAsync` / `WriteToolCallArgumentsAsync` / `EndToolCallAsync`, `CompleteAsync`. `OpenAIResponseWriter`, `AnthropicResponseWriter` and `ResponsesResponseWriter` implement the documented JSON and SSE shapes, so a new front door is a parser, a request builder and a writer.
 
-What crosses protocols and what is dropped (reported in `X-Prompt-Route-Dropped`) is in [providers.md](providers.md#what-survives-translation).
+What crosses protocols and what is dropped (reported in `X-Prompt-Route-Dropped`) is in [What survives translation](providers.md#what-survives-translation).
 
 ## Configuration and hot reload
 
 ```mermaid
 flowchart LR
+    accTitle: Configuration and hot reload
+    accDescr: appsettings.json, environment variables, user secrets and code make the baseline RouterConfiguration. At start the stored semantic-router.json becomes the RouterRuntime snapshot if it is valid, with secrets inherited from the baseline, and the baseline does otherwise. The DI facades forward every call to the current snapshot. The dashboard and the admin API go through the RouterRuntimeProvider, which builds the new snapshot and saves the document to the file.
     AS[appsettings.json · env · user-secrets · code] --> BL[Baseline<br/>RouterConfiguration]
     FS[semantic-router.json<br/>IRouterConfigurationStore] --> LD{Load}
     BL --> LD
@@ -95,7 +99,7 @@ flowchart LR
 
 ## The dashboard
 
-`MapRouterDashboard` serves embedded files (`index.html`, `app.css`, `graph.js`, and the native ES modules under `js/`), theme files from the themes directory, and the admin API under `{prefix}/api`. There is no build step and no dependency; `tests/dashboard-e2e` runs Playwright against the real host in CI. The UI keeps one draft of the configuration in the browser, edits it through path-based bindings (`data-bind="Models.2.Tier"`), and talks to the same validation the router uses at start-up. Themes are token blocks keyed by `data-theme`; see [dashboard.md](dashboard.md#themes). The admin API answers loopback clients only unless that guard is turned off.
+`MapRouterDashboard` serves embedded files (`index.html`, `app.css`, `graph.js`, and the native ES modules under `js/`), theme files from the themes directory, and the admin API under `{prefix}/api`. There is no build step and no dependency; `tests/dashboard-e2e` runs Playwright against the real host in CI. The UI keeps one draft of the configuration in the browser, edits it through path-based bindings (`data-bind="Models.2.Tier"`), and talks to the same validation the router uses at start-up. Themes are token blocks keyed by `data-theme`; see [Dashboard themes](dashboard.md#themes). The admin API answers loopback clients only unless that guard is turned off.
 
 ## Durable state
 
@@ -117,7 +121,7 @@ builder.Services.AddSemanticPromptRouting(builder.Configuration.GetSection("Sema
 | Usage | one row per served request: model, connector, route, client, tokens, cost, reference cost | `UsageRetention` (400 days), so monthly budgets survive restarts. |
 | Audit log | each change through the dashboard or admin API, sign-ins and sign-outs | `AuditRetention` (365 days). Rows are only inserted. |
 
-The same file also keeps feedback, learned routing changes, revoked dashboard sessions and the judge's and incident counts. In the `semantic-router` tool these limits are `State:Retention`; [host.md](host.md#what-the-router-stores) lists every table and how to delete it.
+The same file also keeps feedback, learned routing changes, revoked dashboard sessions and the judge's and incident counts. In the `semantic-router` tool these limits are `State:Retention`; [What the router stores](host.md#what-the-router-stores) lists every table and how to delete it.
 
 History documents are stored as applied. They keep `${…}` references where the configuration uses them, and literal keys where the configuration file holds them too. With a secret store registered, typed keys never reach either.
 
@@ -151,4 +155,4 @@ Do not put the file on a network share: SQLite's locking is unreliable there. Fo
 
 ## Safety rules that shape the design
 
-These are enforced in code and explained in [TERMS.md](TERMS.md): the router never reads or forwards credentials of a client or a CLI; CLI connectors answer loopback clients only and run in a fresh empty directory with their own tools off; subscription limits become cooldowns, never retries or account rotation; the admin API is loopback-only by default (remote access needs a token, and writes must come from the dashboard's own origin); and local-only routes can only be served by models marked local, including on failover.
+These are enforced in code and explained in [Subscription CLI terms](TERMS.md): the router never reads or forwards credentials of a client or a CLI; CLI connectors answer loopback clients only and run in a fresh empty directory with their own tools off; subscription limits become cooldowns, never retries or account rotation; the admin API is loopback-only by default (remote access needs a token, and writes must come from the dashboard's own origin); and local-only routes can only be served by models marked local, including on failover.

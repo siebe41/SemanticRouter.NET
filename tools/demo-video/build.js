@@ -1,10 +1,11 @@
 // Turns a recording into the finished video: the frames from record.js as 30 fps H.264 at the stage's size (1920×1080,
 // or 1080×1920 for the vertical stage), the narration from tts.py mixed in at the times record.js logged, and an .srt
-// with the narration as subtitles.
+// with the narration as subtitles (captions.js).
 //   node build.js <frames-dir> <voice-dir> <out.mp4> [narration file, default narration/intro.json]
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const captions = require('./captions');
 
 const [frames, voice, output, narrationFile = path.join(__dirname, 'narration', 'intro.json')] = process.argv.slice(2).map((p) => path.resolve(p));
 const timeline = JSON.parse(fs.readFileSync(path.join(frames, 'timeline.json'), 'utf8'));
@@ -31,24 +32,9 @@ ffmpeg(['-i', silent, ...inputs, '-filter_complex', mix, '-map', '0:v', '-map', 
   '-c:v', 'copy', '-c:a', 'aac', '-b:a', '160k', '-ar', '48000', '-movflags', '+faststart', output]);
 fs.rmSync(silent);
 
-// 3. Subtitles: one cue per sentence, timed by its share of the line's characters.
-const stamp = (s) => {
-  const ms = Math.round(s * 1000);
-  const pad = (n, w = 2) => String(n).padStart(w, '0');
-  return `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)},${pad(ms % 1000, 3)}`;
-};
-const spoken = (text) => text.replace(/Semantic Router dot net/g, 'SemanticRouter.NET').replace(/dot net/g, '.NET')
-  .replace(/in-it/g, 'init').replace(/L M Studio/g, 'LM Studio').replace(/C L I/g, 'CLI');
-const cues = [];
-for (const n of timeline) {
-  const sentences = spoken(lines[n.key]).match(/.+?(?:[.!?:](?=\s|$)|$)/g).map((s) => s.trim()).filter(Boolean);
-  const total = sentences.reduce((sum, s) => sum + s.length, 0);
-  let at = n.start;
-  for (const s of sentences) {
-    const length = (n.duration * s.length) / total;
-    cues.push(`${cues.length + 1}\n${stamp(at)} --> ${stamp(at + length)}\n${s}\n`);
-    at += length;
-  }
-}
-fs.writeFileSync(output.replace(/\.mp4$/, '.srt'), cues.join('\n'));
+// 3. Subtitles: one cue per sentence, timed by the words' measured times when words.py has written them for this voice,
+// otherwise by the sentence's share of the line's characters.
+const wordsFile = path.join(voice, 'words.json');
+const words = fs.existsSync(wordsFile) ? JSON.parse(fs.readFileSync(wordsFile, 'utf8')) : {};
+fs.writeFileSync(output.replace(/\.mp4$/, '.srt'), captions.srt(captions.cues(timeline, lines, words)));
 console.log(`${output}\n${output.replace(/\.mp4$/, '.srt')}`);

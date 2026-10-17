@@ -83,7 +83,15 @@ DEMO_FEED=out/feed node record.js intro out/frames out/voice
 node build.js out/frames out/voice out/semantic-router-demo.mp4 narration/intro.json
 ```
 
-`build.js` writes the MP4 (1920×1080, 30 fps, H.264 and AAC) and an `.srt` with the narration as subtitles.
+`build.js` writes the MP4 (1920×1080, 30 fps, H.264 and AAC) and an `.srt` with the narration as subtitles, one
+sentence per cue ([captions.js](captions.js), checked by `npm test`). When the voice folder has a `words.json` from
+`words.py`, each cue starts and ends with its sentence's words as spoken; otherwise its time is estimated from the
+sentence's share of the line.
+
+The documentation site's videos page shows each video's narration as a transcript, read from its narration file. A
+figure or name that is on screen but not in the narration goes in the file's `onScreen`, by line, so the transcript
+has it too: `"onScreen": { "paid": ["$0.73 actually spent", "…"] }`. Update it when a new take changes what is on
+screen.
 
 `record.js` uses ports 1234 and 5080 and a throw-away home directory for the demo user, `DEMO_HOME` (default
 `/home/demo`, deleted at the start of every take), so the terminals show `~/billing` and nothing of the recording
