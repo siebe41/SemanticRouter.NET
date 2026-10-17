@@ -438,6 +438,7 @@ public sealed class HostTests : IDisposable
         report.Should().Contain($"[ OK ] egress: connector codex: CLI: {FakeCli}, which contacts OpenAI.");
         report.Should().Contain("[ OK ] egress: connector copilot: CLI: copilot (the Copilot SDK's runtime), which contacts GitHub (no enabled model uses it yet).");
         report.Should().Contain("[ OK ] egress: embeddings: huggingface.co, once, to download ONNX model all-MiniLM-L6-v2 into " + models);
+        report.Should().Contain("[ OK ] egress: ONNX Runtime telemetry: off (ORT_DISABLE_TELEMETRY=1, set before ONNX Runtime loads): mobile.events.data.microsoft.com is never contacted");
         report.Should().Contain("[ OK ] egress: webhook ops: hooks.example.com.");
         report.Should().Contain("[ OK ] egress: price list: openrouter.ai, only when the dashboard looks up cloud models' prices");
         report.Should().Contain("[ OK ] egress: desktop app updates: api.github.com, github.com and objects.githubusercontent.com (only the installed desktop app");
@@ -445,6 +446,16 @@ public sealed class HostTests : IDisposable
         report.Should().NotContain("hook-secret").And.NotContain("token=abc").And.NotContain("/services/").And.NotContain("sk-doctor-test");
         second.ToString().Should().Contain($"[ OK ] egress: embeddings: ONNX model all-MiniLM-L6-v2 is in {models}; nothing is downloaded.")
             .And.NotContain("network: HTTPS also trusts");
+    }
+
+    [Fact]
+    public void Doctor_warns_when_onnx_runtime_telemetry_is_left_on()
+    {
+        EgressList.OnnxTelemetry("1").Status.Should().Be(RouterCheckStatus.Ok);
+        RouterCheck on = EgressList.OnnxTelemetry("0");
+        on.Status.Should().Be(RouterCheckStatus.Warning);
+        on.Message.Should().Contain("ORT_DISABLE_TELEMETRY is '0'").And.Contain("mobile.events.data.microsoft.com").And.Contain("Set it to 1");
+        EgressList.OnnxTelemetry(null).Message.Should().Contain("is not set");
     }
 
     [Fact]

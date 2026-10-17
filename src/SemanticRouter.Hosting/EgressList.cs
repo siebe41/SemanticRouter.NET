@@ -44,6 +44,12 @@ internal static class EgressList
             lines.Add(new RouterCheck(Subject, problem ? RouterCheckStatus.Warning : RouterCheckStatus.Ok, $"embeddings: {embeddings}."));
         }
 
+        if (resolved.Embeddings.Provider == EmbeddingProviderKind.Onnx)
+        {
+            OnnxRuntimeEnvironment.DisableTelemetry();
+            lines.Add(OnnxTelemetry(OnnxRuntimeEnvironment.TelemetrySetting));
+        }
+
         foreach ((string name, WebhookOptions hook) in resolved.Notifications.Webhooks.OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase))
         {
             if (string.IsNullOrEmpty(hook.Url) || !(hook.Notices || hook.Digest))
@@ -81,6 +87,15 @@ internal static class EgressList
     }
 
     private static RouterCheck Line(string message) => new(Subject, RouterCheckStatus.Ok, message);
+
+    /// <summary>Whether ONNX Runtime's own telemetry is off, from <c>ORT_DISABLE_TELEMETRY</c> as ONNX Runtime will read it.</summary>
+    internal static RouterCheck OnnxTelemetry(string? setting) => OnnxRuntimeEnvironment.TurnsTelemetryOff(setting)
+        ? Line($"ONNX Runtime telemetry: off ({OnnxRuntimeEnvironment.TelemetryVariable}=1, set before ONNX Runtime loads): " +
+               $"{OnnxRuntimeEnvironment.TelemetryHost} is never contacted and no device id is written.")
+        : new RouterCheck(Subject, RouterCheckStatus.Warning,
+            $"ONNX Runtime telemetry: {OnnxRuntimeEnvironment.TelemetryVariable} is {(setting is null ? "not set" : $"'{setting}'")} in this environment, " +
+            $"so on Linux and macOS ONNX Runtime may send usage data to {OnnxRuntimeEnvironment.TelemetryHost} and keep a device id in " +
+            $"~/.cache/Microsoft/DeveloperTools/.onnxruntime. Set it to 1, or unset it and the router sets it.");
 
     /// <summary>The desktop app's updates line: where they come from, and what the machine policy says about them.</summary>
     internal static string Updates(MachinePolicy policy)

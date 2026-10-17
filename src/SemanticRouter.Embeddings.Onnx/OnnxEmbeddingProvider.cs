@@ -32,6 +32,11 @@ public sealed class OnnxEmbeddingProvider : IEmbeddingProvider, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(vocabFile);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxTokens, 8);
 
+        // Before ONNX Runtime loads: its Linux and macOS builds report to Microsoft otherwise. The call after it turns off
+        // the Windows build's ETW events, and does nothing for the upload elsewhere.
+        OnnxRuntimeEnvironment.DisableTelemetry();
+        OrtEnv.Instance().DisableTelemetryEvents();
+
         using var options = new SessionOptions
         {
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,

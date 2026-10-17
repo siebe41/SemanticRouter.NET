@@ -9,11 +9,15 @@ public static class OnnxEmbeddingsBuilderExtensions
 {
     /// <summary>
     /// Makes <see cref="EmbeddingProviderKind.Onnx"/> available, so configuration (or the dashboard) can select it, without
-    /// selecting it. Models are downloaded on first use; see <see cref="OnnxEmbeddingOptions"/>.
+    /// selecting it. Models are downloaded on first use; see <see cref="OnnxEmbeddingOptions"/>. Turns ONNX Runtime's
+    /// telemetry off for the process (<see cref="OnnxRuntimeEnvironment.DisableTelemetry"/>).
     /// </summary>
     public static SemanticRouterBuilder AddOnnxEmbeddings(this SemanticRouterBuilder builder, Action<OnnxEmbeddingOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(builder);
+
+        // ONNX Runtime's telemetry is off before anything can load it (OnnxRuntimeEnvironment).
+        OnnxRuntimeEnvironment.DisableTelemetry();
         builder.Services.AddOptions<OnnxEmbeddingOptions>();
         if (configure is not null)
         {

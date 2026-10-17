@@ -36,6 +36,9 @@ internal sealed class OnnxEmbeddingProviderFactory : IEmbeddingProviderFactory, 
     {
         _services = services;
         _options = options.Value;
+
+        // Early, while the router starts: setting a variable is safest before other threads read the environment.
+        OnnxRuntimeEnvironment.DisableTelemetry();
     }
 
     public EmbeddingProviderKind Kind => EmbeddingProviderKind.Onnx;
