@@ -217,8 +217,9 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     }
 
     /// <summary>
-    /// The application menu, which macOS shows in the menu bar while the dashboard window is in front (other
-    /// platforms do not show it): About, Check for updates now and Settings (⌘,), where a Mac app has them.
+    /// The application menu: About, Check for updates now and Settings (⌘,), where a Mac app has them. The app runs as a
+    /// menu-bar (accessory) app, which macOS gives no menu bar, so it is not shown today; the tray menu and the
+    /// dashboard's More have the same entries, and the dashboard does the editing shortcuts itself (desktop.js).
     /// </summary>
     private NativeMenu BuildApplicationMenu()
     {

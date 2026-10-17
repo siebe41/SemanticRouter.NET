@@ -41,6 +41,63 @@ function show(s) {
   el.innerHTML = `<span><strong>${h(s.headline)}</strong>${s.detail ? ' ' + h(s.detail) : ''}</span>${buttons}`;
 }
 
+/*
+ * The editing shortcuts on a Mac, in the app window. The app lives in the menu bar and has no Edit menu, and WebKit
+ * carries out ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z only through that menu: without it they reach the page as plain key presses, and
+ * nothing happens. So they are done here. Where an Edit menu exists (a browser), the menu takes them before the page
+ * sees them, so nothing is done twice. Password fields are not copied from, as in a browser.
+ */
+const isMac = () => /Mac/.test(navigator.platform || '');
+
+function textField(el) {
+  return !!el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && typeof el.selectionStart === 'number' && el.selectionStart !== null));
+}
+
+function insert(el, text) {
+  // insertText keeps the field's undo history; a field that refuses it gets the text set directly.
+  if (!document.execCommand('insertText', false, text)) {
+    el.setRangeText(text, el.selectionStart, el.selectionEnd, 'end');
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
+export function editShortcut(ev) {
+  if (!ev.metaKey || ev.ctrlKey || ev.altKey || ev.defaultPrevented) return;
+  const el = document.activeElement;
+  const field = textField(el);
+  const writable = field && !el.readOnly && !el.disabled;
+  switch (ev.key.toLowerCase()) {
+    case 'a':
+      ev.preventDefault();
+      if (field) el.select(); else document.execCommand('selectAll');
+      break;
+    case 'c':
+    case 'x': {
+      if (field && el.type === 'password') return;
+      const text = field ? el.value.slice(el.selectionStart, el.selectionEnd) : String(window.getSelection());
+      if (!text || !navigator.clipboard) return;
+      ev.preventDefault();
+      navigator.clipboard.writeText(text).then(() => {
+        if (ev.key.toLowerCase() === 'x' && writable) insert(el, '');
+      }, () => { /* refused: nothing copied, nothing cut */ });
+      break;
+    }
+    case 'v':
+      if (!writable || !navigator.clipboard) return;
+      ev.preventDefault();
+      navigator.clipboard.readText().then((text) => { if (text && document.activeElement === el) insert(el, text); }, () => { /* refused */ });
+      break;
+    case 'z':
+      if (!writable) return;
+      ev.preventDefault();
+      document.execCommand(ev.shiftKey ? 'redo' : 'undo');
+      break;
+    default:
+  }
+}
+
+if (bridge() && isMac()) document.addEventListener('keydown', editShortcut);
+
 if (bridge()) {
   for (const [id, action] of [['#desktop-settings', 'settings'], ['#desktop-about', 'about']]) {
     const button = $(id);

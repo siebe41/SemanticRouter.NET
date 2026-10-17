@@ -414,3 +414,45 @@ test('in the desktop app the dashboard opens About and offers an update until No
   await page.evaluate(desktopState, { ...ready, offer: '0.7.0', headline: 'Version 0.7.0 is ready to install.' });
   await expect(banner).toContainText('Version 0.7.0');
 });
+
+// In the app window on a Mac there is no Edit menu, so WebKit does nothing with ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z: the page does
+// them (#210). Chromium on Linux does not act on ⌘ either, so it stands in for that web view here.
+test('on a Mac, the app window does the editing shortcuts itself', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.addInitScript(() => {
+    window.invokeCSharpAction = () => {};
+    Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' });
+  });
+  await open(page, 'overview');
+  await page.evaluate(() => {
+    for (const [id, type] of [['field', 'text'], ['secret', 'password']]) {
+      const input = Object.assign(document.createElement('input'), { id, type, value: 'sk-pasted-key' });
+      document.body.prepend(input);
+    }
+  });
+  const field = page.locator('#field');
+  const clipboard = () => page.evaluate(() => navigator.clipboard.readText());
+
+  await field.focus();
+  await page.keyboard.press('Meta+a');
+  expect(await field.evaluate((e) => [e.selectionStart, e.selectionEnd])).toEqual([0, 13]);
+  await page.keyboard.press('Meta+c');
+  await expect.poll(clipboard).toBe('sk-pasted-key');
+
+  await field.evaluate((e) => e.setSelectionRange(13, 13));
+  await page.keyboard.press('Meta+v');
+  await expect(field).toHaveValue('sk-pasted-keysk-pasted-key');
+  await page.keyboard.press('Meta+z');
+  await expect(field).toHaveValue('sk-pasted-key');
+
+  await field.evaluate((e) => e.setSelectionRange(0, 3));
+  await page.keyboard.press('Meta+x');
+  await expect(field).toHaveValue('pasted-key');
+  await expect.poll(clipboard).toBe('sk-');
+
+  // A password field is not copied from.
+  await page.locator('#secret').focus();
+  await page.keyboard.press('Meta+a');
+  await page.keyboard.press('Meta+c');
+  expect(await clipboard()).toBe('sk-');
+});
