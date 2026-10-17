@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -147,6 +149,17 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
 
     /// <summary>Whether the database opened; when not, every store keeps its state in memory only.</summary>
     public bool Available { get; private set; }
+
+    private long _rewrites;
+
+    /// <summary>
+    /// How often this process rewrote the file (VACUUM): that can renumber the rows of tables without an integer
+    /// primary key, so anything that remembers row ids must read again.
+    /// </summary>
+    public long Rewrites => Interlocked.Read(ref _rewrites);
+
+    /// <summary>Notes a VACUUM (<see cref="Rewrites"/>).</summary>
+    public void Rewritten() => Interlocked.Increment(ref _rewrites);
 
     /// <summary>Runs <paramref name="operation"/>, or returns <paramref name="fallback"/> when the database fails.</summary>
     public T Run<T>(string what, T fallback, Func<SqliteConnection, T> operation)
@@ -859,6 +872,8 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
                 vacuum.ExecuteNonQuery();
             }
 
+            database.Rewritten();
+
             database.EmptyLogAfterPurge(connection, "purging activity");
             return removed;
         });
@@ -927,11 +942,34 @@ internal sealed class SqliteConfigurationHistory(SqliteRouterDatabase database) 
     }
 }
 
-/// <summary>Usage records on disk, for the dashboard's usage views and for budgets across restarts.</summary>
+/// <summary>
+/// Usage records on disk, for the dashboard's usage views and for budgets across restarts. Totals are added up in SQL.
+/// A budget checks its period's totals on every request, so the totals of a range that is still open (it ends in the
+/// future) are kept in memory and brought up to date from the rows added since: those this router wrote, and those of
+/// other routers sharing the file.
+/// </summary>
 internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageLedger
 {
+    private const string Columns =
+        "SELECT timestamp_ticks, model, connector, route, client, is_local, input, output, cache_read, cache_write, cost, reference_cost, profile, subscription_value FROM usage ";
+
+    private const string Filters =
+        "WHERE timestamp_ticks >= $since AND timestamp_ticks < $until AND ($model IS NULL OR model = $model COLLATE NOCASE) " +
+        "AND ($connector IS NULL OR connector = $connector COLLATE NOCASE) AND ($profile IS NULL OR profile = $profile COLLATE NOCASE)";
+
+    /// <summary>Most open ranges kept: a budget's period is one, and it changes only when the period does.</summary>
+    private const int MaxOpenRanges = 64;
+
+    /// <summary>How long an open range goes without being read again when this router wrote nothing: other routers' rows wait this long.</summary>
+    private static readonly TimeSpan OthersWait = TimeSpan.FromSeconds(1);
+
+    /// <summary>How often an open range is added up again from scratch, in case another router pruned or rewrote the file.</summary>
+    private static readonly TimeSpan Recount = TimeSpan.FromHours(1);
+
     private readonly InMemoryUsageLedger _fallback = new();
+    private readonly ConcurrentDictionary<(long Since, long Until, string? Model, string? Connector, string? Profile), OpenRange> _open = new();
     private int _writes;
+    private long _written;
 
     public void Record(UsageRecord record)
     {
@@ -958,34 +996,127 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
         {
             _fallback.Record(record);
         }
+
+        if (prune)
+        {
+            // A retention shorter than a budget's period deletes rows the open totals counted.
+            _open.Clear();
+        }
+
+        Interlocked.Increment(ref _written);
     }
 
     public UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
-        Read(since, until, model, connector, profile).Aggregate(_fallback.Total(since, until, model, connector, profile), (total, r) => total.Add(r));
+        TotalsByModel(since, until, model, connector, profile).Aggregate(UsageTotals.Zero, (total, g) => total.Add(g.Totals));
+
+    public IReadOnlyList<UsageGroup> TotalsByModel(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null)
+    {
+        IEnumerable<UsageGroup> stored = until > database.Time.GetUtcNow()
+            ? Open(since, until, model, connector, profile)
+            : database.Run<IReadOnlyList<UsageGroup>>("reading usage", [], connection => AddUp(connection, since, until, model, connector, profile, after: null, through: null));
+        return Combine(stored.Concat(((IUsageLedger)_fallback).TotalsByModel(since, until, model, connector, profile) ?? []));
+    }
 
     public IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null) =>
         UsageSummaries.Group(Read(since, until, null, null, null), by, zone ?? TimeZoneInfo.Local)
             .Concat(_fallback.Summarize(since, until, by, zone))
             .GroupBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.Count() == 1 ? g.First() : new UsageGroup(g.Key, Merge(g.Select(x => x.Totals))))
+            .Select(g => g.Count() == 1 ? g.First() : new UsageGroup(g.Key, g.Aggregate(UsageTotals.Zero, (total, x) => total.Add(x.Totals))))
             .ToArray();
 
     public IReadOnlyList<UsageRecord> Records(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
         [.. Read(since, until, model, connector, profile), .. _fallback.Records(since, until, model, connector, profile)];
 
-    private static UsageTotals Merge(IEnumerable<UsageTotals> totals) => totals.Aggregate(UsageTotals.Zero, (a, b) => new UsageTotals(
-        a.Requests + b.Requests, a.InputTokens + b.InputTokens, a.OutputTokens + b.OutputTokens, a.CacheReadTokens + b.CacheReadTokens,
-        a.CacheWriteTokens + b.CacheWriteTokens, a.CostUsd + b.CostUsd, a.ReferenceCostUsd + b.ReferenceCostUsd, a.SubscriptionValueUsd + b.SubscriptionValueUsd));
+    private static UsageGroup[] Combine(IEnumerable<UsageGroup> groups) =>
+        [.. groups.GroupBy(g => g.Key, StringComparer.OrdinalIgnoreCase).Select(g => new UsageGroup(g.First().Key, g.Aggregate(UsageTotals.Zero, (total, x) => total.Add(x.Totals))))];
+
+    /// <summary>The totals of a range that is still open: kept, and brought up to date from the rows added since.</summary>
+    private UsageGroup[] Open(DateTimeOffset since, DateTimeOffset until, string? model, string? connector, string? profile)
+    {
+        if (_open.Count >= MaxOpenRanges)
+        {
+            _open.Clear();
+        }
+
+        OpenRange range = _open.GetOrAdd((since.UtcTicks, until.UtcTicks, model?.ToUpperInvariant(), connector?.ToUpperInvariant(), profile?.ToUpperInvariant()), _ => new OpenRange());
+        lock (range)
+        {
+            long written = Interlocked.Read(ref _written);
+            long rewrites = database.Rewrites;
+            if (range.Through >= 0 && written == range.Written && rewrites == range.Rewrites && Stopwatch.GetElapsedTime(range.ReadAt) < OthersWait)
+            {
+                return range.Snapshot();
+            }
+
+            bool read = database.Run("reading usage", false, connection =>
+            {
+                long newest;
+                using (SqliteCommand max = SqliteRouterDatabase.Command(connection, "SELECT COALESCE(MAX(rowid), 0) FROM usage;"))
+                {
+                    newest = Convert.ToInt64(max.ExecuteScalar(), CultureInfo.InvariantCulture);
+                }
+
+                // Rows are only ever added at the end; a lower newest row id means rows were deleted or renumbered.
+                bool recount = range.Through < 0 || newest < range.Through || rewrites != range.Rewrites || Stopwatch.GetElapsedTime(range.CountedAt) > Recount;
+                if (recount)
+                {
+                    range.Totals.Clear();
+                    range.CountedAt = Stopwatch.GetTimestamp();
+                }
+
+                foreach (UsageGroup added in AddUp(connection, since, until, model, connector, profile, after: recount ? null : range.Through, through: newest))
+                {
+                    range.Totals[added.Key] = range.Totals.TryGetValue(added.Key, out UsageTotals? before) ? before.Add(added.Totals) : added.Totals;
+                }
+
+                range.Through = newest;
+                return true;
+            });
+
+            if (!read)
+            {
+                range.Through = -1;
+                range.Totals.Clear();
+                return [];
+            }
+
+            (range.Written, range.Rewrites, range.ReadAt) = (written, rewrites, Stopwatch.GetTimestamp());
+            return range.Snapshot();
+        }
+    }
+
+    /// <summary>Totals per model of the rows in the range, optionally only those with <paramref name="after"/> &lt; row id ≤ <paramref name="through"/>.</summary>
+    private static List<UsageGroup> AddUp(
+        SqliteConnection connection, DateTimeOffset since, DateTimeOffset until, string? model, string? connector, string? profile, long? after, long? through)
+    {
+        // Costs are stored as text, exact decimals; SUM would add them up as floating point.
+        connection.CreateAggregate<string, decimal, string>(
+            "decimal_sum", 0m, (sum, value) => sum + decimal.Parse(value, CultureInfo.InvariantCulture), sum => sum.ToString(CultureInfo.InvariantCulture), isDeterministic: true);
+        using SqliteCommand command = SqliteRouterDatabase.Command(
+            connection,
+            "SELECT model, COUNT(*), SUM(input), SUM(output), SUM(cache_read), SUM(cache_write), decimal_sum(cost), decimal_sum(reference_cost), decimal_sum(subscription_value) " +
+            "FROM usage " + Filters + " AND ($after IS NULL OR rowid > $after) AND ($through IS NULL OR rowid <= $through) GROUP BY model COLLATE NOCASE;",
+            ("$since", since.UtcTicks), ("$until", until.UtcTicks), ("$model", model), ("$connector", connector), ("$profile", profile),
+            ("$after", after), ("$through", through));
+        using SqliteDataReader reader = command.ExecuteReader();
+        var groups = new List<UsageGroup>();
+        while (reader.Read())
+        {
+            groups.Add(new UsageGroup(reader.GetString(0), new UsageTotals(
+                reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4), reader.GetInt64(5),
+                decimal.Parse(reader.GetString(6), CultureInfo.InvariantCulture), decimal.Parse(reader.GetString(7), CultureInfo.InvariantCulture),
+                decimal.Parse(reader.GetString(8), CultureInfo.InvariantCulture))));
+        }
+
+        return groups;
+    }
 
     private List<UsageRecord> Read(DateTimeOffset since, DateTimeOffset until, string? model, string? connector, string? profile) =>
         database.Run("reading usage", new List<UsageRecord>(), connection =>
         {
             var records = new List<UsageRecord>();
             using SqliteCommand command = SqliteRouterDatabase.Command(
-                connection,
-                "SELECT timestamp_ticks, model, connector, route, client, is_local, input, output, cache_read, cache_write, cost, reference_cost, profile, subscription_value FROM usage " +
-                "WHERE timestamp_ticks >= $since AND timestamp_ticks < $until AND ($model IS NULL OR model = $model COLLATE NOCASE) " +
-                "AND ($connector IS NULL OR connector = $connector COLLATE NOCASE) AND ($profile IS NULL OR profile = $profile COLLATE NOCASE);",
+                connection, Columns + Filters + ";",
                 ("$since", since.UtcTicks), ("$until", until.UtcTicks), ("$model", model), ("$connector", connector), ("$profile", profile));
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
@@ -1000,6 +1131,24 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
 
             return records;
         });
+
+    /// <summary>An open range's totals per model, counted up to row <see cref="Through"/> (-1: not counted).</summary>
+    private sealed class OpenRange
+    {
+        public Dictionary<string, UsageTotals> Totals { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public long Through { get; set; } = -1;
+
+        public long Written { get; set; }
+
+        public long Rewrites { get; set; }
+
+        public long ReadAt { get; set; }
+
+        public long CountedAt { get; set; }
+
+        public UsageGroup[] Snapshot() => [.. Totals.Select(t => new UsageGroup(t.Key, t.Value))];
+    }
 }
 
 /// <summary>

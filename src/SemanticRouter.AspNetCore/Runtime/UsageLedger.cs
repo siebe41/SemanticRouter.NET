@@ -50,6 +50,15 @@ public sealed record UsageTotals(
             CacheWriteTokens + record.CacheWriteTokens, CostUsd + record.CostUsd, ReferenceCostUsd + record.ReferenceCostUsd,
             SubscriptionValueUsd + record.SubscriptionValueUsd);
     }
+
+    /// <summary>Adds other totals.</summary>
+    public UsageTotals Add(UsageTotals other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+        return new(Requests + other.Requests, InputTokens + other.InputTokens, OutputTokens + other.OutputTokens, CacheReadTokens + other.CacheReadTokens,
+            CacheWriteTokens + other.CacheWriteTokens, CostUsd + other.CostUsd, ReferenceCostUsd + other.ReferenceCostUsd,
+            SubscriptionValueUsd + other.SubscriptionValueUsd);
+    }
 }
 
 /// <summary>How <see cref="IUsageLedger.Summarize"/> groups usage.</summary>
@@ -99,6 +108,15 @@ public interface IUsageLedger
     /// (the default) for a ledger that keeps only totals: its usage stays at the prices it was recorded at.
     /// </summary>
     IReadOnlyList<UsageRecord>? Records(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) => null;
+
+    /// <summary>
+    /// Totals per model (the group key) between <paramref name="since"/> and <paramref name="until"/>, optionally for one
+    /// model, connector or profile. A cost is linear in each model's tokens, so this is all <see cref="UsagePricing"/>
+    /// needs to price usage at current prices, without reading every record: budgets check it on every request. The
+    /// default groups <see cref="Records"/>; <see langword="null"/> for a ledger that keeps no records.
+    /// </summary>
+    IReadOnlyList<UsageGroup>? TotalsByModel(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
+        Records(since, until, model, connector, profile) is { } records ? UsageSummaries.Group(records, UsageGrouping.Model, TimeZoneInfo.Utc) : null;
 }
 
 /// <summary>The default <see cref="IUsageLedger"/>: this process's usage, in memory, for the last 40 days.</summary>
@@ -204,8 +222,8 @@ public static class UsagePricing
         this IUsageLedger ledger, RouterConfiguration? prices, DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null)
     {
         ArgumentNullException.ThrowIfNull(ledger);
-        return prices is not null && ledger.Records(since, until, model, connector, profile) is { } records
-            ? records.Select(Pricer(prices)).Aggregate(UsageTotals.Zero, (total, r) => total.Add(r))
+        return prices is not null && ledger.TotalsByModel(since, until, model, connector, profile) is { } byModel
+            ? byModel.Select(TotalsPricer(prices)).Aggregate(UsageTotals.Zero, (total, t) => total.Add(t))
             : ledger.Total(since, until, model, connector, profile);
     }
 
@@ -232,14 +250,7 @@ public static class UsagePricing
     /// <param name="prices">The configuration whose models and reference model price the records.</param>
     public static Func<UsageRecord, UsageRecord> Pricer(RouterConfiguration prices)
     {
-        ArgumentNullException.ThrowIfNull(prices);
-        var models = new Dictionary<string, ModelDefinition>(StringComparer.OrdinalIgnoreCase);
-        foreach (ModelDefinition m in prices.Models)
-        {
-            models.TryAdd(m.Name, m);
-        }
-
-        ModelDefinition? reference = prices.Usage.ReferenceModel is { Length: > 0 } name ? models.GetValueOrDefault(name) : null;
+        (Dictionary<string, ModelDefinition> models, ModelDefinition? reference) = Catalog(prices);
         return r =>
         {
             ModelDefinition? model = models.GetValueOrDefault(r.Model);
@@ -251,5 +262,39 @@ public static class UsagePricing
                 SubscriptionValueUsd = model?.ApiValue(r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens) ?? r.SubscriptionValueUsd,
             };
         };
+    }
+
+    /// <summary>
+    /// Prices one model's totals (<see cref="IUsageLedger.TotalsByModel"/>) as <see cref="Pricer"/> prices each of its
+    /// records: the prices are per token, so the sum of the records' costs is the cost of their summed tokens.
+    /// </summary>
+    /// <param name="prices">The configuration whose models and reference model price the totals.</param>
+    public static Func<UsageGroup, UsageTotals> TotalsPricer(RouterConfiguration prices)
+    {
+        (Dictionary<string, ModelDefinition> models, ModelDefinition? reference) = Catalog(prices);
+        return g =>
+        {
+            UsageTotals t = g.Totals;
+            ModelDefinition? model = models.GetValueOrDefault(g.Key);
+            decimal cost = model?.Cost(t.InputTokens, t.OutputTokens, t.CacheReadTokens, t.CacheWriteTokens) ?? t.CostUsd;
+            return t with
+            {
+                CostUsd = cost,
+                ReferenceCostUsd = reference?.Cost(t.InputTokens, t.OutputTokens, t.CacheReadTokens, t.CacheWriteTokens) ?? cost,
+                SubscriptionValueUsd = model?.ApiValue(t.InputTokens, t.OutputTokens, t.CacheReadTokens, t.CacheWriteTokens) ?? t.SubscriptionValueUsd,
+            };
+        };
+    }
+
+    private static (Dictionary<string, ModelDefinition> Models, ModelDefinition? Reference) Catalog(RouterConfiguration prices)
+    {
+        ArgumentNullException.ThrowIfNull(prices);
+        var models = new Dictionary<string, ModelDefinition>(StringComparer.OrdinalIgnoreCase);
+        foreach (ModelDefinition m in prices.Models)
+        {
+            models.TryAdd(m.Name, m);
+        }
+
+        return (models, prices.Usage.ReferenceModel is { Length: > 0 } name ? models.GetValueOrDefault(name) : null);
     }
 }
