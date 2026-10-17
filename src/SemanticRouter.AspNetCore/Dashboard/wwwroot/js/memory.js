@@ -169,7 +169,7 @@ export function memorySide() {
     ${(n.tags || []).length ? `<div class="inline" style="margin-top:6px">${n.tags.map((t) => `<span class="badge">#${h(t)}</span>`).join('')}</div>` : ''}
     ${(n.aliases || []).length ? `<div class="small muted" style="margin-top:4px">also: ${n.aliases.map(h).join(', ')}</div>` : ''}
     ${n.missing ? '' : `<h3 style="margin-top:12px">Where it went</h3>
-    ${e ? `<table class="compact"><tr><th></th><th class="num">text</th><th class="num">mentioned</th></tr>
+    ${e ? `<table class="compact"><tr><th><span class="visually-hidden">Where</span></th><th class="num">text</th><th class="num">mentioned</th></tr>
       <tr><td><span class="signal-text">cloud</span></td><td class="num">${e.cloudContent}</td><td class="num">${e.cloudReference}</td></tr>
       <tr><td><span class="local-text">local</span></td><td class="num">${e.localContent}</td><td class="num">${e.localReference}</td></tr></table>
       <div class="small" style="margin-top:6px">${Object.entries(e.models).sort((a, b) => b[1] - a[1]).map(([name, c]) => `<span class="badge ${isLocalModel(name) ? 'accent' : 'signal'}">${h(name)} ×${c}</span>`).join(' ')}</div>

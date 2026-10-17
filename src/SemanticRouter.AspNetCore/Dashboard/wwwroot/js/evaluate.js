@@ -78,7 +78,7 @@ export function evaluationResults(r) {
         ${readOnly() ? '' : `<button class="btn small" data-action="eval-use-calibration" ${c.recommended.threshold === c.current.threshold && !c.routes.length ? 'disabled' : ''}>Use recommended values</button>`}</div>
       <div class="grid cols-2">
         <div><div class="legend"><span><i class="key" style="background:var(--series-2)"></i>too low</span><span><i class="key" style="background:var(--series-1)"></i>too high</span></div>${sweepChart(c, r.total)}</div>
-        <div><table><tr><th></th><th class="num">Threshold</th><th class="num">Right</th><th class="num">Too low</th><th class="num">Too high</th></tr>
+        <div><table><tr><th><span class="visually-hidden">Setting</span></th><th class="num">Threshold</th><th class="num">Right</th><th class="num">Too low</th><th class="num">Too high</th></tr>
           <tr><td>Current</td><td class="num">${c.current.threshold.toFixed(2)}</td><td class="num">${c.current.correct}</td><td class="num">${c.current.tooLow}</td><td class="num">${c.current.tooHigh}</td></tr>
           <tr><td><b>Recommended</b></td><td class="num"><b>${c.recommended.threshold.toFixed(2)}</b></td><td class="num">${c.recommended.correct}</td><td class="num">${c.recommended.tooLow}</td><td class="num">${c.recommended.tooHigh}</td></tr></table>
           ${c.routes.length ? `<h3 style="margin-top:12px">Route thresholds</h3><table><tr><th>Route</th><th class="num">Now</th><th class="num">Suggested</th><th class="num">Right</th></tr>${c.routes.map((x) => `<tr><td>${h(x.route)}</td><td class="num">${x.current == null ? 'default' : x.current.toFixed(2)}</td><td class="num">${x.recommended == null ? 'default' : x.recommended.toFixed(2)}</td><td class="num">${x.correctBefore} → ${x.correctAfter}</td></tr>`).join('')}</table><p class="small muted">With these: ${c.correctWithRoutes} of ${r.total} right.</p>` : '<p class="small muted" style="margin-top:8px">No per-route threshold does better than the default on this set.</p>'}
@@ -87,7 +87,7 @@ export function evaluationResults(r) {
       <details style="margin-top:8px"><summary class="small muted">Show the sweep as a table</summary><table><tr><th class="num">Threshold</th><th class="num">Right</th><th class="num">Too low</th><th class="num">Too high</th></tr>${c.sweep.filter((p, i) => i % 5 === 0 || p.threshold === c.current.threshold || p.threshold === c.recommended.threshold).map((p) => `<tr><td class="num">${p.threshold.toFixed(2)}</td><td class="num">${p.correct}</td><td class="num">${p.tooLow}</td><td class="num">${p.tooHigh}</td></tr>`).join('')}</table></details>
     </div>` : ''}
     <div class="card section"><div class="card-head"><h2>Misrouted prompts</h2><span class="muted small">${r.misroutes.length} of ${plural(r.total, 'prompt')} · embedded in ${num(r.embeddingMilliseconds, 0)} ms with ${h(r.embeddings)}</span></div>
-      ${r.misroutes.length ? `<div class="table-wrap"><table><tr><th>Prompt</th><th>Expected</th><th>Routed</th><th>Best routes</th><th></th></tr>${misroutes}</table></div>` : '<div class="muted small">Every prompt was routed to its tier.</div>'}</div>`;
+      ${r.misroutes.length ? `<div class="table-wrap"><table><tr><th>Prompt</th><th>Expected</th><th>Routed</th><th>Best routes</th><th><span class="visually-hidden">Actions</span></th></tr>${misroutes}</table></div>` : '<div class="muted small">Every prompt was routed to its tier.</div>'}</div>`;
 }
 
 /* How often the judge's grades agree with the hand labels, and the weight that gives its labels in tuning. */
@@ -102,7 +102,7 @@ export function judgeCard() {
   return `<div class="card section"><div class="card-head"><h2>Judge agreement</h2><span class="muted small">Graded answers whose prompt is also in the evaluation set: a low grade agrees when the label is above the tier that answered, a good grade when it is at or below it.</span></div>
     <div class="small">${j.pairs ? `<b>${j.agreeing} of ${j.pairs}</b> agree (${pct(j.rate)}) · low grades confirmed ${j.lowAgreeing} of ${j.lowGrades} · good grades confirmed ${j.goodAgreeing} of ${j.goodGrades}` : 'No graded answer has a hand label yet. Label graded prompts on the <a href="#/activity">Activity</a> page (the tag button on a row).'}</div>
     <div class="small muted" style="margin-top:4px">${effect}</div>
-    ${j.recent.length ? `<table style="margin-top:10px"><tr><th>Request</th><th>Model</th><th class="num">Grade</th><th class="num">Answered tier</th><th class="num">Label</th><th></th></tr>${j.recent.map((p) => `<tr><td>#${p.entryId}</td><td>${h(p.model || '—')}</td><td class="num">${p.grade}/5</td><td class="num">${p.answeredTier}</td><td class="num">${p.labelTier}</td><td>${p.agrees ? '<span class="badge ok">agrees</span>' : '<span class="badge warn">disagrees</span>'}</td></tr>`).join('')}</table>` : ''}
+    ${j.recent.length ? `<table style="margin-top:10px"><tr><th>Request</th><th>Model</th><th class="num">Grade</th><th class="num">Answered tier</th><th class="num">Label</th><th><span class="visually-hidden">Judge and label</span></th></tr>${j.recent.map((p) => `<tr><td>#${p.entryId}</td><td>${h(p.model || '—')}</td><td class="num">${p.grade}/5</td><td class="num">${p.answeredTier}</td><td class="num">${p.labelTier}</td><td>${p.agrees ? '<span class="badge ok">agrees</span>' : '<span class="badge warn">disagrees</span>'}</td></tr>`).join('')}</table>` : ''}
   </div>`;
 }
 
@@ -127,7 +127,7 @@ export function compareCard() {
       <label class="field"><span class="name">API key</span><input type="text" data-state="evaluation.form.apiKey" value="${h(f.apiKey)}" placeholder="optional, or \${env:…}"></label>`}
     </div>
     <div class="inline" style="margin-top:10px"><button class="btn small" data-action="eval-compare" ${adminOnly()}>Compare</button></div>
-    ${cmp ? `<table style="margin-top:10px"><tr><th></th><th>Embeddings</th><th>Accuracy</th></tr><tr><td>Current</td><td class="small">${h(cmp.current.embeddings)}</td><td>${side(cmp.current)}</td></tr><tr><td>Candidate</td><td class="small">${h(cmp.candidate.embeddings)}</td><td>${side(cmp.candidate)}</td></tr></table>${(cmp.warnings || []).map((w) => `<div class="small muted">${h(w)}</div>`).join('')}` : ''}
+    ${cmp ? `<table style="margin-top:10px"><tr><th><span class="visually-hidden">Run</span></th><th>Embeddings</th><th>Accuracy</th></tr><tr><td>Current</td><td class="small">${h(cmp.current.embeddings)}</td><td>${side(cmp.current)}</td></tr><tr><td>Candidate</td><td class="small">${h(cmp.candidate.embeddings)}</td><td>${side(cmp.candidate)}</td></tr></table>${(cmp.warnings || []).map((w) => `<div class="small muted">${h(w)}</div>`).join('')}` : ''}
   </div>`;
 }
 

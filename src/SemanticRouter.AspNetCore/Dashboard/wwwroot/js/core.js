@@ -198,6 +198,29 @@ export function toast(message, kind, options) {
   return { dismiss };
 }
 
+/*
+ * A table or feed that scrolls must be reachable from the keyboard (WCAG 2.1.1): it takes the focus, so the arrow keys
+ * scroll it, and is named after its table or its card's heading. One that fits is not an extra tab stop.
+ */
+export function scrollRegions(root) {
+  $$('.table-wrap, .feed', root).forEach((el) => {
+    const scrolls = el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
+    if (!scrolls) {
+      if (el.dataset.scrollRegion) { ['tabindex', 'role', 'aria-label'].forEach((a) => el.removeAttribute(a)); delete el.dataset.scrollRegion; }
+      return;
+    }
+    if (el.dataset.scrollRegion) return;
+    const table = el.querySelector('table');
+    const card = el.closest('.card');
+    const heading = card && card.querySelector('h2, h3');
+    const name = (table && (table.getAttribute('aria-label') || (table.caption && table.caption.textContent))) || (heading && heading.textContent) || 'Table';
+    el.setAttribute('tabindex', '0');
+    el.setAttribute('role', 'region');
+    el.setAttribute('aria-label', name.trim());
+    el.dataset.scrollRegion = '1';
+  });
+}
+
 /* The chrome's banner: rewritten only when what it says changes, so a screen reader does not hear it again every refresh. */
 export function banner(message, kind) {
   const el = $('#banner');

@@ -10,7 +10,7 @@ import './audit.js';
 import './desktop.js';
 import { reportActions } from './feedback.js';
 import { actions } from './actions.js';
-import { $, $$, actionKey, api, evaluationEdited, h, isDirty, jsonEdited, metricsOnly, readInput, readOnly, setPath, showSignIn, state, toast } from './core.js';
+import { $, $$, actionKey, api, evaluationEdited, h, isDirty, jsonEdited, metricsOnly, readInput, readOnly, scrollRegions, setPath, showSignIn, state, toast } from './core.js';
 import { aliasRows, limitRows, writeAliases, writeLimits } from './draft.js';
 import { connectStream } from './live.js';
 import { graph } from './memory.js';
@@ -202,6 +202,9 @@ document.addEventListener('keydown', (ev) => {
     el.click();
   }
 });
+// A table that fits the window may scroll once it is narrower, and the other way round.
+let resized;
+window.addEventListener('resize', () => { clearTimeout(resized); resized = setTimeout(() => scrollRegions($('#view')), 150); });
 // Leaving with unapplied edits, or typed text the router does not have yet, asks first (not for the read-only role).
 window.addEventListener('beforeunload', (ev) => { if (!readOnly() && (isDirty() || jsonEdited() || evaluationEdited())) { ev.preventDefault(); ev.returnValue = ''; } });
 

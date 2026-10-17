@@ -73,7 +73,7 @@ function budgetsEditor() {
   const budgets = (c.Usage || {}).Budgets || [];
   const targets = { Model: (c.Models || []).map((m) => m.Name), Connector: connectorNames(), Profile: Object.keys(c.Profiles || {}) };
   return `<h3 style="margin-top:14px">Budgets</h3>
-    <div class="table-wrap"><table class="budgets"><tr><th>Name</th><th>Covers</th><th>Period</th><th class="num">Max tokens</th><th class="num">Max USD</th><th></th></tr>
+    <div class="table-wrap"><table class="budgets"><tr><th>Name</th><th>Covers</th><th>Period</th><th class="num">Max tokens</th><th class="num">Max USD</th><th><span class="visually-hidden">Actions</span></th></tr>
       ${budgets.map((b, i) => {
         const scope = scopeOf(b);
         const options = targets[scope];
@@ -100,7 +100,7 @@ views.usage = () => {
   }
   const t = d.totals; const max = Math.max(1e-9, ...d.groups.map((g) => g.totals.costUsd || 0)); const maxTok = Math.max(1, ...d.groups.map((g) => g.totals.inputTokens + g.totals.outputTokens + g.totals.cacheReadTokens + g.totals.cacheWriteTokens));
   const byCost = d.groups.some((g) => g.totals.costUsd > 0);
-  const seg = (key, values, label) => `<span class="seg" role="group" aria-label="${label}">${values.map(([v, text]) => `<button class="${u[key] === v ? 'on' : ''}" data-action="usage-set" data-key="${key}" data-value="${v}" aria-pressed="${u[key] === v}">${text}</button>`).join('')}</span>`;
+  const seg = (key, values, label) => `<span class="seg" role="group" aria-label="${label}">${values.map(([v, text]) => `<button class="${u[key] === v ? 'on' : ''}" aria-pressed="${u[key] === v}" data-action="usage-set" data-key="${key}" data-value="${v}" aria-pressed="${u[key] === v}">${text}</button>`).join('')}</span>`;
   const usage = state.config.Usage || {};
   const reference = metricsOnly() ? 'a reference model' : '<a href="#/usage" data-action="goto-field" data-view="usage" data-field="Usage.ReferenceModel">set a reference model</a>';
   return `

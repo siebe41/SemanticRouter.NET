@@ -1,6 +1,6 @@
 /* Semantic Router dashboard: Loading, the rail, tabs and top bar, themes, rendering and hash routing. */
 import { loadTrends } from './charts.js';
-import { $, $$, actionKey, api, banner, h, isDirty, METRICS_VIEWS, metricsOnly, plural, PREFIX, readOnly, SECTIONS, sectionOf, sourceLabel, state, THEME_KEY, THEMES, toast, views, whenDate } from './core.js';
+import { $, $$, actionKey, api, banner, h, isDirty, METRICS_VIEWS, metricsOnly, plural, PREFIX, readOnly, scrollRegions, SECTIONS, sectionOf, sourceLabel, state, THEME_KEY, THEMES, toast, views, whenDate } from './core.js';
 import { loadDigest } from './digest.js';
 import { draftChanges, itemKeyForPath, rebase } from './draft.js';
 import { endpointPill } from './endpoints.js';
@@ -479,6 +479,7 @@ export function render() {
     if (openDetails && openDetails.size) { const all = $$('details', root); detailKeys(root).forEach((k, i) => { if (openDetails.has(k)) all[i].open = true; }); }
     markIssues(root);
     readOnlyForms(root);
+    scrollRegions(root);
     $$('[data-action]', root).forEach((el) => { if (state.busy.has(actionKey(el))) setBusy(el, true); });
     if (!placeFocus(root)) refocus(root, typing);
   } catch (e) {
