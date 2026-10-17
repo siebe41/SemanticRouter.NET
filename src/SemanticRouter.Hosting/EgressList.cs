@@ -55,6 +55,11 @@ internal static class EgressList
             lines.Add(Line($"webhook {name}: {host}{(resolved.Notifications.Enabled ? string.Empty : " (Notifications:Enabled is off, so nothing is sent)")}."));
         }
 
+        Uri prices = ModelPriceList.DefaultSource;
+        lines.Add(Line(policy.Refuses(prices) is { } noPrices
+            ? $"price list: {prices.Host} (never contacted: {noPrices})."
+            : $"price list: {prices.Host}, only when the dashboard looks up cloud models' prices (Look up prices, Discover models); nothing but the request for the list is sent."));
+
         // The desktop app follows the machine policy only, not this host's own Network:Offline.
         lines.Add(Line(Updates(services.GetService<MachinePolicy>() ?? MachinePolicy.None)));
 

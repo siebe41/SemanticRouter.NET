@@ -37,8 +37,11 @@ public sealed record BudgetStatus(
     }
 }
 
-/// <summary>Decides whether a model may be tried under the configured budgets, and reports where each budget stands.</summary>
-internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time, ILogger<BudgetGate> logger)
+/// <summary>
+/// Decides whether a model may be tried under the configured budgets, and reports where each budget stands. Spend is at
+/// the catalog's current prices when <paramref name="prices"/> gives the configuration, as on the Usage page.
+/// </summary>
+internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time, ILogger<BudgetGate> logger, Func<RouterConfiguration?>? prices = null)
 {
     private readonly ConcurrentDictionary<string, DateTimeOffset> _warned = new(StringComparer.OrdinalIgnoreCase);
 
@@ -91,7 +94,7 @@ internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time,
         for (int i = 0; i < periods; i++)
         {
             (DateTimeOffset start, DateTimeOffset end) = PeriodOf(budget.Period, at, zone);
-            spent += Exceeded(budget, ledger.Total(start, end, NullIfEmpty(budget.Model), NullIfEmpty(budget.Connector), NullIfEmpty(budget.Profile))) ? 1 : 0;
+            spent += Exceeded(budget, Spent(budget, start, end)) ? 1 : 0;
             at = start.AddTicks(-1);
         }
 
@@ -112,7 +115,7 @@ internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time,
     private BudgetStatus StatusOf(BudgetDefinition budget, UsageOptions usage)
     {
         (DateTimeOffset start, DateTimeOffset end) = PeriodOf(budget.Period, time.GetUtcNow(), ZoneOf(usage));
-        UsageTotals spent = ledger.Total(start, end, NullIfEmpty(budget.Model), NullIfEmpty(budget.Connector), NullIfEmpty(budget.Profile));
+        UsageTotals spent = Spent(budget, start, end);
         double tokenShare = budget.MaxTokens is > 0 and { } maxTokens ? (double)spent.TotalTokens / maxTokens : 0;
         double costShare = budget.MaxCostUsd is > 0 and { } maxCost ? (double)(spent.CostUsd / maxCost) : 0;
         bool exceeded = Exceeded(budget, spent);
@@ -139,6 +142,9 @@ internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time,
 
         return status;
     }
+
+    private UsageTotals Spent(BudgetDefinition budget, DateTimeOffset start, DateTimeOffset end) =>
+        ledger.TotalAtCurrentPrices(prices?.Invoke(), start, end, NullIfEmpty(budget.Model), NullIfEmpty(budget.Connector), NullIfEmpty(budget.Profile));
 
     private static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 

@@ -92,6 +92,13 @@ public interface IUsageLedger
 
     /// <summary>Totals per group between <paramref name="since"/> and <paramref name="until"/>, largest cost first.</summary>
     IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null);
+
+    /// <summary>
+    /// The records between <paramref name="since"/> and <paramref name="until"/>, optionally for one model, connector or
+    /// profile, so <see cref="UsagePricing"/> can price their tokens at the catalog's current prices. <see langword="null"/>
+    /// (the default) for a ledger that keeps only totals: its usage stays at the prices it was recorded at.
+    /// </summary>
+    IReadOnlyList<UsageRecord>? Records(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) => null;
 }
 
 /// <summary>The default <see cref="IUsageLedger"/>: this process's usage, in memory, for the last 40 days.</summary>
@@ -117,7 +124,11 @@ public sealed class InMemoryUsageLedger : IUsageLedger
     }
 
     /// <inheritdoc />
-    public UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null)
+    public UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
+        Records(since, until, model, connector, profile).Aggregate(UsageTotals.Zero, (total, r) => total.Add(r));
+
+    /// <inheritdoc />
+    public IReadOnlyList<UsageRecord> Records(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null)
     {
         lock (_gate)
         {
@@ -126,7 +137,7 @@ public sealed class InMemoryUsageLedger : IUsageLedger
                             && (model is null || string.Equals(r.Model, model, StringComparison.OrdinalIgnoreCase))
                             && (connector is null || string.Equals(r.Connector, connector, StringComparison.OrdinalIgnoreCase))
                             && (profile is null || string.Equals(r.Profile, profile, StringComparison.OrdinalIgnoreCase)))
-                .Aggregate(UsageTotals.Zero, (total, r) => total.Add(r));
+                .ToArray();
         }
     }
 
@@ -170,6 +181,75 @@ public static class UsageSummaries
             UsageGrouping.Profile => record.Profile ?? "(no profile)",
             UsageGrouping.Location => record.IsLocal ? "local" : "cloud",
             _ => TimeZoneInfo.ConvertTime(record.Timestamp, zone).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+        };
+    }
+}
+
+/// <summary>
+/// Usage at the catalog's current prices. A ledger stores what each request cost when it was served; these price the
+/// stored tokens again, so correcting a model's price (or adding one to a model that had none) corrects its past usage,
+/// its subscription value and the budgets too. Records of a model no longer in the catalog keep their stored cost.
+/// </summary>
+public static class UsagePricing
+{
+    /// <summary><see cref="IUsageLedger.Total"/>, priced at <paramref name="prices"/>' current prices when the ledger keeps records.</summary>
+    /// <param name="ledger">The ledger.</param>
+    /// <param name="prices">The configuration whose models and reference model price the usage; <see langword="null"/> for the stored costs.</param>
+    /// <param name="since">From (inclusive).</param>
+    /// <param name="until">To (exclusive).</param>
+    /// <param name="model">Only this model.</param>
+    /// <param name="connector">Only this connector.</param>
+    /// <param name="profile">Only this profile.</param>
+    public static UsageTotals TotalAtCurrentPrices(
+        this IUsageLedger ledger, RouterConfiguration? prices, DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null)
+    {
+        ArgumentNullException.ThrowIfNull(ledger);
+        return prices is not null && ledger.Records(since, until, model, connector, profile) is { } records
+            ? records.Select(Pricer(prices)).Aggregate(UsageTotals.Zero, (total, r) => total.Add(r))
+            : ledger.Total(since, until, model, connector, profile);
+    }
+
+    /// <summary><see cref="IUsageLedger.Summarize"/>, priced at <paramref name="prices"/>' current prices when the ledger keeps records.</summary>
+    /// <param name="ledger">The ledger.</param>
+    /// <param name="prices">The configuration whose models and reference model price the usage; <see langword="null"/> for the stored costs.</param>
+    /// <param name="since">From (inclusive).</param>
+    /// <param name="until">To (exclusive).</param>
+    /// <param name="by">How to group.</param>
+    /// <param name="zone">The time zone days are counted in.</param>
+    public static IReadOnlyList<UsageGroup> SummarizeAtCurrentPrices(
+        this IUsageLedger ledger, RouterConfiguration? prices, DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null)
+    {
+        ArgumentNullException.ThrowIfNull(ledger);
+        return prices is not null && ledger.Records(since, until) is { } records
+            ? UsageSummaries.Group(records.Select(Pricer(prices)), by, zone ?? TimeZoneInfo.Local)
+            : ledger.Summarize(since, until, by, zone);
+    }
+
+    /// <summary>
+    /// Prices records the way the dispatcher does when it records them: cost at the model's prices, the reference cost at
+    /// the reference model's (cache included) or the cost, and a subscription's value at its API prices.
+    /// </summary>
+    /// <param name="prices">The configuration whose models and reference model price the records.</param>
+    public static Func<UsageRecord, UsageRecord> Pricer(RouterConfiguration prices)
+    {
+        ArgumentNullException.ThrowIfNull(prices);
+        var models = new Dictionary<string, ModelDefinition>(StringComparer.OrdinalIgnoreCase);
+        foreach (ModelDefinition m in prices.Models)
+        {
+            models.TryAdd(m.Name, m);
+        }
+
+        ModelDefinition? reference = prices.Usage.ReferenceModel is { Length: > 0 } name ? models.GetValueOrDefault(name) : null;
+        return r =>
+        {
+            ModelDefinition? model = models.GetValueOrDefault(r.Model);
+            decimal cost = model?.Cost(r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens) ?? r.CostUsd;
+            return r with
+            {
+                CostUsd = cost,
+                ReferenceCostUsd = reference?.Cost(r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens) ?? cost,
+                SubscriptionValueUsd = model?.ApiValue(r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens) ?? r.SubscriptionValueUsd,
+            };
         };
     }
 }
