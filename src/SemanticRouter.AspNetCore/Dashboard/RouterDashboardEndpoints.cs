@@ -836,7 +836,7 @@ public static partial class RouterDashboardEndpoints
 
         string file = $"configuration file{(provider.Store is { } store ? $" ({store.Location})" : string.Empty)}";
         return candidate.ProcessSettingChanges(provider.Current.Configuration).Select(name =>
-                $"Connectors:{name}: what a CLI runs (its program, arguments, environment variables and home directory) is changed in the " +
+                $"Connectors:{name}: what a CLI runs (its program, arguments, environment variables, the variables it removes, how it gets the prompt and its home directory) is changed in the " +
                 $"{file}, not over the admin API, which any program on this machine can reach. Presets started from PATH can be added here. " +
                 "To allow it, set SemanticRouter:Dashboard:AllowProcessSettings.")
             .Concat(candidate.MemoryPathChanges(provider.Current.Configuration).Select(name =>

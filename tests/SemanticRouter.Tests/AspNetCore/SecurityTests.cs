@@ -608,11 +608,15 @@ public sealed class DashboardAccessTests : RouterHostTest
 
         HttpResponseMessage shell = await PutWithAsync(client, "evil", """{"Type":"Cli","Preset":"Custom","Executable":"/bin/sh","Arguments":["-c","id"]}""");
         HttpResponseMessage preload = await PutWithAsync(client, "claude", """{"Type":"Cli","Preset":"ClaudeCode","EnvironmentVariables":{"LD_PRELOAD":"/tmp/x.so"}}""");
+        HttpResponseMessage keepKeys = await PutWithAsync(client, "claude", """{"Type":"Cli","Preset":"ClaudeCode","RemoveEnvironmentVariables":[]}""");
+        HttpResponseMessage onCommandLine = await PutWithAsync(client, "claude", """{"Type":"Cli","Preset":"ClaudeCode","PromptInput":"Argument"}""");
         HttpResponseMessage preset = await PutWithAsync(client, "claude", """{"Type":"Cli","Preset":"ClaudeCode"}""");
 
         shell.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await shell.Content.ReadAsStringAsync()).Should().Contain("Connectors:evil").And.Contain("AllowProcessSettings");
         preload.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        keepKeys.StatusCode.Should().Be(HttpStatusCode.BadRequest, "keeping ANTHROPIC_API_KEY would switch the CLI's billing to the API key");
+        onCommandLine.StatusCode.Should().Be(HttpStatusCode.BadRequest, "a prompt on the command line can be read by other users of the machine");
         preset.StatusCode.Should().Be(HttpStatusCode.OK, "a preset started from PATH runs the vendor's own CLI");
         await DisposeAsync();
 

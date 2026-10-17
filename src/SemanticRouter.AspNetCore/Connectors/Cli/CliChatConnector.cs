@@ -200,6 +200,7 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             StandardInput = standardInput,
             SetEnvironment = _adapter.EnvironmentFor(_options),
             RemoveEnvironment = _removedEnvironment,
+            SecretValues = _redactor.Values,
         };
     }
 
