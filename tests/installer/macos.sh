@@ -15,6 +15,11 @@ version() { /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app
 label="io.github.siebe41.semantic-router"
 plist="$HOME/Library/LaunchAgents/$label.plist"
 instance="$config/semantic-router.instance.json"
+tools="$(cd "$(dirname "$0")/../../tools/upgrade-fixtures" && pwd)"
+# The service's router runs on this home with the default address.
+newest="$(ls "$(dirname "$0")/../fixtures/upgrade"/*.zip | sort -V | tail -n 1)"
+usage="$(python3 "$tools/seed-home.py" "$newest" "$config")"
+echo "Seeded $config from $(basename "$newest") ($usage usage records)"
 
 # Waits up to 90 s for a command to succeed.
 wait_for() {
@@ -62,6 +67,7 @@ echo "::group::Background service"
 [ -f "$plist" ] || { echo "::error::No launchd agent at $plist"; exit 1; }
 wait_for "the background service to run 1.0.0" service_on 1.0.0 || { logs; exit 1; }
 grep -q "<string>$exe</string>" "$plist" || { echo "::error::The agent does not run $exe"; cat "$plist"; exit 1; }
+python3 "$tools/check-usage.py" http://127.0.0.1:5080 "$usage" "1.0.0 on the $(basename "$newest" .zip) home" || { logs; exit 1; }
 echo "launchd runs $label, which answers as 1.0.0"
 echo "::endgroup::"
 
@@ -93,6 +99,7 @@ done
 [ "$(version)" = "1.0.1" ] || { echo "::error::The app is '$(version)' after the update, expected 1.0.1"; tail -40 "$HOME/Library/Logs/velopack_SemanticRouter.log" /tmp/velopack_SemanticRouter.log 2>/dev/null; exit 1; }
 # The update stopped the service; the new version installed and started it again.
 wait_for "the background service to run 1.0.1 after the update" service_on 1.0.1 || { logs; exit 1; }
+python3 "$tools/check-usage.py" http://127.0.0.1:5080 "$usage" "1.0.1 after the update" || { logs; exit 1; }
 echo "::endgroup::"
 
 echo "::group::The new version"

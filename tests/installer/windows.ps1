@@ -56,6 +56,16 @@ function Invoke-Program([string] $program, [string[]] $arguments, [int] $seconds
     $p.ExitCode
 }
 
+Step 'A home from the newest release'
+# The upgrade fixture of the newest release (#206): what it set up and used, in the default configuration directory.
+# Its state database is moved out of the roaming profile on the first start (#216).
+$tools = Join-Path $PSScriptRoot '..\..\tools\upgrade-fixtures'
+$newest = Get-ChildItem (Join-Path $PSScriptRoot '..\fixtures\upgrade') -Filter '*.zip' | Sort-Object { [version]$_.BaseName } | Select-Object -Last 1
+$usage = (python (Join-Path $tools 'seed-home.py') $newest.FullName $config).Trim()
+if ($LASTEXITCODE -ne 0) { Fail "Could not seed $config from $($newest.Name)" }
+Write-Host "Seeded $config from $($newest.Name) ($usage usage records)"
+Done
+
 Step 'Install 1.0.0'
 $setupLog = Join-Path $env:RUNNER_TEMP 'setup.log'
 $code = Invoke-Program (Resolve-Path $Setup).Path @('--silent', '--log', $setupLog) 300
@@ -80,6 +90,9 @@ Wait-Until { (Router-Processes).Count -ge 1 } 60 'the background service to run'
 # The app's own sign-in entry (the tray's "Start at sign-in"), as the app writes it.
 New-ItemProperty -Path $runKey -Name 'SemanticRouter Desktop' -Value "`"$exe`" --background --config-dir `"$config`"" -PropertyType String -Force | Out-Null
 Wait-Until { Test-Path (Join-Path $local 'semantic-router.db') } 60 "the service's state database in $local"
+if (Test-Path (Join-Path $config 'semantic-router.db')) { Fail "The state database is still in the roaming $config" }
+python (Join-Path $tools 'check-usage.py') http://127.0.0.1:5080 $usage "1.0.0 on the $($newest.BaseName) home"
+if ($LASTEXITCODE -ne 0) { Fail 'The home from the newest release lost its usage' }
 Done
 
 Step 'The app starts in the background, takes a second launch and quits'
@@ -127,6 +140,8 @@ $code = Invoke-Program $exe @('--quit', '--config-dir', "`"$config`"") 30
 if ($code -ne 0) { Fail "--quit exited with $code" }
 Wait-Until { (App-Processes).Count -eq 0 } 30 'the restarted app to quit'
 if ((Router-Processes).Count -lt 1) { Fail 'Quitting the app stopped the background service' }
+python (Join-Path $tools 'check-usage.py') http://127.0.0.1:5080 $usage '1.0.1 after the update'
+if ($LASTEXITCODE -ne 0) { Fail 'The update lost the usage' }
 Write-Host "Updated to $(Installed-Version); the app started again and the service runs again"
 Done
 

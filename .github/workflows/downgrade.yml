@@ -1,0 +1,35 @@
+name: Downgrade
+
+# Nightly, since it needs nuget.org: the current build migrates a home the newest release set up and used, then the
+# newest published release is started on it, and again on the copy the upgrade kept (tests/installer/downgrade.sh,
+# docs/host.md "Upgrading and going back"). The upgrade direction runs on every pull request
+# (UpgradeFromReleasedVersionsTests and the installer jobs in ci.yml).
+on:
+  schedule:
+    - cron: '41 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  downgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Build the host
+        run: dotnet build src/SemanticRouter.Host --configuration Release -p:RestoreLockedMode=true
+
+      - name: Upgrade, then go back to the newest release
+        run: tests/installer/downgrade.sh src/SemanticRouter.Host/bin/Release/net10.0/semantic-router.dll
