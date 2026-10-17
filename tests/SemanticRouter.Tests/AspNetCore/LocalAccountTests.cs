@@ -24,9 +24,13 @@ public sealed class LocalAccountLookupTests
         client.Connect((IPEndPoint)listener.LocalEndpoint);
         using Socket accepted = listener.AcceptSocket();
 
-        LocalAccount account = LocalAccounts.Find((IPEndPoint)client.Client.LocalEndPoint!, (IPEndPoint)accepted.LocalEndPoint!);
+        var clientEnd = (IPEndPoint)client.Client.LocalEndPoint!;
+        var serverEnd = (IPEndPoint)accepted.LocalEndPoint!;
+        LocalAccount account = LocalAccounts.Find(clientEnd, serverEnd);
 
-        account.Should().Be(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows() ? LocalAccount.Same : LocalAccount.Unknown);
+        account.Should().Be(
+            OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows() ? LocalAccount.Same : LocalAccount.Unknown,
+            MacRecords(clientEnd.Port, serverEnd.Port));
     }
 
     [Fact]
@@ -47,8 +51,9 @@ public sealed class LocalAccountLookupTests
         // As Kestrel reports it: the client as ::ffff:127.0.0.1.
         var remote = (IPEndPoint)accepted.RemoteEndPoint!;
         var local = (IPEndPoint)accepted.LocalEndPoint!;
-        LocalAccounts.Find(remote, local)
-            .Should().Be(OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows() ? LocalAccount.Same : LocalAccount.Unknown);
+        LocalAccounts.Find(remote, local).Should().Be(
+            OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows() ? LocalAccount.Same : LocalAccount.Unknown,
+            MacRecords(remote.Port, local.Port));
     }
 
     [Theory]
@@ -111,14 +116,18 @@ public sealed class LocalAccountLookupTests
         LocalAccounts.WindowsOwners(table, v6, new IPEndPoint(address, 1), server).Should().Be(((int?)null, (int?)null));
     }
 
-    [Fact]
-    public void The_macos_socket_list_names_the_owner_of_each_end()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void The_macos_socket_list_names_the_owner_of_each_end(bool packed)
     {
-        byte[] list = MacList((Client, Server, 501u), (Server, Client, 502u), (new IPEndPoint(IPAddress.IPv6Loopback, 9), new IPEndPoint(IPAddress.IPv6Loopback, 10), 0u));
+        var other6 = (new IPEndPoint(IPAddress.IPv6Loopback, 9), new IPEndPoint(IPAddress.IPv6Loopback, 10));
+        byte[] list = MacList(packed, (Client, Server, 501u, 900), (Server, Client, 502u, 4242), (other6.Item1, other6.Item2, 0u, 1));
 
-        LocalAccounts.MacOwners(list, Client, Server).Should().Be(((uint?)501, (uint?)502));
-        LocalAccounts.MacOwners(list, new IPEndPoint(IPAddress.IPv6Loopback, 9), new IPEndPoint(IPAddress.IPv6Loopback, 10)).Should().Be(((uint?)0, (uint?)null));
-        LocalAccounts.MacOwners(list.AsSpan(0, 10), Client, Server).Should().Be(((uint?)null, (uint?)null));
+        LocalAccounts.MacOwners(list, Client, Server, self: 502, pid: 4242).Should().Be(((uint?)501, (uint?)502));
+        LocalAccounts.MacOwners(list, Client, Server, self: 503, pid: 4242).Should().Be(((uint?)null, (uint?)null), "the router's own end must show the layout");
+        LocalAccounts.MacOwners(list, new IPEndPoint(IPAddress.Loopback, 1), Server, self: 502, pid: 4242).Should().Be(((uint?)null, (uint?)null));
+        LocalAccounts.MacOwners(list.AsSpan(0, 10), Client, Server, self: 502, pid: 4242).Should().Be(((uint?)null, (uint?)null));
     }
 
     private static string Row(int sl, string local, string remote, string state, uint uid) =>
@@ -156,26 +165,31 @@ public sealed class LocalAccountLookupTests
     }
 
     // The layout netstat reads: xinpgen, then per socket xinpcb_n, xsocket_n, two xsockbuf_n, xsockstat_n and xtcpcb_n,
-    // then a closing xinpgen.
-    private static byte[] MacList(params (IPEndPoint Local, IPEndPoint Remote, uint Uid)[] sockets)
+    // then a closing xinpgen. Packed to 4 bytes, the fields after the first 64-bit one move up by 4.
+    private static byte[] MacList(bool packed, params (IPEndPoint Local, IPEndPoint Remote, uint Uid, int Pid)[] sockets)
     {
+        int shift = packed ? 4 : 0;
         using var stream = new MemoryStream();
         Write(stream, Record(24, 0, _ => { }));
-        foreach ((IPEndPoint local, IPEndPoint remote, uint uid) in sockets)
+        foreach ((IPEndPoint local, IPEndPoint remote, uint uid, int pid) in sockets)
         {
-            Write(stream, Record(104, 0x10, r =>
+            Write(stream, Record(104 - shift, 0x10, r =>
             {
                 BinaryPrimitives.WriteUInt16BigEndian(r[16..], (ushort)remote.Port);
                 BinaryPrimitives.WriteUInt16BigEndian(r[18..], (ushort)local.Port);
                 bool v4 = local.AddressFamily == AddressFamily.InterNetwork;
-                r[48] = v4 ? (byte)0x1 : (byte)0x2;
-                remote.Address.GetAddressBytes().CopyTo(r[(v4 ? 64 : 52)..]);
-                local.Address.GetAddressBytes().CopyTo(r[(v4 ? 80 : 68)..]);
+                r[48 - shift] = v4 ? (byte)0x1 : (byte)0x2;
+                remote.Address.GetAddressBytes().CopyTo(r[((v4 ? 64 : 52) - shift)..]);
+                local.Address.GetAddressBytes().CopyTo(r[((v4 ? 80 : 68) - shift)..]);
             }));
-            Write(stream, Record(100, 0x01, r => BitConverter.TryWriteBytes(r[68..], uid)));
-            Write(stream, Record(36, 0x02, _ => { }));
-            Write(stream, Record(36, 0x04, _ => { }));
-            Write(stream, Record(132, 0x08, _ => { }));
+            Write(stream, Record(112 - (2 * shift), 0x01, r =>
+            {
+                BitConverter.TryWriteBytes(r[(68 - shift)..], uid);
+                BitConverter.TryWriteBytes(r[(72 - shift)..], pid);
+            }));
+            Write(stream, Record(32, 0x02, _ => { }));
+            Write(stream, Record(32, 0x04, _ => { }));
+            Write(stream, Record(136, 0x08, _ => { }));
             Write(stream, Record(232, 0x20, _ => { }));
         }
 
@@ -192,6 +206,53 @@ public sealed class LocalAccountLookupTests
             fill(record.AsSpan(0, length));
             return record;
         }
+    }
+
+    /// <summary>On macOS, the records of the sockets on these ports, in hex, to tell which layout a failing kernel uses.</summary>
+    private static string MacRecords(params int[] ports)
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return string.Empty;
+        }
+
+        byte[]? list = LocalAccounts.MacPcbList();
+        if (list is null)
+        {
+            return "net.inet.tcp.pcblist_n could not be read";
+        }
+
+        var text = new System.Text.StringBuilder($"pcblist_n: {list.Length} bytes; ");
+        var group = new List<string>();
+        bool keep = false;
+        for (int offset = (int)((BitConverter.ToUInt32(list) + 7) & ~7u); offset + 8 <= list.Length;)
+        {
+            uint length = BitConverter.ToUInt32(list.AsSpan(offset)), kind = BitConverter.ToUInt32(list.AsSpan(offset + 4));
+            if (length <= 24 || offset + length > list.Length)
+            {
+                break;
+            }
+
+            if (kind == 0x10)
+            {
+                keep = ports.Contains(BinaryPrimitives.ReadUInt16BigEndian(list.AsSpan(offset + 18)));
+            }
+
+            group.Add($"kind {kind:X} len {length}: {Convert.ToHexString(list, offset, (int)Math.Min(length, 120u))}");
+            if (kind == 0x20)
+            {
+                if (keep)
+                {
+                    text.AppendJoin(" | ", group).Append(" || ");
+                }
+
+                (group, keep) = ([], false);
+            }
+
+            offset += (int)((length + 7) & ~7u);
+        }
+
+        return text.ToString();
     }
 
     private delegate void SpanAction(Span<byte> record);

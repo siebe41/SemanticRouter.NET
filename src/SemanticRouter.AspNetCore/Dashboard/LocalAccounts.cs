@@ -187,7 +187,12 @@ internal static class LocalAccounts
     private static readonly byte[] PcbListName = "net.inet.tcp.pcblist_n\0"u8.ToArray();
 
     [SupportedOSPlatform("macos")]
-    private static (uint? Client, uint? Server)? MacTable(IPEndPoint client, IPEndPoint server)
+    private static (uint? Client, uint? Server)? MacTable(IPEndPoint client, IPEndPoint server) =>
+        MacPcbList() is { } list ? MacOwners(list, client, server, GetEffectiveUserId(), Environment.ProcessId) : null;
+
+    /// <summary>The kernel's list of TCP sockets, as netstat reads it; <see langword="null"/> when it cannot be read.</summary>
+    [SupportedOSPlatform("macos")]
+    internal static byte[]? MacPcbList()
     {
         for (int attempt = 0; attempt < 3; attempt++)
         {
@@ -202,7 +207,7 @@ internal static class LocalAccounts
             length = (nuint)list.Length;
             if (SysctlByName(PcbListName, list, ref length, IntPtr.Zero, 0) == 0)
             {
-                return MacOwners(list.AsSpan(0, (int)length), client, server);
+                return list[..(int)length];
             }
 
             if (Marshal.GetLastPInvokeError() != 12) // ENOMEM: it grew meanwhile
@@ -214,18 +219,22 @@ internal static class LocalAccounts
         return null;
     }
 
-    internal static (uint? Client, uint? Server) MacOwners(ReadOnlySpan<byte> list, IPEndPoint client, IPEndPoint server)
+    /// <summary>
+    /// The owners of both ends, read from the socket records of the list. The private structures are laid out either
+    /// naturally or packed to 4 bytes, which moves their fields, so the router's own end (<paramref name="self"/> and
+    /// <paramref name="pid"/>) shows which layout this kernel uses before the client's end is read with it.
+    /// </summary>
+    internal static (uint? Client, uint? Server) MacOwners(ReadOnlySpan<byte> list, IPEndPoint client, IPEndPoint server, uint self, int pid)
     {
-        uint? clientUid = null, serverUid = null;
         if (list.Length < XinpgenSize)
         {
             return (null, null);
         }
 
-        int offset = RoundUp(BitConverter.ToUInt32(list));
+        (int Start, int Length)? clientSocket = null, serverSocket = null;
+        (int Start, int Length)? inpcb = null, socket = null;
         uint seen = 0;
-        uint? uid = null;
-        (IPEndPoint Local, IPEndPoint Remote)? ends = null;
+        int offset = RoundUp(BitConverter.ToUInt32(list));
         while (offset + 8 <= list.Length)
         {
             uint length = BitConverter.ToUInt32(list[offset..]);
@@ -235,55 +244,102 @@ internal static class LocalAccounts
                 break; // the closing xinpgen
             }
 
-            ReadOnlySpan<byte> record = list.Slice(offset, (int)length);
-            if (kind == XsoSocket && record.Length >= 72)
+            if (kind == XsoSocket)
             {
-                uid = BitConverter.ToUInt32(record[68..]); // xsocket_n.so_uid
+                socket = (offset, (int)length);
             }
-            else if (kind == XsoInpcb && record.Length >= 84)
+            else if (kind == XsoInpcb)
             {
-                ends = MacEnds(record);
+                inpcb = (offset, (int)length);
             }
 
             seen |= kind;
             if ((seen & XsoAllTcp) == XsoAllTcp)
             {
-                if (ends is { } found && uid is { } owner)
+                if (inpcb is { } i && socket is { } so)
                 {
-                    if (found.Local.Equals(client) && found.Remote.Equals(server))
+                    ReadOnlySpan<byte> record = list.Slice(i.Start, i.Length);
+                    if (MacConnects(record, client, server))
                     {
-                        clientUid = owner;
+                        clientSocket = so;
                     }
-                    else if (found.Local.Equals(server) && found.Remote.Equals(client))
+                    else if (MacConnects(record, server, client))
                     {
-                        serverUid = owner;
+                        serverSocket = so;
                     }
                 }
 
-                (seen, uid, ends) = (0, null, null);
+                (seen, inpcb, socket) = (0, null, null);
             }
 
             offset += RoundUp(length);
         }
 
-        return (clientUid, serverUid);
+        if (clientSocket is not { } c || serverSocket is not { } s || MacUidOffset(list.Slice(s.Start, s.Length), self, pid) is not { } at
+            || c.Length < at + 4)
+        {
+            return (null, null);
+        }
+
+        return (BitConverter.ToUInt32(list[(c.Start + at)..]), self);
     }
 
-    // xinpcb_n: inp_fport at 16 and inp_lport at 18 (network order), inp_vflag at 48, then the foreign and the local address
-    // (16 bytes each, at 52 and 68; an IPv4 address is the last 4 of them).
-    private static (IPEndPoint Local, IPEndPoint Remote)? MacEnds(ReadOnlySpan<byte> record)
+    // xsocket_n: so_uid then so_last_pid follow so_oobmark, at 68 and 72 laid out naturally, at 64 and 68 packed to 4 bytes.
+    private static int? MacUidOffset(ReadOnlySpan<byte> socket, uint self, int pid)
     {
-        int remotePort = BinaryPrimitives.ReadUInt16BigEndian(record[16..]), localPort = BinaryPrimitives.ReadUInt16BigEndian(record[18..]);
-        byte flags = record[48];
-        (IPAddress Remote, IPAddress Local)? addresses = (flags & 0x1) != 0
-            ? (new IPAddress(record.Slice(64, 4)), new IPAddress(record.Slice(80, 4)))
-            : (flags & 0x2) != 0 ? (new IPAddress(record.Slice(52, 16)), new IPAddress(record.Slice(68, 16))) : null;
-        return addresses is { } both
-            ? (Normalize(new IPEndPoint(both.Local, localPort)), Normalize(new IPEndPoint(both.Remote, remotePort)))
-            : null;
+        foreach (int at in (int[])[68, 64])
+        {
+            if (socket.Length >= at + 8 && BitConverter.ToUInt32(socket[at..]) == self && BitConverter.ToInt32(socket[(at + 4)..]) == pid)
+            {
+                return at;
+            }
+        }
+
+        // The last owner can be another process (a socket passed on); then only the account says which layout it is.
+        bool natural = socket.Length >= 72 && BitConverter.ToUInt32(socket[68..]) == self;
+        bool packed = socket.Length >= 68 && BitConverter.ToUInt32(socket[64..]) == self;
+        return natural == packed ? null : natural ? 68 : 64;
+    }
+
+    // xinpcb_n: inp_fport at 16 and inp_lport at 18 (network order), then inp_vflag and the foreign and local addresses
+    // (16 bytes each; an IPv4 address is the last 4): at 48, 52 and 68 laid out naturally, at 44, 48 and 64 packed to 4.
+    private static bool MacConnects(ReadOnlySpan<byte> record, IPEndPoint local, IPEndPoint remote)
+    {
+        if (record.Length < 84 || BinaryPrimitives.ReadUInt16BigEndian(record[18..]) != local.Port
+            || BinaryPrimitives.ReadUInt16BigEndian(record[16..]) != remote.Port)
+        {
+            return false;
+        }
+
+        foreach ((int flags, int foreign) in ((int, int)[])[(48, 52), (44, 48)])
+        {
+            int at = record[flags] switch
+            {
+                var f when (f & 0x1) != 0 => 12, // INP_IPV4
+                var f when (f & 0x2) != 0 => 0, // INP_IPV6
+                _ => -1,
+            };
+            if (at < 0)
+            {
+                continue;
+            }
+
+            int size = at == 12 ? 4 : 16;
+            IPAddress remoteAddress = new(record.Slice(foreign + at, size)), localAddress = new(record.Slice(foreign + 16 + at, size));
+            if (Normalize(new IPEndPoint(localAddress, local.Port)).Equals(local) && Normalize(new IPEndPoint(remoteAddress, remote.Port)).Equals(remote))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static int RoundUp(uint length) => (int)((length + 7) & ~7u);
+
+    [DllImport("libc", EntryPoint = "geteuid")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static extern uint GetEffectiveUserId();
 
     [DllImport("libc", EntryPoint = "sysctlbyname", SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
