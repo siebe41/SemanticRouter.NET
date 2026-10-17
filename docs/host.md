@@ -83,6 +83,8 @@ Things to know:
 - **Windows shows a console window for a moment at sign-in**, while the sign-in entry starts the background router and returns. The same service set up by the [desktop app](desktop.md#the-app-and-the-background-service) runs `SemanticRouter --headless`, a GUI program, and starts without one. Either installs the same service, so `semantic-router service status`, `stop` and `start` work on both.
 - **Without systemd** (some containers, WSL without systemd, OpenRC distributions) `install` says so and changes nothing. Run `semantic-router` under the supervisor you have.
 
+The dashboard does the same under **Admin → Service**: **Install and hand over** installs the service with the options this router runs with, stops this router and waits for the service's router to listen (when it does not, this one starts again and the page says why); **Reinstall** and **Remove the service** are there once it is installed, with **Restart** and **Stop** for whichever router you are looking at. A restart from the dashboard happens in the same process: the router stops, lets requests in flight finish, and starts again with the saved settings. Removing the service from the router it runs stops that router; from a router started in a terminal, that router keeps running. On macOS, the service's own router cannot reinstall itself (launchd would stop it first): run `service install` in a terminal.
+
 While it runs, the router records its process id and addresses in `semantic-router.instance.json`; `service status` reads it.
 
 ## What `init` adds
@@ -128,6 +130,7 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | `semantic-router.service.json`, `logs/` | Windows background service only: what the sign-in entry starts, and what it logs. |
 | `models/` | Downloaded ONNX embedding models, one directory per model. Copy a `models/{name}` directory here to run without internet access. |
 | `appsettings.json` (optional) | Host settings: logging, Kestrel, `SemanticRouter:Dashboard`, overrides. |
+| `semantic-router.host.json` (optional) | Where to listen (`Urls`), as **Admin → Service** saves it. Read right after `appsettings.json`, so environment variables and `--urls` still win. |
 
 ### What the router stores
 
@@ -193,7 +196,7 @@ It is a host setting, read at start-up: put it in `appsettings.json` in the conf
 
 ## Listening beyond this machine
 
-The tool binds to `http://localhost:5080`. With `--urls http://0.0.0.0:5080` (or any non-loopback address) it prints what that changes:
+The tool binds to `http://localhost:5080`. Choose **Other machines too** under **Admin → Service** on the dashboard and restart, or start it with `--urls http://0.0.0.0:5080` (or any non-loopback address); the dashboard page lists what that needs, and the banner prints what it changes:
 
 - **Subscription CLI connectors still answer only local requests.** Remote callers fall through to API-key or local models ([Subscription CLI terms](TERMS.md)).
 - **The dashboard refuses remote callers** until you set `SemanticRouter:Dashboard:AdminToken` and `RequireLocalClient: false` ([Access and security](dashboard.md#access-and-security)).

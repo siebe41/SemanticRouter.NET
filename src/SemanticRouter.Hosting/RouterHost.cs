@@ -54,6 +54,10 @@ internal static partial class RouterHost
             ContentRootPath = settings.ConfigurationDirectory,
         });
 
+        // Where the dashboard's Service page saves the listen addresses: right above appsettings.json, so environment
+        // variables and the command line still win. Added before the template, like the sources below.
+        AddHostFile(builder.Configuration, settings.ConfigurationDirectory);
+
         // Below everything else, so appsettings.json or Logging__LogLevel__… can turn any of it back up. Added before
         // the template: adding a source reloads the others, and the template's stream can be read only once.
         builder.Configuration.Sources.Insert(0, new MemoryConfigurationSource { InitialData = QuietLogging });
@@ -114,6 +118,17 @@ internal static partial class RouterHost
         app.MapRouterDashboard("/router");
         app.MapRouterDashboardRedirect("/router");
         return app;
+    }
+
+    /// <summary>Adds <see cref="HostListen.FileName"/> right after the last <c>appsettings*.json</c> source.</summary>
+    private static void AddHostFile(ConfigurationManager configuration, string configurationDirectory)
+    {
+        var source = new JsonConfigurationSource { Path = HostListen.FileIn(configurationDirectory), Optional = true, ReloadOnChange = false };
+        source.ResolveFileProvider();
+        int appSettings = configuration.Sources
+            .Select((s, i) => (s, i))
+            .LastOrDefault(x => x.s is JsonConfigurationSource { Path: { } path } && Path.GetFileName(path).StartsWith("appsettings", StringComparison.OrdinalIgnoreCase), (null!, -1)).i;
+        configuration.Sources.Insert(appSettings + 1, source);
     }
 
     /// <summary>The generic host's own log category: it reports a failed start, and a background service that failed.</summary>
@@ -188,17 +203,53 @@ internal static partial class RouterHost
     /// <summary>The exit code when the listen address is taken; a service manager does not restart on it.</summary>
     public const int AddressInUseExitCode = 3;
 
-    public static async Task<int> RunAsync(HostSettings settings, TextWriter output, Action<WebApplicationBuilder>? configure = null)
+    /// <summary>
+    /// Runs the router until it is stopped. With <paramref name="lifecycle"/>, the dashboard can restart it (it starts
+    /// again in this process), stop it, or hand it over to the background service.
+    /// </summary>
+    public static async Task<int> RunAsync(
+        HostSettings settings, TextWriter output, Action<WebApplicationBuilder>? configure = null, RouterLifecycle? lifecycle = null)
     {
-        await using RunningRouter? router = await StartAsync(settings, output, configure).ConfigureAwait(false);
-        if (router is null)
+        Action<WebApplicationBuilder>? build = lifecycle is null ? configure : builder =>
         {
-            return AddressInUseExitCode;
-        }
+            configure?.Invoke(builder);
+            lifecycle.Register(builder);
+        };
+        IReadOnlyList<string>? previous = null;
+        while (true)
+        {
+            RunningRouter? router = await StartAsync(settings, output, build).ConfigureAwait(false);
+            if (router is null && previous is { Count: > 0 })
+            {
+                // Restarted from the dashboard onto an address that is taken: listen where it did before, not nowhere.
+                router = await StartAsync(settings with { HostArguments = [.. settings.HostArguments, "--urls", string.Join(';', previous)] }, output, build).ConfigureAwait(false);
+                lifecycle?.KeptListening(previous);
+            }
 
-        await WriteBannerAsync(router.App, settings, output).ConfigureAwait(false);
-        await router.App.WaitForShutdownAsync().ConfigureAwait(false);
-        return 0;
+            if (router is null)
+            {
+                return AddressInUseExitCode;
+            }
+
+            string? action;
+            try
+            {
+                lifecycle?.Started(router.App);
+                await WriteBannerAsync(router.App, settings, output).ConfigureAwait(false);
+                await router.App.WaitForShutdownAsync().ConfigureAwait(false);
+                action = lifecycle?.TakePending();
+                previous = router.Instance.Urls;
+            }
+            finally
+            {
+                await router.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (action is null || !await lifecycle!.CarryOutAsync(action, output).ConfigureAwait(false))
+            {
+                return 0;
+            }
+        }
     }
 
     /// <summary>

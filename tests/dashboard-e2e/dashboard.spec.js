@@ -7,14 +7,14 @@ const { test: base, expect } = require('@playwright/test');
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'semantic-router.json'), 'utf8')
   .replace(/__STUB__/g, `http://127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`));
 
-const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'json', 'audit', 'feedback'];
+const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'service', 'json', 'audit', 'feedback'];
 // The rail's sections and the tabs each one shows, in order (SECTIONS in js/core.js).
 const SECTIONS = {
   Monitor: ['Overview', 'Live', 'Activity', 'Usage', 'Memory'],
   Routing: ['Tiers', 'Routes', 'Rules', 'Profiles', 'Evaluate', 'Router learned'],
   Providers: ['Models', 'Connectors', 'Embeddings'],
   Gateway: ['Settings', 'Connect clients'],
-  Admin: ['JSON', 'Audit log'],
+  Admin: ['Service', 'JSON', 'Audit log'],
 };
 const THEMES = ['machine-dark', 'machine-light', 'terminal'];
 
@@ -96,6 +96,16 @@ test('the audit log lists changes with who made them and from where', async ({ p
   await expect(table.locator('tbody tr').first()).toContainText('this machine');
   await expect(table).toContainText('applied the configuration');
   await expect(table).toContainText('PUT /router/api/config');
+});
+
+test('the Service page says where the router listens and that --urls decides it', async ({ page }) => {
+  // server.js starts the router with --urls: that wins over the saved setting, and the page says so.
+  await open(page, 'service');
+  await expect(page.locator('#tabs a.active')).toHaveText('Service');
+  await expect(page.locator('#view')).toContainText(/the --urls http:\/\/127\.0\.0\.1:/i);
+  await expect(page.getByRole('radio', { name: /This machine only/ })).toBeChecked();
+  await expect(page.locator('#view button[data-id="restart"]')).toBeVisible();
+  await expect(page.locator('#view h2', { hasText: 'Background service' })).toBeVisible();
 });
 
 test('a metrics user sees only the figures and never asks for prompts or the configuration', async ({ page }) => {
