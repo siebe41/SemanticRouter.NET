@@ -324,6 +324,16 @@ internal abstract class ServicePlatform
 
     public abstract Task<ServiceOutcome> UninstallAsync();
 
+    /// <summary>
+    /// Removes the definition without stopping the router: for the router the service runs, which then exits by itself
+    /// (a clean exit, which the service manager does not restart). Stopping it through the service manager would end
+    /// that process before the definition is gone.
+    /// </summary>
+    public virtual Task<ServiceOutcome> UnregisterAsync() => UninstallAsync();
+
+    /// <summary>Whether this process is the router the service manager runs for this service.</summary>
+    public virtual bool RunsThisProcess(Func<string, string?> environment) => false;
+
     public abstract Task<ServiceOutcome> StartAsync();
 
     public abstract Task<ServiceOutcome> StopAsync();

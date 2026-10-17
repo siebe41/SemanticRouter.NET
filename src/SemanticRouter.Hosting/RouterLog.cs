@@ -35,12 +35,13 @@ internal static class RouterLog
     /// Runs the router with no console to write to (started in the background, or headless by a service manager):
     /// the banner, the logs and a crash all go to the log file.
     /// </summary>
-    public static async Task<int> RunAsync(HostSettings settings)
+    /// <param name="lifecycle">What the dashboard may do to this process (the tool's background router), or <see langword="null"/>.</param>
+    public static async Task<int> RunAsync(HostSettings settings, RouterLifecycle? lifecycle = null)
     {
         await using TextWriter log = RedirectConsole(settings.ConfigurationDirectory);
         try
         {
-            return await RouterHost.RunAsync(settings, log, Configure).ConfigureAwait(false);
+            return await RouterHost.RunAsync(settings, log, Configure, lifecycle).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

@@ -9,6 +9,7 @@ import './learned.js';
 import './audit.js';
 import './desktop.js';
 import { reportActions } from './feedback.js';
+import { serviceActions } from './service.js';
 import { actions } from './actions.js';
 import { $, $$, actionKey, api, evaluationEdited, h, isDirty, jsonEdited, metricsOnly, readInput, readOnly, scrollRegions, setPath, showSignIn, state, toast } from './core.js';
 import { aliasRows, limitRows, writeAliases, writeLimits } from './draft.js';
@@ -38,7 +39,7 @@ document.addEventListener('click', (ev) => {
   // A control inside a clickable header (the model's "enabled" box) does not also toggle the header.
   const own = ev.target.closest('[data-no-action]');
   if (own && el.contains(own)) return;
-  const action = actions[el.dataset.action] || reportActions[el.dataset.action];
+  const action = actions[el.dataset.action] || reportActions[el.dataset.action] || serviceActions[el.dataset.action];
   if (!action) return;
   if (el.tagName === 'INPUT' && el.type === 'checkbox') return;
   ev.preventDefault();

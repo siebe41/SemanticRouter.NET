@@ -367,7 +367,7 @@ input[type="text"], input[type="number"], input[type="password"], input[type="ur
 }
 textarea { font-family: var(--font-mono); font-size: 12.5px; min-height: 80px; resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
-input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width: 15px; height: 15px; }
 label.check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 14px; }
 .form-grid .wide { grid-column: 1 / -1; }
@@ -614,6 +614,12 @@ table.compact th, table.compact td { padding: 3px 6px; }
 .empty-note { margin-bottom: 10px; padding: 8px 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius); }
 .flat-line { padding: 10px 16px; }
 .danger-zone { border-color: var(--danger); }
+/* The Service page: an outcome above the cards, the choice of who can connect, what serving other machines needs. */
+.page-banner { margin-bottom: 14px; border: 1px solid var(--border); border-radius: 8px; }
+label.check.choice { display: flex; align-items: flex-start; flex-wrap: nowrap; }
+label.check.choice input { flex: none; margin-top: 3px; }
+.checklist { margin: 4px 0 0; padding-left: 18px; }
+.checklist li { margin: 4px 0; }
 .lineup-common { color: var(--text-muted); border-left: 3px solid var(--warn); padding-left: 8px; }
 
 /* Placeholders read as examples, never as values (a default shown in a field looked stored, in the light theme most). */

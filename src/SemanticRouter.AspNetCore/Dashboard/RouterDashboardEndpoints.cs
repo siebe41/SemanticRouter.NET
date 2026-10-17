@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SemanticRouter;
@@ -695,6 +696,7 @@ public static partial class RouterDashboardEndpoints
         TuningApi.Map(api, ApiJson, Actor);
         ReliabilityApi.Map(api, ApiJson);
         DigestApi.Map(api, ApiJson);
+        ServiceControlApi.Map(api, ApiJson, options);
         return group;
     }
 
@@ -718,9 +720,11 @@ public static partial class RouterDashboardEndpoints
     /// (the entry as <c>GET api/activity</c> returns it), and a comment every 15 seconds to keep proxies from closing
     /// the stream. A slow reader loses the oldest events rather than holding up requests.
     /// </summary>
-    private static async Task StreamEventsAsync(HttpContext context, RoutingActivityLog activity)
+    private static async Task StreamEventsAsync(HttpContext context, RoutingActivityLog activity, IHostApplicationLifetime lifetime)
     {
-        CancellationToken aborted = context.RequestAborted;
+        // Ends when the router stops too, so an open live view does not hold up a restart until the shutdown times out.
+        using var stream = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, lifetime.ApplicationStopping);
+        CancellationToken aborted = stream.Token;
         Channel<RoutingActivityEntry> channel = Channel.CreateBounded<RoutingActivityEntry>(
             new BoundedChannelOptions(256) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
         void OnUpdated(RoutingActivityEntry entry) => channel.Writer.TryWrite(entry);
@@ -767,7 +771,7 @@ public static partial class RouterDashboardEndpoints
         }
         catch (OperationCanceledException) when (aborted.IsCancellationRequested)
         {
-            // The browser went away.
+            // The browser went away, or the router is stopping.
         }
         finally
         {

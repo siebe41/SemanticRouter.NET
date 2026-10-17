@@ -9,7 +9,7 @@ const stub = `http://127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`;
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'semantic-router.json'), 'utf8').replace(/__STUB__/g, stub));
 const axeSource = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
 
-const PAGES = ['overview', 'live', 'activity', 'usage', 'memory', 'tiers', 'routes', 'routing', 'profiles', 'evaluate', 'learned', 'models', 'connectors', 'embeddings', 'gateway', 'clients', 'json', 'audit', 'feedback'];
+const PAGES = ['overview', 'live', 'activity', 'usage', 'memory', 'tiers', 'routes', 'routing', 'profiles', 'evaluate', 'learned', 'models', 'connectors', 'embeddings', 'gateway', 'clients', 'service', 'json', 'audit', 'feedback'];
 const THEMES = ['machine-dark', 'machine-light', 'terminal'];
 const SIZES = { desktop: { width: 1360, height: 900 }, phone: { width: 390, height: 844 } };
 const RULES = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];

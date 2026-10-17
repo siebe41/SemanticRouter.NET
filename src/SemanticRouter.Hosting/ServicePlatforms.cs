@@ -88,6 +88,29 @@ internal sealed class SystemdUserService(string unitDirectory, ProcessRunner run
         return await Sequence(["daemon-reload"]).ConfigureAwait(false);
     }
 
+    public override async Task<ServiceOutcome> UnregisterAsync()
+    {
+        await Systemctl("disable", UnitName).ConfigureAwait(false);
+        File.Delete(Location);
+        return await Sequence(["daemon-reload"]).ConfigureAwait(false);
+    }
+
+    public override bool RunsThisProcess(Func<string, string?> environment)
+    {
+        try
+        {
+            return InUnit(File.ReadAllText("/proc/self/cgroup"));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Whether a <c>/proc/self/cgroup</c> puts the process in this unit (<c>0::/user.slice/…/semantic-router.service</c>).</summary>
+    internal static bool InUnit(string cgroup) =>
+        cgroup.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Any(line => line.EndsWith("/" + UnitName, StringComparison.Ordinal));
+
     public override Task<ServiceOutcome> StartAsync() => Sequence(["start", UnitName]);
 
     public override Task<ServiceOutcome> StopAsync() => Sequence(["stop", UnitName]);
@@ -245,6 +268,16 @@ internal sealed class LaunchAgentService(string agentsDirectory, string logDirec
         return ServiceOutcome.Ok();
     }
 
+    public override Task<ServiceOutcome> UnregisterAsync()
+    {
+        // Left loaded until this sign-in ends; with the property list gone it does not start at the next one.
+        File.Delete(Location);
+        return Task.FromResult(ServiceOutcome.Ok());
+    }
+
+    /// <summary>launchd names the job it started in <c>XPC_SERVICE_NAME</c>.</summary>
+    public override bool RunsThisProcess(Func<string, string?> environment) => environment("XPC_SERVICE_NAME") == Label;
+
     public override async Task<ServiceOutcome> StartAsync()
     {
         string domain = await DomainAsync().ConfigureAwait(false);
@@ -401,6 +434,12 @@ internal sealed class WindowsSignInService : ServicePlatform
     public override async Task<ServiceOutcome> UninstallAsync()
     {
         ServiceOutcome stopped = await StopAsync().ConfigureAwait(false);
+        RemoveEntry();
+        return stopped;
+    }
+
+    private void RemoveEntry()
+    {
         if (OperatingSystem.IsWindows())
         {
             using RegistryKey? key = Registry.CurrentUser.OpenSubKey(_runKey, writable: true);
@@ -408,8 +447,16 @@ internal sealed class WindowsSignInService : ServicePlatform
         }
 
         File.Delete(DefinitionFile);
-        return stopped;
     }
+
+    public override Task<ServiceOutcome> UnregisterAsync()
+    {
+        RemoveEntry();
+        return Task.FromResult(ServiceOutcome.Ok());
+    }
+
+    /// <summary>The router <c>service start</c> starts in the background carries <see cref="DetachedVariable"/>.</summary>
+    public override bool RunsThisProcess(Func<string, string?> environment) => IsInstalled() && environment(DetachedVariable) == "1";
 
     public override Task<ServiceOutcome> StartAsync()
     {
@@ -502,7 +549,7 @@ internal sealed class WindowsSignInService : ServicePlatform
         ReadValue() is { } command ? $"starts at sign-in: {command}" : "not set to start at sign-in");
 
     /// <summary>The background router: no console, so the banner and the logs go to <see cref="RouterLog"/>.</summary>
-    public static Task<int> RunDetachedAsync(HostSettings settings) => RouterLog.RunAsync(settings);
+    public static Task<int> RunDetachedAsync(HostSettings settings) => RouterLog.RunAsync(settings, RouterLifecycle.ForThisTool(settings));
 
     private string? ReadValue()
     {

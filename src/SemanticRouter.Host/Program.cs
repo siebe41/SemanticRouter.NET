@@ -56,7 +56,7 @@ switch (settings.Command)
 
         return Environment.GetEnvironmentVariable(WindowsSignInService.DetachedVariable) == "1"
             ? await WindowsSignInService.RunDetachedAsync(settings)
-            : await RouterHost.RunAsync(settings, Console.Out);
+            : await RouterHost.RunAsync(settings, Console.Out, lifecycle: RouterLifecycle.ForThisTool(settings));
 }
 
 static string Help() => $"""
@@ -111,4 +111,5 @@ static string Help() => $"""
       semantic-router.db             Cooldowns, tool-call affinity, activity and configuration history.
       semantic-router.instance.json  The running router's process id and addresses, while it runs.
       appsettings.json               Optional: host settings (logging, Kestrel, SemanticRouter overrides).
+      semantic-router.host.json      Where to listen, as the dashboard's Admin → Service page saves it; --urls wins.
     """;

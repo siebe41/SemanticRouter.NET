@@ -9,7 +9,7 @@ const stub = `http://127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`;
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'semantic-router.json'), 'utf8').replace(/__STUB__/g, stub));
 
 // Every page, in rail order (Feedback, at the foot of the rail, last).
-const PAGES = ['overview', 'live', 'activity', 'usage', 'memory', 'tiers', 'routes', 'routing', 'profiles', 'evaluate', 'learned', 'models', 'connectors', 'embeddings', 'gateway', 'clients', 'json', 'audit', 'feedback'];
+const PAGES = ['overview', 'live', 'activity', 'usage', 'memory', 'tiers', 'routes', 'routing', 'profiles', 'evaluate', 'learned', 'models', 'connectors', 'embeddings', 'gateway', 'clients', 'service', 'json', 'audit', 'feedback'];
 
 // As in dashboard.spec.js: a test fails if the page throws, logs an error or asks another host for anything. A test
 // that expects a 4xx on purpose (an older router's 404, the gateway's refusal) lets the browser's "Failed to load

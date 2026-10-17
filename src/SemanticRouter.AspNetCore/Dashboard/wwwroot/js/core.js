@@ -55,6 +55,7 @@ export const state = {
   profileTester: { prompt: '', results: null, busy: false },
   checking: new Set(), // connectors whose endpoint check is running
   audit: { entries: null, loading: false, limit: 200, error: null }, // GET api/audit (Audit log)
+  hostService: { data: null, loading: false, error: null, scope: null, port: null, waiting: null, stopped: null }, // GET api/service (Service)
   lineups: [],         // Discover models: one { connector, busy, error, server, loading, loadingNote, note, lineup } per connector asked
   issues: null,        // [{ path, message }] behind state.errors: each problem tied to its field (data-bind path)
   focusIssue: false,   // after Validate or Apply: focus the first problem on the page
@@ -106,7 +107,7 @@ export const SECTIONS = [
   { id: 'routing', pages: [['tiers', 'Tiers'], ['routes', 'Routes'], ['routing', 'Rules'], ['profiles', 'Profiles'], ['evaluate', 'Evaluate'], ['learned', 'Router learned']] },
   { id: 'providers', pages: [['models', 'Models'], ['connectors', 'Connectors'], ['embeddings', 'Embeddings']] },
   { id: 'gateway', pages: [['gateway', 'Settings'], ['clients', 'Connect clients']] },
-  { id: 'admin', pages: [['json', 'JSON'], ['audit', 'Audit log']] },
+  { id: 'admin', pages: [['service', 'Service'], ['json', 'JSON'], ['audit', 'Audit log']] },
 ];
 export const sectionOf = (view) => SECTIONS.find((s) => s.pages.some(([page]) => page === view));
 // Attributes for a button that spends embedding or API calls: the read-only role sees it disabled.
