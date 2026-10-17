@@ -20,7 +20,7 @@ public sealed class SqliteStateTests : IDisposable
 
     public void Dispose()
     {
-        SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         Directory.Delete(_directory, recursive: true);
     }
 
@@ -86,12 +86,12 @@ public sealed class SqliteStateTests : IDisposable
             legacy.ExecuteNonQuery();
         }
 
-        SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         var reopened = new SqliteConfigurationHistory(Open());
 
         reopened.List().Should().HaveCount(2);
         reopened.List().Select(v => reopened.GetVersion(v.Id)!.Connectors["openai"].ApiKey).Should().AllBe("***");
-        SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         File.ReadAllText(DbPath).Should().NotContain("sk-inherited-from-env", "the old pages are rewritten");
     }
 
@@ -231,7 +231,7 @@ public sealed class SqliteStateTests : IDisposable
         read.Commit();
 
         (await purge).Should().Be(1);
-        string files = string.Concat(Directory.GetFiles(_directory, "state.db*").Select(DurableStateHostTests.ReadWhileOpen));
+        string files = DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db");
         files.Should().NotContain("purge-me 3f9d", "the purge waits for the reader, then empties the log");
     }
 
@@ -366,7 +366,7 @@ public sealed class SqliteStateTests : IDisposable
         new SqliteToolCallAffinity(database).Lookup(["none"]).Should().BeNull();
 
         // Nothing is left holding the broken file, so it can be replaced (Windows refuses to delete an open file).
-        SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         if (OperatingSystem.IsLinux())
         {
             Directory.GetFiles("/proc/self/fd")
@@ -669,22 +669,25 @@ public sealed class DurableStateHostTests : RouterHostTest
         JsonBody(new JsonObject { ["model"] = "auto", ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = prompt }) });
 
     /// <summary>Everything the state database's files hold, as text, read while the router still has them open.</summary>
-    private string DatabaseFiles()
-    {
-        var text = new StringBuilder();
-        foreach (string file in Directory.GetFiles(_directory, "state.db*"))
-        {
-            text.Append(ReadWhileOpen(file));
-        }
+    private string DatabaseFiles() => ReadDatabaseFiles(_directory, "state.db");
 
-        return text.ToString();
+    /// <summary>
+    /// The text of a database and its -wal and -shm files, while the router may be using them. The log is read before
+    /// the database: a checkpoint moves pages from the log into the database (and closing the last connection deletes
+    /// the log), so what leaves the log in between is still found in the database.
+    /// </summary>
+    internal static string ReadDatabaseFiles(string directory, string name)
+    {
+        string database = Path.Combine(directory, name);
+        return ReadWhileOpen(database + "-wal") + ReadWhileOpen(database) + ReadWhileOpen(database + "-shm");
     }
 
     /// <summary>
-    /// Reads a file the router may be writing. On macOS the shared lock .NET takes when opening a file conflicts with
-    /// the lock SQLite holds while it writes, so a read that lands during a write is tried again.
+    /// Reads a file the router may be writing; empty when there is no such file (any more). On macOS the shared lock
+    /// .NET takes when opening a file conflicts with the lock SQLite holds while it writes, so a read that lands during
+    /// a write is tried again.
     /// </summary>
-    internal static string ReadWhileOpen(string file)
+    private static string ReadWhileOpen(string file)
     {
         for (int attempt = 1; ; attempt++)
         {
@@ -693,6 +696,10 @@ public sealed class DurableStateHostTests : RouterHostTest
                 using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
                 using var reader = new StreamReader(stream, Encoding.Latin1);
                 return reader.ReadToEnd();
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return string.Empty;
             }
             catch (IOException) when (attempt < 50 && File.Exists(file))
             {
@@ -705,12 +712,18 @@ public sealed class DurableStateHostTests : RouterHostTest
     private async Task WaitForStoredActivityAsync(int count)
     {
         IRoutingActivityStore store = Services.GetRequiredService<IRoutingActivityStore>();
-        for (int i = 0; i < 200 && store.Recent(count).Count < count; i++)
+        await WaitUntilAsync(() => store.Recent(count).Count >= count);
+        store.Recent(count).Should().HaveCount(count);
+    }
+
+    /// <summary>Waits until <paramref name="done"/> holds, for up to 10 seconds: a slow runner gets the time it needs, a fast one does not wait for it.</summary>
+    private static async Task WaitUntilAsync(Func<bool> done)
+    {
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        while (!done() && System.Diagnostics.Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(10))
         {
             await Task.Delay(10);
         }
-
-        store.Recent(count).Should().HaveCount(count);
     }
 
     private static async Task<string> LastPreviewAsync(HttpClient client) =>
@@ -795,10 +808,7 @@ public sealed class DurableStateHostTests : RouterHostTest
             }
         }
 
-        for (int i = 0; i < 200 && !Events().Contains("exit code 1", StringComparison.Ordinal); i++)
-        {
-            await Task.Delay(10);
-        }
+        await WaitUntilAsync(() => Events().Contains("exit code 1", StringComparison.Ordinal));
 
         await listening.CancelAsync();
         await listener;
@@ -898,7 +908,7 @@ public sealed class DurableStateHostTests : RouterHostTest
         entry["outcome"]!.GetValue<string>().Should().Be("served");
         entry["servedBy"]!.GetValue<string>().Should().Be("local");
         await DisposeAsync();
-        SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         Directory.Delete(_directory, recursive: true);
     }
 
@@ -933,7 +943,7 @@ public sealed class DurableStateHostTests : RouterHostTest
         latest["note"]!.GetValue<string>().Should().Be($"to version {firstId}");
         (await client.PostAsync("/router/api/config/history/999/rollback", null)).StatusCode.Should().Be(HttpStatusCode.NotFound);
         await DisposeAsync();
-        SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         Directory.Delete(_directory, recursive: true);
     }
 }

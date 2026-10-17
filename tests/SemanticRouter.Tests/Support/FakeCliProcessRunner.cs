@@ -23,7 +23,7 @@ internal sealed class FakeCliProcessRunner(Func<CliInvocation, ICliProcess> star
     }
 }
 
-internal sealed class FakeCliProcess(IReadOnlyList<string> lines, int exitCode = 0, string stderr = "", TimeSpan? delay = null, Task? until = null) : ICliProcess
+internal sealed class FakeCliProcess(IReadOnlyList<string> lines, int exitCode = 0, string stderr = "", TimeSpan? delay = null, Task? until = null, Task? after = null) : ICliProcess
 {
     public string StandardError => stderr;
 
@@ -45,6 +45,12 @@ internal sealed class FakeCliProcess(IReadOnlyList<string> lines, int exitCode =
         {
             cancellationToken.ThrowIfCancellationRequested();
             yield return line;
+        }
+
+        // A CLI that goes quiet after its lines, until this task ends.
+        if (after is not null)
+        {
+            await after.WaitAsync(cancellationToken);
         }
     }
 

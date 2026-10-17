@@ -85,7 +85,7 @@ The classifier looks at the latest message, but a conversation is more than that
 
 - **A floor.** It remembers the highest tier a conversation needed recently, and a new turn needs at least that. The header and the activity entry show `ConversationFloor` when the floor raised the tier.
 - **Short follow-ups keep the full floor.** A message of up to `ShortFollowUpLength` characters (default 60, without code blocks), such as "yes", "try again" or "looks good, commit it", is not classified on its own.
-- **It decays.** Every `DecayTurns` turns (default 3) that need less than the conversation's peak lower the floor by one tier, so a conversation that moved on to simpler work gets cheaper models again. A harder turn raises the peak at once. After `IdleTimeout` (default 30 minutes) without a turn, the conversation is forgotten.
+- **It decays.** Every `DecayTurns` turns (default 3) that need less than the conversation's peak lower the floor by one tier, so a conversation that moved on to simpler work gets cheaper models again. A harder turn raises the peak at once. After `IdleTimeout` (default 30 minutes) without a turn, the conversation is forgotten. The router remembers at most 32,768 conversations, in memory; beyond that the least recently active are forgotten first.
 - **It sticks to a model.** While the model that answered the last turn is available and exactly on the required tier, it is tried first (`X-Prompt-Route-Sticky: true`, and **sticky** on the Activity page): answers stay coherent and the provider's prompt cache keeps working.
 - **It weighs the warm prompt cache.** Caches are per model, so moving a conversation sends its whole context again and writes it to the new model's cache. After each turn the router notes how much of the context the serving model reported reading or writing from its cache, and keeps it warm for as long as the provider keeps the entries, refreshed by every turn that uses it. On an Anthropic connector (`Type: Anthropic`) the router knows that from the cache markers: the connector's `CacheTtl` (`5m` or `1h`) for the markers it adds, or the longest `ttl` among an Anthropic client's own markers. For other backends it is `CacheLifetime` (default 5 minutes). On the next turn it compares two costs, at the models' configured prices: staying, which reads the cached part at the warm model's cache-read price and sends the rest at its input price, and moving to the ranking's first choice, which sends the whole context at its cache-write price. It stays when that is cheaper, also on a model above the required tier, and moves when it is not, for example down to a much cheaper, local or flat-rate model. A model below the required tier is never kept. After a failover it goes back to the warm model when that comes out of its cooldown before the cache expires. The reason shows on the Activity page and in `X-Prompt-Route-Selection`, e.g. `cache: stayed on opus (80k cached); moving to sonnet would cost $0.252 more`. Without a warm cache (expired, or a backend that reports no cache use) the rule above applies.
 
@@ -107,7 +107,7 @@ Labels on the Evaluate page improve routing only when someone adds them. The rou
 
 | Feedback | Noticed when | About |
 |---|---|---|
-| **Retried** | The same client sends the same prompt again within `RetryEscalation:Window` (2 minutes) of the answer, whether or not retry escalation is on. | The answer. |
+| **Retried** | The same client sends the same prompt again in the same conversation within `RetryEscalation:Window` (2 minutes) of the answer, before the conversation moved on, whether or not retry escalation is on. Only the first repeat counts: a prompt sent again and again is a script or a monitor. The same prompt in another conversation, and a short follow-up said again ("continue"), are not retries. The router remembers the latest 16,384 answers for this. | The answer. |
 | **Corrected** | The next message in the conversation reads as a correction: "that's wrong", "no, I meant…", "it still doesn't compile", "you forgot…", "try again", or a short message saying it is still failing, in English, Dutch, German, French or Spanish. A short follow-up in other words or another language is compared by meaning ([below](#corrections-in-other-words)). | The previous turn. |
 | **Overridden** | The next message chooses a model or tier with a [callout](clients.md#telling-the-router-what-you-want). | The previous turn. |
 | **Tool errors** | Tool results come back marked as errors on two tool turns in a row (the Anthropic protocol carries the flag), or the model writes malformed tool calls. | The turn running the task, or the turn itself. |
@@ -226,7 +226,8 @@ When a client sends the same prompt again shortly after it was answered, the ans
 "Middleware": { "RetryEscalation": { "Enabled": true, "Window": "00:02:00" } }
 ```
 
-- The router keeps a hash of the client and the prompt, in memory, never the prompt text.
+- A retry is the same prompt from the same client in the same conversation, before another turn of it was answered; a short follow-up (up to `Conversation:ShortFollowUpLength` characters) after the first turn is not one. A prompt that keeps coming back escalates each time, but gives feedback only once.
+- The router keeps a hash of the client, the conversation and the prompt, in memory, never the prompt text.
 - Requests that carry tool results (tool loops resend the same user message) and requests for a specific catalog model are never escalated.
 - A prompt answered by the highest-tier enabled model is not escalated further.
 

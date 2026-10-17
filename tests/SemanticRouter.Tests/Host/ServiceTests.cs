@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SemanticRouter.Host;
+using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.Host;
 
@@ -22,7 +23,7 @@ public sealed class ServiceTests : IDisposable
         // Windows can hold a closed database file for a moment longer (the last connection, a virus scanner): try again.
         for (int attempt = 1; ; attempt++)
         {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            SqliteFiles.Release(_directory);
             try
             {
                 Directory.Delete(_directory, recursive: true);

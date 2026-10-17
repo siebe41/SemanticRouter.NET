@@ -53,6 +53,59 @@ public sealed class FeedbackTests : RouterHostTest
         retried.Detail.Should().Contain(Id(again).ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
+    private const string Question = "why does the build fail on the release branch but not on main";
+
+    [Fact]
+    public async Task The_same_prompt_in_another_conversation_is_not_a_retry()
+    {
+        HttpClient client = await StartDispatchAsync();
+
+        await client.PostAsync("/v1/chat/completions", Chat("set up the project", Question));
+        await client.PostAsync("/v1/chat/completions", Chat("review my pull request", Question));
+
+        Feedback.Recent().Should().BeEmpty("two conversations asked the same thing; neither retried");
+    }
+
+    [Fact]
+    public async Task A_prompt_sent_again_and_again_counts_as_one_retry()
+    {
+        HttpClient client = await StartDispatchAsync();
+
+        for (int i = 0; i < 10; i++)
+        {
+            await client.PostAsync("/v1/chat/completions", Chat(Question));
+        }
+
+        Feedback.Recent().Should().ContainSingle("a script repeating a prompt is not ten verdicts on the model")
+            .Which.Kind.Should().Be(FeedbackKind.Retried);
+    }
+
+    [Fact]
+    public async Task A_short_follow_up_said_again_is_not_a_retry()
+    {
+        HttpClient client = await StartDispatchAsync();
+
+        await client.PostAsync("/v1/chat/completions", Chat("set up the project", "continue"));
+        await client.PostAsync("/v1/chat/completions", Chat("set up the project", "continue", "continue"));
+
+        Feedback.Recent().Should().NotContain(f => f.Kind == FeedbackKind.Retried);
+    }
+
+    [Fact]
+    public async Task A_regenerated_turn_is_a_retry_until_the_conversation_moves_on()
+    {
+        HttpClient client = await StartDispatchAsync();
+
+        HttpResponseMessage first = await client.PostAsync("/v1/chat/completions", Chat("set up the project", Question));
+        await client.PostAsync("/v1/chat/completions", Chat("set up the project", Question));
+        Feedback.Recent().Should().ContainSingle().Which.EntryId.Should().Be(Id(first), "the same turn sent again");
+
+        await client.PostAsync("/v1/chat/completions", Chat("set up the project", Question, "now explain the fix in detail please"));
+        await client.PostAsync("/v1/chat/completions", Chat("set up the project", Question, "now explain the fix in detail please", Question));
+
+        Feedback.Recent().Should().ContainSingle("the conversation moved on before the question came back");
+    }
+
     [Fact]
     public async Task A_correction_or_a_callout_judges_the_previous_turn()
     {

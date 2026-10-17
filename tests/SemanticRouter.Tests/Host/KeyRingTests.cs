@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Host;
+using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.Host;
 
@@ -23,7 +24,7 @@ public sealed class KeyRingTests : IDisposable
 
     public void Dispose()
     {
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         Directory.Delete(_directory, recursive: true);
     }
 

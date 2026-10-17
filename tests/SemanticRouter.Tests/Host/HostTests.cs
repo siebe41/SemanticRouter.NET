@@ -19,7 +19,7 @@ public sealed class HostTests : IDisposable
     public void Dispose()
     {
         // The host keeps its state database open in the connection pool; Windows cannot delete an open file.
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        SqliteFiles.Release(_directory);
         Directory.Delete(_directory, recursive: true);
     }
 

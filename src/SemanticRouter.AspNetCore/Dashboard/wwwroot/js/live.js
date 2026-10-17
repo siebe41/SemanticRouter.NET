@@ -211,7 +211,7 @@ export function liveFeed() {
         <span class="t">${h(when(e.timestamp))}</span>
         <span class="who">${h(clientLabel(e))}</span>
         <span class="arrow">→</span>
-        ${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.outcome === 'rate-limited' ? '<span class="badge warn">rate limited</span>' : `<span class="model ${local ? 'local' : 'cloud'}">${h(model || '—')}</span>`}
+        ${e.outcome === 'failed' ? '<span class="badge danger">failed</span>' : e.outcome === 'rate-limited' ? '<span class="badge warn">rate limited</span>' : `<span class="model ${local ? 'local' : 'cloud'}">${h(model || '—')}</span>`}${e.outcome === 'cancelled' ? ' <span class="badge warn" title="The client went away before the reply was finished">cancelled</span>' : ''}
         <span class="tier">T${e.tier}</span>
       </div>
       <div class="feed-why">

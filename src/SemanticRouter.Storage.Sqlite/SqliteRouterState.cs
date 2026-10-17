@@ -92,6 +92,7 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
         """;
 
     private readonly string _connectionString;
+    private readonly int _busyTimeoutSeconds;
     private readonly ILogger _logger;
     private long _lastWarningTicks;
 
@@ -102,13 +103,8 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
         _logger = logger;
         string path = System.IO.Path.GetFullPath(Options.Path);
         Location = path;
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = path,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            DefaultTimeout = Math.Max(1, (int)Math.Ceiling(Options.BusyTimeout.TotalSeconds)),
-            Pooling = true,
-        }.ToString();
+        _connectionString = ConnectionStringFor(path);
+        _busyTimeoutSeconds = Math.Max(1, (int)Math.Ceiling(Options.BusyTimeout.TotalSeconds));
 
         try
         {
@@ -253,6 +249,27 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
             return (long)command.ExecuteScalar()!;
         });
 
+    /// <summary>
+    /// The connection string for a database file. It depends on the path alone, so the pool of pooled connections to
+    /// one file can be found again (<see cref="ClearPool"/>); the busy timeout is set on each connection instead.
+    /// </summary>
+    internal static string ConnectionStringFor(string fullPath) => new SqliteConnectionStringBuilder
+    {
+        DataSource = fullPath,
+        Mode = SqliteOpenMode.ReadWriteCreate,
+        Pooling = true,
+    }.ToString();
+
+    /// <summary>
+    /// Closes the pooled connections to one database file, so it can be deleted or replaced. Unlike
+    /// <see cref="SqliteConnection.ClearAllPools"/> it leaves every other database in the process alone.
+    /// </summary>
+    internal static void ClearPool(string path)
+    {
+        using var connection = new SqliteConnection(ConnectionStringFor(System.IO.Path.GetFullPath(path)));
+        SqliteConnection.ClearPool(connection);
+    }
+
     public static SqliteCommand Command(SqliteConnection connection, string sql, params (string Name, object? Value)[] parameters)
     {
         SqliteCommand command = connection.CreateCommand();
@@ -267,7 +284,7 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention
 
     private SqliteConnection Open()
     {
-        var connection = new SqliteConnection(_connectionString);
+        var connection = new SqliteConnection(_connectionString) { DefaultTimeout = _busyTimeoutSeconds };
         try
         {
             connection.Open();

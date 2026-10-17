@@ -13,10 +13,15 @@ internal readonly record struct ConversationContext(int? Floor, string? Preferre
 /// <summary>
 /// Remembers, per conversation, the highest tier recent turns needed and the model that answered last
 /// (<see cref="ConversationRoutingOptions"/>). Keys are a hash of the client, the system prompt (or the client's session
-/// id) and the first user message: no prompt text is kept. In memory only, and pruned.
+/// id) and the first user message: no prompt text is kept. In memory only, and bounded: conversations idle for longer
+/// than <see cref="ConversationRoutingOptions.IdleTimeout"/> go, and beyond <see cref="MaxEntries"/> the least recently
+/// active go first.
 /// </summary>
 internal sealed class ConversationTracker
 {
+    /// <summary>The most conversations remembered (and, separately, the most kept local-only): about 10 MB each.</summary>
+    public const int MaxEntries = 32_768;
+
     private const int PruneAbove = 4096;
 
     /// <summary>How long a conversation stays local-only after its last local-only turn.</summary>
@@ -25,8 +30,21 @@ internal sealed class ConversationTracker
     private readonly ConcurrentDictionary<string, State> _conversations = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _localOnly = new(StringComparer.Ordinal);
     private readonly TimeProvider _time;
+    private readonly TrackerPruning _conversationPruning;
+    private readonly TrackerPruning _localOnlyPruning;
 
-    public ConversationTracker(TimeProvider? time = null) => _time = time ?? TimeProvider.System;
+    public ConversationTracker(TimeProvider? time = null)
+    {
+        _time = time ?? TimeProvider.System;
+        _conversationPruning = new TrackerPruning(MaxEntries, PruneAbove, _time);
+        _localOnlyPruning = new TrackerPruning(MaxEntries, PruneAbove, _time);
+    }
+
+    /// <summary>Conversations remembered now.</summary>
+    internal int Count => _conversations.Count;
+
+    /// <summary>The pruning of conversations, for tests of its cost.</summary>
+    internal TrackerPruning Pruning => _conversationPruning;
 
     /// <summary>
     /// The conversation a request belongs to. Chat clients resend the whole history, so the system prompt and the first
@@ -68,18 +86,8 @@ internal sealed class ConversationTracker
     /// <summary>Keeps the conversation's later turns local (a local-only route, profile, signal or callout matched).</summary>
     public void MarkLocalOnly(string localKey)
     {
-        DateTimeOffset now = _time.GetUtcNow();
-        _localOnly[localKey] = now;
-        if (_localOnly.Count > PruneAbove)
-        {
-            foreach ((string key, DateTimeOffset at) in _localOnly)
-            {
-                if (now - at > LocalOnlyMemory)
-                {
-                    _localOnly.TryRemove(key, out _);
-                }
-            }
-        }
+        _localOnly[localKey] = _time.GetUtcNow();
+        _localOnlyPruning.Written(_localOnly, at => at, LocalOnlyMemory);
     }
 
     /// <summary>A first turn starts afresh: another conversation may have opened with the same message.</summary>
@@ -141,7 +149,7 @@ internal sealed class ConversationTracker
             state.At = now;
         }
 
-        Prune(now, options.IdleTimeout);
+        _conversationPruning.Written(_conversations, LastActive, options.IdleTimeout);
     }
 
     /// <summary>Forgets a conversation: a first turn starts it afresh (another conversation may have opened the same way).</summary>
@@ -229,21 +237,16 @@ internal sealed class ConversationTracker
             state.Model = model ?? state.Model;
             state.At = _time.GetUtcNow();
         }
+
+        // Decided and Choose add conversations too, and a conversation of explicit models only ever comes here.
+        _conversationPruning.Written(_conversations, LastActive, options.IdleTimeout);
     }
 
-    private void Prune(DateTimeOffset now, TimeSpan idle)
+    private static DateTimeOffset LastActive(State state)
     {
-        if (_conversations.Count <= PruneAbove)
+        lock (state)
         {
-            return;
-        }
-
-        foreach ((string key, State state) in _conversations)
-        {
-            if (now - state.At > idle)
-            {
-                _conversations.TryRemove(key, out _);
-            }
+            return state.At;
         }
     }
 
