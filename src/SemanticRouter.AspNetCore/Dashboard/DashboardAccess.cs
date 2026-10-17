@@ -94,6 +94,7 @@ internal sealed class DashboardAccess
     private const string ActorKey = "SemanticRouter.DashboardActor";
     private const string ProxyUserKey = "SemanticRouter.DashboardProxyUser";
     private const string WrongTokenKey = "SemanticRouter.DashboardWrongToken";
+    private const string RemoteKey = "SemanticRouter.RemoteClient";
     private const string SessionKey = "SemanticRouter.DashboardSession";
 
     // v3 added the session id. Cookies of the earlier "{kind}.{issued}.{mac}" form are refused: they cannot be revoked.
@@ -175,9 +176,28 @@ internal sealed class DashboardAccess
         context.Items[WrongTokenKey] = true;
     }
 
-    /// <summary>Whether the request comes from this machine (no remote address counts as local, e.g. in-process tests).</summary>
+    /// <summary>
+    /// Whether the request comes from this machine, from the account the router runs as: a loopback connection that the
+    /// operating system says another account opened is remote (unless <see cref="NetworkOptions.TrustOtherLocalAccounts"/>).
+    /// No remote address counts as local (in-process callers, e.g. tests), unless <see cref="MarkRemote"/> said otherwise.
+    /// </summary>
     public static bool IsLocal(HttpContext context) =>
-        context.Connection.RemoteIpAddress is not { } remote || IPAddress.IsLoopback(remote);
+        !context.Items.ContainsKey(RemoteKey)
+        && (context.Connection.RemoteIpAddress is not { } remote
+            || (IPAddress.IsLoopback(remote) && (TrustsOtherAccounts(context) || LocalAccounts.Of(context) != LocalAccount.Other)));
+
+    /// <summary>Whether the request comes over loopback from another account on this machine, which counts as remote.</summary>
+    public static bool IsOtherLocalAccount(HttpContext context) =>
+        context.Connection.RemoteIpAddress is { } remote && IPAddress.IsLoopback(remote) && !IsLocal(context);
+
+    /// <summary>
+    /// Makes a request the router sends itself on behalf of a remote client (the judge grading its answer) count as
+    /// remote, so connectors that serve only this machine refuse it as they would the client's own request.
+    /// </summary>
+    public static void MarkRemote(HttpContext context) => context.Items[RemoteKey] = true;
+
+    private static bool TrustsOtherAccounts(HttpContext context) =>
+        context.RequestServices is { } services && NetworkOptions.Of(services) is { TrustOtherLocalAccounts: true };
 
     /// <summary>Whether this caller must present a token to get a role (not when a trusted proxy named the user).</summary>
     public bool TokenRequired(HttpContext context) =>
@@ -197,8 +217,10 @@ internal sealed class DashboardAccess
         bool local = IsLocal(context);
         if (!local && _options.RequireLocalClient)
         {
-            return Refuse(StatusCodes.Status403Forbidden,
-                "The router dashboard only answers requests from this machine (RouterDashboardOptions.RequireLocalClient).");
+            return Refuse(StatusCodes.Status403Forbidden, IsOtherLocalAccount(context)
+                ? "The router dashboard only answers the account the router runs as, and this request comes from another account on this " +
+                  "machine (RouterDashboardOptions.RequireLocalClient; SemanticRouter:Network:TrustOtherLocalAccounts trusts every account here)."
+                : "The router dashboard only answers requests from this machine (RouterDashboardOptions.RequireLocalClient).");
         }
 
         // A user an authenticating proxy named. Only a request that came straight from a known proxy may name one; from
@@ -228,9 +250,11 @@ internal sealed class DashboardAccess
 
         if (!local && !TokensConfigured && !_options.AllowUnauthenticatedRemoteClients && identity is null)
         {
-            return Refuse(StatusCodes.Status403Forbidden,
-                "Remote access to the router dashboard needs a token: set SemanticRouter:Dashboard:AdminToken (or ReadOnlyToken, MetricsToken), " +
-                "or AllowUnauthenticatedRemoteClients when a reverse proxy authenticates callers.");
+            return Refuse(StatusCodes.Status403Forbidden, IsOtherLocalAccount(context)
+                ? "This request comes from another account on this machine, which counts as a remote client: sign in with a dashboard " +
+                  "token (SemanticRouter:Dashboard:AdminToken, ReadOnlyToken or MetricsToken), or set SemanticRouter:Network:TrustOtherLocalAccounts."
+                : "Remote access to the router dashboard needs a token: set SemanticRouter:Dashboard:AdminToken (or ReadOnlyToken, MetricsToken), " +
+                  "or AllowUnauthenticatedRemoteClients when a reverse proxy authenticates callers.");
         }
 
         // Every call that changes something must come from the dashboard's own origin, and so must every endpoint marked as

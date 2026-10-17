@@ -4,8 +4,8 @@ using Microsoft.Extensions.Options;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>
-/// The router's own outbound connections (the <c>Network</c> section). A host setting: read at start-up, not edited on
-/// the dashboard. See <c>docs/network.md</c>.
+/// The router's own outbound connections, and who on this machine counts as local (the <c>Network</c> section). A host
+/// setting: read at start-up, not edited on the dashboard. See <c>docs/network.md</c>.
 /// </summary>
 public sealed class NetworkOptions
 {
@@ -30,6 +30,16 @@ public sealed class NetworkOptions
     /// <c>*.corp.example</c>, <c>10.0.0.5:8443</c>).
     /// </summary>
     public IList<string> AllowedHosts { get; } = new List<string>();
+
+    /// <summary>
+    /// Treat a loopback connection from another account on this machine as local, as the router did before it looked:
+    /// admin on the dashboard without a token, the gateway without a key, and the CLI connectors. Off by default, so that
+    /// on a shared machine (a server with several users, a terminal server, a CI runner) another user is a remote client
+    /// and needs a token or a gateway key. Turn it on for a router that runs as its own service account for the people
+    /// who sign in to this machine. Linux, macOS and Windows say who opened a connection; root and LocalSystem count as
+    /// the router's own account, since they can read its keys anyway.
+    /// </summary>
+    public bool TrustOtherLocalAccounts { get; set; }
 
     /// <summary>
     /// The settings as configured, without validating them: a <see cref="CaBundle"/> that cannot be loaded is reported

@@ -302,6 +302,27 @@ public sealed class DashboardRoleTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_remote_admin_cannot_send_an_environment_variable_or_another_settings_secret_to_an_address_it_chooses()
+    {
+        HttpClient client = await StartAsync();
+        JsonNode config = JsonNode.Parse(await (await client.SendAsync(Request(HttpMethod.Get, "/router/api/config", AdminToken))).Content.ReadAsStringAsync())!["config"]!;
+        config["Connectors"]!["collector"] = new JsonObject
+        {
+            ["BaseAddress"] = "https://collector.example",
+            ["ApiKey"] = "${env:ROUTER_ADMIN_TOKEN}",
+            ["Headers"] = new JsonObject { ["X-Org"] = "${secret:connectors/anthropic/ApiKey}" },
+        };
+
+        HttpResponseMessage applied = await client.SendAsync(Request(
+            HttpMethod.Put, "/router/api/config?persist=false", AdminToken, content: new StringContent(config.ToJsonString(), Encoding.UTF8, "application/json")));
+
+        applied.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        string[] errors = [.. JsonNode.Parse(await applied.Content.ReadAsStringAsync())!["errors"]!.AsArray().Select(e => (string)e!)];
+        errors.Should().Contain(e => e.StartsWith("Connectors:collector:ApiKey: only this machine can name an environment variable", StringComparison.Ordinal))
+            .And.Contain(e => e.StartsWith("Connectors:collector:Headers:X-Org: a stored-secret reference may only name this setting's own secret", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Each_token_must_be_its_own()
     {
         Func<Task> start = () => StartAsync(o => o.MetricsToken = ReadOnlyToken);

@@ -171,6 +171,66 @@ public sealed class SecretsTests
         added.ReferenceErrors(current).Should().ContainSingle("a new connector has no stored secret yet");
     }
 
+    [Fact]
+    public void Every_resolved_value_is_checked_not_only_the_ones_that_look_secret()
+    {
+        RouterConfiguration current = Document();
+        current.Connectors["azure"].ApiKey = "${secret:connectors/azure/ApiKey}";
+
+        // "X-Org" does not look like a key, but it is resolved and sent like one.
+        RouterConfiguration borrowed = current.Masked();
+        borrowed.Connectors["collector"] = new ConnectorOptions { BaseAddress = new Uri("https://collector.example") };
+        borrowed.Connectors["collector"].Headers["X-Org"] = "${secret:connectors/azure/ApiKey}";
+        borrowed.ReferenceErrors(current).Should().ContainSingle()
+            .Which.Should().StartWith("Connectors:collector:Headers:X-Org: a stored-secret reference may only name this setting's own secret");
+        borrowed.ReferenceErrors(current, fromThisMachine: true).Should().ContainSingle("a stored secret stays where it was configured, whoever asks");
+    }
+
+    [Fact]
+    public void Only_this_machine_can_name_an_environment_variable_a_setting_did_not_have()
+    {
+        RouterConfiguration current = Document();
+        current.Connectors["openai"].Headers["X-Project"] = "${env:OPENAI_PROJECT}";
+        current.Notifications.Webhooks["team"] = new WebhookOptions { Url = "https://hooks.example/team" };
+
+        RouterConfiguration unchanged = current.Masked();
+        unchanged.ReferenceErrors(current).Should().BeEmpty("a reference the setting already had stays");
+
+        RouterConfiguration collector = current.Masked();
+        collector.Connectors["collector"] = new ConnectorOptions { BaseAddress = new Uri("https://collector.example"), ApiKey = "${env:ROUTER_ADMIN_TOKEN}" };
+        collector.ReferenceErrors(current).Should().ContainSingle()
+            .Which.Should().StartWith("Connectors:collector:ApiKey: only this machine can name an environment variable (${env:ROUTER_ADMIN_TOKEN})");
+        collector.ReferenceErrors(current, fromThisMachine: true).Should().BeEmpty("the router's own account can read its environment anyway");
+
+        RouterConfiguration header = current.Masked();
+        header.Connectors["openai"].Headers["X-Org"] = "${env:ANTHROPIC_API_KEY}";
+        header.ReferenceErrors(current).Should().ContainSingle("a variable a connector did not have, even at the same address")
+            .Which.Should().StartWith("Connectors:openai:Headers:X-Org:");
+
+        RouterConfiguration webhook = current.Masked();
+        webhook.Notifications.Webhooks["team"].Url = "https://hooks.example/team?k=${env:OPENAI_API_KEY}";
+        webhook.ReferenceErrors(current).Should().ContainSingle().Which.Should().StartWith("Notifications:Webhooks:team:Url:");
+
+        RouterConfiguration embeddings = current.Masked();
+        embeddings.Embeddings.ApiKey = "${env:OPENROUTER_API_KEY}";
+        embeddings.ReferenceErrors(current).Should().ContainSingle().Which.Should().StartWith("Embeddings:ApiKey:");
+
+        RouterConfiguration preset = current.Masked();
+        preset.Connectors["anthropic"] = new ConnectorOptions
+        {
+            Type = ConnectorType.Anthropic,
+            BaseAddress = new Uri("https://api.anthropic.com"),
+            ApiKey = "${env:ANTHROPIC_API_KEY}",
+        };
+        preset.ReferenceErrors(current).Should().BeEmpty("a preset's own key for its own provider, as the dashboard's setup adds it");
+        preset.Connectors["anthropic"].BaseAddress = new Uri("https://api.anthropic.com.collector.example");
+        preset.ReferenceErrors(current).Should().ContainSingle("only for the preset's address");
+
+        RouterConfiguration gateway = current.Masked();
+        gateway.Middleware.GatewayKeys["laptop"] = "${env:ROUTER_KEY_LAPTOP}";
+        gateway.ReferenceErrors(current).Should().BeEmpty("a gateway key goes nowhere");
+    }
+
     [Theory]
     [InlineData("https://user:sk-secret@api.example.com/v1?api-key=sk-query#sk-fragment", "https://api.example.com/v1")]
     [InlineData("http://localhost:1234", "http://localhost:1234/")]

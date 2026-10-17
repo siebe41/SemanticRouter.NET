@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Tests.Support;
@@ -255,6 +256,45 @@ public sealed class JudgeTests : RouterHostTest
 
         JudgeCalls(CloudHttp, "cloud-judge-1").Should().Be(0, "the profile keeps this client's data off that connector");
         Latest.Grade.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_remote_clients_answers_are_not_sent_to_a_cli_judge_that_serves_only_this_machine()
+    {
+        const string Grade = """{\"grade\": 2, \"reason\": \"names the wrong city\"}""";
+        Cli = FakeCliProcessRunner.Replying(ClaudeStream.Delta(Grade), ClaudeStream.Success(Grade));
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+                o.GatewayKeys["colleague"] = "gw-colleague-key-123";
+                (o.Judge.Enabled, o.Judge.SampleRate, o.Judge.Model) = (true, 1, "claude-cli");
+            },
+            services: s => s.AddSingleton<TimeProvider>(_time),
+            beforeRouter: app => app.Use((context, next) =>
+            {
+                if (context.Request.Headers.ContainsKey("X-Test-Remote"))
+                {
+                    context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.7");
+                }
+
+                return next(context);
+            }),
+            withCli: true);
+
+        var remote = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = Json(ChatJson) };
+        remote.Headers.Add("X-Test-Remote", "1");
+        remote.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "gw-colleague-key-123");
+        (await client.SendAsync(remote)).StatusCode.Should().Be(HttpStatusCode.OK);
+        await Judge.WhenIdleAsync(TimeSpan.FromSeconds(10));
+
+        Cli.Invocations.Should().BeEmpty("the claude connector does not allow remote clients, and grading would send it this client's text");
+        Latest.Grade.Should().BeNull();
+
+        await AskAsync(client);
+        Cli.Invocations.Should().ContainSingle("a request from this machine is graded as before");
+        Latest.Grade.Should().Be(2);
     }
 
     [Fact]

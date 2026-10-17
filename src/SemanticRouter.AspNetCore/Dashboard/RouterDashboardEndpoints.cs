@@ -284,7 +284,7 @@ public static partial class RouterDashboardEndpoints
                 return unreadable!;
             }
 
-            return Results.Json(Validation([.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)], candidate), ApiJson);
+            return Results.Json(Validation([.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration, DashboardAccess.IsLocal(context))], candidate), ApiJson);
         }).Audited("validated a configuration");
 
         // baseVersion: the version the caller's draft started from. When another version runs by now, nothing is applied
@@ -305,7 +305,7 @@ public static partial class RouterDashboardEndpoints
                 return unreadable!;
             }
 
-            IReadOnlyList<string> errors = [.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration)];
+            IReadOnlyList<string> errors = [.. provider.ValidateChange(candidate), .. ProcessSettingErrors(candidate, provider, options), .. candidate.ReferenceErrors(provider.Current.Configuration, DashboardAccess.IsLocal(context))];
             if (errors.Count > 0)
             {
                 return Results.Json(Validation(errors, candidate), ApiJson, statusCode: StatusCodes.Status400BadRequest);
@@ -600,10 +600,10 @@ public static partial class RouterDashboardEndpoints
             errors.AddRange(candidate.MaskedSecretErrors());
             errors.AddRange(ProcessSettingErrors(candidate, provider, options));
 
-            // The same reference rules as PUT api/config, on purpose: a new connector may name an ${env:…} key, a moved one
-            // may not. Whoever can discover here can apply the same draft there, so being stricter here would protect
-            // nothing; the audit detail records where the key went instead.
-            errors.AddRange(candidate.ReferenceErrors(current));
+            // The same reference rules as PUT api/config, on purpose: only this machine may name an ${env:…} key the
+            // connector did not have (or a preset's own key for its provider), and a moved connector none at all. Whoever
+            // can discover here can apply the same draft there; the audit detail records where the key went.
+            errors.AddRange(candidate.ReferenceErrors(current, DashboardAccess.IsLocal(context)));
             if (errors.Count > 0)
             {
                 return Results.Json(Validation(errors, candidate), ApiJson, statusCode: StatusCodes.Status400BadRequest);
