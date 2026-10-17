@@ -73,6 +73,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Dashboard: Label starts with no tier picked and warns when it is the tier the prompt was routed to.
 - Desktop app: the tray's **Check for updates** is now **Check for updates automatically**, next to **Check for updates now…**.
 - Dashboard: links in running text are underlined, and a few theme colours are slightly stronger so status badges, faint text and links keep 4.5:1 on every surface, hovered rows included. A theme file is now checked against `--bg-hover` too.
+- The library packages depend on each other at exactly their own version: `SemanticRouter.Storage.Sqlite`, `SemanticRouter.Embeddings.Onnx` and `SemanticRouter.Connectors.Copilot` 0.6.0 need `SemanticRouter.AspNetCore` `[0.6.0]` (not 0.6.0 or later), and `SemanticRouter.AspNetCore` needs `SemanticRouter.Core` of its own version the same way. Mixing versions, which failed at run time with a `MissingMethodException`, now fails the restore (NU1107) or warns (NU1608); update all the SemanticRouter packages you use together. `SemanticRouter.Connectors.Copilot` needs `GitHub.Copilot.SDK` 1.0.22 or a later 1.0.x, since it uses an API the SDK marks experimental. (#PRNUM)
 
 ### Fixed
 

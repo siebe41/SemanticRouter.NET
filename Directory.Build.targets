@@ -14,4 +14,41 @@
   <PropertyGroup Condition="'$(RuntimeIdentifier)' == '' and '$(RuntimeIdentifiers)' != ''">
     <EnableRuntimePackDownload>false</EnableRuntimePackDownload>
   </PropertyGroup>
+
+  <!--
+    The first-party packages are versioned together and depend on each other exactly (CONTRIBUTING.md, Package
+    versions and dependencies): Storage.Sqlite, Embeddings.Onnx and Connectors.Copilot are compiled against one build
+    of SemanticRouter.AspNetCore, internals included, and AspNetCore against one build of SemanticRouter.Core. By
+    default a project reference becomes an open lower bound in the nuspec (version="0.6.0", meaning 0.6.0 or later), so
+    NuGet would pair an old package with a newer sibling and the app would fail at run time with a
+    MissingMethodException. As [0.6.0], a mismatch is reported at restore instead (NU1107, or NU1608 when the app
+    references the newer sibling itself).
+  -->
+  <Target Name="UseExactProjectReferenceVersions" AfterTargets="_GetProjectReferenceVersions">
+    <ItemGroup>
+      <_ExactProjectReferences Include="@(_ProjectReferencesWithVersions)" ProjectVersion="[%(_ProjectReferencesWithVersions.ProjectVersion)]" />
+      <_ProjectReferencesWithVersions Remove="@(_ProjectReferencesWithVersions)" />
+      <_ProjectReferencesWithVersions Include="@(_ExactProjectReferences)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Fails the pack when the generated nuspec gives a SemanticRouter.* dependency anything but an exact version, so the
+    rule above cannot silently stop applying (a renamed SDK target, a PackageReference to a sibling, a nuspec file).
+    The package written with that nuspec is deleted, so no such package is left to publish.
+  -->
+  <Target Name="CheckExactSemanticRouterDependencies" AfterTargets="GenerateNuspec" Condition="'$(IsPackable)' == 'true' and '$(PackAsTool)' != 'true'">
+    <ItemGroup>
+      <_GeneratedNuspec Include="@(NuGetPackOutput)" Condition="'%(Extension)' == '.nuspec'" />
+      <_GeneratedPackage Include="@(NuGetPackOutput)" Condition="'%(Extension)' != '.nuspec'" />
+    </ItemGroup>
+    <XmlPeek XmlInputPath="%(_GeneratedNuspec.FullPath)"
+             Query="//*[local-name()='dependency'][starts-with(@id, 'SemanticRouter.')][not(starts-with(@version, '[') and substring(@version, string-length(@version)) = ']' and not(contains(@version, ',')))]/@id"
+             Condition="'@(_GeneratedNuspec)' != ''">
+      <Output TaskParameter="Result" ItemName="_InexactSemanticRouterDependency" />
+    </XmlPeek>
+    <Delete Files="@(_GeneratedPackage)" Condition="'@(_InexactSemanticRouterDependency)' != ''" />
+    <Error Condition="'@(_InexactSemanticRouterDependency)' != ''"
+           Text="$(PackageId) depends on @(_InexactSemanticRouterDependency, ', ') without an exact version. The first-party packages depend on each other exactly, as [x.y.z] (CONTRIBUTING.md#package-versions-and-dependencies)." />
+  </Target>
 </Project>

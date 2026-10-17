@@ -37,6 +37,23 @@ Every pull request runs CI ([`.github/workflows/ci.yml`](.github/workflows/ci.ym
 - **Add tests** for behaviour you change. Tests must not need the network, a model or a vendor CLI; the existing tests show how to use `TestServer` and the stand-in CLI in `tests/SemanticRouter.FakeCli`.
 - **Update the documentation** (README or `docs/`) when you change configuration, endpoints or behaviour.
 
+## Package versions and dependencies
+
+The five library packages (`SemanticRouter.Core`, `SemanticRouter.AspNetCore`, `SemanticRouter.Storage.Sqlite`, `SemanticRouter.Embeddings.Onnx` and `SemanticRouter.Connectors.Copilot`) and the `semantic-router` tool are versioned together: every release publishes all of them with the same version, built from one commit.
+
+They also depend on each other exactly. `SemanticRouter.AspNetCore` 0.6.0 depends on `SemanticRouter.Core` `[0.6.0]`, and Storage.Sqlite, Embeddings.Onnx and Connectors.Copilot 0.6.0 depend on `SemanticRouter.AspNetCore` `[0.6.0]`, not on 0.6.0 or later. Each is compiled against one build of the package below it, and Storage.Sqlite and Connectors.Copilot use its internals through `InternalsVisibleTo`, which carry no compatibility promise. With an open lower bound NuGet would pair an old package with a newer sibling without a word, and the app would fail at run time with a `MissingMethodException`. With an exact version, two packages that want different versions of a sibling fail the restore (NU1107), and an app that references a newer sibling directly gets warning NU1608. An app updates all the SemanticRouter packages it uses together.
+
+[`Directory.Build.targets`](Directory.Build.targets) makes every project reference an exact dependency in the package (`UseExactProjectReferenceVersions`), and `dotnet pack` fails when a generated nuspec gives a `SemanticRouter.*` dependency anything else (`CheckExactSemanticRouterDependencies`). So a new library package depends on its siblings through a `ProjectReference`, never a `PackageReference`.
+
+The internals the sibling packages use are a contract between the packages of one version, not a public API. Change them freely, but build and test the siblings with the change in the same pull request (the solution build does). Today they are:
+
+- Connectors.Copilot: `ChatResponseWriterFactory`, `IChatResponseWriter`, `ChatTranscript`, `CliScratch`, `DroppedFeatures`, `PromptedToolFormat` and `ConnectorOptions.EffectiveTimeout`.
+- Storage.Sqlite: `IStateRetention` and `OwnerOnly`.
+
+Do not add `InternalsVisibleTo` for a package outside this repository.
+
+**Third-party dependencies** have an open lower bound (the version in `Directory.Packages.props`, or later), except when a package uses an API its author marks as experimental or otherwise not covered by their compatibility promise. Then the dependency gets an upper bound up to the next version that may break it, and the bound moves only after the package was tested against that version. Today that is `GitHub.Copilot.SDK` `[1.0.22, 1.1)`: Connectors.Copilot uses its permission API, marked experimental (GHCP001). Raising the bound changes the version range in `Directory.Packages.props`; run `dotnet restore` and commit the lock files as for any version change.
+
 ## Changelog
 
 The [changelog](CHANGELOG.md) lists every user-visible change. If your pull request changes what someone using the packages, the tool, the container image or the desktop app sees (a setting, an endpoint, a default, a fix to behaviour they could notice, a security fix), add one line under **Unreleased**, in the right group:

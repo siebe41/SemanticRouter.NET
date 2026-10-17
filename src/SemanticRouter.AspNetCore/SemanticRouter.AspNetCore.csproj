@@ -32,9 +32,13 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SemanticRouter.Tests" />
-    <!-- First-party connector package, versioned with this one: it reuses the response writers and transcript renderer. -->
+    <!--
+      The packages below are versioned with this one and depend on it exactly ([x.y.z]), so the internals they use are a
+      contract between the packages of one version (CONTRIBUTING.md, Package versions and dependencies, lists them).
+    -->
+    <!-- First-party connector package: it reuses the response writers and transcript renderer. -->
     <InternalsVisibleTo Include="SemanticRouter.Connectors.Copilot" />
-    <!-- First-party storage and host, versioned with this one: they keep the same file modes. -->
+    <!-- First-party storage and host (the host is not packed): they keep the same file modes. -->
     <InternalsVisibleTo Include="SemanticRouter.Storage.Sqlite" />
     <InternalsVisibleTo Include="SemanticRouter.Hosting" />
   </ItemGroup>
