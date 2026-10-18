@@ -187,35 +187,71 @@ jobs:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: dotnet nuget push "artifacts/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
-  image:
+  # The image is built, scanned and pushed in three jobs, so that neither the build nor the scanners (Trivy and Syft,
+  # which download their binaries and Trivy's vulnerability database at run time) run next to a token that can push or
+  # next to the docker daemon the push uses. The build only reads the repository, the scan holds no permission at all,
+  # and the push runs no tool but docker: it loads the build's tarball, checks that it is the image the build made, and
+  # checks that the registry holds that same image afterwards. So what is signed and attested is what was built and
+  # scanned.
+  image-build:
     needs: packages
     runs-on: ubuntu-latest
-    environment: release
-    permissions:
-      contents: read
-      packages: write
     outputs:
-      image: ${{ steps.push.outputs.image }}
-      digest: ${{ steps.push.outputs.digest }}
+      image: ${{ steps.build.outputs.image }}
+      version: ${{ steps.build.outputs.version }}
+      id: ${{ steps.save.outputs.id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # Built, scanned and inventoried before the registry login, so the build never runs next to a token that can push.
       # The tag's version and the commit go into the assemblies (what the router reports) and the OCI labels.
       - name: Build
+        id: build
         run: |
           image="ghcr.io/$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/semantic-router"
+          version="${GITHUB_REF_NAME#v}"
           echo "IMAGE=$image" >> "$GITHUB_ENV"
-          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           docker build -f src/SemanticRouter.Host/Dockerfile \
-            --build-arg VERSION="${GITHUB_REF_NAME#v}" --build-arg REVISION="$GITHUB_SHA" \
-            -t "$image:${GITHUB_REF_NAME#v}" -t "$image:latest" .
+            --build-arg VERSION="$version" --build-arg REVISION="$GITHUB_SHA" \
+            -t "$image:$version" -t "$image:latest" .
 
       # Nothing is published that reports another version than its tag: the router, the dashboard and the labels.
       - name: Check the version
         run: deploy/image-version-check.sh "$IMAGE:latest" "$VERSION" "$GITHUB_SHA"
+
+      - name: Save
+        id: save
+        run: |
+          echo "id=$(docker image inspect "$IMAGE:$VERSION" --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
+          docker save "$IMAGE:$VERSION" "$IMAGE:latest" -o image.tar
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: image
+          path: image.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  # No permission, so the job's token can do nothing, and no cache, so a cache entry written elsewhere cannot change
+  # the scanner or its database.
+  image-scan:
+    needs: image-build
+    runs-on: ubuntu-latest
+    permissions: {}
+    env:
+      IMAGE: ${{ needs.image-build.outputs.image }}
+      VERSION: ${{ needs.image-build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image
+
+      - name: Load
+        run: docker load -i image.tar
 
       # Nothing with a fixable high or critical vulnerability is published.
       - name: Scan
@@ -226,6 +262,7 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: '1'
+          cache: 'false'
 
       # The image's CycloneDX SBOM: attached to the release, and to the image as an attestation (image-sign).
       - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
@@ -251,13 +288,43 @@ jobs:
           name: sbom-image
           path: SemanticRouter-${{ env.VERSION }}-image.cdx.json
 
+  image:
+    needs: [ image-build, image-scan ]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      packages: write
+    env:
+      IMAGE: ${{ needs.image-build.outputs.image }}
+      VERSION: ${{ needs.image-build.outputs.version }}
+      BUILT: ${{ needs.image-build.outputs.id }}
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image
+
+      - name: Load
+        run: |
+          docker load -i image.tar
+          for tag in "$VERSION" latest; do
+            id="$(docker image inspect "$IMAGE:$tag" --format '{{.Id}}')"
+            if [ "$id" != "$BUILT" ]; then
+              echo "::error::$IMAGE:$tag is $id, but the build made $BUILT."
+              exit 1
+            fi
+          done
+
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # The digest is read back from the registry: what the version tag points to is what is signed and attested.
+      # The digest is read back from the registry: what the version tag points to is what is signed and attested, and
+      # it must be the image the build made.
       - name: Push
         id: push
         run: |
@@ -271,12 +338,18 @@ jobs:
             echo "::error::No digest for $IMAGE:$VERSION in the registry."
             exit 1
           fi
+          docker pull -q "$IMAGE@$digest" >/dev/null
+          id="$(docker image inspect "$IMAGE@$digest" --format '{{.Id}}')"
+          if [ "$id" != "$BUILT" ]; then
+            echo "::error::The registry's $IMAGE@$digest is $id, but the build made $BUILT."
+            exit 1
+          fi
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
   # Keyless signing of the pushed image, then its provenance and SBOM attestations, stored in the registry next to it.
   # cosign and actions/attest get a short-lived Sigstore certificate for this workflow from the job's GitHub OIDC token.
-  # This job builds and runs nothing from the repository; the image job, which builds, never holds the OIDC token.
+  # This job builds and runs nothing from the repository; the image jobs never hold the OIDC token.
   image-sign:
     needs: image
     runs-on: ubuntu-latest
