@@ -1,0 +1,38 @@
+{
+  "note": "Latency rows of `gateway --latency` on a 4 vCPU Linux container (load generator, stub and router on the same cores). The CI job warns when a run is twice as slow or half as fast as these; refresh them from the gateway-benchmark artifact of a nightly run.",
+  "latency": [
+    {
+      "concurrency": 1,
+      "requestsPerSecond": 1037.1,
+      "firstByteP50": 0.79,
+      "totalP50": 0.82,
+      "totalP95": 1.73,
+      "totalP99": 2.85,
+      "directTotalP50": 0.08,
+      "errors": 0,
+      "residentMegabytes": 216
+    },
+    {
+      "concurrency": 8,
+      "requestsPerSecond": 6124.4,
+      "firstByteP50": 1.09,
+      "totalP50": 1.09,
+      "totalP95": 2.35,
+      "totalP99": 5.65,
+      "directTotalP50": 0.1,
+      "errors": 0,
+      "residentMegabytes": 301
+    },
+    {
+      "concurrency": 32,
+      "requestsPerSecond": 7846.8,
+      "firstByteP50": 3.46,
+      "totalP50": 3.46,
+      "totalP95": 7.53,
+      "totalP99": 12.68,
+      "directTotalP50": 0.37,
+      "errors": 0,
+      "residentMegabytes": 307
+    }
+  ]
+}

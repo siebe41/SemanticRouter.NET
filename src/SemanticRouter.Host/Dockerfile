@@ -3,6 +3,10 @@
 # on the machine itself for those.
 #
 #   docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router .
+#
+# The release passes the tag's version and the commit (--build-arg VERSION=0.5.0 --build-arg REVISION=<sha>), which the
+# router reports (the dashboard, GET /router/api/status), the SBOM names and the OCI labels carry. Without them the image
+# reports the next release's version from Directory.Build.props, like any build from source.
 #   docker run -p 127.0.0.1:5080:8080 -v semantic-router:/data -e ROUTER_ADMIN_TOKEN=... -e ROUTER_GATEWAY_KEY=... semantic-router
 #
 # Clients send ROUTER_GATEWAY_KEY as their API key (ANTHROPIC_AUTH_TOKEN, OPENAI_API_KEY). Publish the port beyond
@@ -15,14 +19,26 @@ WORKDIR /src
 COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props .editorconfig ./
 COPY src/ src/
 COPY deploy/third-party-notices.cs deploy/
+ARG VERSION=
+ARG REVISION=
 # Locked restore: exactly the packages in the projects' packages.lock.json files.
-RUN dotnet publish src/SemanticRouter.Host/SemanticRouter.Host.csproj -c Release -o /app /p:UseAppHost=false /p:RestoreLockedMode=true
+RUN dotnet publish src/SemanticRouter.Host/SemanticRouter.Host.csproj -c Release -o /app /p:UseAppHost=false /p:RestoreLockedMode=true \
+      ${VERSION:+"-p:Version=$VERSION"} ${REVISION:+"-p:SourceRevisionId=$REVISION"}
 # The licences and notices of the NuGet packages the image ships, from the packages restore just fetched (no network).
 RUN dotnet run --file deploy/third-party-notices.cs -- /app/THIRD-PARTY-NOTICES.txt /app
 # The runtime image has no shell to create the data directory, so it is made here and copied over.
 RUN mkdir -p /data
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra@sha256:3ed6558056b54d5c9dfefb7ff473728e022ff2bf1d976cbf8ee07b05ec594374
+ARG VERSION=
+ARG REVISION=
+LABEL org.opencontainers.image.title="semantic-router" \
+      org.opencontainers.image.description="A semantic prompt router for OpenAI and Anthropic clients: it picks local models or paid APIs per turn, with a dashboard" \
+      org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.revision="$REVISION" \
+      org.opencontainers.image.source="https://github.com/siebe41/SemanticRouter.NET" \
+      org.opencontainers.image.url="https://github.com/siebe41/SemanticRouter.NET" \
+      org.opencontainers.image.licenses="MIT"
 WORKDIR /app
 COPY --from=build /app .
 COPY --from=build --chown=$APP_UID:$APP_UID /data /data

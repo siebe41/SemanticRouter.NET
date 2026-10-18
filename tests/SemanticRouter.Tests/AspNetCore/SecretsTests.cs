@@ -239,6 +239,18 @@ public sealed class SecretsTests
         AddressDisplay.Show(new Uri(address)).Should().Be(shown);
 
     [Fact]
+    public void Credentials_in_addresses_are_redacted_wherever_they_appear()
+    {
+        var configuration = new RouterConfiguration();
+        configuration.Connectors["x"] = new ConnectorOptions { BaseAddress = new Uri("https://user:sk-in%2Fuserinfo@api.example.com/?api-version=2024&api-key=sk-in-query") };
+        configuration.Embeddings.Endpoint = new Uri("https://embed.example.com/?token=tok-in-embeddings");
+        var redactor = new SecretRedactor(configuration.SecretValues());
+
+        redactor.Redact("failed: user:sk-in%2Fuserinfo, sk-in/userinfo, sk-in-query, tok-in-embeddings, 2024")
+            .Should().Be("failed: ***, ***, ***, ***, 2024");
+    }
+
+    [Fact]
     public async Task A_probe_names_the_address_without_its_credentials()
     {
         var connector = new ConnectorOptions { BaseAddress = new Uri("https://user:sk-in-userinfo@api.example.com/?key=sk-in-query") };

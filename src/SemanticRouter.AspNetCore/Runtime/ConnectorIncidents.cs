@@ -101,6 +101,29 @@ internal sealed class ConnectorIncidents
         }
     }
 
+    /// <summary>
+    /// Forgets the latest failure messages, which can quote a failed CLI run's output (and so the prompt), for when the
+    /// activity is deleted. Since when each connector fails, and its limit days, stay.
+    /// </summary>
+    public void ForgetDetails()
+    {
+        lock (_gate)
+        {
+            if (_connectors.Values.All(s => s.Detail is null && s.LimitDetail is null))
+            {
+                return;
+            }
+
+            foreach (State state in _connectors.Values)
+            {
+                state.Detail = null;
+                state.LimitDetail = null;
+            }
+
+            Save();
+        }
+    }
+
     /// <summary>Writes the state through (under the lock). Failures are the store's to log.</summary>
     private void Save() => _store?.Save(StoreKey, JsonSerializer.Serialize(_connectors, Json));
 

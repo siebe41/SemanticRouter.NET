@@ -19,6 +19,55 @@ internal static class AddressDisplay
         ["key", "token", "secret", "auth", "password", "pwd", "credential", "session", "signature", "sig"];
 
     /// <summary>
+    /// The credentials written into <paramref name="address"/>, for the <see cref="SecretRedactor"/>: the user information
+    /// (<c>user:password</c>, and the password alone) and the values of query parameters named like a key, each as written
+    /// and unescaped.
+    /// </summary>
+    public static IEnumerable<string> Credentials(Uri? address)
+    {
+        if (address is not { IsAbsoluteUri: true })
+        {
+            yield break;
+        }
+
+        var values = new List<string>();
+        if (address.UserInfo.Length > 0)
+        {
+            values.Add(address.UserInfo);
+            int colon = address.UserInfo.IndexOf(':', StringComparison.Ordinal);
+            if (colon >= 0)
+            {
+                values.Add(address.UserInfo[(colon + 1)..]);
+            }
+        }
+
+        if (address.Query.Length > 1)
+        {
+            foreach (string parameter in address.Query[1..].Split('&'))
+            {
+                int equals = parameter.IndexOf('=', StringComparison.Ordinal);
+                if (equals >= 0 && IsSecretParameter(parameter[..equals]))
+                {
+                    values.Add(parameter[(equals + 1)..]);
+                }
+            }
+        }
+
+        foreach (string value in values.Where(v => v.Length > 0))
+        {
+            yield return value;
+            string unescaped = Uri.UnescapeDataString(value);
+            if (!string.Equals(unescaped, value, StringComparison.Ordinal))
+            {
+                yield return unescaped;
+            }
+        }
+    }
+
+    private static bool IsSecretParameter(string name) =>
+        SecretParameterWords.Any(w => Uri.UnescapeDataString(name).Contains(w, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
     /// The address with the credentials in it shown as <c>***</c>: the user information (<c>user:password@</c>) and the
     /// values of query parameters named like a key (<c>api-key</c>, <c>token</c>, <c>sig</c>…). Other parameters
     /// (<c>api-version</c>) stay readable. The same address when it holds no credentials.
@@ -46,7 +95,7 @@ internal static class AddressDisplay
             {
                 int equals = parameters[i].IndexOf('=', StringComparison.Ordinal);
                 string name = equals < 0 ? parameters[i] : parameters[i][..equals];
-                if (equals >= 0 && SecretParameterWords.Any(w => Uri.UnescapeDataString(name).Contains(w, StringComparison.OrdinalIgnoreCase)))
+                if (equals >= 0 && IsSecretParameter(name))
                 {
                     parameters[i] = name + "=" + RouterConfiguration.MaskedSecret;
                     masked = true;

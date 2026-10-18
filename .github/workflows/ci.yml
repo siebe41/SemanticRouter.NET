@@ -280,8 +280,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Built as a version of its own, as the release builds the tag's, to check that the version reaches the router.
       - name: Build the image
-        run: docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router:ci .
+        run: |
+          docker build -f src/SemanticRouter.Host/Dockerfile \
+            --build-arg VERSION="0.0.0-ci.$GITHUB_RUN_NUMBER" --build-arg REVISION="$GITHUB_SHA" -t semantic-router:ci .
+
+      - name: The image reports the version it was built as
+        run: deploy/image-version-check.sh semantic-router:ci "0.0.0-ci.$GITHUB_RUN_NUMBER" "$GITHUB_SHA"
+
+      # The router turns ONNX Runtime's telemetry off itself (the tool's test checks that with a recording proxy); the
+      # image also starts it with the variable set.
+      - name: ONNX Runtime telemetry is off
+        run: docker image inspect semantic-router:ci --format '{{json .Config.Env}}' | grep -q '"ORT_DISABLE_TELEMETRY=1"'
 
       - name: Smoke test
         run: |

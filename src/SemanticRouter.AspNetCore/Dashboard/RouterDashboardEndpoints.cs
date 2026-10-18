@@ -197,6 +197,14 @@ public static partial class RouterDashboardEndpoints
         group.MapGet("/graph.js", (HttpContext context) => Asset(context, "graph.js", "text/javascript; charset=utf-8", prefix)).WithMetadata(DashboardAnonymousMetadata.Instance);
 
         RouteGroupBuilder api = group.MapGroup("/api");
+
+        // API answers hold prompt previews, the masked configuration and learned examples: a browser or the desktop app's
+        // web view must not keep them in its disk cache, where deleting the activity cannot reach them.
+        api.AddEndpointFilter((invocation, next) =>
+        {
+            invocation.HttpContext.Response.Headers.CacheControl = "no-store";
+            return next(invocation);
+        });
         api.MapGet("/themes", () => Results.Json(new ThemesResponse(themes.Directory, ThemeCatalog.RequiredTokens, themes.List()), ApiJson))
             .WithMetadata(DashboardMetricsMetadata.Instance);
         api.MapGet("/session", (HttpContext context) =>
@@ -255,6 +263,12 @@ public static partial class RouterDashboardEndpoints
                     provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>(),
                     services.GetService<IModelCacheShare>(), Listening(services), options.PublicOrigins);
                 status = status with { Unsaved = provider.Unsaved, Instance = provider.Instance };
+
+                // State writes that failed after the configuration was applied (a locked or full disk): shown as they happen.
+                if (services.GetService<IStateStorageHealth>()?.Problem is { } state && !status.Warnings.Contains(state))
+                {
+                    status = status with { Warnings = [.. status.Warnings, state] };
+                }
 
                 // A connector's last error comes from the activity log's details, which can quote a reply.
                 return Results.Json(
@@ -430,13 +444,17 @@ public static partial class RouterDashboardEndpoints
             return Results.Json(new ActivityResponse(entries, activity.NextId - 1, kinds), ApiJson);
         });
 
-        // Deletes activity (and its prompt previews) for good: everything, or since/until. The state database zeroes and
-        // compacts what it deleted, so the rows cannot be recovered from its files.
-        api.MapDelete("/activity", (HttpContext context, RoutingActivityLog activity, DateTimeOffset? since, DateTimeOffset? until) =>
+        // Deletes activity (and its prompt previews) for good: everything, or since/until, with what else holds text from
+        // those prompts (ActivityPurge). The state database zeroes and compacts what it deleted, so the rows cannot be
+        // recovered from its files; complete is false when another reader kept its write-ahead log past the busy timeout.
+        api.MapDelete("/activity", (HttpContext context, ActivityPurge purge, DateTimeOffset? since, DateTimeOffset? until) =>
             {
-                int removed = activity.Purge(since ?? DateTimeOffset.MinValue, until ?? DateTimeOffset.MaxValue);
-                DashboardAudit.Detail(context, $"{removed} {(removed == 1 ? "entry" : "entries")}" + (since is null && until is null ? ", everything" : $" from {since?.ToString("u") ?? "the start"} to {until?.ToString("u") ?? "now"}"));
-                return Results.Json(new { removed }, ApiJson);
+                (int removed, bool complete) = purge.Run(since ?? DateTimeOffset.MinValue, until ?? DateTimeOffset.MaxValue);
+                DashboardAudit.Detail(
+                    context,
+                    $"{removed} {(removed == 1 ? "entry" : "entries")}" + (since is null && until is null ? ", everything" : $" from {since?.ToString("u") ?? "the start"} to {until?.ToString("u") ?? "now"}")
+                    + (complete ? string.Empty : "; not yet gone from the state file's write-ahead log"));
+                return Results.Json(new { removed, complete }, ApiJson);
             })
             .WithMetadata(DashboardWriteMetadata.Instance)
             .Audited("deleted activity");
@@ -731,7 +749,7 @@ public static partial class RouterDashboardEndpoints
         void OnUpdated(RoutingActivityEntry entry) => channel.Writer.TryWrite(entry);
 
         context.Response.ContentType = "text/event-stream";
-        context.Response.Headers.CacheControl = "no-cache";
+        context.Response.Headers.CacheControl = "no-store";
         context.Response.Headers["X-Accel-Buffering"] = "no";
         context.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
 
