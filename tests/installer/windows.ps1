@@ -1,6 +1,7 @@
 # Exercises the Windows installer (#50): install 1.0.0 per user, set up the background service and the sign-in entry,
-# start the app and hand a second launch over to it (#212), update to 1.0.1 from a local feed, then uninstall, and
-# checks that nothing is left behind but the configuration.
+# start the app and hand a second launch over to it (#212), update to 1.0.1 from a local feed as Restart to update does
+# (the new version starts again and resumes the service), then uninstall, and checks that nothing is left behind but
+# the configuration.
 #
 #   pwsh tests/installer/windows.ps1 -Setup installers/SemanticRouter-win-x64-Setup-1.0.0.exe -Feed installers
 #
@@ -55,6 +56,16 @@ function Invoke-Program([string] $program, [string[]] $arguments, [int] $seconds
     $p.ExitCode
 }
 
+Step 'A home from the newest release'
+# The upgrade fixture of the newest release (#206): what it set up and used, in the default configuration directory.
+# Its state database is moved out of the roaming profile on the first start (#216).
+$tools = Join-Path $PSScriptRoot '..\..\tools\upgrade-fixtures'
+$newest = Get-ChildItem (Join-Path $PSScriptRoot '..\fixtures\upgrade') -Filter '*.zip' | Sort-Object { [version]$_.BaseName } | Select-Object -Last 1
+$usage = (python (Join-Path $tools 'seed-home.py') $newest.FullName $config).Trim()
+if ($LASTEXITCODE -ne 0) { Fail "Could not seed $config from $($newest.Name)" }
+Write-Host "Seeded $config from $($newest.Name) ($usage usage records)"
+Done
+
 Step 'Install 1.0.0'
 $setupLog = Join-Path $env:RUNNER_TEMP 'setup.log'
 $code = Invoke-Program (Resolve-Path $Setup).Path @('--silent', '--log', $setupLog) 300
@@ -79,6 +90,9 @@ Wait-Until { (Router-Processes).Count -ge 1 } 60 'the background service to run'
 # The app's own sign-in entry (the tray's "Start at sign-in"), as the app writes it.
 New-ItemProperty -Path $runKey -Name 'SemanticRouter Desktop' -Value "`"$exe`" --background --config-dir `"$config`"" -PropertyType String -Force | Out-Null
 Wait-Until { Test-Path (Join-Path $local 'semantic-router.db') } 60 "the service's state database in $local"
+if (Test-Path (Join-Path $config 'semantic-router.db')) { Fail "The state database is still in the roaming $config" }
+python (Join-Path $tools 'check-usage.py') http://127.0.0.1:5080 $usage "1.0.0 on the $($newest.BaseName) home"
+if ($LASTEXITCODE -ne 0) { Fail 'The home from the newest release lost its usage' }
 Done
 
 Step 'The app starts in the background, takes a second launch and quits'
@@ -97,23 +111,42 @@ if (Test-Path (Join-Path $other 'semantic-router.instance.json')) { Fail "The ap
 Write-Host 'Started, handed a second launch over, and quit.'
 Done
 
-Step 'Update to 1.0.1'
+Step 'Update to 1.0.1, as Restart to update'
 # A release build takes SEMANTICROUTER_UPDATE_SOURCE only when the machine policy allows a custom feed (CI runs as an administrator).
 $policy = 'HKLM:\Software\Policies\SemanticRouter\Updates'
 New-Item -Path $policy -Force | Out-Null
 New-ItemProperty -Path $policy -Name 'AllowCustomFeed' -Value 1 -PropertyType DWord -Force | Out-Null
 $env:SEMANTICROUTER_UPDATE_SOURCE = (Resolve-Path $Feed).Path
-$code = Invoke-Program $exe @('--update') 300
+$code = Invoke-Program $exe @('--update', '--restart') 300
 if ($code -ne 0) { Get-Content (Join-Path $local 'logs\semantic-router.log') -Tail 20 -ErrorAction SilentlyContinue; Fail "--update exited with $code" }
 Wait-Until { (Installed-Version) -eq '1.0.1' } 120 'version 1.0.1 to be installed'
 Remove-Item Env:SEMANTICROUTER_UPDATE_SOURCE
 Remove-Item -Path 'HKLM:\Software\Policies\SemanticRouter' -Recurse -Force
 
-# The update stopped the service; the new version installed and started it again.
+# The update stopped the service; the new version started again and resumed it.
+function App-Processes {
+    @(Get-CimInstance Win32_Process -Filter "Name = 'SemanticRouter.exe'" | Where-Object { $_.CommandLine -like '*--resume-service*' })
+}
+Wait-Until { (App-Processes).Count -ge 1 } 90 'the new version to start again with --resume-service'
+$app = (App-Processes)[0]
+if ($app.ExecutablePath -ne $exe) { Fail "The app restarted from $($app.ExecutablePath), expected $exe" }
+if ($app.CommandLine -notlike "*$config*") { Fail "The app restarted without its configuration directory: $($app.CommandLine)" }
 Wait-Until { (Router-Processes).Count -ge 1 } 90 'the background service to run again after the update'
 $running = (Router-Processes)[0].ExecutablePath
 if ($running -ne $exe) { Fail "The service runs $running, expected $exe" }
-Write-Host "Updated to $(Installed-Version); the service runs again"
+
+# Quit the restarted app; the service keeps running. The app starts the service before its window, and only then takes
+# a second launch: until it does, --quit finds no app and does nothing, so it is asked again until it is gone.
+Wait-Until {
+    $code = Invoke-Program $exe @('--quit', '--config-dir', "`"$config`"") 30
+    if ($code -ne 0) { Fail "--quit exited with $code" }
+    Start-Sleep -Seconds 2
+    (App-Processes).Count -eq 0
+} 90 'the restarted app to quit'
+if ((Router-Processes).Count -lt 1) { Fail 'Quitting the app stopped the background service' }
+python (Join-Path $tools 'check-usage.py') http://127.0.0.1:5080 $usage '1.0.1 after the update'
+if ($LASTEXITCODE -ne 0) { Fail 'The update lost the usage' }
+Write-Host "Updated to $(Installed-Version); the app started again and the service runs again"
 Done
 
 Step 'Uninstall'

@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -136,7 +138,10 @@ public sealed class TemplateMigrationTests : IDisposable
         RouterConfiguration upgraded = upgrade.Document;
         upgraded.Middleware.ModelAliases["*opus*"].Should().Be("family:sonnet");
         upgraded.Middleware.ModelAliases.Keys.First().Should().Be("opus-pinned");
-        upgrade.Kept.Should().ContainSingle().Which.Should().Be("Middleware.ModelAliases.*opus* (the template changed it from \"family:opus\" to \"auto\")");
+        TemplateDefault kept = upgrade.Kept.Should().ContainSingle().Subject;
+        (kept.Setting, kept.Yours!.GetValue<string>(), kept.Default!.GetValue<string>()).Should().Be(("Middleware.ModelAliases.*opus*", "family:sonnet", "auto"));
+        kept.Path.Should().Equal("Middleware", "ModelAliases", "*opus*");
+        upgrade.Describe().Should().Contain("Kept as you had them: Middleware.ModelAliases.*opus* (yours: \"family:sonnet\"; the template's: \"auto\")");
 
         RouteDefinition merged = upgraded.Routes.Single(r => r.Name == "smalltalk");
         merged.Tier.Should().Be(2);
@@ -144,6 +149,66 @@ public sealed class TemplateMigrationTests : IDisposable
         upgraded.Routes.Single(r => r.Name == "simple-code").Utterances.Should().Contain("format this json").And.Contain("make this field read-only");
         upgraded.Routes.Should().NotContain(r => r.Name == "agent-housekeeping", "a route someone removed stays removed");
         upgraded.Routes.Should().Contain(r => r.Name == "quick-answers");
+    }
+
+    [Fact]
+    public void A_new_default_is_written_where_the_setting_is()
+    {
+        RouterConfiguration document = AsReleased(TemplateMigration.Current);
+
+        TemplateDefaults.WithValue(document, ["Middleware", "ModelAliases", "*opus*"], JsonValue.Create("family:opus"))!
+            .Middleware.ModelAliases["*opus*"].Should().Be("family:opus");
+        TemplateDefaults.WithValue(document, ["Routes", "[Name=smalltalk]", "Tier"], JsonValue.Create(2))!
+            .Routes.Single(r => r.Name == "smalltalk").Tier.Should().Be(2);
+        TemplateDefaults.WithValue(document, ["Routes", "[Name=SMALLTALK]"], null)!
+            .Routes.Should().NotContain(r => r.Name == "smalltalk", "a removed default removes the item; names match as the router matches them");
+        TemplateDefaults.WithValue(document, ["Middleware", "ModelAliases", "opus-pinned"], null)!
+            .Middleware.ModelAliases.Should().NotContainKey("opus-pinned");
+        TemplateDefaults.WithValue(document, ["Routes", "[Name=gone]", "Tier"], JsonValue.Create(2)).Should().BeNull("the route is no longer there");
+        TemplateDefaults.ValueAt(document, ["Routes", "[Name=smalltalk]", "Tier"])!.GetValue<int>().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task The_overview_offers_the_new_defaults_of_what_the_upgrade_kept()
+    {
+        RouterConfiguration document = AsReleased(1);
+        document.Middleware.ModelAliases["*opus*"] = "family:sonnet";
+        document.Routes.Add(new RouteDefinition { Name = "quick-answers", Tier = 3, Utterances = { "my own quick question" } });
+        document.Connectors["local"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
+        document.Models.Add(new ModelDefinition { Name = "small", Connector = "local", Model = "m", Tier = 1 });
+        new JsonFileRouterConfigurationStore(ConfigurationFile).Save(document);
+        var output = new StringWriter();
+
+        await using RunningRouter router = (await RouterHost.StartAsync(Settings("--urls", "http://127.0.0.1:0"), output, b => b.Logging.ClearProviders()))!;
+        using var client = new HttpClient { BaseAddress = new Uri(router.LocalUrl) };
+        output.ToString().Should().Contain("the dashboard's Overview offers the new defaults");
+
+        JsonObject pending = (await client.GetFromJsonAsync<JsonObject>("/router/api/config/template-defaults"))!;
+        (pending["from"]!.GetValue<int>(), pending["to"]!.GetValue<int>()).Should().Be((1, TemplateMigration.Current));
+        JsonArray settings = pending["settings"]!.AsArray();
+        settings.Select(s => s!["name"]!.GetValue<string>()).Should().BeEquivalentTo("Middleware.ModelAliases.*opus*", "Routes[quick-answers]");
+        JsonNode opus = settings.Single(s => s!["name"]!.GetValue<string>() == "Middleware.ModelAliases.*opus*")!;
+        (opus["yours"]!.GetValue<string>(), opus["default"]!.GetValue<string>(), opus["current"]!.GetValue<string>())
+            .Should().Be(("\"family:sonnet\"", "\"auto\"", "\"family:sonnet\""));
+        JsonObject digest = (await client.GetFromJsonAsync<JsonObject>("/router/api/digest"))!;
+        digest["notices"]!.AsArray().Should().Contain(n => n!["kind"]!.GetValue<string>() == "TemplateDefaults" && n["link"]!.GetValue<string>() == "#/overview");
+
+        using HttpResponseMessage used = await client.PostAsJsonAsync("/router/api/config/template-defaults/use", new { setting = "Middleware.ModelAliases.*opus*" });
+        used.StatusCode.Should().Be(HttpStatusCode.OK, await used.Content.ReadAsStringAsync());
+        (await used.Content.ReadFromJsonAsync<JsonObject>())!["saved"]!.GetValue<bool>().Should().BeTrue();
+        RouterRuntimeProvider provider = router.App.Services.GetRequiredService<RouterRuntimeProvider>();
+        provider.Current.Configuration.Middleware.ModelAliases["*opus*"].Should().Be("auto");
+        new JsonFileRouterConfigurationStore(ConfigurationFile).Load()!.Middleware.ModelAliases["*opus*"].Should().Be("auto", "it is saved like the change it is");
+        provider.History!.List(1)[0].Source.Should().Be("template");
+
+        using HttpResponseMessage keep = await client.PostAsJsonAsync("/router/api/config/template-defaults/keep", new { setting = "Routes[quick-answers]" });
+        keep.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        provider.Current.Configuration.Routes.Single(r => r.Name == "quick-answers").Tier.Should().Be(3, "kept as yours");
+        (await client.GetFromJsonAsync<JsonObject>("/router/api/config/template-defaults"))!["settings"]!.AsArray().Should().BeEmpty();
+        (await client.GetFromJsonAsync<JsonObject>("/router/api/digest"))!["notices"]!.AsArray()
+            .Should().NotContain(n => n!["kind"]!.GetValue<string>() == "TemplateDefaults");
+        using HttpResponseMessage again = await client.PostAsJsonAsync("/router/api/config/template-defaults/keep", new { setting = "Routes[quick-answers]" });
+        again.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]

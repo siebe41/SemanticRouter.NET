@@ -10,15 +10,21 @@ namespace SemanticRouter.Host;
 /// <param name="Document">The document on the current template, stamped with it.</param>
 /// <param name="Changes">What changed, one entry per setting, in the order of the document.</param>
 /// <param name="Kept">Settings the template changed that the document had changed too, and so kept as they were.</param>
-internal sealed record TemplateUpgrade(int From, RouterConfiguration Document, IReadOnlyList<string> Changes, IReadOnlyList<string> Kept)
+internal sealed record TemplateUpgrade(int From, RouterConfiguration Document, IReadOnlyList<string> Changes, IReadOnlyList<TemplateDefault> Kept)
 {
     /// <summary>The changes and what was kept, for the log and the configuration history.</summary>
     public string Describe()
     {
         string what = Changes.Count == 0 ? "nothing to change" : string.Join("; ", Changes);
-        string kept = Kept.Count == 0 ? string.Empty : $". Kept as you had them: {string.Join("; ", Kept)}";
+        string kept = Kept.Count == 0 ? string.Empty : $". Kept as you had them: {string.Join("; ", Kept.Select(Describe))}";
         return $"template {From.ToString(CultureInfo.InvariantCulture)} → {TemplateMigration.Current.ToString(CultureInfo.InvariantCulture)}: {what}{kept}";
     }
+
+    /// <summary>One kept setting: yours, and the template's new value.</summary>
+    public static string Describe(TemplateDefault kept) =>
+        $"{kept.Setting} (yours: {Show(kept.Yours)}; the template's: {(kept.Default is null ? "none" : Show(kept.Default))})";
+
+    private static string Show(JsonNode? value) => value is null ? "none" : value.ToJsonString();
 }
 
 /// <summary>
@@ -93,10 +99,10 @@ internal static class TemplateMigration
         int from = Math.Clamp(origin, 1, Current);
         JsonObject mine = Normalize(document);
         var changes = new List<string>();
-        var kept = new List<string>();
+        var kept = new List<TemplateDefault>();
         for (int version = from; version < Current; version++)
         {
-            MergeObject(mine, Normalize(Template(version)), Normalize(Template(version + 1)), string.Empty, changes, kept);
+            MergeObject(mine, Normalize(Template(version)), Normalize(Template(version + 1)), Place.Root, changes, kept);
         }
 
         RouterConfiguration upgraded = RouterConfiguration.FromJson(mine.ToJsonString());
@@ -105,11 +111,11 @@ internal static class TemplateMigration
     }
 
     /// <summary>
-    /// Upgrades the configuration file and the evaluation set next to it, as the router does on every start. Returns what
-    /// changed, for the configuration history, or <see langword="null"/> when nothing did. A file that cannot be read or
+    /// Upgrades the configuration file and the evaluation set next to it, as the router does on every start. Returns the
+    /// upgrade, for the configuration history and the settings it kept, or <see langword="null"/> when nothing changed. A file that cannot be read or
     /// parsed is left for the router to report; one whose upgrade would not validate is left as it is, and said so.
     /// </summary>
-    public static async Task<string?> UpgradeFilesAsync(string configurationFile, TextWriter output)
+    public static async Task<TemplateUpgrade?> UpgradeFilesAsync(string configurationFile, TextWriter output)
     {
         ArgumentNullException.ThrowIfNull(output);
         string? evaluation = UpgradeEvaluationSet(SemanticRouterServiceCollectionExtensions.EvaluationSetFileNextTo(configurationFile));
@@ -157,9 +163,13 @@ internal static class TemplateMigration
             return null;
         }
 
-        string note = upgrade.Describe();
-        await output.WriteLineAsync($"Updated {configurationFile} to the current template ({note}).").ConfigureAwait(false);
-        return note;
+        await output.WriteLineAsync($"Updated {configurationFile} to the current template ({upgrade.Describe()}).").ConfigureAwait(false);
+        if (upgrade.Kept.Count > 0)
+        {
+            await output.WriteLineAsync("Settings you had changed that the template changed too were kept; the dashboard's Overview offers the new defaults.").ConfigureAwait(false);
+        }
+
+        return upgrade;
     }
 
     /// <summary>
@@ -243,7 +253,7 @@ internal static class TemplateMigration
     /// where <paramref name="mine"/> still has the old value. A property the template added goes where the template has
     /// it, since order can matter (the first model alias that matches wins).
     /// </summary>
-    private static void MergeObject(JsonObject mine, JsonObject old, JsonObject @new, string path, List<string> changes, List<string> kept)
+    private static void MergeObject(JsonObject mine, JsonObject old, JsonObject @new, Place path, List<string> changes, List<TemplateDefault> kept)
     {
         foreach ((string key, JsonNode? before) in old.ToArray())
         {
@@ -255,11 +265,11 @@ internal static class TemplateMigration
             if (JsonNode.DeepEquals(current, before))
             {
                 mine.Remove(key);
-                changes.Add($"{Join(path, key)} removed");
+                changes.Add($"{path.Property(key)} removed");
             }
             else
             {
-                kept.Add($"{Join(path, key)} (the template no longer has it)");
+                kept.Add(path.Property(key).Kept(current, null));
             }
         }
 
@@ -274,11 +284,11 @@ internal static class TemplateMigration
                 {
                     int at = order.Skip(i + 1).Select(mine.IndexOf).FirstOrDefault(index => index >= 0, mine.Count);
                     mine.Insert(at, key, after?.DeepClone());
-                    changes.Add($"{Join(path, key)} added");
+                    changes.Add($"{path.Property(key)} added");
                 }
                 else if (!JsonNode.DeepEquals(mine[key], after))
                 {
-                    kept.Add($"{Join(path, key)} (the template now adds {Show(after)})");
+                    kept.Add(path.Property(key).Kept(mine[key], after));
                 }
 
                 continue;
@@ -290,7 +300,7 @@ internal static class TemplateMigration
                 continue;
             }
 
-            JsonNode? merged = Merge(current, before, after, Join(path, key), changes, kept);
+            JsonNode? merged = Merge(current, before, after, path.Property(key), changes, kept);
             if (!ReferenceEquals(merged, current))
             {
                 mine[key] = merged;
@@ -299,7 +309,7 @@ internal static class TemplateMigration
     }
 
     /// <summary>One value: the template's new one where it is still the old one, merged within objects and lists.</summary>
-    private static JsonNode? Merge(JsonNode? mine, JsonNode? old, JsonNode? @new, string path, List<string> changes, List<string> kept)
+    private static JsonNode? Merge(JsonNode? mine, JsonNode? old, JsonNode? @new, Place path, List<string> changes, List<TemplateDefault> kept)
     {
         if (JsonNode.DeepEquals(mine, @new))
         {
@@ -332,12 +342,12 @@ internal static class TemplateMigration
             return @new?.DeepClone();
         }
 
-        kept.Add($"{path} (the template changed it from {Show(old)} to {Show(@new)})");
+        kept.Add(path.Kept(mine, @new));
         return mine;
     }
 
     /// <summary>A list of named items (routes, tiers): each item merged with the template's item of the same name.</summary>
-    private static void MergeItems(JsonArray mine, JsonArray old, JsonArray @new, string itemKey, string path, List<string> changes, List<string> kept)
+    private static void MergeItems(JsonArray mine, JsonArray old, JsonArray @new, string itemKey, Place path, List<string> changes, List<TemplateDefault> kept)
     {
         foreach (JsonNode? before in old)
         {
@@ -350,11 +360,11 @@ internal static class TemplateMigration
             if (JsonNode.DeepEquals(current, before))
             {
                 mine.Remove(current);
-                changes.Add($"{path}[{name}] removed");
+                changes.Add($"{path.Item(itemKey, name)} removed");
             }
             else
             {
-                kept.Add($"{path}[{name}] (the template no longer has it)");
+                kept.Add(path.Item(itemKey, name).Kept(current, null));
             }
         }
 
@@ -369,11 +379,11 @@ internal static class TemplateMigration
                 {
                     int at = @new.Skip(i + 1).Select(n => Find(mine, itemKey, KeyOf(n, itemKey)!)).Where(n => n is not null).Select(n => mine.IndexOf(n)).FirstOrDefault(index => index >= 0, mine.Count);
                     mine.Insert(at, after.DeepClone());
-                    changes.Add($"{path}[{name}] added");
+                    changes.Add($"{path.Item(itemKey, name)} added");
                 }
                 else if (!JsonNode.DeepEquals(current, after))
                 {
-                    kept.Add($"{path}[{name}] (the template now adds one of its own)");
+                    kept.Add(path.Item(itemKey, name).Kept(current, after));
                 }
 
                 continue;
@@ -381,7 +391,7 @@ internal static class TemplateMigration
 
             if (current is not null && !JsonNode.DeepEquals(before, after))
             {
-                JsonNode? merged = Merge(current, before, after, $"{path}[{name}]", changes, kept);
+                JsonNode? merged = Merge(current, before, after, path.Item(itemKey, name), changes, kept);
                 if (!ReferenceEquals(merged, current))
                 {
                     mine[mine.IndexOf(current)] = merged;
@@ -391,7 +401,7 @@ internal static class TemplateMigration
     }
 
     /// <summary>A list of words, as a set: what the template added is added (at the end), what it dropped is dropped.</summary>
-    private static JsonArray MergeWords(List<string> mine, List<string> old, List<string> @new, string path, List<string> changes)
+    private static JsonArray MergeWords(List<string> mine, List<string> old, List<string> @new, Place path, List<string> changes)
     {
         string[] dropped = [.. old.Except(@new, StringComparer.Ordinal).Where(w => mine.Contains(w, StringComparer.Ordinal))];
         string[] added = [.. @new.Except(old, StringComparer.Ordinal).Where(w => !mine.Contains(w, StringComparer.Ordinal))];
@@ -467,7 +477,22 @@ internal static class TemplateMigration
         };
     }
 
-    private static string Join(string path, string key) => path.Length == 0 ? key : $"{path}.{key}";
+    /// <summary>
+    /// Where a setting is: as people read it (<c>Routes[smalltalk].Utterances</c>), and as the steps
+    /// <see cref="TemplateDefaults"/> follows (<c>Routes</c>, <c>[Name=smalltalk]</c>, <c>Utterances</c>).
+    /// </summary>
+    private sealed record Place(string Display, IReadOnlyList<string> Steps)
+    {
+        public static readonly Place Root = new(string.Empty, []);
+
+        public Place Property(string key) => new(Display.Length == 0 ? key : $"{Display}.{key}", [.. Steps, key]);
+
+        public Place Item(string itemKey, string name) => new($"{Display}[{name}]", [.. Steps, $"[{itemKey}={name}]"]);
+
+        public TemplateDefault Kept(JsonNode? yours, JsonNode? template) => new(Display, Steps, yours?.DeepClone(), template?.DeepClone());
+
+        public override string ToString() => Display;
+    }
 
     private static string Show(JsonNode? value) => value is null ? "null" : value.ToJsonString();
 }

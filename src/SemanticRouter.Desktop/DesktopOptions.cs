@@ -8,12 +8,14 @@ namespace SemanticRouter.Desktop;
 /// sign-in), <c>--quit</c> (ask the running app to quit), <c>--headless</c> (run only the router, with no window or
 /// tray: what the background service runs), and <c>--install-service</c> / <c>--uninstall-service</c> (set the
 /// background service up or remove it without the tray, for scripts and installers), <c>--update</c> (apply an
-/// available update and exit) and <c>--resume-service</c> (start the background service again, after an update).
+/// available update and exit; with <c>--restart</c>, as the tray's Restart to update does: the app starts again on the
+/// new version) and <c>--resume-service</c> (start the background service again, after an update).
 /// </summary>
 internal sealed record DesktopOptions(
-    HostSettings Host, bool Background, bool Quit, bool Headless = false, string? ServiceAction = null, bool Update = false, bool ResumeService = false)
+    HostSettings Host, bool Background, bool Quit, bool Headless = false, string? ServiceAction = null, bool Update = false, bool ResumeService = false,
+    bool Restart = false)
 {
-    private static readonly string[] Flags = ["--background", "--quit", "--headless", "--install-service", "--uninstall-service", "--update", DesktopUpdater.ResumeService];
+    private static readonly string[] Flags = ["--background", "--quit", "--headless", "--install-service", "--uninstall-service", "--update", "--restart", DesktopUpdater.ResumeService];
 
     public static DesktopOptions Parse(IReadOnlyList<string> args, Func<string, string?>? environment = null)
     {
@@ -25,6 +27,12 @@ internal sealed record DesktopOptions(
             host = host with { Error = $"The desktop app takes options, not the '{host.Command}' command; use the semantic-router tool for that." };
         }
 
-        return new DesktopOptions(host, background, quit, headless, serviceAction, args.Contains("--update"), args.Contains(DesktopUpdater.ResumeService));
+        bool update = args.Contains("--update"), restart = args.Contains("--restart");
+        if (host.Error is null && restart && !update)
+        {
+            host = host with { Error = "--restart goes with --update: SemanticRouter --update --restart applies an update and starts the new version." };
+        }
+
+        return new DesktopOptions(host, background, quit, headless, serviceAction, update, args.Contains(DesktopUpdater.ResumeService), restart);
     }
 }

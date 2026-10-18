@@ -58,7 +58,7 @@ On macOS the app lives in the menu bar, with no Dock icon and no menu bar of its
 
 Untick **Install updates when quitting** to decide yourself: the app then only says a new version is available (in the tray menu, and once as a system notification) and downloads nothing until you choose **Restart to update to …**, which downloads it, applies it and starts the app again. Quitting never applies it.
 
-From a script: `SemanticRouter --update` downloads and applies an available update and exits (0 when up to date or updating, 1 when the update could not be applied).
+From a script: `SemanticRouter --update` downloads and applies an available update and exits (0 when up to date or updating, 1 when the update could not be applied). `SemanticRouter --update --restart` does what **Restart to update** does: the new version starts once the update is applied, and starts the background service again if it ran the app.
 
 An administrator can turn updates off, take them from an internal feed, make them notify-only, or require them to be signed by a given publisher, for every user of the machine: see [Managed deployment](#managed-deployment).
 

@@ -325,11 +325,20 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     public (RouterRuntime Runtime, bool Saved)? ApplyKeepingSaveState(Func<RouterConfiguration, bool> change, string source, string? actor = null, string? note = null)
     {
         ArgumentNullException.ThrowIfNull(change);
+        return ApplyKeepingSaveState(copy => change(copy) ? copy : null, source, actor, note);
+    }
+
+    /// <summary>
+    /// <see cref="ApplyKeepingSaveState(Func{RouterConfiguration, bool}, string, string?, string?)"/> for a change that
+    /// makes a new document from a copy of the running one; <see langword="null"/> from it means the change no longer applies.
+    /// </summary>
+    public (RouterRuntime Runtime, bool Saved)? ApplyKeepingSaveState(Func<RouterConfiguration, RouterConfiguration?> change, string source, string? actor = null, string? note = null)
+    {
+        ArgumentNullException.ThrowIfNull(change);
         for (int attempt = 1; ; attempt++)
         {
             RouterRuntime running = Current;
-            RouterConfiguration next = running.Configuration.Clone();
-            if (!change(next))
+            if (change(running.Configuration.Clone()) is not { } next)
             {
                 return null;
             }
@@ -347,7 +356,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         }
     }
 
-    /// <summary>How many times <see cref="ApplyKeepingSaveState"/> makes a change before giving up on a busy configuration.</summary>
+    /// <summary>How many times <see cref="ApplyKeepingSaveState(Func{RouterConfiguration, bool}, string, string?, string?)"/> makes a change before giving up on a busy configuration.</summary>
     internal const int ChangeAttempts = 3;
 
     /// <summary>

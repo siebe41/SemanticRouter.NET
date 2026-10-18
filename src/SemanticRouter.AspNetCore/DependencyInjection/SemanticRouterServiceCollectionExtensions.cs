@@ -121,6 +121,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton(sp => new ClientRateLimiter(sp.GetService<TimeProvider>()));
         services.AddHostedService<SemanticRouterWarmupService>();
         services.AddHostedService<TuningService>();
+        services.TryAddSingleton<TemplateDefaults>();
         services.TryAddSingleton<RouterNotices>();
         services.TryAddSingleton<WebhookNotifier>();
         services.TryAddSingleton<NoticeService>();

@@ -78,6 +78,7 @@ Its numbers are the Usage page's for the same window.
 | A model is unreliable for most of its work | [Model reliability](routing-quality.md#model-reliability) left it out of more than half of the kinds of work it does (routes, requests with tools). |
 | A connector is down | Every request to it has failed for `Notifications:ConnectorDownAfter` (1 hour). A usage limit does not count. |
 | Tuning wants a change it may not make | [Automatic tuning](routing-quality.md#automatic-tuning) has suggestions waiting: `Tuning:Mode` is `Suggest`, or a change someone undid came back with stronger evidence. |
+| An upgrade kept settings you had changed | An upgrade to a newer built-in template kept settings you had changed that the template changed too ([Upgrading and going back](host.md#upgrading-and-going-back)). The Overview lists them under **New defaults to review**: **Use the new default** or **Keep mine** for each; the notice clears when all are decided. |
 
 **Notifications:** when a notice appears, the [desktop app](desktop.md) shows a system notification and the service writes a warning to its log ("Needs a decision: …"). Each is announced once, and the log says when it clears. `Notifications:Enabled: false` is the one switch that silences them (and the webhooks below); the Overview still lists the notices.
 
