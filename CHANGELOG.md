@@ -83,6 +83,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Fixed
 
+- The container image reports its release's version. Released images were built as 0.1.0 whatever their tag, so the dashboard, `GET /router/api/status`, `semantic-router version` and the image's SBOM all named the wrong version. The image now also carries the OCI labels `org.opencontainers.image.version`, `.revision`, `.source` and `.licenses`, and the release fails unless the image, its labels and its SBOM name the tag's version. (#219)
 - Requests no longer wait for the SQLite state file. Usage, activity, feedback, warm caches, tool-call affinity and cooldowns are saved by one background writer, in batches; with SQLite state the gateway went from about 760 to 6,100 requests a second at 8 clients in the gateway benchmark, and p99 from 300 ms (busy-retry sleeps of 150 ms) to 6 ms. Stopping the router saves what is still waiting. A write that fails is counted (`semantic_router.state.dropped_writes`) and the dashboard's status says how many were lost. Activity is pruned every tenth of its cap instead of every 100 entries, and activity ids are reserved 1,024 at a time, ahead of need.
 - The latency and prompt-cache figures of the latency-aware strategies are recomputed in the background. A request used to read a day of activity from the state file every 10 seconds while every other request waited for it.
 - The in-memory warm prompt cache store is bounded (32,768 conversations) and no longer walks every entry on every write once it holds a few thousand.

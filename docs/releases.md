@@ -67,6 +67,14 @@ gh attestation verify oci://ghcr.io/siebe41/semantic-router:0.3.0 --repo siebe41
   --predicate-type https://cyclonedx.org/bom    # the SBOM attestation; add --format json to print it
 ```
 
+The image says which release and commit it was built from, in its [OCI labels](https://github.com/opencontainers/image-spec/blob/main/annotations.md) and in `semantic-router version`; the release checks that both, the dashboard and the image's SBOM name the tag's version before it pushes:
+
+```bash
+docker image inspect ghcr.io/siebe41/semantic-router:0.3.0 \
+  --format '{{index .Config.Labels "org.opencontainers.image.version"}} {{index .Config.Labels "org.opencontainers.image.revision"}}'
+docker run --rm ghcr.io/siebe41/semantic-router:0.3.0 version
+```
+
 ## SBOMs and third-party notices
 
 The SBOMs are [CycloneDX](https://cyclonedx.org/) JSON, generated with [Syft](https://github.com/anchore/syft) from what was built: the desktop archives' contents, the NuGet packages' contents and the container image. Feed them to a vulnerability scanner (`grype sbom:SemanticRouter-0.3.0-desktop.cdx.json`) or your inventory.
