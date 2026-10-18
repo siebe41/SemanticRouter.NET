@@ -293,8 +293,8 @@ public sealed class DesktopTests : IDisposable
             }
         });
 
-        (await SendWhenListeningAsync(other, SingleInstance.Show)).Should().BeTrue();
-        (await other.TrySendAsync(SingleInstance.Ping, TimeSpan.FromSeconds(5))).Should().BeTrue();
+        (await WaitUntilListeningAsync(other)).Should().BeTrue();
+        (await other.TrySendAsync(SingleInstance.Show, TimeSpan.FromSeconds(5))).Should().BeTrue();
         (await other.TrySendAsync(SingleInstance.Quit, TimeSpan.FromSeconds(5))).Should().BeTrue();
         await quit.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -548,11 +548,13 @@ public sealed class DesktopTests : IDisposable
         public ValueTask DisposeAsync() => new(StopAsync());
     }
 
-    private static async Task<bool> SendWhenListeningAsync(SingleInstance client, string command)
+    // Retries a ping, which the listener answers without passing on: a command the listener took but answered too late
+    // for the client would arrive twice when sent again.
+    private static async Task<bool> WaitUntilListeningAsync(SingleInstance client)
     {
         for (int attempt = 0; attempt < 20; attempt++)
         {
-            if (await client.TrySendAsync(command, TimeSpan.FromMilliseconds(500)))
+            if (await client.TrySendAsync(SingleInstance.Ping, TimeSpan.FromMilliseconds(500)))
             {
                 return true;
             }
