@@ -335,6 +335,13 @@ Put the router behind a proxy that signs people in with your identity provider, 
 - **The proxy decides.** On a request that names a user, tokens and session cookies are not consulted, and there is nothing to sign out of on the dashboard. The machine policy's `Dashboard: ReadOnly` still makes admins read-only (a metrics user stays metrics).
 - Tokens and loopback access keep working for requests without the header (scripts on the proxy's network with `Authorization: Bearer`, the machine itself).
 
+### No built-in OIDC sign-in or Operator role
+
+Two things [#108](https://github.com/siebe41/SemanticRouter.NET/issues/108) asked about are left out on purpose. Either can come back if a deployment needs what the alternatives below do not give.
+
+- **OIDC sign-in.** Use a proxy that signs people in, as above. oauth2-proxy, Cloudflare Access, Azure App Proxy, Pomerium and most identity-aware gateways already speak OIDC to your identity provider, handle its redirects, token refresh and sign-out, and pass the user and their groups on in a header. Built into the router, OIDC would mean the router holding a client secret and validating tokens and signing keys itself: more to get wrong and keep patched in a tool that mostly runs on one person's machine. The header reaches the same identity providers, maps groups to roles the same way, and puts the same user in the history and the [audit log](#audit-log).
+- **An `Operator` role** (routing, models and profiles, but not what programs run or where keys go). Over the admin API, the admin role is already held back from most of that: it cannot change what a CLI runs or which folders memory reads unless `AllowProcessSettings` is on, cannot name an environment variable from another machine, and cannot send a stored key to a new address ([Access and security](#access-and-security), [Where the configuration comes from](#where-the-configuration-comes-from)). What an operator would lose beyond that is a short list of rarer changes, such as adding a connector with a key typed in, gateway keys, webhooks, budgets and retention. Keep `AllowProcessSettings` off, give `Admin` to the few people who make those changes and `ReadOnly` or `Metrics` to everyone else; the audit log shows who changed what.
+
 ### Audit log
 
 Every request that changes something through the dashboard or admin API (each `PUT`, `POST` and `DELETE`, and every endpoint that spends embedding or API calls), sign-ins and sign-outs, wrong tokens, and exports of activity and of the evaluation set are recorded once answered:
@@ -350,7 +357,19 @@ Every request that changes something through the dashboard or admin API (each `P
 
 Never recorded: request bodies, tokens, keys, prompt text or utterances. Requests refused before anyone signed in (no credentials) are not recorded, so a stranger cannot fill the log; wrong tokens are, and they are throttled per address. Reading `GET api/audit` is not recorded.
 
-With the state database (`UseSqliteState`, which the `semantic-router` host uses) the log is the `audit` table: rows are only inserted, never changed, and only those older than `State:Retention:AuditDays` (365 days by default) are deleted, as new ones are written. Purging activity does not touch it, and the machine policy's `MaxRetentionDays` does not cap it, since it holds no prompt text. Changing `AuditDays` is itself recorded. Without the database the latest 5,000 entries are kept in memory; your own store can replace it by registering an `IAuditLog`. Each entry is also logged at Information level under the `SemanticRouter.Audit` category, so it reaches whatever collects the router's logs (OpenTelemetry, a file, the console).
+With the state database (`UseSqliteState`, which the `semantic-router` host uses) the log is the `audit` table: rows are only inserted, never changed, and only those older than `State:Retention:AuditDays` (365 days by default) are deleted, as new ones are written. Purging activity does not touch it, and the machine policy's `MaxRetentionDays` does not cap it, since it holds no prompt text. Changing `AuditDays` is itself recorded. Without the database the latest 5,000 entries are kept in memory; your own store can replace it by registering an `IAuditLog`.
+
+Each entry is also logged, so it reaches whatever collects the router's logs (OpenTelemetry, a file, the console), and a SIEM can take it from there without the export. A structured collector gets the fields as named values (with OpenTelemetry, the log record's attributes):
+
+| | |
+|---|---|
+| Category | `SemanticRouter.Audit` |
+| Level | `Information` |
+| Event id | `1`, named `AuditEntry` |
+| Message | `Audit: {Actor} from {Client}: {Method} {Path} -> {Status}: {Summary}` |
+| Fields | `Actor`, `Client`, `Method`, `Path`, `Status` (a number) and `Summary`, as in the table above, except that `Client` is `this machine` for in-process calls. The time is the log record's own; `route` is only in the table and the export. |
+
+The category, id, name and field names stay the same from release to release, so rules can match on them; a change would be listed in the [changelog](../CHANGELOG.md) as breaking.
 
 ### Gateway keys
 
