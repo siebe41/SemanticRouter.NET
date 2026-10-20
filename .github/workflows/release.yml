@@ -108,14 +108,21 @@ jobs:
       - name: Test
         run: dotnet test --configuration Release
 
-      # The tool package carries the licences and notices of the packages it ships.
+      # The tool package carries the licences and notices of the packages it ships, and of the fonts.
       - name: Third-party notices
-        run: dotnet run --file deploy/third-party-notices.cs -- notices/THIRD-PARTY-NOTICES.txt src/SemanticRouter.Host/bin/Release/net10.0
+        run: |
+          dotnet run --file deploy/third-party-notices.cs -- notices/THIRD-PARTY-NOTICES.txt src/SemanticRouter.Host/bin/Release/net10.0
+          deploy/third-party-notices-check.sh notices/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)"
 
       - name: Pack
         run: |
           dotnet pack --configuration Release --output artifacts -p:Version="$VERSION" \
             -p:ThirdPartyNoticesFile="$PWD/notices/THIRD-PARTY-NOTICES.txt"
+
+      # Each package has its readme, icon and copyright for nuget.org, and each library its symbol package (.snupkg),
+      # whose PDB SourceLink maps to this commit's sources.
+      - name: Package contents
+        run: deploy/package-contents-check.sh artifacts
 
       # A CycloneDX SBOM of the NuGet packages, read from their contents: the tool's deps.json and each package's
       # assemblies.
@@ -137,7 +144,9 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages
-          path: artifacts/*.nupkg
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -182,6 +191,7 @@ jobs:
         with:
           user: ${{ vars.NUGET_USER }}
 
+      # Pushing a .nupkg also pushes the .snupkg of the same name beside it, to nuget.org's symbol server.
       - name: Push to NuGet
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
@@ -449,6 +459,7 @@ jobs:
           mkdir -p tool && unzip -q packages/SemanticRouter.Host.*.nupkg -d tool
           dotnet restore src/SemanticRouter.Host/SemanticRouter.Host.csproj --locked-mode
           dotnet run --file deploy/third-party-notices.cs -- artifacts/THIRD-PARTY-NOTICES.txt sbom tool
+          deploy/third-party-notices-check.sh artifacts/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)"             "Velopack native binaries" "AppImage type2-runtime"
 
       - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
@@ -764,10 +775,10 @@ jobs:
               --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish $VPK_PRE
           done
 
-  # Last, once every asset is signed and attached: SHA256SUMS over all the release's assets; the NuGet packages (as
-  # pushed to nuget.org, before nuget.org adds its repository signature) and the packages' and image's SBOMs attached;
-  # and one build provenance attestation covering every asset and SHA256SUMS, for `gh attestation verify`. The job
-  # downloads, hashes and uploads; it builds and runs nothing from the repository.
+  # Last, once every asset is signed and attached: SHA256SUMS over all the release's assets; the NuGet and symbol
+  # packages (as pushed to nuget.org, before nuget.org adds its repository signature) and the packages' and image's SBOMs
+  # attached; and one build provenance attestation covering every asset and SHA256SUMS, for `gh attestation verify`. The
+  # job downloads, hashes and uploads; it builds and runs nothing from the repository.
   checksums:
     needs: [ packages, image, desktop, installers, installer-windows, installer-macos ]
     runs-on: ubuntu-latest

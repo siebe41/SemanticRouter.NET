@@ -40,13 +40,24 @@ internal static class RouterDoctor
     public static async Task<IReadOnlyList<RouterCheck>> CheckAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(services);
-        RouterRuntime runtime = services.GetRequiredService<RouterRuntimeProvider>().Current;
+        RouterRuntimeProvider provider = services.GetRequiredService<RouterRuntimeProvider>();
+        RouterRuntime runtime = provider.Current;
         RouterConfiguration resolved = runtime.Resolved;
         var checks = new List<RouterCheck>();
 
-        foreach (string warning in runtime.Warnings)
+        // A policy entry that names no type turns nothing off, which is a failure here rather than the runtime's warning:
+        // a misspelt entry must not look like a working policy.
+        IReadOnlyList<string> unknownPolicyTypes = provider.UnknownDisabledConnectorTypes();
+        string[] reported = [.. unknownPolicyTypes.Select(RouterRuntimeProvider.UnknownDisabledConnectorTypeWarning)];
+        foreach (string warning in runtime.Warnings.Except(reported, StringComparer.Ordinal))
         {
             checks.Add(new RouterCheck("configuration", RouterCheckStatus.Warning, warning));
+        }
+
+        foreach (string type in unknownPolicyTypes)
+        {
+            checks.Add(new RouterCheck("machine policy", RouterCheckStatus.Failed,
+                $"DisabledConnectorTypes names '{type}', which is not a built-in connector type and no installed package provides, so it turns nothing off. Check its spelling."));
         }
 
         checks.Add(await CheckEmbeddingsAsync(runtime, services.GetServices<IEmbeddingProviderFactory>(), cancellationToken).ConfigureAwait(false));
@@ -107,7 +118,7 @@ internal static class RouterDoctor
         {
             bool installed = services.GetServices<IChatConnectorFactory>().Any(f => connector.IsType(f.Type));
             runtime.Connectors.TryGet(name, out IChatConnector running);
-            if (!installed || running is IModelDiscovery || connector.BaseAddress is null)
+            if (!installed || running is IModelDiscovery || connector.RunsProgram)
             {
                 return [await CheckPackagedAsync(name, connector.Type, installed ? running as IModelDiscovery : null, installed, runtime, models, cancellationToken)
                     .ConfigureAwait(false)];

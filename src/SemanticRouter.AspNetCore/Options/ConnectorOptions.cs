@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 
@@ -38,12 +39,47 @@ public static class ConnectorTypes
     public static bool IsBuiltIn(string? type) => BuiltIn.Contains(type, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// <paramref name="type"/> trimmed, with a built-in name in its canonical spelling (so <c>"cli"</c> becomes
-    /// <see cref="Cli"/>) and an empty value read as <see cref="OpenAICompatible"/>. Other names are kept as written.
+    /// The types of the factories a router has registered (<see cref="Register"/>), by name: their spelling and whether
+    /// they call their <see cref="ConnectorOptions.BaseAddress"/>. Shared by every router in the process, since a type
+    /// name means one package.
     /// </summary>
-    internal static string Normalize(string? type) =>
-        string.IsNullOrWhiteSpace(type) ? OpenAICompatible
-        : BuiltIn.FirstOrDefault(b => string.Equals(b, type.Trim(), StringComparison.OrdinalIgnoreCase)) ?? type.Trim();
+    private static readonly ConcurrentDictionary<string, (string Name, bool UsesBaseAddress)> Packaged = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// <paramref name="type"/> trimmed, with a built-in name or the name of a registered factory in its canonical spelling
+    /// (so <c>"cli"</c> becomes <see cref="Cli"/> and <c>"copilot"</c> becomes <c>Copilot</c>) and an empty value read as
+    /// <see cref="OpenAICompatible"/>. Other names are kept as written.
+    /// </summary>
+    internal static string Normalize(string? type)
+    {
+        if (string.IsNullOrWhiteSpace(type))
+        {
+            return OpenAICompatible;
+        }
+
+        string trimmed = type.Trim();
+        return BuiltIn.FirstOrDefault(b => string.Equals(b, trimmed, StringComparison.OrdinalIgnoreCase))
+            ?? (Packaged.TryGetValue(trimmed, out var packaged) ? packaged.Name : trimmed);
+    }
+
+    /// <summary>Records the types of <paramref name="factories"/>, for <see cref="Normalize"/> and <see cref="UsesBaseAddress"/>.</summary>
+    internal static void Register(IEnumerable<IChatConnectorFactory> factories)
+    {
+        foreach (IChatConnectorFactory factory in factories)
+        {
+            if (!string.IsNullOrWhiteSpace(factory.Type) && !IsBuiltIn(factory.Type))
+            {
+                Packaged[factory.Type.Trim()] = (factory.Type.Trim(), factory.UsesBaseAddress);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a registered factory says connectors of the packaged <paramref name="type"/> send every request to their
+    /// <see cref="ConnectorOptions.BaseAddress"/> (<see cref="IChatConnectorFactory.UsesBaseAddress"/>). <see langword="false"/>
+    /// for a type no factory has declared that for.
+    /// </summary>
+    internal static bool UsesBaseAddress(string type) => Packaged.TryGetValue(type, out var packaged) && packaged.UsesBaseAddress;
 }
 
 /// <summary>How a CLI connector handles requests that offer tools (agentic clients such as Claude Code).</summary>
@@ -132,7 +168,8 @@ public sealed class ConnectorOptions
 {
     /// <summary>
     /// Which implementation to use: one of <see cref="ConnectorTypes"/>, or a type an installed package provides through
-    /// an <see cref="IChatConnectorFactory"/>. Case-insensitive; built-in names are stored in their canonical spelling.
+    /// an <see cref="IChatConnectorFactory"/>. Case-insensitive; built-in names, and those of the installed factories, are
+    /// stored in their canonical spelling.
     /// Default <see cref="ConnectorTypes.OpenAICompatible"/>.
     /// </summary>
     [AllowNull]
@@ -148,11 +185,13 @@ public sealed class ConnectorOptions
     public bool IsType(string type) => string.Equals(Type, type, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Whether the connector runs a program rather than calling an address: a <see cref="ConnectorTypes.Cli"/>, or a type
-    /// from another package configured without a <see cref="BaseAddress"/> (such as Copilot, whose SDK runs the
-    /// <c>copilot</c> CLI). A packaged type with a <see cref="BaseAddress"/> is treated as an HTTP connector to that address.
+    /// Whether the connector reaches its vendor by its own means rather than by calling <see cref="BaseAddress"/>: a
+    /// <see cref="ConnectorTypes.Cli"/>, or a type from another package whose factory does not declare
+    /// <see cref="IChatConnectorFactory.UsesBaseAddress"/> (such as Copilot, whose SDK runs the <c>copilot</c> CLI). Decided
+    /// by the factory, not by the settings, so a <see cref="BaseAddress"/> the connector ignores cannot pass it off as a
+    /// local server to the machine policy.
     /// </summary>
-    internal bool RunsProgram => Type == ConnectorTypes.Cli || (!ConnectorTypes.IsBuiltIn(Type) && BaseAddress is null);
+    internal bool RunsProgram => Type == ConnectorTypes.Cli || (!ConnectorTypes.IsBuiltIn(Type) && !ConnectorTypes.UsesBaseAddress(Type));
 
     // ---- OpenAICompatible -------------------------------------------------------------------------------------
 

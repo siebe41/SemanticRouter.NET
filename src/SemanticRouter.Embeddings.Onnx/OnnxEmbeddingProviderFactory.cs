@@ -59,6 +59,9 @@ internal sealed class OnnxEmbeddingProviderFactory : IEmbeddingProviderFactory, 
 
     public string? Unavailable => _unavailable();
 
+    /// <summary>The model runs in this process, so prompts that must stay local may be embedded with it.</summary>
+    public bool RunsInProcess => true;
+
     /// <summary>Where downloaded models go.</summary>
     public string ModelsDirectory =>
         _options.ModelsDirectory

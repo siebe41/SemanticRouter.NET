@@ -9,6 +9,7 @@ Every release on [GitHub Releases](https://github.com/siebe41/SemanticRouter.NET
 | `SHA256SUMS` | The SHA-256 checksum of every other asset. |
 | `SemanticRouter-<version>-<platform>.zip` / `.tar.gz`, the installers, the update feed (`releases.<channel>.json`, `*-full.nupkg`, `*-delta.nupkg`) | The desktop app ([Desktop app](desktop.md)). |
 | `SemanticRouter.*.<version>.nupkg` | The NuGet packages and the `semantic-router` tool, exactly as pushed to nuget.org. |
+| `SemanticRouter.*.<version>.snupkg` | The libraries' symbol packages, as pushed to nuget.org's symbol server: their PDBs, which map to the tagged commit's sources with SourceLink. The tool package carries its PDB inside. |
 | `SemanticRouter-<version>-packages.cdx.json` | CycloneDX SBOM of the NuGet packages and the tool. |
 | `SemanticRouter-<version>-desktop.cdx.json` | CycloneDX SBOM of the desktop app, for every platform (the archives and installers ship the same app). |
 | `SemanticRouter-<version>-image.cdx.json` | CycloneDX SBOM of the container image. It is also attached to the image as a signed attestation. |
@@ -49,6 +50,8 @@ dotnet nuget verify --all SemanticRouter.Host.0.3.0.nupkg
 
 The packages are not author-signed.
 
+A debugger finds the libraries' symbols on nuget.org's symbol server (in Visual Studio, enable **NuGet.org Symbol Server** under Tools > Options > Debugging > Symbols, and turn off **Just My Code**) and steps into the source of the released commit, which SourceLink fetches from GitHub.
+
 ## Check the container image
 
 The image (`ghcr.io/siebe41/semantic-router`) is signed with keyless [cosign](https://docs.sigstore.dev/cosign/) and carries provenance and SBOM attestations in the registry. With cosign 3 or later:
@@ -79,6 +82,8 @@ docker run --rm ghcr.io/siebe41/semantic-router:0.3.0 version
 
 The SBOMs are [CycloneDX](https://cyclonedx.org/) JSON, generated with [Syft](https://github.com/anchore/syft) from what was built: the desktop archives' contents, the NuGet packages' contents and the container image. Feed them to a vulnerability scanner (`grype sbom:SemanticRouter-0.3.0-desktop.cdx.json`) or your inventory.
 
+Syft lists the .NET runtime that the desktop app bundles as `pkg:nuget/runtimepack.Microsoft.NETCore.App.Runtime.<rid>` (and `runtimepack.Microsoft.AspNetCore.App.Runtime.<rid>`), while advisories name the package without the `runtimepack.` prefix; remove it before scanning, or the runtime's advisories are missed. Each week, [Release SBOM scan](../.github/workflows/release-sbom-scan.yml) does that with the latest release's desktop and packages SBOMs, scans them with [Trivy](https://trivy.dev), and opens an issue asking for a patch release when one names a high or critical vulnerability that has a fix (the container image has its own check, [Image freshness](../.github/workflows/image-freshness.yml)).
+
 `THIRD-PARTY-NOTICES.txt` also ships inside everything that redistributes those packages:
 
 | | Where |
@@ -87,7 +92,18 @@ The SBOMs are [CycloneDX](https://cyclonedx.org/) JSON, generated with [Syft](ht
 | The `semantic-router` tool | At the package root; once installed, under `~/.dotnet/tools/.store/semanticrouter.host/<version>/semanticrouter.host/<version>/` |
 | Container image | `/app/THIRD-PARTY-NOTICES.txt`. The image has no shell: `docker create --name n ghcr.io/siebe41/semantic-router:0.3.0 && docker cp n:/app/THIRD-PARTY-NOTICES.txt . && docker rm n` |
 
-[`deploy/third-party-notices.cs`](../deploy/third-party-notices.cs) writes it at publish time from the build's `*.deps.json` and each package's `.nuspec` and licence files in the NuGet cache, without network access. The same packages always give the same file. The container's Ubuntu and ASP.NET Core base layers come from Microsoft's image, with their own licence files.
+[`deploy/third-party-notices.cs`](../deploy/third-party-notices.cs) writes it at publish time from the build's `*.deps.json` and each package's `.nuspec` and licence files in the NuGet cache, without network access. It adds what no package names, from [`deploy/third-party/extra.json`](../deploy/third-party/extra.json): the Inter and Fira Sans fonts the dashboard embeds (SIL OFL 1.1), and, for the desktop app, Velopack's native updater, setup and stub, and the AppImage runtime with the libraries linked into it. Every entry has an SPDX licence, and every licence has its text in the file: the package's own licence file, or else the standard text from [`deploy/third-party/licences`](../deploy/third-party/licences). A package that declares a licence file instead of an SPDX expression needs its id in `extra.json`, and a licence without a text fails the generator, so the pull request that adds such a package fails CI. The same packages always give the same file. The container's Ubuntu and ASP.NET Core base layers come from Microsoft's image, with their own licence files.
+
+The `SemanticRouter.AspNetCore` package is `MIT AND OFL-1.1`, because its DLL embeds the fonts; it carries their licences under `licenses/`.
+
+### The embedding models
+
+No release contains an ONNX embedding model: the router downloads the one it is configured with on its first start, from a pinned revision, checked by SHA-256 ([Network access](network.md)). Each model is under its authors' licence:
+
+| Model | Downloaded from | Upstream | Licence |
+|---|---|---|---|
+| `all-MiniLM-L6-v2` (the default) | [`Xenova/all-MiniLM-L6-v2`](https://huggingface.co/Xenova/all-MiniLM-L6-v2), an ONNX export | [`sentence-transformers/all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) | Apache-2.0 |
+| `bge-small-en-v1.5` | [`Xenova/bge-small-en-v1.5`](https://huggingface.co/Xenova/bge-small-en-v1.5), an ONNX export | [`BAAI/bge-small-en-v1.5`](https://huggingface.co/BAAI/bge-small-en-v1.5) | MIT, upstream's; the export declares no licence of its own |
 
 ## Cutting a release
 

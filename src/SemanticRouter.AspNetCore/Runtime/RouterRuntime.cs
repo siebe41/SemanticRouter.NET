@@ -174,6 +174,8 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             {
                 lock (_gate)
                 {
+                    // Before anything binds, so a packaged type name in any case binds in its package's spelling.
+                    RegisterInstalledTypes();
                     _baseline ??= RouterConfiguration.Compose(
                         _services.GetRequiredService<IOptions<SemanticRouterOptions>>().Value,
                         new Dictionary<string, ConnectorOptions>(_services.GetRequiredService<IOptions<SemanticRouterConnectorsOptions>>().Value.Connectors, StringComparer.OrdinalIgnoreCase),
@@ -208,6 +210,31 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
     /// <summary>The connector types this router can build: the built-in ones and those of the registered factories.</summary>
     private string[] InstalledConnectorTypes() => [.. ConnectorTypes.BuiltIn, .. _services.GetServices<IChatConnectorFactory>().Select(f => f.Type)];
+
+    /// <summary>
+    /// Records the names and traits of the registered connector and embedding factories, so a name binds in its package's
+    /// spelling (the dashboard compares names exactly) and the policy knows how the package's connectors reach their vendor.
+    /// </summary>
+    private void RegisterInstalledTypes()
+    {
+        ConnectorTypes.Register(_services.GetServices<IChatConnectorFactory>());
+        EmbeddingProviderKinds.Register(_services.GetServices<IEmbeddingProviderFactory>());
+    }
+
+    /// <summary>
+    /// The <see cref="MachinePolicy.DisabledConnectorTypes"/> entries that name no built-in type and no installed package's
+    /// type, trimmed. Such an entry turns nothing off, so it is most likely misspelt.
+    /// </summary>
+    internal IReadOnlyList<string> UnknownDisabledConnectorTypes()
+    {
+        string[] installed = InstalledConnectorTypes();
+        return [.. Policy.DisabledConnectorTypes.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim())
+            .Where(t => !installed.Contains(t, StringComparer.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase)];
+    }
+
+    /// <summary>The start-up warning about a <see cref="UnknownDisabledConnectorTypes"/> entry.</summary>
+    internal static string UnknownDisabledConnectorTypeWarning(string type) =>
+        $"The machine policy turns off connector type '{type}', which no installed package provides; check its spelling.";
 
     /// <summary>
     /// Errors for connectors a change gives a type no installed package provides. A connector the running configuration
@@ -542,6 +569,15 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     private RouterRuntime Build(
         RouterConfiguration configuration, RouterConfigurationSource source, IReadOnlyList<string>? notes = null, string? changeSource = null, string? actor = null)
     {
+        // A document bound before the factories were registered keeps a packaged name as written; spell it as the package does.
+        RegisterInstalledTypes();
+        foreach (ConnectorOptions connector in configuration.Connectors.Values)
+        {
+            connector.Type = connector.Type;
+        }
+
+        configuration.Embeddings.Provider = configuration.Embeddings.Provider;
+
         // The machine policy wins over the configuration: what breaks it is turned off, and said so.
         IReadOnlyList<string> enforced = Policy.Enforce(configuration);
         IReadOnlyList<string> errors = configuration.GetDocumentValidationErrors();
@@ -577,10 +613,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             warnings.Add($"Connector '{name}' is skipped: {ConnectorCatalog.NotInstalled(connector.Type)}.");
         }
 
-        foreach (string type in Policy.DisabledConnectorTypes.Where(t => !installed.Contains(t, StringComparer.OrdinalIgnoreCase)))
-        {
-            warnings.Add($"The machine policy turns off connector type '{type}', which no installed package provides; check its spelling.");
-        }
+        warnings.AddRange(UnknownDisabledConnectorTypes().Select(UnknownDisabledConnectorTypeWarning));
 
         if (configuration.Middleware.Mode == PromptRouterMode.Dispatch && !configuration.Models.Any(m => m.Enabled))
         {

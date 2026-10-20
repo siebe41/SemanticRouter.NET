@@ -1,7 +1,9 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Xml.Linq;
+using Avalonia.Input;
 using Microsoft.Extensions.Logging;
 using SemanticRouter.Desktop;
 using SemanticRouter.Host;
@@ -39,6 +41,19 @@ public sealed class DesktopTests : IDisposable
 
         WebViewProfile.CacheDirectories.Should().OnlyContain(c => !Directory.Exists(Path.Combine(profile, c)));
         File.Exists(cookies).Should().BeTrue("the sign-in stays");
+    }
+
+    [Fact]
+    public void The_macOS_edit_menu_sends_the_standard_actions_on_the_standard_keys()
+    {
+        // A Mac's web view copies and pastes on these action messages, and macOS finds ⌘C and the rest by these keys.
+        MacApplication.EditCommands.Select(c => (c.Header, c.Action, c.Key, c.Modifiers)).Should().Equal(
+            ("Undo", "undo:", Key.Z, KeyModifiers.Meta),
+            ("Redo", "redo:", Key.Z, KeyModifiers.Meta | KeyModifiers.Shift),
+            ("Cut", "cut:", Key.X, KeyModifiers.Meta),
+            ("Copy", "copy:", Key.C, KeyModifiers.Meta),
+            ("Paste", "paste:", Key.V, KeyModifiers.Meta),
+            ("Select All", "selectAll:", Key.A, KeyModifiers.Meta));
     }
 
     [Fact]
@@ -229,6 +244,32 @@ public sealed class DesktopTests : IDisposable
 
         // The desktop entry escapes backslashes (key-file string rules), which only Windows paths have.
         static string Escaped(string path) => path.Replace("\\", "\\\\", StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true, false, "tray-template@2x.png", new[] { 36 })]
+    [InlineData(false, true, "tray.ico", new[] { 16, 20, 24, 32, 40, 48 })]
+    [InlineData(false, false, "tray.png", new[] { 48 })]
+    public void Each_platform_gets_a_tray_icon_in_the_sizes_its_tray_draws(bool macOS, bool windows, string asset, int[] sizes)
+    {
+        App.TrayIconAsset(macOS, windows).Should().Be(asset);
+
+        Sizes(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "tray-icons", asset))).Should().Equal(sizes);
+
+        // A PNG has its width, height and colour type in its first chunk (IHDR); an ICO lists its frames, 0 meaning 256.
+        static int[] Sizes(byte[] icon)
+        {
+            if (icon.AsSpan(1, 3).SequenceEqual("PNG"u8))
+            {
+                int width = BinaryPrimitives.ReadInt32BigEndian(icon.AsSpan(16));
+                BinaryPrimitives.ReadInt32BigEndian(icon.AsSpan(20)).Should().Be(width, "a tray icon is square");
+                icon[25].Should().Be(6, "a tray icon is RGBA, so the glyph has no background");
+                return [width];
+            }
+
+            int frames = BinaryPrimitives.ReadUInt16LittleEndian(icon.AsSpan(4));
+            return [.. Enumerable.Range(0, frames).Select(i => icon[6 + (16 * i)] is 0 ? 256 : icon[6 + (16 * i)]).Order()];
+        }
     }
 
     [Fact]

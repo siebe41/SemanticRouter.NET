@@ -222,28 +222,25 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         return tray;
     }
 
-    /// <summary>
-    /// The tray icon: the app's pulse glyph without its dark tile, which nearly disappears on a dark menu bar or taskbar
-    /// (deploy/make-tray-icons.py makes them from the app icon). On macOS a black template image, at twice the menu
-    /// bar's size so it stays sharp on a Retina screen; on Windows an icon with every size the notification area uses.
-    /// Elsewhere the app's own tile, as tray hosts on Linux draw icons on many backgrounds.
-    /// </summary>
-    private WindowIcon TrayIconImage()
+    private static WindowIcon TrayIconImage()
     {
-        string? asset = OperatingSystem.IsMacOS() ? "tray-template@2x.png" : OperatingSystem.IsWindows() ? "tray.ico" : null;
-        if (asset is null)
-        {
-            return _icon;
-        }
-
-        using Stream stream = AssetLoader.Open(new Uri($"avares://SemanticRouter/Assets/{asset}"));
+        using Stream stream = AssetLoader.Open(new Uri($"avares://SemanticRouter/Assets/{TrayIconAsset(OperatingSystem.IsMacOS(), OperatingSystem.IsWindows())}"));
         return new WindowIcon(stream);
     }
 
     /// <summary>
-    /// The application menu: About, Check for updates now and Settings (⌘,), where a Mac app has them. The app runs as a
-    /// menu-bar (accessory) app, which macOS gives no menu bar, so it is not shown today; the tray menu and the
-    /// dashboard's More have the same entries, and the dashboard does the editing shortcuts itself (desktop.js).
+    /// The tray icon: the app's pulse glyph without its dark tile, which nearly disappears on a dark menu bar or taskbar
+    /// (deploy/make-tray-icons.py draws them from deploy/icon.svg). On macOS a black template image, at twice the menu
+    /// bar's size so it stays sharp on a Retina screen; on Windows an icon with every size the notification area uses.
+    /// On Linux the glyph in its own colours, which read on light and dark panels: a StatusNotifier host does not say
+    /// what colour its panel is, and the desktop's light or dark setting does not either.
+    /// </summary>
+    internal static string TrayIconAsset(bool macOS, bool windows) => macOS ? "tray-template@2x.png" : windows ? "tray.ico" : "tray.png";
+
+    /// <summary>
+    /// The application menu: About, Check for updates now and Settings (⌘,), where a Mac app has them. macOS shows it,
+    /// with the dashboard window's Edit menu, while that window is open (<see cref="MacApplication"/>); otherwise the app
+    /// is a menu-bar app with no menu bar, and the tray menu and the dashboard's More have the same entries.
     /// </summary>
     private NativeMenu BuildApplicationMenu()
     {
@@ -555,6 +552,19 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
                 _preferences.Save(_directory);
             }, log);
             _window.PageAction += OnPageAction;
+            if (OperatingSystem.IsMacOS())
+            {
+                // The menu bar, with the app menu and Edit, while the window is open (MacApplication).
+                NativeMenu.SetMenu(_window, MacApplication.EditMenu());
+                _window.PropertyChanged += (_, e) =>
+                {
+                    if (OperatingSystem.IsMacOS() && e.Property == Visual.IsVisibleProperty)
+                    {
+                        MacApplication.ShowMenuBar(e.GetNewValue<bool>());
+                    }
+                };
+            }
+
             UpdateMenu();
         }
 

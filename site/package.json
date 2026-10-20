@@ -8,8 +8,10 @@
     "build": "vitepress build",
     "preview": "vitepress preview"
   },
+  "dependencies": {
+    "mermaid": "12.2.0"
+  },
   "devDependencies": {
-    "mermaid": "12.2.0",
     "vitepress": "1.6.4"
   }
 }

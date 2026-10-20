@@ -186,6 +186,17 @@ public sealed class CopilotConnectorTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_lowercase_type_reaches_the_dashboard_in_the_package_spelling()
+    {
+        // The dashboard compares type names exactly ('Copilot'), as the old enum binding let it.
+        HttpClient client = await StartCopilotAsync(connector: c => c.Type = "copilot");
+
+        JsonElement config = JsonDocument.Parse(await client.GetStringAsync("/router/api/config")).RootElement.GetProperty("config");
+
+        config.GetProperty("Connectors").GetProperty("copilot").GetProperty("Type").GetString().Should().Be(CopilotConnector.Type);
+    }
+
+    [Fact]
     public async Task Without_the_package_copilot_models_are_skipped_with_the_reason()
     {
         HttpClient client = await StartCopilotAsync(withFactory: false);
