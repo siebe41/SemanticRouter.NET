@@ -5,7 +5,7 @@ namespace SemanticRouter.AspNetCore;
 /// <summary>
 /// Dashboard sessions ended on the server. Signing out revokes the session's id; signing out every session revokes
 /// everything issued until then. A revocation is kept only until the session it names would have lapsed anyway
-/// (issued + <see cref="Microsoft.AspNetCore.Builder.RouterDashboardOptions.SessionLifetime"/>), in memory and, with the
+/// (issued + <see cref="RouterDashboardOptions.SessionLifetime"/>), in memory and, with the
 /// state database, in <see cref="IStateValueStore"/>, so it survives a restart and reaches other instances sharing the
 /// file within a second. Revocations are never dropped early: past <see cref="MaxRevoked"/> ids, every session issued
 /// up to the newest of them is revoked instead.

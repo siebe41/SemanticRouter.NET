@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Storage.Sqlite;
 using SemanticRouter.Tests.Support;
 using static SemanticRouter.Tests.Support.TestEmbeddings;
 

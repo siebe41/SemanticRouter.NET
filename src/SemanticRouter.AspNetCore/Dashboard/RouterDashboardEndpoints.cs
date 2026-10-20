@@ -19,106 +19,6 @@ using SemanticRouter.AspNetCore;
 
 namespace Microsoft.AspNetCore.Builder;
 
-/// <summary>
-/// Options for <see cref="RouterDashboardEndpoints.MapRouterDashboard"/>. Bound from <c>SemanticRouter:Dashboard</c>
-/// when routing is registered from configuration; the <c>configure</c> callback of <c>MapRouterDashboard</c> runs after.
-/// See <c>docs/dashboard.md</c> for the supported setups.
-/// </summary>
-public sealed class RouterDashboardOptions
-{
-    /// <summary>Shortest token accepted, so a token cannot be guessed.</summary>
-    public const int MinimumTokenLength = 16;
-
-    /// <summary>
-    /// Only answer dashboard and admin requests from the loopback interface. Default <see langword="true"/>. To reach
-    /// the dashboard from other machines, turn this off and set <see cref="AdminToken"/> (or, behind a reverse proxy
-    /// that authenticates callers itself, <see cref="AllowUnauthenticatedRemoteClients"/>).
-    /// </summary>
-    public bool RequireLocalClient { get; set; } = true;
-
-    /// <summary>
-    /// Token that remote clients present (as <c>Authorization: Bearer {token}</c> or by signing in on the dashboard) for
-    /// full access. At least 16 characters; <c>${env:…}</c> and <c>${secret:…}</c> references are resolved.
-    /// </summary>
-    public string? AdminToken { get; set; }
-
-    /// <summary>Token for view-only access: status, activity and the masked configuration, but nothing that spends embedding or API calls.</summary>
-    public string? ReadOnlyToken { get; set; }
-
-    /// <summary>
-    /// Token for figures only (<see cref="RouterDashboardRole.Metrics"/>): status and health, usage and cost totals,
-    /// activity counts and the digest's counts, never prompt or reply text, utterances, the configuration or memory.
-    /// </summary>
-    public string? MetricsToken { get; set; }
-
-    /// <summary>
-    /// Serve remote clients without a token. Only for a reverse proxy that authenticates every request itself; ignored
-    /// when a token is configured. Default <see langword="false"/>.
-    /// </summary>
-    public bool AllowUnauthenticatedRemoteClients { get; set; }
-
-    /// <summary>
-    /// Require the token from loopback clients too. Turn this on when a reverse proxy on this machine forwards remote
-    /// traffic, which otherwise arrives from loopback and would be trusted. Default <see langword="false"/>.
-    /// </summary>
-    public bool RequireTokenForLocalClients { get; set; }
-
-    /// <summary>
-    /// Let the admin API change what a CLI or Copilot connector runs (its program, arguments, environment variables and
-    /// home directory, beyond a preset started from PATH) and which folders and files memory sources read. Off by
-    /// default, because loopback clients are admin without a token, and with this any program on the machine (or any
-    /// user, on a shared one) could run whatever it liked as you, or have the router read any file you can. Those
-    /// settings are then changed in the configuration file. Default <see langword="false"/>.
-    /// </summary>
-    public bool AllowProcessSettings { get; set; }
-
-    /// <summary>
-    /// Addresses the dashboard is reached at besides <c>localhost</c>, e.g. <c>https://router.home.lan</c>. Changes
-    /// are accepted from these origins, and loopback requests may name them in the Host header.
-    /// </summary>
-    public IList<string> PublicOrigins { get; } = new List<string>();
-
-    /// <summary>
-    /// How long a dashboard sign-in lasts: the session cookie then lapses and the token must be entered again. Changing
-    /// a token ends every session signed in with it, and signing out ends that session on the server. Default 12 hours.
-    /// </summary>
-    public TimeSpan SessionLifetime { get; set; } = TimeSpan.FromHours(12);
-
-    /// <summary>
-    /// Header an authenticating reverse proxy sets to the signed-in user, e.g. <c>X-Forwarded-User</c> or
-    /// <c>X-Auth-Request-Email</c> (oauth2-proxy), <c>Cf-Access-Authenticated-User-Email</c> (Cloudflare Access). Believed
-    /// only on requests that come straight from a proxy named in <c>SemanticRouter:ForwardedHeaders:KnownProxies</c> or
-    /// <c>KnownNetworks</c> (<see cref="RouterForwardedHeadersExtensions.UseRouterForwardedHeaders"/>); from anyone else
-    /// it is ignored. The user gets the role <see cref="TrustedIdentityRoles"/> gives them (none: <c>403</c>), tokens are
-    /// not consulted, and the user is named in the configuration history and the audit log. The proxy must replace the
-    /// header, not add to one the client sent.
-    /// </summary>
-    public string? TrustedIdentityHeader { get; set; }
-
-    /// <summary>
-    /// Header with the signed-in user's groups, comma separated (e.g. <c>X-Forwarded-Groups</c>), for
-    /// <see cref="TrustedIdentityRoles"/> entries that name a group. Optional; believed only with <see cref="TrustedIdentityHeader"/>.
-    /// </summary>
-    public string? TrustedGroupsHeader { get; set; }
-
-    /// <summary>
-    /// The role of each user or group a trusted proxy names, e.g. <c>{ "alice@corp.example": "Admin", "router-admins":
-    /// "Admin", "finance": "Metrics", "*": "ReadOnly" }</c>. The user's own entry wins, then the highest role among their
-    /// groups (<c>Admin</c>, then <c>ReadOnly</c>, then <c>Metrics</c>), then <c>*</c>. Names are compared ignoring case.
-    /// </summary>
-    public IDictionary<string, RouterDashboardRole> TrustedIdentityRoles { get; } = new Dictionary<string, RouterDashboardRole>(StringComparer.OrdinalIgnoreCase);
-
-    /// <summary>Entries shown by the activity endpoint when the client gives no limit. Default 100.</summary>
-    public int DefaultActivityLimit { get; set; } = 100;
-
-    /// <summary>
-    /// Directory of drop-in themes: one <c>{id}.css</c> file per theme declaring <c>:root[data-theme="{id}"] { … }</c>,
-    /// with an optional <c>{id}.json</c> manifest (<c>{ "name": "Ocean" }</c>). Default: a <c>themes</c> directory next to
-    /// the configuration file (<c>UseConfigurationFile</c>), or none. See docs/dashboard.md#themes.
-    /// </summary>
-    public string? ThemesDirectory { get; set; }
-}
-
 /// <summary>Maps the configuration dashboard and its admin API.</summary>
 public static partial class RouterDashboardEndpoints
 {
@@ -1230,14 +1130,14 @@ public static partial class RouterDashboardEndpoints
     /// <param name="TokenRequired">Whether this caller needs a token (it is remote, or tokens are required locally).</param>
     /// <param name="TokensConfigured">Whether the router has a token to sign in with.</param>
     /// <param name="Identity">Who the caller acts as (the user a trusted proxy named, <c>admin token</c>, …), when signed in.</param>
-    public sealed record SessionResponse(string? Role, bool TokenRequired, bool TokensConfigured, string? Identity = null);
+    internal sealed record SessionResponse(string? Role, bool TokenRequired, bool TokensConfigured, string? Identity = null);
 
     /// <summary>Sign-in request.</summary>
-    public sealed record SignInRequest(string? Token);
+    internal sealed record SignInRequest(string? Token);
 
     /// <summary>Validation outcome.</summary>
     /// <param name="Errors">Problems; empty when valid.</param>
-    public sealed record ValidationResult(IReadOnlyList<string> Errors)
+    internal sealed record ValidationResult(IReadOnlyList<string> Errors)
     {
         /// <summary>Whether the document can be applied.</summary>
         public bool Valid => Errors.Count == 0;
@@ -1256,7 +1156,7 @@ public static partial class RouterDashboardEndpoints
     /// <param name="At">When it was applied.</param>
     /// <param name="Source">What applied it (<c>admin API</c>, <c>auto-tune</c>, <c>rollback</c>, <c>startup</c>, …).</param>
     /// <param name="Detail">The same in a sentence, with what to do.</param>
-    public sealed record ConflictResponse(string Title, int CurrentVersion, string? Actor, DateTimeOffset At, string? Source, string Detail)
+    internal sealed record ConflictResponse(string Title, int CurrentVersion, string? Actor, DateTimeOffset At, string? Source, string Detail)
     {
         /// <summary>The HTTP status, as in a problem document.</summary>
         public int Status { get; } = StatusCodes.Status409Conflict;
@@ -1266,15 +1166,15 @@ public static partial class RouterDashboardEndpoints
     }
 
     /// <summary>Usage over a window.</summary>
-    public sealed record UsageResponse(
+    internal sealed record UsageResponse(
         DateTimeOffset Since, DateTimeOffset Until, UsageGrouping By, string? ReferenceModel, UsageTotals Totals,
         IReadOnlyList<UsageGroup> Groups, IReadOnlyList<BudgetStatus> Budgets);
 
     /// <summary>Applied configuration versions, newest first.</summary>
-    public sealed record HistoryResponse(IReadOnlyList<RouterConfigurationVersion> Versions);
+    internal sealed record HistoryResponse(IReadOnlyList<RouterConfigurationVersion> Versions);
 
     /// <summary>Recent routing activity.</summary>
-    public sealed record ActivityResponse(IReadOnlyList<RoutingActivityEntry> Entries, long Latest, IReadOnlyDictionary<long, IReadOnlyList<FeedbackKind>> Feedback);
+    internal sealed record ActivityResponse(IReadOnlyList<RoutingActivityEntry> Entries, long Latest, IReadOnlyDictionary<long, IReadOnlyList<FeedbackKind>> Feedback);
 
     /// <summary>The memory map: every note and link, and where notes have been sent.</summary>
     /// <param name="LoadedAt">When the sources were last scanned; <see langword="null"/> before the first scan.</param>
@@ -1285,7 +1185,7 @@ public static partial class RouterDashboardEndpoints
     /// <param name="Nodes">Notes, and link targets with no note (<c>missing</c>).</param>
     /// <param name="Links">Links as pairs of indexes into <paramref name="Nodes"/>.</param>
     /// <param name="Exposure">By note id: the requests that carried the note, local and cloud, per model.</param>
-    public sealed record MemoryMapResponse(
+    internal sealed record MemoryMapResponse(
         DateTimeOffset? LoadedAt,
         double LoadMilliseconds,
         bool TrackSharing,
@@ -1296,27 +1196,27 @@ public static partial class RouterDashboardEndpoints
         IReadOnlyDictionary<string, MemoryExposure> Exposure);
 
     /// <summary>A note in the memory map. Its text is never sent.</summary>
-    public sealed record MemoryNodeResponse(
+    internal sealed record MemoryNodeResponse(
         string Id, string Title, string Source, string Path, string Folder, IReadOnlyList<string> Tags, IReadOnlyList<string> Aliases,
         int Size, DateTimeOffset? Modified, int Fingerprints, bool Missing);
 
     /// <summary>Models to price: <c>POST api/prices/lookup</c>.</summary>
     /// <param name="Models">Each model and the connector that serves it.</param>
-    public sealed record PriceLookupRequest(IReadOnlyList<PriceLookupModel>? Models);
+    internal sealed record PriceLookupRequest(IReadOnlyList<PriceLookupModel>? Models);
 
     /// <summary>A model to price, with what of its connector says whose price it pays.</summary>
     /// <param name="Model">The provider's model id.</param>
     /// <param name="Type">The connector type.</param>
     /// <param name="Preset">A CLI connector's preset.</param>
     /// <param name="BaseAddress">An HTTP connector's address (only its host is used).</param>
-    public sealed record PriceLookupModel(string? Model, ConnectorType Type = ConnectorType.OpenAICompatible, CliPreset Preset = CliPreset.Custom, Uri? BaseAddress = null);
+    internal sealed record PriceLookupModel(string? Model, ConnectorType Type = ConnectorType.OpenAICompatible, CliPreset Preset = CliPreset.Custom, Uri? BaseAddress = null);
 
     /// <summary>The prices found.</summary>
     /// <param name="Source">The price list's host.</param>
     /// <param name="Fetched">When the list was fetched; <see langword="null"/> when there is none.</param>
     /// <param name="Problem">Why the list could not be fetched (an older one may still have answered).</param>
     /// <param name="Prices">One per model asked, in order; <see langword="null"/> where the list has no price.</param>
-    public sealed record PriceLookupResponse(string Source, DateTimeOffset? Fetched, string? Problem, IReadOnlyList<PriceLookupResult?> Prices);
+    internal sealed record PriceLookupResponse(string Source, DateTimeOffset? Fetched, string? Problem, IReadOnlyList<PriceLookupResult?> Prices);
 
     /// <summary>A model's list prices, USD per million tokens.</summary>
     /// <param name="Id">The price list's id for it.</param>
@@ -1326,13 +1226,13 @@ public static partial class RouterDashboardEndpoints
     /// <param name="CacheRead">Prompt-cache reads, when listed.</param>
     /// <param name="CacheWrite">Prompt-cache writes, when listed.</param>
     /// <param name="ContextWindow">The context window, when listed.</param>
-    public sealed record PriceLookupResult(string Id, bool SameProvider, decimal Input, decimal Output, decimal? CacheRead, decimal? CacheWrite, int? ContextWindow);
+    internal sealed record PriceLookupResult(string Id, bool SameProvider, decimal Input, decimal Output, decimal? CacheRead, decimal? CacheWrite, int? ContextWindow);
 
     /// <summary>Request for the embeddings probe.</summary>
-    public sealed record EmbeddingTestRequest(string? Text);
+    internal sealed record EmbeddingTestRequest(string? Text);
 
     /// <summary>Result of the embeddings probe.</summary>
-    public sealed record EmbeddingTestResponse(bool Ok, int Dimensions, double Milliseconds, string? Error);
+    internal sealed record EmbeddingTestResponse(bool Ok, int Dimensions, double Milliseconds, string? Error);
 
     /// <summary>What a connector offers: <c>POST api/connectors/{name}/discover</c>.</summary>
     /// <param name="Models">The model ids the provider serves (for the model editor's suggestions).</param>
@@ -1343,7 +1243,7 @@ public static partial class RouterDashboardEndpoints
     /// <param name="Lineup">Every model found, with the suggested catalog entry.</param>
     /// <param name="Families">The model-family table the suggestions used.</param>
     /// <param name="FamiliesWarning">Why the local model-family table was not (fully) used.</param>
-    public sealed record DiscoverResponse(
+    internal sealed record DiscoverResponse(
         IReadOnlyList<string> Models, string? Note, string? Server, ModelLoading Loading, string? LoadingNote, IReadOnlyList<LineupModel> Lineup,
         string? Families = null, string? FamiliesWarning = null)
     {
@@ -1376,7 +1276,7 @@ public static partial class RouterDashboardEndpoints
     /// <param name="Recommended">Whether adding it is a sensible default.</param>
     /// <param name="Reason">Why the suggestion looks the way it does.</param>
     /// <param name="Suggestion">The suggested catalog entry, in the configuration document's shape; <see langword="null"/> for embedding models.</param>
-    public sealed record LineupModel(
+    internal sealed record LineupModel(
         string Id, DiscoveredModelKind Kind, bool Listed, bool? Loaded, int? ContextLength, double? ParametersBillions, IReadOnlyList<string> Capabilities,
         string? InCatalog, bool Recommended, string Reason, JsonElement? Suggestion)
     {
@@ -1391,10 +1291,10 @@ public static partial class RouterDashboardEndpoints
     /// <param name="Directory">Where theme files are read from, if anywhere.</param>
     /// <param name="RequiredTokens">The tokens a theme file should declare.</param>
     /// <param name="Themes">Built-in themes first, then the files.</param>
-    public sealed record ThemesResponse(string? Directory, IReadOnlyList<string> RequiredTokens, IReadOnlyList<DashboardTheme> Themes);
+    internal sealed record ThemesResponse(string? Directory, IReadOnlyList<string> RequiredTokens, IReadOnlyList<DashboardTheme> Themes);
 
     /// <summary>Live status of the router.</summary>
-    public sealed record StatusResponse(
+    internal sealed record StatusResponse(
         int Version,
         string Source,
         DateTimeOffset CreatedAt,
@@ -1430,7 +1330,7 @@ public static partial class RouterDashboardEndpoints
     }
 
     /// <summary>Embedding provider in use.</summary>
-    public sealed record EmbeddingsStatus(
+    internal sealed record EmbeddingsStatus(
         string Provider, string? Model, string? Endpoint, int Dimensions, IReadOnlyList<string> Available, IReadOnlyList<EmbeddingModelStatus> Models,
         IndexStatus? Index, ClassificationCacheStatistics? Cache)
     {
@@ -1439,16 +1339,16 @@ public static partial class RouterDashboardEndpoints
     }
 
     /// <summary>The route index of the running configuration: utterances embedded and how long the warm-up took.</summary>
-    public sealed record IndexStatus(int Utterances, int Dimensions, double BuildMilliseconds);
+    internal sealed record IndexStatus(int Utterances, int Dimensions, double BuildMilliseconds);
 
     /// <summary>A model a provider kind offers by name.</summary>
-    public sealed record EmbeddingModelStatus(string Provider, string Name, string Description, float SuggestedThreshold, long DownloadBytes);
+    internal sealed record EmbeddingModelStatus(string Provider, string Name, string Description, float SuggestedThreshold, long DownloadBytes);
 
     /// <summary>A tier on the ladder.</summary>
-    public sealed record TierStatus(int Level, string Name, string? Description);
+    internal sealed record TierStatus(int Level, string Name, string? Description);
 
     /// <summary>A catalog model and its health.</summary>
-    public sealed record ModelStatus(
+    internal sealed record ModelStatus(
         string Name, string Connector, string? Model, int Tier, IReadOnlyList<string> Capabilities, bool IsLocal, bool Enabled, int Priority,
         int ContextWindow, decimal InputCostPerMillionTokens, decimal OutputCostPerMillionTokens, DateTimeOffset? CoolingDownUntil, string? ConnectorType)
     {
@@ -1460,18 +1360,18 @@ public static partial class RouterDashboardEndpoints
     }
 
     /// <summary>A connector.</summary>
-    public sealed record ConnectorStatus(string Name, string Type, string? Preset, string? Target, string ToolCalling, bool HasApiKey, int ModelCount);
+    internal sealed record ConnectorStatus(string Name, string Type, string? Preset, string? Target, string ToolCalling, bool HasApiKey, int ModelCount);
 
     /// <summary>A route.</summary>
-    public sealed record RouteStatus(string Name, int Tier, int Utterances, bool LocalOnly, IReadOnlyList<string> RequiredCapabilities, float Threshold);
+    internal sealed record RouteStatus(string Name, int Tier, int Utterances, bool LocalOnly, IReadOnlyList<string> RequiredCapabilities, float Threshold);
 
     /// <summary>Gateway settings.</summary>
-    public sealed record GatewayStatus(
+    internal sealed record GatewayStatus(
         string Mode, IReadOnlyList<string> PathPrefixes, IReadOnlyList<string> AnthropicPathPrefixes, IReadOnlyList<string> ResponsesPathPrefixes,
         IReadOnlyDictionary<string, string> ModelAliases, string Strategy, IReadOnlyList<RateLimitStatus> RateLimits);
 
     /// <summary>Counts over the activity log.</summary>
-    public sealed record ActivitySummary(
+    internal sealed record ActivitySummary(
         int Total, int Served, int Failed, int Degraded,
         IReadOnlyDictionary<string, int> ByModel, IReadOnlyDictionary<string, int> ByTier, IReadOnlyDictionary<string, int> ByReason,
         IReadOnlyList<ConnectorLatency> Latency);
@@ -1484,7 +1384,7 @@ public static partial class RouterDashboardEndpoints
     /// <param name="FirstByteP50">Median time to the first byte of the reply, in milliseconds, from the start of the attempt that served it.</param>
     /// <param name="FirstByteP95">95th percentile time to the first byte.</param>
     /// <param name="TotalP50">Median time to the end of the reply.</param>
-    public sealed record ConnectorLatency(string Connector, string? Kind, int Requests, int WithTools, double? FirstByteP50, double? FirstByteP95, double? TotalP50);
+    internal sealed record ConnectorLatency(string Connector, string? Kind, int Requests, int WithTools, double? FirstByteP50, double? FirstByteP95, double? TotalP50);
 }
 
 internal static partial class DashboardLog

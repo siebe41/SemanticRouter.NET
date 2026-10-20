@@ -19,6 +19,15 @@ How a request moves through the router, how configuration reloads without droppi
 | `tests/SemanticRouter.Tests` | all | Over 1,000 tests; no network, model or vendor CLI needed. Run on Linux, Windows and macOS in CI. |
 | `tests/SemanticRouter.FakeCli` | nothing | A stand-in CLI (`fake-cli`) the process tests start, so they run on every OS. |
 
+### Namespaces
+
+Each library package keeps its types in its own namespace: `SemanticRouter` (Core), `SemanticRouter.AspNetCore`, `SemanticRouter.Storage.Sqlite`, `SemanticRouter.Embeddings.Onnx` and `SemanticRouter.Connectors.Copilot`. Options types are there too (`RouterDashboardOptions`, `SqliteStateOptions`, `OnnxEmbeddingOptions`). Only the static classes of extension methods that set the router up are in Microsoft's namespaces, where a web project finds them without a `using`:
+
+- `Microsoft.Extensions.DependencyInjection`: the extensions on `IServiceCollection` (`AddSemanticPromptRouting`) and on `SemanticRouterBuilder` in every package (`UseSqliteState`, `AddOnnxEmbeddings`, `UseOnnxEmbeddings`, `AddCopilotConnector`), as ASP.NET Core does for its own builders such as `IHttpClientBuilder`.
+- `Microsoft.AspNetCore.Builder`: the `Use*` and `Map*` extensions on the application and endpoint builders (`UsePromptRouter`, `UseRouterForwardedHeaders`, `MapRouterDashboard`, `MapRouterDashboardRedirect`, `MapPromptClassification`, `MapRouterModels`, `MapAnthropicTokenCount`).
+
+The request and response bodies of the dashboard's API and of the classify, `/v1/models` and `count_tokens` endpoints are internal types: their contract is the JSON, not a .NET type, so a new field is not a breaking change of the package.
+
 ## One request, end to end
 
 ```mermaid
