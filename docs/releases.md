@@ -9,6 +9,7 @@ Every release on [GitHub Releases](https://github.com/siebe41/SemanticRouter.NET
 | `SHA256SUMS` | The SHA-256 checksum of every other asset. |
 | `SemanticRouter-<version>-<platform>.zip` / `.tar.gz`, the installers, the update feed (`releases.<channel>.json`, `*-full.nupkg`, `*-delta.nupkg`) | The desktop app ([Desktop app](desktop.md)). |
 | `SemanticRouter.*.<version>.nupkg` | The NuGet packages and the `semantic-router` tool, exactly as pushed to nuget.org. |
+| `SemanticRouter.*.<version>.snupkg` | The libraries' symbol packages, as pushed to nuget.org's symbol server: their PDBs, which map to the tagged commit's sources with SourceLink. The tool package carries its PDB inside. |
 | `SemanticRouter-<version>-packages.cdx.json` | CycloneDX SBOM of the NuGet packages and the tool. |
 | `SemanticRouter-<version>-desktop.cdx.json` | CycloneDX SBOM of the desktop app, for every platform (the archives and installers ship the same app). |
 | `SemanticRouter-<version>-image.cdx.json` | CycloneDX SBOM of the container image. It is also attached to the image as a signed attestation. |
@@ -48,6 +49,8 @@ dotnet nuget verify --all SemanticRouter.Host.0.3.0.nupkg
 ```
 
 The packages are not author-signed.
+
+A debugger finds the libraries' symbols on nuget.org's symbol server (in Visual Studio, enable **NuGet.org Symbol Server** under Tools > Options > Debugging > Symbols, and turn off **Just My Code**) and steps into the source of the released commit, which SourceLink fetches from GitHub.
 
 ## Check the container image
 

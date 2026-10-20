@@ -37,6 +37,8 @@
     -->
     <VersionPrefix>0.6.0</VersionPrefix>
     <Authors>SemanticRouter.NET contributors</Authors>
+    <!-- As in LICENSE. Also the assemblies' copyright attribute. -->
+    <Copyright>Copyright (c) 2026 Andrew Siebert</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/siebe41/SemanticRouter.NET</PackageProjectUrl>
     <RepositoryUrl>https://github.com/siebe41/SemanticRouter.NET</RepositoryUrl>
