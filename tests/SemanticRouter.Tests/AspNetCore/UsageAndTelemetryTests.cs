@@ -48,7 +48,7 @@ public sealed class QuotaResetParserTests
     public void A_parsed_reset_replaces_the_fixed_quota_cooldown_within_limits()
     {
         var time = new ManualTimeProvider();
-        var tracker = new ModelHealthTracker(new ModelSelectionOptions { QuotaCooldown = TimeSpan.FromMinutes(15) }, time);
+        var tracker = new ModelHealthTracker(new ModelSelectionOptions { QuotaCooldown = TimeSpan.FromMinutes(15) }, new ModelHealthTrackerDependencies { Time = time });
         ModelDefinition claude = Model("claude", 4);
         ModelDefinition codex = Model("codex", 4);
         ModelDefinition other = Model("other", 4);

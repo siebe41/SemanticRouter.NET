@@ -216,12 +216,12 @@ public sealed class SqliteStateTests : IDisposable
     public void A_restart_during_a_quota_cooldown_keeps_the_original_expiry()
     {
         ModelDefinition claude = Model("claude", 4);
-        var before = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(Open()));
+        var before = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(Open()) });
         before.ReportFailure(claude, ModelFailureKind.QuotaExceeded);
         DateTimeOffset expiry = before.GetCooldowns()["claude"];
 
         _time.Advance(TimeSpan.FromMinutes(5));
-        var after = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(Open()));
+        var after = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(Open()) });
 
         after.IsAvailable(claude).Should().BeFalse("the cooldown was stored with its absolute expiry");
         after.GetCooldowns()["claude"].Should().Be(expiry);
@@ -233,8 +233,8 @@ public sealed class SqliteStateTests : IDisposable
     public void Instances_sharing_the_file_see_each_others_cooldowns_after_a_refresh()
     {
         ModelDefinition claude = Model("claude", 4);
-        var a = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(Open()));
-        var b = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(Open()));
+        var a = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(Open()) });
+        var b = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(Open()) });
 
         a.ReportFailure(claude, ModelFailureKind.QuotaExceeded);
         Settle();
@@ -263,10 +263,10 @@ public sealed class SqliteStateTests : IDisposable
     [Fact]
     public void Warm_prompt_caches_survive_a_restart_until_they_expire()
     {
-        var opus = new WarmCache("opus", 80_000, _time.GetUtcNow().AddMinutes(5));
+        var opus = new WarmCache { Model = "opus", CachedTokens = 80_000, ExpiresAt = _time.GetUtcNow().AddMinutes(5) };
         var before = new SqliteWarmCaches(Open());
         before.Remember("conversation", opus);
-        before.Remember("conversation", new WarmCache("sonnet", 20_000, _time.GetUtcNow().AddMinutes(5)));
+        before.Remember("conversation", new WarmCache { Model = "sonnet", CachedTokens = 20_000, ExpiresAt = _time.GetUtcNow().AddMinutes(5) });
         before.Forget("conversation", "SONNET");
 
         new SqliteWarmCaches(Open()).Lookup("conversation").Should().Equal(opus);
@@ -542,7 +542,7 @@ public sealed class SqliteStateTests : IDisposable
         File.WriteAllBytes(DbPath, Encoding.UTF8.GetBytes(new string('x', 4096)));
 
         SqliteRouterDatabase database = Open();
-        var tracker = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(database));
+        var tracker = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(database) });
         var history = new SqliteConfigurationHistory(database);
         tracker.ReportFailure(Model("claude", 4), ModelFailureKind.QuotaExceeded);
         long id = history.Record(new RouterConfiguration { FallbackTier = 2 }, "startup");
@@ -596,7 +596,7 @@ public sealed class SqliteStateTests : IDisposable
     public void A_locked_database_degrades_to_memory_without_throwing()
     {
         SqliteRouterDatabase database = Open(o => o.BusyTimeout = TimeSpan.FromSeconds(1));
-        var tracker = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(database));
+        var tracker = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(database) });
         using var holder = new SqliteConnection($"Data Source={DbPath};Pooling=False");
         holder.Open();
         using (SqliteCommand begin = holder.CreateCommand())

@@ -296,7 +296,7 @@ internal sealed partial class RouterTuner : IDisposable
             (kinds.TryGetValue(prompt, out HashSet<FeedbackKind>? set) ? set : kinds[prompt] = []).Add(item.Kind);
         }
 
-        return (needed.Select(n => new EvaluationCase(n.Key, n.Value.Tier) { LocalOnly = n.Value.LocalOnly, Note = "from feedback" }).ToArray(), kinds);
+        return (needed.Select(n => new EvaluationCase { Prompt = n.Key, ExpectedTier = n.Value.Tier, LocalOnly = n.Value.LocalOnly, Note = "from feedback" }).ToArray(), kinds);
     }
 
     /// <summary>

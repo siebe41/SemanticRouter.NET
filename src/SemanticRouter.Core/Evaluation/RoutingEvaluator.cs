@@ -3,24 +3,32 @@ using System.Diagnostics;
 namespace SemanticRouter;
 
 /// <summary>What one labelled prompt was routed to.</summary>
-/// <param name="Case">The labelled prompt.</param>
-/// <param name="ActualTier">The tier the configuration gave it.</param>
-/// <param name="Reason">How that tier was decided.</param>
-/// <param name="ActualRoute">The route it matched, if any.</param>
-/// <param name="Similarity">The matched (or best) route's similarity.</param>
-/// <param name="Complexity">The prompt's complexity score.</param>
-/// <param name="LocalOnly">Whether the decision keeps the prompt on local models.</param>
-/// <param name="TopScores">The best route scores, best first.</param>
-public sealed record EvaluationResult(
-    EvaluationCase Case,
-    int ActualTier,
-    RoutingReason Reason,
-    string? ActualRoute,
-    float? Similarity,
-    double Complexity,
-    bool LocalOnly,
-    IReadOnlyList<RouteScore> TopScores)
+public sealed record EvaluationResult
 {
+    /// <summary>The labelled prompt.</summary>
+    public required EvaluationCase Case { get; init; }
+
+    /// <summary>The tier the configuration gave it.</summary>
+    public required int ActualTier { get; init; }
+
+    /// <summary>How that tier was decided.</summary>
+    public required RoutingReason Reason { get; init; }
+
+    /// <summary>The route it matched, if any.</summary>
+    public string? ActualRoute { get; init; }
+
+    /// <summary>The matched (or best) route's similarity.</summary>
+    public float? Similarity { get; init; }
+
+    /// <summary>The prompt's complexity score.</summary>
+    public required double Complexity { get; init; }
+
+    /// <summary>Whether the decision keeps the prompt on local models.</summary>
+    public required bool LocalOnly { get; init; }
+
+    /// <summary>The best route scores, best first.</summary>
+    public required IReadOnlyList<RouteScore> TopScores { get; init; }
+
     /// <summary>The tier is right, and a local-only case stayed local.</summary>
     public bool Correct => ActualTier == Case.ExpectedTier && (!Case.LocalOnly || LocalOnly);
 
@@ -31,11 +39,17 @@ public sealed record EvaluationResult(
 }
 
 /// <summary>Accuracy for the prompts labelled with one tier.</summary>
-/// <param name="Tier">The expected tier.</param>
-/// <param name="Total">Prompts labelled with it.</param>
-/// <param name="Correct">Prompts routed to it.</param>
-public sealed record TierAccuracy(int Tier, int Total, int Correct)
+public sealed record TierAccuracy
 {
+    /// <summary>The expected tier.</summary>
+    public required int Tier { get; init; }
+
+    /// <summary>Prompts labelled with it.</summary>
+    public required int Total { get; init; }
+
+    /// <summary>Prompts routed to it.</summary>
+    public required int Correct { get; init; }
+
     /// <summary><see cref="Correct"/> / <see cref="Total"/>.</summary>
     public double Accuracy => Total == 0 ? 0 : (double)Correct / Total;
 }
@@ -114,37 +128,64 @@ public sealed class PreparedEvaluation
 }
 
 /// <summary>One default threshold tried during calibration.</summary>
-/// <param name="Threshold">The default similarity threshold.</param>
-/// <param name="Correct">Prompts routed to their tier.</param>
-/// <param name="TooLow">Prompts routed below their tier.</param>
-/// <param name="TooHigh">Prompts routed above their tier.</param>
-/// <param name="Total">Labelled prompts.</param>
-public sealed record CalibrationPoint(float Threshold, int Correct, int TooLow, int TooHigh, int Total)
+public sealed record CalibrationPoint
 {
+    /// <summary>The default similarity threshold.</summary>
+    public required float Threshold { get; init; }
+
+    /// <summary>Prompts routed to their tier.</summary>
+    public required int Correct { get; init; }
+
+    /// <summary>Prompts routed below their tier.</summary>
+    public required int TooLow { get; init; }
+
+    /// <summary>Prompts routed above their tier.</summary>
+    public required int TooHigh { get; init; }
+
+    /// <summary>Labelled prompts.</summary>
+    public required int Total { get; init; }
+
     /// <summary><see cref="Correct"/> / <see cref="Total"/>.</summary>
     public double Accuracy => Total == 0 ? 0 : (double)Correct / Total;
 }
 
 /// <summary>A per-route threshold calibration suggests.</summary>
-/// <param name="Route">The route.</param>
-/// <param name="Current">Its configured threshold (<see langword="null"/>: the default).</param>
-/// <param name="Recommended">The suggested threshold (<see langword="null"/>: use the default).</param>
-/// <param name="CorrectBefore">Correct prompts with the route's current setting (and the recommended default).</param>
-/// <param name="CorrectAfter">Correct prompts with the suggestion.</param>
-public sealed record RouteThresholdRecommendation(string Route, float? Current, float? Recommended, int CorrectBefore, int CorrectAfter);
+public sealed record RouteThresholdRecommendation
+{
+    /// <summary>The route.</summary>
+    public required string Route { get; init; }
+
+    /// <summary>Its configured threshold (<see langword="null"/>: the default).</summary>
+    public float? Current { get; init; }
+
+    /// <summary>The suggested threshold (<see langword="null"/>: use the default).</summary>
+    public float? Recommended { get; init; }
+
+    /// <summary>Correct prompts with the route's current setting (and the recommended default).</summary>
+    public required int CorrectBefore { get; init; }
+
+    /// <summary>Correct prompts with the suggestion.</summary>
+    public required int CorrectAfter { get; init; }
+}
 
 /// <summary>The result of sweeping thresholds over an evaluation set.</summary>
-/// <param name="Current">The configuration as it is.</param>
-/// <param name="Recommended">The best default threshold (never worse than <paramref name="Current"/> on the set).</param>
-/// <param name="Sweep">Every default threshold tried, ascending.</param>
-/// <param name="Routes">Per-route thresholds that improve on the recommended default, and current overrides that should go.</param>
-/// <param name="CorrectWithRoutes">Correct prompts with the recommended default and route thresholds together.</param>
-public sealed record CalibrationReport(
-    CalibrationPoint Current,
-    CalibrationPoint Recommended,
-    IReadOnlyList<CalibrationPoint> Sweep,
-    IReadOnlyList<RouteThresholdRecommendation> Routes,
-    int CorrectWithRoutes);
+public sealed record CalibrationReport
+{
+    /// <summary>The configuration as it is.</summary>
+    public required CalibrationPoint Current { get; init; }
+
+    /// <summary>The best default threshold (never worse than <see cref="Current"/> on the set).</summary>
+    public required CalibrationPoint Recommended { get; init; }
+
+    /// <summary>Every default threshold tried, ascending.</summary>
+    public required IReadOnlyList<CalibrationPoint> Sweep { get; init; }
+
+    /// <summary>Per-route thresholds that improve on the recommended default, and current overrides that should go.</summary>
+    public required IReadOnlyList<RouteThresholdRecommendation> Routes { get; init; }
+
+    /// <summary>Correct prompts with the recommended default and route thresholds together.</summary>
+    public required int CorrectWithRoutes { get; init; }
+}
 
 /// <summary>
 /// Runs labelled prompts through the classification pipeline (complexity, route index, route selection) without
@@ -167,11 +208,19 @@ public sealed class RoutingEvaluator
     private readonly RouteDefinition[] _routes;
     private readonly bool _hasLocalOnlyRoutes;
 
+    /// <summary>Creates an evaluator for a configuration, with <see cref="HeuristicComplexityAnalyzer"/>.</summary>
+    /// <param name="embeddings">The embedding provider the configuration uses (or one to compare against).</param>
+    /// <param name="options">Routes, thresholds and complexity rules.</param>
+    public RoutingEvaluator(IEmbeddingProvider embeddings, SemanticRouterOptions options)
+        : this(embeddings, options, null)
+    {
+    }
+
     /// <summary>Creates an evaluator for a configuration.</summary>
     /// <param name="embeddings">The embedding provider the configuration uses (or one to compare against).</param>
     /// <param name="options">Routes, thresholds and complexity rules.</param>
     /// <param name="complexity">Defaults to <see cref="HeuristicComplexityAnalyzer"/>.</param>
-    public RoutingEvaluator(IEmbeddingProvider embeddings, SemanticRouterOptions options, IComplexityAnalyzer? complexity = null)
+    public RoutingEvaluator(IEmbeddingProvider embeddings, SemanticRouterOptions options, IComplexityAnalyzer? complexity)
     {
         ArgumentNullException.ThrowIfNull(embeddings);
         ArgumentNullException.ThrowIfNull(options);
@@ -267,7 +316,7 @@ public sealed class RoutingEvaluator
             Tiers = tiers,
             Confusion = confusion,
             PerTier = results.GroupBy(r => r.Case.ExpectedTier).OrderBy(g => g.Key)
-                .Select(g => new TierAccuracy(g.Key, g.Count(), g.Count(r => r.Correct))).ToArray(),
+                .Select(g => new TierAccuracy { Tier = g.Key, Total = g.Count(), Correct = g.Count(r => r.Correct) }).ToArray(),
             Results = results,
         };
     }
@@ -315,7 +364,14 @@ public sealed class RoutingEvaluator
             thresholds[route.Name] = chosen;
             if (chosen != route.SimilarityThreshold)
             {
-                recommendations.Add(new RouteThresholdRecommendation(route.Name, route.SimilarityThreshold, chosen, before.Correct, chosenPoint.Correct));
+                recommendations.Add(new RouteThresholdRecommendation
+                {
+                    Route = route.Name,
+                    Current = route.SimilarityThreshold,
+                    Recommended = chosen,
+                    CorrectBefore = before.Correct,
+                    CorrectAfter = chosenPoint.Correct,
+                });
             }
         }
 
@@ -327,7 +383,14 @@ public sealed class RoutingEvaluator
             withRoutes = best.Correct;
         }
 
-        return new CalibrationReport(currentPoint, best, sweep, recommendations, withRoutes);
+        return new CalibrationReport
+        {
+            Current = currentPoint,
+            Recommended = best,
+            Sweep = sweep,
+            Routes = recommendations,
+            CorrectWithRoutes = withRoutes,
+        };
     }
 
     private static CalibrationPoint Best(IEnumerable<CalibrationPoint> sweep, float current) => sweep
@@ -348,7 +411,7 @@ public sealed class RoutingEvaluator
             tooHigh += result.ActualTier > result.Case.ExpectedTier ? 1 : 0;
         }
 
-        return new CalibrationPoint(threshold, correct, tooLow, tooHigh, prepared.Cases.Count);
+        return new CalibrationPoint { Threshold = threshold, Correct = correct, TooLow = tooLow, TooHigh = tooHigh, Total = prepared.Cases.Count };
     }
 
     internal static Func<RouteDefinition, float> ThresholdFunction(float fallback, IReadOnlyDictionary<string, float?>? routes) =>
@@ -366,18 +429,43 @@ public sealed class RoutingEvaluator
 
         if (string.IsNullOrWhiteSpace(item.Prompt))
         {
-            return new EvaluationResult(item, _options.FallbackTier, RoutingReason.EmptyPrompt, null, null, 0, false, []);
+            return new EvaluationResult
+            {
+                Case = item,
+                ActualTier = _options.FallbackTier,
+                Reason = RoutingReason.EmptyPrompt,
+                Complexity = 0,
+                LocalOnly = false,
+                TopScores = [],
+            };
         }
 
         if (!_hasLocalOnlyRoutes && complexity.Score >= _options.ComplexityShortCircuitThreshold)
         {
             int tier = _options.TierForComplexity(complexity.Score) is > 0 and var t ? t : _options.FallbackTier;
-            return new EvaluationResult(item, tier, RoutingReason.ComplexityShortCircuit, null, null, complexity.Score, false, []);
+            return new EvaluationResult
+            {
+                Case = item,
+                ActualTier = tier,
+                Reason = RoutingReason.ComplexityShortCircuit,
+                Complexity = complexity.Score,
+                LocalOnly = false,
+                TopScores = [],
+            };
         }
 
         RouteDecision decision = selector.SelectRoute(ranked, complexity);
         bool localOnly = decision.LocalOnly || (prepared.WholeRanked[index] is { } whole && selector.SelectRoute(whole, complexity).LocalOnly);
-        return new EvaluationResult(
-            item, decision.RequiredTier, decision.Reason, decision.Route?.Name, decision.Similarity, complexity.Score, localOnly, top);
+        return new EvaluationResult
+        {
+            Case = item,
+            ActualTier = decision.RequiredTier,
+            Reason = decision.Reason,
+            ActualRoute = decision.Route?.Name,
+            Similarity = decision.Similarity,
+            Complexity = complexity.Score,
+            LocalOnly = localOnly,
+            TopScores = top,
+        };
     }
 }

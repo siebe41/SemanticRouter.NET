@@ -314,8 +314,10 @@ internal static class EvaluationApi
     {
         public static CaseDto From(EvaluationCase item) => new(item.Prompt, item.ExpectedTier, item.ExpectedRoute, item.LocalOnly, item.Note);
 
-        public EvaluationCase ToCase() => new(Prompt.Trim(), Tier)
+        public EvaluationCase ToCase() => new()
         {
+            Prompt = Prompt.Trim(),
+            ExpectedTier = Tier,
             ExpectedRoute = string.IsNullOrWhiteSpace(Route) ? null : Route.Trim(),
             LocalOnly = LocalOnly,
             Note = string.IsNullOrWhiteSpace(Note) ? null : Note,

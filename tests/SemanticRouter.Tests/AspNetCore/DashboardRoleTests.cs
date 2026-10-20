@@ -127,7 +127,7 @@ public sealed class DashboardRoleTests : RouterHostTest
             Examples = [Secret + "-EXAMPLE"],
             State = TuningChangeState.Applied,
         });
-        Services.GetRequiredService<IEvaluationSetStore>().Save([new EvaluationCase(Secret + "-EVALUATION", 1)]);
+        Services.GetRequiredService<IEvaluationSetStore>().Save([new EvaluationCase { Prompt = Secret + "-EVALUATION", ExpectedTier = 1 }]);
 
         // A connector down for over an hour: the notice's detail quotes what it said.
         Services.GetRequiredService<ConnectorIncidents>().Failed("lmstudio", ModelFailureKind.Unavailable, Secret + "-INCIDENT");

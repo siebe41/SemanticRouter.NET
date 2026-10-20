@@ -537,7 +537,7 @@ internal sealed partial class PromptRoutingMiddleware
         int cached = (entry.CacheReadTokens ?? 0) + (entry.CacheCreationTokens ?? 0);
         if (cached > 0)
         {
-            _warmCaches!.Remember(conversation, new WarmCache(model, cached, started + lifetime));
+            _warmCaches!.Remember(conversation, new WarmCache { Model = model, CachedTokens = cached, ExpiresAt = started + lifetime });
         }
         else if (entry.InputTokens is not null)
         {

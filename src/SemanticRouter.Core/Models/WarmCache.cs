@@ -5,7 +5,14 @@ namespace SemanticRouter;
 /// when. Read from the cache, that prefix costs the model's <see cref="ModelDefinition.CacheReadCostPerMillionTokens"/>;
 /// moved to another model, it is sent and written again at full price.
 /// </summary>
-/// <param name="Model">The catalog model whose cache it is.</param>
-/// <param name="CachedTokens">The cached prefix: the last turn's cache reads plus cache writes.</param>
-/// <param name="ExpiresAt">When the entry is gone: the last turn that used it plus the cache's lifetime.</param>
-public sealed record WarmCache(string Model, int CachedTokens, DateTimeOffset ExpiresAt);
+public sealed record WarmCache
+{
+    /// <summary>The catalog model whose cache it is.</summary>
+    public required string Model { get; init; }
+
+    /// <summary>The cached prefix: the last turn's cache reads plus cache writes.</summary>
+    public required int CachedTokens { get; init; }
+
+    /// <summary>When the entry is gone: the last turn that used it plus the cache's lifetime.</summary>
+    public required DateTimeOffset ExpiresAt { get; init; }
+}

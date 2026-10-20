@@ -36,7 +36,7 @@ public class WarmCacheRoutingTests
             options.Models.Add(model);
         }
 
-        return new PromptRouter(new Moq.Mock<IPromptClassifier>().Object, options, health: health, time: _time);
+        return new PromptRouter(new Moq.Mock<IPromptClassifier>().Object, options, new PromptRouterDependencies { Health = health, Time = _time });
     }
 
     private static PromptClassificationResult Tier(int tier) => new()
@@ -50,7 +50,7 @@ public class WarmCacheRoutingTests
     private static PromptRoutingRequest Request(string? preferred, params WarmCache[] caches) =>
         new() { Prompt = "and now the tests", EstimatedInputTokens = 82_000, PreferredModel = preferred, WarmCaches = caches };
 
-    private WarmCache Warm(string model, int tokens = 80_000) => new(model, tokens, _time.GetUtcNow().AddMinutes(4));
+    private WarmCache Warm(string model, int tokens = 80_000) => new WarmCache { Model = model, CachedTokens = tokens, ExpiresAt = _time.GetUtcNow().AddMinutes(4) };
 
     [Fact]
     public void A_conversation_whose_tier_drops_stays_on_its_warm_model_when_moving_costs_more()
@@ -87,7 +87,7 @@ public class WarmCacheRoutingTests
     {
         // Two tier-4 models; "opus-b" is pricier, so the ranking prefers opus. Opus fails over to opus-b for a turn.
         ModelDefinition opusB = Priced("opus-b", 4, 6m, 30m, 3m, 7.5m);
-        var health = new ModelHealthTracker(new ModelSelectionOptions { QuotaCooldown = TimeSpan.FromMinutes(2) }, _time);
+        var health = new ModelHealthTracker(new ModelSelectionOptions { QuotaCooldown = TimeSpan.FromMinutes(2) }, new ModelHealthTrackerDependencies { Time = _time });
         PromptRouter router = Create(health, Opus, opusB);
         WarmCache opusCache = Warm("opus");
         health.ReportFailure(Opus, ModelFailureKind.QuotaExceeded);
@@ -101,7 +101,7 @@ public class WarmCacheRoutingTests
         back.Sticky.Should().BeTrue();
 
         _time.Advance(TimeSpan.FromMinutes(2));
-        RoutingPlan expired = router.Plan(Tier(4), Request("opus-b", opusCache, new WarmCache("opus-b", 81_000, _time.GetUtcNow().AddMinutes(4))));
+        RoutingPlan expired = router.Plan(Tier(4), Request("opus-b", opusCache, new WarmCache { Model = "opus-b", CachedTokens = 81_000, ExpiresAt = _time.GetUtcNow().AddMinutes(4) }));
         expired.Candidates[0].Model.Name.Should().Be("opus-b", "opus's cache expired: only opus-b's is warm, and moving would write 82k");
     }
 
@@ -109,7 +109,7 @@ public class WarmCacheRoutingTests
     public void Without_a_warm_cache_routing_is_unchanged()
     {
         PromptRouter router = Create();
-        WarmCache expired = new("opus", 80_000, _time.GetUtcNow().AddSeconds(-1));
+        WarmCache expired = new WarmCache { Model = "opus", CachedTokens = 80_000, ExpiresAt = _time.GetUtcNow().AddSeconds(-1) };
 
         RoutingPlan cold = router.Plan(Tier(3), Request("opus", expired));
         RoutingPlan none = router.Plan(Tier(3), Request("opus"));

@@ -62,6 +62,14 @@ The public API is every public type and member of the five library packages, and
 
 Adding to the public API is fine. Removing or changing a member breaks every application compiled against the old one, even when its source would still compile: adding an optional parameter, for example, removes the method that had one parameter less. Prefer a new overload, and mark what it replaces `[Obsolete]` rather than removing it.
 
+**Adding a field or a dependency without a break.** Write the public API so that it grows by addition:
+
+- A data type is a record with `required` and `init` properties (`public required int Tier { get; init; }`), not a positional record (`record X(int Tier)`): a positional record's constructor and `Deconstruct` change with every member added. A new field is a new `init` property that is not `required`, whose default keeps today's behaviour. A positional record that is complete by definition, such as `RouteScore` (a route and a similarity) or `TimeWindow` (a start and an end), stays positional, and its documentation says it is frozen.
+- A service class takes its required collaborators as constructor parameters, and the ones that have a default in a dependencies object: `new PromptRouter(classifier, options, new PromptRouterDependencies { Health = health })`. A new collaborator is a new property of that object. `PromptRouterDependencies`, `SemanticPromptClassifierDependencies`, `DefaultModelSelectorDependencies` and `ModelHealthTrackerDependencies` are the ones today.
+- Anywhere else, a new parameter is a new overload, never an optional parameter appended to a shipped signature. A trailing `CancellationToken cancellationToken = default` is the one exception, and only on a new method.
+
+Package validation (below) enforces this: appending a parameter or a positional member removes a member the baseline has, and the pack fails. `SemanticRouter.AspNetCore` still has positional records and optional-parameter constructors from before this rule; they are converted before 1.0 ([#199](https://github.com/siebe41/SemanticRouter.NET/issues/199)).
+
 `dotnet pack -c Release` (run by CI on every pull request) validates each library package against the last release on nuget.org, the baseline set by `PackageValidationBaselineVersion` in [`Directory.Build.targets`](Directory.Build.targets). A type or member that the baseline has and the new package does not, or one changed in a way that breaks callers (made sealed, abstract or less visible, for example), fails the pack with a CP diagnostic, such as `CP0002: Member '...' exists on [Baseline] ... but not on ...`.
 
 **A deliberate break** (before 1.0, or for a new major version) is suppressed in the pull request that makes it, so it is reviewed there:

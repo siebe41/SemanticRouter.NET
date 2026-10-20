@@ -1,42 +1,67 @@
 namespace SemanticRouter;
 
 /// <summary>One similarity threshold the tuner would move: a bounded step toward the value calibration recommends.</summary>
-/// <param name="Route">The route whose own threshold moves, or <see langword="null"/> for <see cref="SemanticRouterOptions.DefaultSimilarityThreshold"/>.</param>
-/// <param name="Current">The value now (for a route, <see langword="null"/>: it uses the default).</param>
-/// <param name="Proposed">The value after the step (for a route, <see langword="null"/>: use the default).</param>
-/// <param name="Target">Where calibration says it should end up (for a route, <see langword="null"/>: the default).</param>
-/// <param name="Fixed">Prompts routed to their tier at <paramref name="Target"/> that are not now.</param>
-/// <param name="Broken">Prompts routed to their tier now that are not at <paramref name="Target"/>.</param>
-/// <param name="Gain">Correct prompts gained at <paramref name="Target"/>, automatic labels counted at their weight.</param>
-public sealed record ThresholdStep(
-    string? Route,
-    float? Current,
-    float? Proposed,
-    float? Target,
-    IReadOnlyList<EvaluationCase> Fixed,
-    IReadOnlyList<EvaluationCase> Broken,
-    double Gain);
+public sealed record ThresholdStep
+{
+    /// <summary>The route whose own threshold moves, or <see langword="null"/> for <see cref="SemanticRouterOptions.DefaultSimilarityThreshold"/>.</summary>
+    public string? Route { get; init; }
+
+    /// <summary>The value now (for a route, <see langword="null"/>: it uses the default).</summary>
+    public float? Current { get; init; }
+
+    /// <summary>The value after the step (for a route, <see langword="null"/>: use the default).</summary>
+    public float? Proposed { get; init; }
+
+    /// <summary>Where calibration says it should end up (for a route, <see langword="null"/>: the default).</summary>
+    public float? Target { get; init; }
+
+    /// <summary>Prompts routed to their tier at <see cref="Target"/> that are not now.</summary>
+    public required IReadOnlyList<EvaluationCase> Fixed { get; init; }
+
+    /// <summary>Prompts routed to their tier now that are not at <see cref="Target"/>.</summary>
+    public required IReadOnlyList<EvaluationCase> Broken { get; init; }
+
+    /// <summary>Correct prompts gained at <see cref="Target"/>, automatic labels counted at their weight.</summary>
+    public required double Gain { get; init; }
+}
 
 /// <summary>How one set of labelled prompts routes.</summary>
-/// <param name="Total">Prompts in the set.</param>
-/// <param name="Correct">Prompts routed to their tier (and local when labelled local-only).</param>
-/// <param name="TooLow">Prompts routed below their tier.</param>
-/// <param name="TooHigh">Prompts routed above their tier.</param>
-/// <param name="LocalOnlyMissed">Prompts labelled local-only that would leave the machine.</param>
-public sealed record TuningScore(int Total, int Correct, int TooLow, int TooHigh, int LocalOnlyMissed);
+public sealed record TuningScore
+{
+    /// <summary>Prompts in the set.</summary>
+    public required int Total { get; init; }
+
+    /// <summary>Prompts routed to their tier (and local when labelled local-only).</summary>
+    public required int Correct { get; init; }
+
+    /// <summary>Prompts routed below their tier.</summary>
+    public required int TooLow { get; init; }
+
+    /// <summary>Prompts routed above their tier.</summary>
+    public required int TooHigh { get; init; }
+
+    /// <summary>Prompts labelled local-only that would leave the machine.</summary>
+    public required int LocalOnlyMissed { get; init; }
+}
 
 /// <summary>The steps the tuner found, and how the two sets route before and after all of them.</summary>
-/// <param name="Steps">The accepted steps, in the order they were tried (the default threshold first).</param>
-/// <param name="ConfirmedBefore">The confirmed (hand-labelled) set with the thresholds as they are.</param>
-/// <param name="ConfirmedAfter">The confirmed set after every step.</param>
-/// <param name="AutomaticBefore">The automatically labelled set with the thresholds as they are.</param>
-/// <param name="AutomaticAfter">The automatically labelled set after every step.</param>
-public sealed record ThresholdTuning(
-    IReadOnlyList<ThresholdStep> Steps,
-    TuningScore ConfirmedBefore,
-    TuningScore ConfirmedAfter,
-    TuningScore AutomaticBefore,
-    TuningScore AutomaticAfter);
+public sealed record ThresholdTuning
+{
+    /// <summary>The accepted steps, in the order they were tried (the default threshold first).</summary>
+    public required IReadOnlyList<ThresholdStep> Steps { get; init; }
+
+    /// <summary>The confirmed (hand-labelled) set with the thresholds as they are.</summary>
+    public required TuningScore ConfirmedBefore { get; init; }
+
+    /// <summary>The confirmed set after every step.</summary>
+    public required TuningScore ConfirmedAfter { get; init; }
+
+    /// <summary>The automatically labelled set with the thresholds as they are.</summary>
+    public required TuningScore AutomaticBefore { get; init; }
+
+    /// <summary>The automatically labelled set after every step.</summary>
+    public required TuningScore AutomaticAfter { get; init; }
+}
 
 /// <summary>Limits for <see cref="ThresholdTuner"/>.</summary>
 public sealed class ThresholdTuningOptions
@@ -157,20 +182,29 @@ public sealed class ThresholdTuner
                     continue;
                 }
 
-                steps.Add(new ThresholdStep(
-                    route,
-                    route is null ? state.Default : state.Routes[route],
-                    route is null ? next.Default : next.Routes[route],
-                    route is null ? target.Default : target.Routes[route],
-                    Changed(prepared, before, atTarget),
-                    Changed(prepared, atTarget, before),
-                    gain));
+                steps.Add(new ThresholdStep
+                {
+                    Route = route,
+                    Current = route is null ? state.Default : state.Routes[route],
+                    Proposed = route is null ? next.Default : next.Routes[route],
+                    Target = route is null ? target.Default : target.Routes[route],
+                    Fixed = Changed(prepared, before, atTarget),
+                    Broken = Changed(prepared, atTarget, before),
+                    Gain = gain,
+                });
                 state = next;
                 reached = after;
             }
         }
 
-        return new ThresholdTuning(steps, baseline.Confirmed, reached.Confirmed, baseline.Automatic, reached.Automatic);
+        return new ThresholdTuning
+        {
+            Steps = steps,
+            ConfirmedBefore = baseline.Confirmed,
+            ConfirmedAfter = reached.Confirmed,
+            AutomaticBefore = baseline.Automatic,
+            AutomaticAfter = reached.Automatic,
+        };
     }
 
     /// <summary>Nothing gets worse than <paramref name="baseline"/> where it matters.</summary>
@@ -283,8 +317,22 @@ public sealed class ThresholdTuner
 
         return new Outcome(
             correct,
-            new TuningScore(confirmedCount, confirmed[0], confirmed[1], confirmed[2], confirmed[3]),
-            new TuningScore(count - confirmedCount, automatic[0], automatic[1], automatic[2], automatic[3]),
+            new TuningScore
+            {
+                Total = confirmedCount,
+                Correct = confirmed[0],
+                TooLow = confirmed[1],
+                TooHigh = confirmed[2],
+                LocalOnlyMissed = confirmed[3],
+            },
+            new TuningScore
+            {
+                Total = count - confirmedCount,
+                Correct = automatic[0],
+                TooLow = automatic[1],
+                TooHigh = automatic[2],
+                LocalOnlyMissed = automatic[3],
+            },
             weighted,
             weightedTooLow);
     }

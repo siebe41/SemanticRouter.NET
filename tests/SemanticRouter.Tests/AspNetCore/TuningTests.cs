@@ -22,15 +22,15 @@ public sealed class TuningTests : RouterHostTest
     /// </summary>
     private async Task<HttpClient> StartTunedAsync(Action<TuningOptions>? tuning = null, int smallTalk = 3, int reasoning = 3)
     {
-        var cases = new List<EvaluationCase> { new(_embeddings.At("what is the weather in paris", 0, 0.3f), 3) };
+        var cases = new List<EvaluationCase> { new EvaluationCase { Prompt = _embeddings.At("what is the weather in paris", 0, 0.3f), ExpectedTier = 3 } };
         for (int i = 0; i < smallTalk; i++)
         {
-            cases.Add(new EvaluationCase(_embeddings.At($"hi there {i}", 0, 0.765f), 1) { ExpectedRoute = "smalltalk" });
+            cases.Add(new EvaluationCase { Prompt = _embeddings.At($"hi there {i}", 0, 0.765f), ExpectedTier = 1, ExpectedRoute = "smalltalk" });
         }
 
         for (int i = 0; i < reasoning; i++)
         {
-            cases.Add(new EvaluationCase(_embeddings.At($"design the ledger {i}", 2, 0.825f), 4) { ExpectedRoute = "reasoning" });
+            cases.Add(new EvaluationCase { Prompt = _embeddings.At($"design the ledger {i}", 2, 0.825f), ExpectedTier = 4, ExpectedRoute = "reasoning" });
         }
 
         HttpClient client = await StartAsync(
@@ -293,7 +293,7 @@ public sealed class TuningTests : RouterHostTest
                 ServedBy = "local",
                 Grade = 2,
             });
-            cases.Add(new EvaluationCase(prompt, agrees ? 3 : 1) { Note = $"labelled from activity #{entry.Id}" });
+            cases.Add(new EvaluationCase { Prompt = prompt, ExpectedTier = agrees ? 3 : 1, Note = $"labelled from activity #{entry.Id}" });
         }
 
         labels.Save(cases);
@@ -355,7 +355,7 @@ public sealed class TuningTests : RouterHostTest
         const string prompt = "ship the release notes";
         _embeddings.Set(prompt, [0f, 0f, 0f, 0f, 0f, 1f]);
         _embeddings.Set("draft the release notes", [0f, 0f, 0f, 0f, 0.5f, 0.866f]);
-        labels.Save([.. labels.Load(), new EvaluationCase(prompt, 1) { ExpectedRoute = "smalltalk" }, new EvaluationCase("draft the release notes", 1), new EvaluationCase(_embeddings.At("good day", 0, 0.9f), 1)]);
+        labels.Save([.. labels.Load(), new EvaluationCase { Prompt = prompt, ExpectedTier = 1, ExpectedRoute = "smalltalk" }, new EvaluationCase { Prompt = "draft the release notes", ExpectedTier = 1 }, new EvaluationCase { Prompt = _embeddings.At("good day", 0, 0.9f), ExpectedTier = 1 }]);
 
         JsonElement run = await RunAsync(client);
 

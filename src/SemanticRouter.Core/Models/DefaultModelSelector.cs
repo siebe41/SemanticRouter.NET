@@ -1,6 +1,23 @@
 namespace SemanticRouter;
 
 /// <summary>
+/// The optional collaborators of a <see cref="DefaultModelSelector"/>: what it learns about the models while the router
+/// runs. Without one, the selector does without that knowledge.
+/// </summary>
+/// <remarks>A new collaborator becomes a property here, so code that creates a selector keeps working.</remarks>
+public sealed class DefaultModelSelectorDependencies
+{
+    /// <summary>Recent time to first byte per model, for <see cref="SelectionStrategy.Fastest"/> and <see cref="SelectionStrategy.Balanced"/>.</summary>
+    public IModelLatency? Latency { get; init; }
+
+    /// <summary>Recent prompt-cache shares per model and route, for cost estimates; without it, list prices.</summary>
+    public IModelCacheShare? CacheShare { get; init; }
+
+    /// <summary>Which local models are loaded now, for <see cref="SelectionStrategy.CheapestCapable"/>.</summary>
+    public IModelResidency? Residency { get; init; }
+}
+
+/// <summary>
 /// The default <see cref="IModelSelector"/>.
 /// </summary>
 /// <remarks>
@@ -18,21 +35,29 @@ public sealed class DefaultModelSelector : IModelSelector
     private readonly IModelCacheShare? _cache;
     private readonly IModelResidency? _residency;
 
-    /// <summary>Creates a selector.</summary>
-    /// <param name="options">The selection settings.</param>
-    /// <param name="latency">Recent time to first byte per model, for <see cref="SelectionStrategy.Fastest"/> and <see cref="SelectionStrategy.Balanced"/>.</param>
-    /// <param name="cache">Recent prompt-cache shares per model and route, for cost estimates; without it, list prices.</param>
-    /// <param name="residency">Which local models are loaded now, for <see cref="SelectionStrategy.CheapestCapable"/>.</param>
-    public DefaultModelSelector(
-        ModelSelectionOptions? options = null,
-        IModelLatency? latency = null,
-        IModelCacheShare? cache = null,
-        IModelResidency? residency = null)
+    /// <summary>Creates a selector with the default settings.</summary>
+    public DefaultModelSelector()
+        : this(null, new DefaultModelSelectorDependencies())
     {
+    }
+
+    /// <summary>Creates a selector.</summary>
+    /// <param name="options">The selection settings, or <see langword="null"/> for the defaults.</param>
+    public DefaultModelSelector(ModelSelectionOptions? options)
+        : this(options, new DefaultModelSelectorDependencies())
+    {
+    }
+
+    /// <summary>Creates a selector.</summary>
+    /// <param name="options">The selection settings, or <see langword="null"/> for the defaults.</param>
+    /// <param name="dependencies">What the selector learns about the models while the router runs.</param>
+    public DefaultModelSelector(ModelSelectionOptions? options, DefaultModelSelectorDependencies dependencies)
+    {
+        ArgumentNullException.ThrowIfNull(dependencies);
         _options = options ?? new ModelSelectionOptions();
-        _latency = latency;
-        _cache = cache;
-        _residency = residency;
+        _latency = dependencies.Latency;
+        _cache = dependencies.CacheShare;
+        _residency = dependencies.Residency;
     }
 
     /// <inheritdoc />
@@ -61,7 +86,7 @@ public sealed class DefaultModelSelector : IModelSelector
 
             bool meets = model.Tier >= requirements.RequiredTier;
             decimal cost = model.EstimateCost(requirements.EstimatedInputTokens, outputTokens, _cache?.Typical(model, requirements.Route));
-            var candidate = new ModelCandidate(model, cost, meets);
+            var candidate = new ModelCandidate { Model = model, EstimatedCost = cost, MeetsRequiredTier = meets };
             (meets ? meeting : below).Add(candidate);
         }
 
