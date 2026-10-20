@@ -250,6 +250,57 @@ public sealed class DashboardRoleTests : RouterHostTest
     }
 
     [Fact]
+    public async Task The_read_only_role_cannot_export_prompt_text()
+    {
+        HttpClient client = await StartAsync();
+        SeedText();
+        Services.GetRequiredService<IEvaluationSetStore>().Save(
+            [new EvaluationCase("shared prompt", 1), new EvaluationCase(Secret + "-LOCAL", 2) { LocalOnly = true }]);
+
+        async Task<(HttpStatusCode Status, string Body)> GetAsync(string path, string token)
+        {
+            HttpResponseMessage response = await client.SendAsync(Request(HttpMethod.Get, path, token));
+            return (response.StatusCode, await response.Content.ReadAsStringAsync());
+        }
+
+        (HttpStatusCode activity, string activityBody) = await GetAsync("/router/api/activity/export?format=jsonl", ReadOnlyToken);
+        (HttpStatusCode set, string setBody) = await GetAsync("/router/api/evaluation/set/export", ReadOnlyToken);
+        activity.Should().Be(HttpStatusCode.OK);
+        activityBody.Should().Contain("private").And.NotContain(Secret + "-PROMPT");
+        set.Should().Be(HttpStatusCode.OK);
+        setBody.Should().Contain("shared prompt").And.NotContain(Secret + "-LOCAL");
+
+        foreach (string path in new[]
+                 {
+                     "/router/api/activity/export?format=jsonl&prompts=true", "/router/api/activity/export?prompts=True",
+                     "/router/api/evaluation/set/export?localOnly=true",
+                 })
+        {
+            (HttpStatusCode status, string body) = await GetAsync(path, ReadOnlyToken);
+            status.Should().Be(HttpStatusCode.Forbidden, path);
+            body.Should().Contain("Only the admin role can export prompt text").And.NotContain(Secret, path);
+        }
+
+        (await GetAsync("/router/api/activity/export?prompts=false", ReadOnlyToken)).Status.Should().Be(HttpStatusCode.OK);
+        (await GetAsync("/router/api/activity/export?prompts=true", AdminToken)).Body.Should().Contain(Secret + "-PROMPT");
+        (await GetAsync("/router/api/evaluation/set/export?localOnly=true", AdminToken)).Body.Should().Contain(Secret + "-LOCAL");
+        Audit().Should().Contain(e => e.Actor == "read-only token" && e.Status == 403 && e.Summary == "exported activity");
+    }
+
+    [Fact]
+    public async Task An_admin_can_export_prompt_text_under_a_read_only_policy()
+    {
+        HttpClient client = await StartAsync(services: s => s.AddSingleton(MachinePolicy.FromJson("""{"Dashboard":"ReadOnly"}""", "test policy")));
+        SeedText();
+
+        HttpResponseMessage export = await client.SendAsync(Request(HttpMethod.Get, "/router/api/activity/export?prompts=true", AdminToken));
+
+        export.StatusCode.Should().Be(HttpStatusCode.OK, "exporting changes nothing, as reading the audit log does not");
+        (await export.Content.ReadAsStringAsync()).Should().Contain(Secret + "-PROMPT");
+        (await client.SendAsync(Request(HttpMethod.Get, "/router/api/activity/export?prompts=true", ReadOnlyToken))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
     public async Task The_metrics_token_opens_nothing_on_the_gateway()
     {
         HttpClient client = await StartAsync();

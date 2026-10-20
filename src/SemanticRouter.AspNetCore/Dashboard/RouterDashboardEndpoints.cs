@@ -414,7 +414,7 @@ public static partial class RouterDashboardEndpoints
             return string.Equals(format, "jsonl", StringComparison.OrdinalIgnoreCase)
                 ? Results.File(System.Text.Encoding.UTF8.GetBytes(ActivityReports.ToJsonLines(entries, includePrompts)), "application/jsonl", $"semantic-router-activity-{stamp}.jsonl")
                 : Results.File(System.Text.Encoding.UTF8.GetBytes(ActivityReports.ToCsv(entries, includePrompts)), "text/csv", $"semantic-router-activity-{stamp}.csv");
-        }).Audited("exported activity");
+        }).WithMetadata(new DashboardPromptExportMetadata("prompts")).Audited("exported activity");
 
         api.MapGet("/usage", (RouterRuntimeProvider provider, IUsageLedger ledger, BudgetGate budgets, string? window, string? by) =>
         {

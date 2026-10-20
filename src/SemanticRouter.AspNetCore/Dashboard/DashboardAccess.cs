@@ -19,6 +19,8 @@ public enum RouterDashboardRole
     /// <summary>
     /// View status, activity and the (masked) configuration. No changes, and nothing that spends embedding or API calls
     /// or scans the disk: classifying, evaluating, testing embeddings, checking or discovering connectors, rescanning memory.
+    /// Prompt previews show on the pages, but exports leave the prompt text out (activity's <c>prompts=true</c> and the
+    /// evaluation set's <c>localOnly=true</c> need <see cref="Admin"/>).
     /// </summary>
     ReadOnly = 1,
 
@@ -52,6 +54,20 @@ internal sealed class DashboardMetricsMetadata
 internal sealed class DashboardAdminReadMetadata
 {
     public static DashboardAdminReadMetadata Instance { get; } = new();
+}
+
+/// <summary>
+/// Marks an export that holds prompt text in bulk when its query parameter <see cref="Parameter"/> is <c>true</c> (activity
+/// with prompt previews, the evaluation set with its local-only prompts). That form needs the admin role, as
+/// <see cref="DashboardAdminReadMetadata"/> does; without the parameter the export stays open to the read-only role.
+/// </summary>
+/// <param name="parameter">The query parameter that asks for the prompt text.</param>
+internal sealed class DashboardPromptExportMetadata(string parameter)
+{
+    public string Parameter { get; } = parameter;
+
+    /// <summary>Whether <paramref name="request"/> asks for the prompt text, read as the endpoint binds the parameter.</summary>
+    public bool Asks(HttpRequest request) => bool.TryParse(request.Query[Parameter], out bool asked) && asked;
 }
 
 /// <summary>
@@ -337,6 +353,13 @@ internal sealed class DashboardAccess
         if (role != RouterDashboardRole.Admin && endpoint?.Metadata.GetMetadata<DashboardAdminReadMetadata>() is not null)
         {
             return Refuse(StatusCodes.Status403Forbidden, "Only the admin role can read the audit log.");
+        }
+
+        // Checked before a read-only policy clamps the role, as the audit log is: exporting changes nothing.
+        if (role != RouterDashboardRole.Admin && endpoint?.Metadata.GetMetadata<DashboardPromptExportMetadata>() is { } export && export.Asks(context.Request))
+        {
+            return Refuse(StatusCodes.Status403Forbidden,
+                $"Only the admin role can export prompt text ({export.Parameter}=true). Leave {export.Parameter} out to export without it.");
         }
 
         if (_policy == DashboardPolicy.ReadOnly && role == RouterDashboardRole.Admin)

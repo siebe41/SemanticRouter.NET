@@ -57,7 +57,7 @@ internal static class EvaluationApi
             // Prompts labelled local-only stay on this machine unless the export asks for them.
             IEnumerable<EvaluationCase> cases = store.Load().Where(c => localOnly == true || !c.LocalOnly);
             return Results.File(Encoding.UTF8.GetBytes(EvaluationSet.ToJsonLines(cases)), "application/jsonl", "semantic-router.evaluation.jsonl");
-        }).Audited("exported the evaluation set");
+        }).WithMetadata(new DashboardPromptExportMetadata("localOnly")).Audited("exported the evaluation set");
 
         api.MapPost("/evaluate", async (HttpContext context, RouterRuntimeProvider provider, IEvaluationSetStore store, bool? calibrate) =>
         {

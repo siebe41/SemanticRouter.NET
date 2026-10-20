@@ -38,7 +38,7 @@ A JSON array of the same objects works too, as does `{"cases": [...]}`. Use the 
 
 - **Where it lives.** `semantic-router init` writes a sample set for the starting routes as `semantic-router.evaluation.jsonl` next to `semantic-router.json`. A library host keeps the set next to its configuration file (`UseConfigurationFile`), or wherever `UseEvaluationSetFile(path)` says. Without either, the set lives in memory.
 - **Growing it from real traffic.** On the **Activity** page, **Label** opens a form for any entry. Pick the tier the prompt should have had (and optionally its route). Then add it to the set, add it as an utterance to a route (an existing one, or a new one created with that tier), or both. Adding an utterance applies a new configuration version immediately, so the next prompt like it routes differently without a restart.
-- **Privacy.** Labels keep the local-only flag of the activity entry. **Download** (`GET api/evaluation/set/export`) leaves local-only prompts out unless you add `?localOnly=true`. The activity log keeps only the first 160 characters of a prompt, so check the text in the label form.
+- **Privacy.** Labels keep the local-only flag of the activity entry. **Download** (`GET api/evaluation/set/export`) leaves local-only prompts out unless you add `?localOnly=true`, which needs the admin role. The activity log keeps only the first 160 characters of a prompt, so check the text in the label form.
 
 ## Running a set
 
@@ -240,7 +240,7 @@ It is off by default: a client that legitimately repeats a prompt (a "regenerate
 | `GET api/evaluation/set` | The stored set: `location`, `count`, `cases`. |
 | `PUT api/evaluation/set` | Replace the set. Body: an array of cases, JSON Lines, or `{"text": "…"}`. |
 | `POST api/evaluation/cases` | Add a case (`{prompt, tier, route?, localOnly?, note?}`). A prompt labelled again replaces its earlier label. |
-| `GET api/evaluation/set/export?localOnly=false` | Download the set as JSON Lines, without local-only prompts unless asked. |
+| `GET api/evaluation/set/export?localOnly=false` | Download the set as JSON Lines, without local-only prompts unless asked (`localOnly=true`, admin role only). |
 | `POST api/evaluate?calibrate=true` | Evaluate the body's set, or the stored set when the body is empty. |
 | `POST api/evaluate/compare` | `{"embeddings": {provider settings}, "text": optional set}`: both providers' reports and calibrations. |
 | `GET api/routes/health` | Findings and route pairs. |
