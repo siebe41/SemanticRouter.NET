@@ -5,7 +5,7 @@ using SemanticRouter.AspNetCore;
 namespace SemanticRouter.Connectors.Copilot;
 
 /// <summary>
-/// Creates <see cref="ConnectorType.Copilot"/> connectors. The Copilot runtime behind them is shared per executable and
+/// Creates <see cref="CopilotConnector.Type"/> connectors. The Copilot runtime behind them is shared per executable and
 /// home directory, so applying a new configuration does not start another process.
 /// </summary>
 internal sealed class CopilotConnectorFactory : IChatConnectorFactory, IAsyncDisposable
@@ -26,7 +26,7 @@ internal sealed class CopilotConnectorFactory : IChatConnectorFactory, IAsyncDis
         _create = create;
     }
 
-    public ConnectorType Type => ConnectorType.Copilot;
+    public string Type => CopilotConnector.Type;
 
     public IChatConnector Create(string name, ConnectorOptions options)
     {

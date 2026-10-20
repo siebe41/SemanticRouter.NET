@@ -173,17 +173,17 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 continue;
             }
 
-            switch (connector.Type)
+            if (connector.Type == ConnectorTypes.Cli && connector.Preset == CliPreset.Custom && string.IsNullOrWhiteSpace(connector.Executable))
             {
-                case ConnectorType.Cli when connector.Preset == CliPreset.Custom && string.IsNullOrWhiteSpace(connector.Executable):
-                    errors.Add($"Connector '{name}' is a Custom CLI and needs an Executable.");
-                    break;
-                case ConnectorType.Cli or ConnectorType.Copilot when connector.MaxConcurrency < 1:
-                    errors.Add($"Connector '{name}' MaxConcurrency must be at least 1.");
-                    break;
-                case ConnectorType.OpenAICompatible or ConnectorType.Anthropic or ConnectorType.Responses when connector.BaseAddress is not { IsAbsoluteUri: true }:
-                    errors.Add($"Connector '{name}' needs an absolute BaseAddress.");
-                    break;
+                errors.Add($"Connector '{name}' is a Custom CLI and needs an Executable.");
+            }
+            else if (connector.RunsProgram && connector.MaxConcurrency < 1)
+            {
+                errors.Add($"Connector '{name}' MaxConcurrency must be at least 1.");
+            }
+            else if (!connector.RunsProgram && connector.BaseAddress is not { IsAbsoluteUri: true })
+            {
+                errors.Add($"Connector '{name}' needs an absolute BaseAddress.");
             }
 
             if (connector.Timeout < TimeSpan.Zero)
@@ -215,7 +215,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
-        if (Embeddings.Provider == EmbeddingProviderKind.OpenAICompatible)
+        if (Embeddings.Provider == EmbeddingProviderKinds.OpenAICompatible)
         {
             if (Embeddings.Endpoint is not { IsAbsoluteUri: true })
             {
@@ -705,7 +705,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
     }
 
     /// <summary>
-    /// The CLI and Copilot connectors whose process settings (program, arguments, environment variables, home directory)
+    /// The connectors that run a program (CLI, or a packaged type such as Copilot) whose process settings (program, arguments, environment variables, home directory)
     /// differ from <paramref name="current"/>, other than a plain preset started from PATH.
     /// </summary>
     internal IReadOnlyList<string> ProcessSettingChanges(RouterConfiguration current)
@@ -713,13 +713,13 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         var changed = new List<string>();
         foreach ((string name, ConnectorOptions connector) in Connectors)
         {
-            if (connector.Type is not (ConnectorType.Cli or ConnectorType.Copilot)
+            if (!connector.RunsProgram
                 || (current.Connectors.TryGetValue(name, out ConnectorOptions? existing) && SameProcess(connector, existing)))
             {
                 continue;
             }
 
-            bool plainPreset = (connector.Type == ConnectorType.Copilot || connector.Preset != CliPreset.Custom)
+            bool plainPreset = (connector.Type != ConnectorTypes.Cli || connector.Preset != CliPreset.Custom)
                 && string.IsNullOrEmpty(connector.Executable) && connector.Arguments is not { Count: > 0 }
                 && connector.EnvironmentVariables.Count == 0 && string.IsNullOrEmpty(connector.HomeDirectory)
                 && connector.RemoveEnvironmentVariables is null && connector.PromptInput == CliPromptInput.Stdin;

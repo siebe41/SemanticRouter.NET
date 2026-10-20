@@ -94,7 +94,7 @@ internal static class PromptCacheLifetime
     /// </summary>
     public static TimeSpan? Of(ChatCompletionRequest chat, ConnectorOptions connector)
     {
-        if (connector.Type != ConnectorType.Anthropic)
+        if (connector.Type != ConnectorTypes.Anthropic)
         {
             return null;
         }

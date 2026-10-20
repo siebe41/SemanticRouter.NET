@@ -100,12 +100,12 @@ public sealed class OnnxEmbeddingTests : IDisposable
     {
         var factory = new OnnxEmbeddingProviderFactory(new ServiceCollection().BuildServiceProvider(), Options.Create(new OnnxEmbeddingOptions { ModelsDirectory = _directory }));
 
-        IEmbeddingProvider unknown = factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx, Model = "nope" });
+        IEmbeddingProvider unknown = factory.Create(new EmbeddingProviderOptions { Provider = OnnxEmbeddings.Provider, Model = "nope" });
 
         (await FluentActions.Awaiting(() => unknown.GenerateEmbeddingAsync("hi").AsTask()).Should().ThrowAsync<InvalidOperationException>())
             .WithMessage("*'nope' is not a known ONNX model (all-MiniLM-L6-v2, bge-small-en-v1.5)*ModelPath*");
 
-        IEmbeddingProvider missing = factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx, ModelPath = Path.Combine(_directory, "absent") });
+        IEmbeddingProvider missing = factory.Create(new EmbeddingProviderOptions { Provider = OnnxEmbeddings.Provider, ModelPath = Path.Combine(_directory, "absent") });
         (await FluentActions.Awaiting(() => missing.GenerateEmbeddingAsync("hi").AsTask()).Should().ThrowAsync<InvalidOperationException>())
             .WithMessage("*could not be loaded*");
     }
@@ -116,13 +116,13 @@ public sealed class OnnxEmbeddingTests : IDisposable
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSemanticPromptRouting(o => o.Routes.Add(TestEmbeddings.Route("smalltalk", 1, "hello"))).Services
-            .Configure<EmbeddingProviderOptions>(o => o.Provider = EmbeddingProviderKind.Onnx);
+            .Configure<EmbeddingProviderOptions>(o => o.Provider = OnnxEmbeddings.Provider);
         await using ServiceProvider provider = services.BuildServiceProvider();
 
         IEmbeddingProvider embeddings = provider.GetRequiredService<RouterRuntimeProvider>().Current.EmbeddingProvider;
 
         (await FluentActions.Awaiting(() => embeddings.GenerateEmbeddingAsync("hi").AsTask()).Should().ThrowAsync<InvalidOperationException>())
-            .WithMessage("*SemanticRouter.Embeddings.Onnx*UseOnnxEmbeddings*");
+            .WithMessage("No installed package provides the embedding provider 'Onnx'*");
     }
 
     private static OnnxEmbeddingProviderFactory RealFactory() => new(
@@ -133,7 +133,7 @@ public sealed class OnnxEmbeddingTests : IDisposable
     public async Task MiniLM_embeds_meaning_not_just_shared_words()
     {
         using OnnxEmbeddingProviderFactory factory = RealFactory();
-        IEmbeddingProvider provider = factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx });
+        IEmbeddingProvider provider = factory.Create(new EmbeddingProviderOptions { Provider = OnnxEmbeddings.Provider });
 
         IReadOnlyList<ReadOnlyMemory<float>> vectors = await provider.GenerateEmbeddingsAsync(
             ["hello, how are you?", "hey there, how's it going", "why does this async code deadlock", ""]);
@@ -155,7 +155,7 @@ public sealed class OnnxEmbeddingTests : IDisposable
     public async Task With_MiniLM_corrections_in_other_languages_are_recognised_and_next_steps_are_not()
     {
         using OnnxEmbeddingProviderFactory factory = RealFactory();
-        IEmbeddingProvider provider = factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx });
+        IEmbeddingProvider provider = factory.Create(new EmbeddingProviderOptions { Provider = OnnxEmbeddings.Provider });
         var detector = new CorrectionDetector(null!, Microsoft.Extensions.Logging.Abstractions.NullLogger<CorrectionDetector>.Instance);
         var options = new FeedbackOptions();
         async Task<bool> Corrected(string prompt) =>
@@ -196,7 +196,7 @@ public sealed class OnnxEmbeddingTests : IDisposable
     public async Task A_loaded_model_is_shared_by_every_configuration_version()
     {
         using OnnxEmbeddingProviderFactory factory = RealFactory();
-        var options = new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx, Model = "bge-small-en-v1.5" };
+        var options = new EmbeddingProviderOptions { Provider = OnnxEmbeddings.Provider, Model = "bge-small-en-v1.5" };
 
         ReadOnlyMemory<float> first = await factory.Create(options).GenerateEmbeddingAsync("summarize this email");
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -218,7 +218,7 @@ public sealed class OnnxEmbeddingTests : IDisposable
         RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
         template.DefaultSimilarityThreshold = OnnxEmbeddingModels.Find(name)!.SuggestedThreshold;
         using OnnxEmbeddingProviderFactory factory = RealFactory();
-        var classifier = new SemanticPromptClassifier(factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx, Model = name }), template);
+        var classifier = new SemanticPromptClassifier(factory.Create(new EmbeddingProviderOptions { Provider = OnnxEmbeddings.Provider, Model = name }), template);
         (string Prompt, string Route, int Tier)[] expected =
         [
             ("what does HTTP 409 mean?", "quick-answers", 2),
@@ -256,7 +256,7 @@ public sealed class OnnxEmbeddingTests : IDisposable
         RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
         template.DefaultSimilarityThreshold = OnnxEmbeddingModels.Find(null)!.SuggestedThreshold;
         using OnnxEmbeddingProviderFactory factory = RealFactory();
-        var classifier = new SemanticPromptClassifier(factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx }), template);
+        var classifier = new SemanticPromptClassifier(factory.Create(new EmbeddingProviderOptions { Provider = OnnxEmbeddings.Provider }), template);
         string function = string.Join('\n',
             "def parse_duration(text):",
             "    units = {\"d\": 86400, \"h\": 3600, \"m\": 60, \"s\": 1}",
@@ -300,7 +300,7 @@ public sealed class OnnxEmbeddingTests : IDisposable
             },
         });
         using OnnxEmbeddingProviderFactory factory = RealFactory();
-        var classifier = new SemanticPromptClassifier(factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx }), template);
+        var classifier = new SemanticPromptClassifier(factory.Create(new EmbeddingProviderOptions { Provider = OnnxEmbeddings.Provider }), template);
         string records = string.Join('\n', Enumerable.Range(1, 12).Select(i =>
             $"{1000 + i}, customer {i}, account number {4400 + i}-0021, social security number {i:000}-45-6789"));
         PromptProse.Extract($"summarize these:\n{records}").Should().Be("summarize these:", "the records are a pasted block");
@@ -325,7 +325,7 @@ public sealed class OnnxEmbeddingTests : IDisposable
         OnnxModelInfo model = OnnxEmbeddingModels.Find(name)!;
         template.DefaultSimilarityThreshold = model.SuggestedThreshold;
         using OnnxEmbeddingProviderFactory factory = RealFactory();
-        IEmbeddingProvider embeddings = factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx, Model = name });
+        IEmbeddingProvider embeddings = factory.Create(new EmbeddingProviderOptions { Provider = OnnxEmbeddings.Provider, Model = name });
         var evaluator = new RoutingEvaluator(embeddings, template);
         IReadOnlyList<EvaluationCase> cases = EvaluationSet.Parse(RouterHost.EvaluationTemplate());
 

@@ -32,7 +32,7 @@ public static partial class ConnectorProbe
         string name, ConnectorOptions connector, HttpClient client, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         ConnectorProbeResult listed = await ListModelsAsync(name, connector, client, timeout, cancellationToken).ConfigureAwait(false);
-        if (!listed.Ok || connector.Type != ConnectorType.OpenAICompatible || connector.BaseAddress is not { } baseAddress || !IsLocalAddress(baseAddress))
+        if (!listed.Ok || connector.Type != ConnectorTypes.OpenAICompatible || connector.BaseAddress is not { } baseAddress || !IsLocalAddress(baseAddress))
         {
             return listed;
         }
@@ -301,7 +301,7 @@ public static partial class ConnectorProbe
     {
         ArgumentNullException.ThrowIfNull(connector);
         ArgumentNullException.ThrowIfNull(client);
-        if (connector.Type != ConnectorType.OpenAICompatible || connector.BaseAddress is not { } baseAddress || !IsLocalAddress(baseAddress))
+        if (connector.Type != ConnectorTypes.OpenAICompatible || connector.BaseAddress is not { } baseAddress || !IsLocalAddress(baseAddress))
         {
             return null;
         }

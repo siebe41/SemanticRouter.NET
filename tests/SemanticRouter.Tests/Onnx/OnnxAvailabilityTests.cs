@@ -29,7 +29,7 @@ public sealed class OnnxAvailabilityTests : RouterHostTest, IDisposable
     private OnnxEmbeddingProviderFactory Factory(IServiceProvider services) =>
         new(services, Options.Create(new OnnxEmbeddingOptions { ModelsDirectory = _directory }), () => Reason);
 
-    private Task<HttpClient> StartAsync(EmbeddingProviderKind embeddings) => StartAsync(
+    private Task<HttpClient> StartAsync(string embeddings) => StartAsync(
         routing: o => o.Routes.Add(TestEmbeddings.Route("smalltalk", 1, "hello there")),
         services: s =>
         {
@@ -48,7 +48,7 @@ public sealed class OnnxAvailabilityTests : RouterHostTest, IDisposable
         await using (services)
         {
             using OnnxEmbeddingProviderFactory factory = Factory(services);
-            IEmbeddingProvider provider = factory.Create(new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx });
+            IEmbeddingProvider provider = factory.Create(new EmbeddingProviderOptions { Provider = OnnxEmbeddings.Provider });
 
             factory.Unavailable.Should().Be(Reason);
             (await FluentActions.Awaiting(() => provider.GenerateEmbeddingAsync("hi").AsTask()).Should().ThrowAsync<InvalidOperationException>())
@@ -89,7 +89,7 @@ public sealed class OnnxAvailabilityTests : RouterHostTest, IDisposable
     [Fact]
     public async Task A_request_falls_back_with_the_reason_in_the_log_and_no_stack_trace()
     {
-        HttpClient client = await StartAsync(EmbeddingProviderKind.Onnx);
+        HttpClient client = await StartAsync(OnnxEmbeddings.Provider);
 
         HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", new StringContent(ChatJson, Encoding.UTF8, "application/json"));
 
@@ -99,9 +99,20 @@ public sealed class OnnxAvailabilityTests : RouterHostTest, IDisposable
     }
 
     [Fact]
+    public async Task A_lowercase_provider_reaches_the_dashboard_in_the_package_spelling()
+    {
+        // The dashboard shows the Onnx model fields only for 'Onnx', compared exactly.
+        HttpClient client = await StartAsync("onnx");
+
+        JsonNode config = JsonNode.Parse(await client.GetStringAsync("/router/api/config"))!["config"]!;
+
+        ((string?)config["Embeddings"]!["Provider"]).Should().Be(OnnxEmbeddings.Provider);
+    }
+
+    [Fact]
     public async Task The_dashboard_status_says_onnx_cannot_run_here()
     {
-        HttpClient client = await StartAsync(EmbeddingProviderKind.Hashing);
+        HttpClient client = await StartAsync(EmbeddingProviderKinds.Hashing);
 
         JsonNode status = JsonNode.Parse(await client.GetStringAsync(new Uri("/router/api/status", UriKind.Relative)))!;
 
@@ -112,11 +123,11 @@ public sealed class OnnxAvailabilityTests : RouterHostTest, IDisposable
     [Fact]
     public async Task Doctor_suggests_an_embedding_server_instead_and_fails_an_onnx_choice()
     {
-        await StartAsync(EmbeddingProviderKind.Hashing);
+        await StartAsync(EmbeddingProviderKinds.Hashing);
         RouterCheck hashing = (await RouterDoctor.CheckAsync(Services)).Single(c => c.Subject == "embeddings");
         await DisposeAsync();
 
-        await StartAsync(EmbeddingProviderKind.Onnx);
+        await StartAsync(OnnxEmbeddings.Provider);
         RouterCheck onnx = (await RouterDoctor.CheckAsync(Services)).Single(c => c.Subject == "embeddings");
 
         hashing.Status.Should().Be(RouterCheckStatus.Warning);

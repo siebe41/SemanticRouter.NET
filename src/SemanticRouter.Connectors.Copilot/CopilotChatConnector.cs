@@ -42,7 +42,21 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
 
     public string Name { get; }
 
-    public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken) => _backend.ListModelsAsync(cancellationToken);
+    public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _backend.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or Win32Exception && !cancellationToken.IsCancellationRequested)
+        {
+            // The doctor and the dashboard's Discover show this message: say how to fix it.
+            string fix = ex.Message.Contains("authenticat", StringComparison.OrdinalIgnoreCase)
+                ? "Sign in once with `copilot` (then /login), or `gh auth login`."
+                : $"Install the copilot CLI (npm install -g @github/copilot) or set SemanticRouter:Connectors:{Name}:Executable to it, then sign in with `copilot` (/login).";
+            throw new InvalidOperationException($"{ex.Message.TrimEnd('.')}. {fix}", ex);
+        }
+    }
 
     public async Task<ConnectorResult> SendAsync(ConnectorRequest request, HttpContext context, CancellationToken cancellationToken)
     {

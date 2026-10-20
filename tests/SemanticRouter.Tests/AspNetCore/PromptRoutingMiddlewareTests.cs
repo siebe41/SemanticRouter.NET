@@ -105,7 +105,7 @@ public abstract class RouterHostTest : IAsyncDisposable
                     {
                         router.AddConnector("claude", c =>
                         {
-                            c.Type = ConnectorType.Cli;
+                            c.Type = ConnectorTypes.Cli;
                             c.Preset = CliPreset.ClaudeCode;
                         });
                     }

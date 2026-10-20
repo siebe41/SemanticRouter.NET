@@ -33,8 +33,11 @@ public sealed class MachinePolicy
     /// <summary>No policy: nothing is restricted.</summary>
     public static MachinePolicy None { get; } = new();
 
-    /// <summary>Connector types that may not be used, e.g. <c>["Cli", "Copilot"]</c> to keep subscription logins out.</summary>
-    public IList<ConnectorType> DisabledConnectorTypes { get; } = new List<ConnectorType>();
+    /// <summary>
+    /// Connector types that may not be used (case-insensitive), e.g. <c>["Cli", "Copilot"]</c> to keep subscription logins
+    /// out. Any <see cref="ConnectorOptions.Type"/> can be named, including types from connector packages.
+    /// </summary>
+    public IList<string> DisabledConnectorTypes { get; } = new List<string>();
 
     /// <summary>CLI presets that may not be used, e.g. <c>["ClaudeCode", "Codex"]</c>.</summary>
     public IList<CliPreset> DisabledPresets { get; } = new List<CliPreset>();
@@ -154,6 +157,11 @@ public sealed class MachinePolicy
 
     private IEnumerable<string> Errors()
     {
+        if (DisabledConnectorTypes.Any(string.IsNullOrWhiteSpace))
+        {
+            yield return "DisabledConnectorTypes may not hold an empty name.";
+        }
+
         foreach (string pattern in AllowedEndpoints.Concat(LocalHosts ?? []))
         {
             if (!HostPattern.TryParse(pattern, out _))
@@ -182,22 +190,22 @@ public sealed class MachinePolicy
     public string? Blocks(ConnectorOptions connector)
     {
         ArgumentNullException.ThrowIfNull(connector);
-        if (DisabledConnectorTypes.Contains(connector.Type))
+        if (DisabledConnectorTypes.Any(t => string.Equals(t?.Trim(), connector.Type, StringComparison.OrdinalIgnoreCase)))
         {
             return $"{connector.Type} connectors are turned off by your organization's policy";
         }
 
-        if (connector.Type == ConnectorType.Cli && DisabledPresets.Contains(connector.Preset))
+        if (connector.Type == ConnectorTypes.Cli && DisabledPresets.Contains(connector.Preset))
         {
             return $"the {connector.Preset} CLI is turned off by your organization's policy";
         }
 
-        if (Offline && connector.Type is ConnectorType.Cli or ConnectorType.Copilot)
+        if (Offline && connector.RunsProgram)
         {
             return $"{connector.Type} connectors reach their vendor, so they are off in offline mode ({OfflineSetting})";
         }
 
-        return connector.Type is ConnectorType.Cli or ConnectorType.Copilot || connector.BaseAddress is not { } address ? null : Refuses(address);
+        return connector.RunsProgram || connector.BaseAddress is not { } address ? null : Refuses(address);
     }
 
     /// <summary>Whether the router may send requests to <paramref name="address"/> (<see cref="AllowedEndpoints"/>, <see cref="Offline"/>).</summary>
@@ -217,7 +225,7 @@ public sealed class MachinePolicy
             : null;
     }
 
-    /// <summary>Whether <see cref="LocalHosts"/> lets a model at <paramref name="address"/> be local (<see langword="null"/>: a CLI or Copilot).</summary>
+    /// <summary>Whether <see cref="LocalHosts"/> lets a model at <paramref name="address"/> be local (<see langword="null"/>: a connector that runs a program, such as a CLI or Copilot).</summary>
     public bool AllowsLocal(Uri? address) =>
         LocalHosts is null || (address is not null && Matches(address, LocalHosts));
 
@@ -253,7 +261,7 @@ public sealed class MachinePolicy
         foreach (ModelDefinition model in configuration.Models.Where(m => m.IsLocal))
         {
             ConnectorOptions? connector = configuration.Connectors.FirstOrDefault(c => Same(c.Key, model.Connector)).Value;
-            Uri? address = connector?.Type is ConnectorType.Cli or ConnectorType.Copilot ? null : connector?.BaseAddress;
+            Uri? address = connector is null || connector.RunsProgram ? null : connector.BaseAddress;
             if (!AllowsLocal(address))
             {
                 model.IsLocal = false;
@@ -271,7 +279,11 @@ public sealed class MachinePolicy
         }
 
         EmbeddingProviderOptions embeddings = configuration.Embeddings;
-        if (embeddings.Provider == EmbeddingProviderKind.OpenAICompatible && embeddings.Endpoint is { } endpoint)
+        if (!EmbeddingProviderKinds.IsBuiltIn(embeddings.Provider) && !EmbeddingProviderKinds.RunsInProcess(embeddings.Provider))
+        {
+            EnforcePackagedEmbeddings(embeddings, changes);
+        }
+        else if (embeddings.Provider == EmbeddingProviderKinds.OpenAICompatible && embeddings.Endpoint is { } endpoint)
         {
             if (embeddings.IsLocal == true && !AllowsLocal(endpoint))
             {
@@ -281,12 +293,12 @@ public sealed class MachinePolicy
 
             if (Refuses(endpoint) is { } refused)
             {
-                embeddings.Provider = EmbeddingProviderKind.Hashing;
+                embeddings.Provider = EmbeddingProviderKinds.Hashing;
                 changes.Add($"The embeddings endpoint is not used ({refused}): routing uses the in-process hashing embeddings.");
             }
             else if (RequireLocalOnly && !embeddings.KeepsPromptsLocal)
             {
-                embeddings.Provider = EmbeddingProviderKind.Hashing;
+                embeddings.Provider = EmbeddingProviderKinds.Hashing;
                 changes.Add($"The embeddings endpoint {endpoint.Authority} is not allowed by your organization's policy: routing uses the in-process hashing embeddings.");
             }
         }
@@ -312,6 +324,36 @@ public sealed class MachinePolicy
             PromptStorage.Redacted => 1,
             _ => 2,
         };
+    }
+
+    /// <summary>
+    /// Holds a packaged embedding provider that does not run in this process (it may send text anywhere) to the policy:
+    /// offline mode and local-only models replace it with Hashing, as do allowed endpoints that do not include its
+    /// <see cref="EmbeddingProviderOptions.Endpoint"/>, and local hosts that do not include it make it not local.
+    /// </summary>
+    private void EnforcePackagedEmbeddings(EmbeddingProviderOptions embeddings, List<string> changes)
+    {
+        string provider = embeddings.Provider;
+        if (embeddings.IsLocal == true && !AllowsLocal(embeddings.Endpoint))
+        {
+            embeddings.IsLocal = false;
+            changes.Add($"The {provider} embeddings do not count as local in your organization's policy.");
+        }
+
+        string? refused = Offline ? $"{provider} embeddings may reach their vendor, so they are off in offline mode ({OfflineSetting})"
+            : AllowedEndpoints.Count == 0 ? null
+            : embeddings.Endpoint is { } endpoint ? Refuses(endpoint)
+            : $"{provider} embeddings name no Endpoint, and your organization's policy allows only listed endpoints";
+        if (refused is not null)
+        {
+            embeddings.Provider = EmbeddingProviderKinds.Hashing;
+            changes.Add($"The {provider} embeddings are not used ({refused}): routing uses the in-process hashing embeddings.");
+        }
+        else if (RequireLocalOnly && !embeddings.KeepsPromptsLocal)
+        {
+            embeddings.Provider = EmbeddingProviderKinds.Hashing;
+            changes.Add($"The {provider} embeddings are not allowed by your organization's policy, which allows local models only: routing uses the in-process hashing embeddings.");
+        }
     }
 
     /// <summary>What a configuration change would have to give up to keep within the policy; empty when it keeps within it.</summary>

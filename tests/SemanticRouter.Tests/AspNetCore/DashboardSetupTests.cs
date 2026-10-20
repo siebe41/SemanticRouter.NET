@@ -300,7 +300,7 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
         config["Connectors"]!["lmstudio"]!["Type"] = "Telepathy";
         JsonNode badEnum = await NodeAsync(await client.PostAsync("/router/api/config/validate", Body(config)));
         ((string?)badEnum["issues"]![0]!["path"]).Should().Be("Connectors.lmstudio.Type");
-        ((string?)badEnum["issues"]![0]!["message"]).Should().Contain("\"Telepathy\" is not one of:").And.Contain("OpenAICompatible");
+        ((string?)badEnum["issues"]![0]!["message"]).Should().Contain("no installed connector package provides connector type 'Telepathy'").And.Contain("OpenAICompatible");
 
         config["Connectors"]!["lmstudio"]!["Type"] = "OpenAICompatible";
         config["Models"]![0]!["Tier"] = "high";
@@ -457,7 +457,7 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
     {
         var detector = new FixedDetector(
             new SetupDetection("claude-code", "Claude Code", "cli", "claude-cli",
-                new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode, ToolCalling = CliToolCalling.Prompted })
+                new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode, ToolCalling = CliToolCalling.Prompted })
             {
                 Detail = "Signed in · claude 2.1.3 at /usr/local/bin/claude",
                 Consent = SetupApi.Consent(CliPreset.ClaudeCode),
@@ -498,7 +498,7 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
     [Fact]
     public async Task Setup_says_when_a_model_is_needed_and_leaves_out_what_the_policy_or_offline_mode_turns_off()
     {
-        var detector = new FixedDetector(new SetupDetection("claude-code", "Claude Code", "cli", "claude-cli", new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode }));
+        var detector = new FixedDetector(new SetupDetection("claude-code", "Claude Code", "cli", "claude-cli", new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode }));
         HttpClient client = await StartDispatchAsync(
             routing: o => o.Models.ToList().ForEach(m => m.Enabled = false),
             services: s =>
@@ -616,12 +616,12 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
     [InlineData("OpenAICompatible", "http://[::1]:1234/", null, "http://[::1]:1234")]
     [InlineData("Cli", null, "/opt/tools/claude", "claude")]
     [InlineData("Cli", null, null, "claude")]
-    [InlineData("Copilot", null, null, "copilot")]
+    [InlineData("Copilot", null, null, "Copilot")]
     public void The_audit_names_where_a_draft_connector_was_asked_without_its_path_or_credentials(string type, string? address, string? executable, string expected)
     {
         var connector = new ConnectorOptions
         {
-            Type = Enum.Parse<ConnectorType>(type),
+            Type = type,
             BaseAddress = address is null ? null : new Uri(address),
             Executable = executable,
             Preset = CliPreset.ClaudeCode,

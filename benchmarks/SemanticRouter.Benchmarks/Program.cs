@@ -49,7 +49,7 @@ var providers = new List<(string Name, Func<IEmbeddingProvider> Create)> { ("Has
 providers.AddRange(onnx);
 if (args.Length >= 3 && args[0] == "--remote")
 {
-    var options = new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.OpenAICompatible, Endpoint = new Uri(args[1]), Model = args[2] };
+    var options = new EmbeddingProviderOptions { Provider = EmbeddingProviderKinds.OpenAICompatible, Endpoint = new Uri(args[1]), Model = args[2] };
     providers.Add(($"{args[2]} at {args[1]}", () => new OpenAICompatibleEmbeddingProvider(new HttpClient(), options)));
 }
 

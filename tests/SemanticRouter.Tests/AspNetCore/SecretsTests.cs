@@ -96,7 +96,7 @@ public sealed class SecretsTests
     public void Cli_environment_variables_and_cookie_headers_are_secrets()
     {
         RouterConfiguration document = Document();
-        var claude = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        var claude = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode };
         claude.EnvironmentVariables["CLAUDE_CODE_OAUTH_TOKEN"] = "oauth-secret-123";
         document.Connectors["claude"] = claude;
         document.Connectors["azure"].Headers["Cookie"] = "session=abc123";
@@ -118,7 +118,7 @@ public sealed class SecretsTests
     public void A_stored_secret_is_not_sent_where_its_connector_now_points()
     {
         RouterConfiguration current = Document();
-        var cli = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        var cli = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode };
         cli.EnvironmentVariables["CLAUDE_CODE_OAUTH_TOKEN"] = "oauth-secret-123";
         current.Connectors["claude"] = cli;
 
@@ -218,7 +218,7 @@ public sealed class SecretsTests
         RouterConfiguration preset = current.Masked();
         preset.Connectors["anthropic"] = new ConnectorOptions
         {
-            Type = ConnectorType.Anthropic,
+            Type = ConnectorTypes.Anthropic,
             BaseAddress = new Uri("https://api.anthropic.com"),
             ApiKey = "${env:ANTHROPIC_API_KEY}",
         };

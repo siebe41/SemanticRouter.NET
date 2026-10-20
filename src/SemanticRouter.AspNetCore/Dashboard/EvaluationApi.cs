@@ -305,9 +305,9 @@ internal static class EvaluationApi
 
     private static string Describe(EmbeddingProviderOptions settings) => settings.Provider switch
     {
-        EmbeddingProviderKind.Hashing => $"Hashing ({settings.Dimensions} dimensions)",
-        EmbeddingProviderKind.Onnx => $"ONNX {settings.ModelPath ?? settings.Model ?? "all-MiniLM-L6-v2"} (in-process)",
-        _ => $"{settings.Model} at {AddressDisplay.Show(settings.Endpoint)}",
+        EmbeddingProviderKinds.Hashing => $"Hashing ({settings.Dimensions} dimensions)",
+        EmbeddingProviderKinds.OpenAICompatible => $"{settings.Model} at {AddressDisplay.Show(settings.Endpoint)}",
+        _ => $"{settings.Provider} {settings.ModelPath ?? settings.Model ?? "(its default model)"}",
     };
 
     public sealed record CaseDto(string Prompt, int Tier, string? Route = null, bool LocalOnly = false, string? Note = null)

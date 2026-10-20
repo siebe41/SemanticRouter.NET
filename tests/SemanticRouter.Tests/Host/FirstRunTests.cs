@@ -60,7 +60,7 @@ public sealed class FirstRunTests : IDisposable
     public async Task Init_keeps_a_template_whose_embeddings_someone_chose()
     {
         RouterConfiguration chosen = RouterConfiguration.FromJson(RouterHost.Template());
-        chosen.Embeddings.Provider = EmbeddingProviderKind.OpenAICompatible;
+        chosen.Embeddings.Provider = EmbeddingProviderKinds.OpenAICompatible;
         chosen.Embeddings.Endpoint = new Uri("http://embeddings.lan:8080");
         chosen.Embeddings.Model = "nomic-embed-text";
         var store = new JsonFileRouterConfigurationStore(ConfigurationFile);
@@ -116,7 +116,7 @@ public sealed class FirstRunTests : IDisposable
         // After init ran (other embeddings, a disabled CLI model), running init again would not help.
         RouterConfiguration initialised = RouterConfiguration.FromJson(RouterHost.Template());
         initialised.Embeddings.Dimensions = 256;
-        initialised.Connectors["tool"] = new ConnectorOptions { Type = ConnectorType.Cli, Executable = "no-such-cli" };
+        initialised.Connectors["tool"] = new ConnectorOptions { Type = ConnectorTypes.Cli, Executable = "no-such-cli" };
         initialised.Models.Add(new ModelDefinition { Name = "tool", Connector = "tool", Tier = 2, Enabled = false });
         new JsonFileRouterConfigurationStore(ConfigurationFile).Save(initialised);
         var after = new StringWriter();
@@ -206,8 +206,8 @@ public sealed class FirstRunTests : IDisposable
         var environment = new Dictionary<string, string?> { [HostSettings.SeedVariable] = "true", ["OPENAI_API_KEY"] = "sk-seed-test", ["ANTHROPIC_API_KEY"] = "sk-ant-seed-test" };
         FirstRun.SeedFromEnvironment(document, environment.GetValueOrDefault).Should().Equal("openai", "anthropic");
 
-        document.Connectors["openai"].Should().BeEquivalentTo(new { Type = ConnectorType.OpenAICompatible, BaseAddress = new Uri("https://api.openai.com"), ApiKey = "${env:OPENAI_API_KEY}" });
-        document.Connectors["anthropic"].Should().BeEquivalentTo(new { Type = ConnectorType.Anthropic, BaseAddress = new Uri("https://api.anthropic.com"), ApiKey = "${env:ANTHROPIC_API_KEY}" });
+        document.Connectors["openai"].Should().BeEquivalentTo(new { Type = ConnectorTypes.OpenAICompatible, BaseAddress = new Uri("https://api.openai.com"), ApiKey = "${env:OPENAI_API_KEY}" });
+        document.Connectors["anthropic"].Should().BeEquivalentTo(new { Type = ConnectorTypes.Anthropic, BaseAddress = new Uri("https://api.anthropic.com"), ApiKey = "${env:ANTHROPIC_API_KEY}" });
         document.ToJson().Should().NotContain("sk-seed-test").And.NotContain("sk-ant-seed-test");
         document.GetDocumentValidationErrors().Should().BeEmpty();
         FirstRun.Describe("/data/semantic-router.json", ["openai", "anthropic"])

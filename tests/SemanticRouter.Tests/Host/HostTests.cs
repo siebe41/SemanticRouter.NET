@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Connectors.Copilot;
+using SemanticRouter.Embeddings.Onnx;
 using SemanticRouter.Host;
 using SemanticRouter.Tests.Support;
 
@@ -186,7 +188,7 @@ public sealed class HostTests : IDisposable
         written.Models.Single(m => m.Name == "lmstudio-qwen3-coder-30b").Capabilities.Should().Contain(["code", "tools"]);
         written.Models.Where(m => m.Connector == "claude-cli").Should().OnlyContain(m => m.Capabilities.Contains("tools") && m.ContextWindow == 200_000);
         written.Connectors["claude-cli"].ToolCalling.Should().Be(CliToolCalling.Prompted);
-        written.Embeddings.Provider.Should().Be(EmbeddingProviderKind.OpenAICompatible);
+        written.Embeddings.Provider.Should().Be(EmbeddingProviderKinds.OpenAICompatible);
         written.Embeddings.Model.Should().Be("text-embedding-nomic-embed-text-v1.5");
         written.DefaultSimilarityThreshold.Should().BeApproximately(0.62f, 0.001f);
         output.ToString().Should().Contain("lmstudio: http://localhost:1234/").And.Contain("copilot").And.Contain("disabled");
@@ -358,8 +360,8 @@ public sealed class HostTests : IDisposable
         var document = RouterConfiguration.FromJson(RouterHost.Template());
         document.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
         document.Connectors["openai"] = new ConnectorOptions { BaseAddress = new Uri("https://api.example.com"), ApiKey = "sk-doctor-test" };
-        document.Connectors["tool"] = new ConnectorOptions { Type = ConnectorType.Cli, Executable = FakeCli };
-        document.Connectors["missing"] = new ConnectorOptions { Type = ConnectorType.Cli, Executable = Path.Combine(_directory, "no-such-cli") };
+        document.Connectors["tool"] = new ConnectorOptions { Type = ConnectorTypes.Cli, Executable = FakeCli };
+        document.Connectors["missing"] = new ConnectorOptions { Type = ConnectorTypes.Cli, Executable = Path.Combine(_directory, "no-such-cli") };
         document.Models.Add(new ModelDefinition { Name = "small", Connector = "lmstudio", Model = "qwen3-8b", IsLocal = true });
         document.Models.Add(new ModelDefinition { Name = "typo", Connector = "lmstudio", Model = "qwen3-8 b", IsLocal = true });
         document.Models.Add(new ModelDefinition { Name = "cloud", Connector = "openai", Model = "gpt-x", Tier = 3 });
@@ -394,12 +396,12 @@ public sealed class HostTests : IDisposable
         var document = RouterConfiguration.FromJson(RouterHost.Template());
         document.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
         document.Connectors["openai"] = new ConnectorOptions { BaseAddress = new Uri("https://api.example.com:8443/v1"), ApiKey = "sk-doctor-test" };
-        document.Connectors["codex"] = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.Codex, Executable = FakeCli };
-        document.Connectors["copilot"] = new ConnectorOptions { Type = ConnectorType.Copilot };
+        document.Connectors["codex"] = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.Codex, Executable = FakeCli };
+        document.Connectors["copilot"] = new ConnectorOptions { Type = CopilotConnector.Type };
         document.Models.Add(new ModelDefinition { Name = "small", Connector = "lmstudio", Model = "qwen3-8b", IsLocal = true });
         document.Models.Add(new ModelDefinition { Name = "cloud", Connector = "openai", Model = "gpt-x", Tier = 3 });
         document.Models.Add(new ModelDefinition { Name = "codex", Connector = "codex", Tier = 4 });
-        document.Embeddings = new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.Onnx };
+        document.Embeddings = new EmbeddingProviderOptions { Provider = OnnxEmbeddings.Provider };
         document.Notifications.Webhooks["ops"] = new WebhookOptions { Url = "https://hooks.example.com/services/T000/B000/hook-secret?token=abc" };
         new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(document);
         string bundle = Path.Combine(_directory, "corporate-root.pem");
@@ -537,9 +539,9 @@ public sealed class HostTests : IDisposable
             .Should().Be(0);
         RouterConfiguration hashing = new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Load()!;
 
-        onnx.Embeddings.Provider.Should().Be(EmbeddingProviderKind.Onnx);
+        onnx.Embeddings.Provider.Should().Be(OnnxEmbeddings.Provider);
         here.ToString().Should().Contain("'all-MiniLM-L6-v2' runs in this process");
-        hashing.Embeddings.Provider.Should().Be(EmbeddingProviderKind.Hashing, "a model that cannot load would leave every prompt unclassified");
+        hashing.Embeddings.Provider.Should().Be(EmbeddingProviderKinds.Hashing, "a model that cannot load would leave every prompt unclassified");
         hashing.DefaultSimilarityThreshold.Should().Be(RouterConfiguration.FromJson(RouterHost.Template()).DefaultSimilarityThreshold);
         intelMac.ToString().Should().Contain("embeddings: no embedding server found, so prompts are matched by shared words (Hashing). " + reason)
             .And.Contain("Providers → Embeddings").And.NotContain("runs in this process");
@@ -568,7 +570,7 @@ public sealed class HostTests : IDisposable
     {
         var document = RouterConfiguration.FromJson(RouterHost.Template());
         document.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
-        document.Connectors["claude-cli"] = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode, ToolCalling = CliToolCalling.Prompted };
+        document.Connectors["claude-cli"] = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode, ToolCalling = CliToolCalling.Prompted };
         document.Models.Add(new ModelDefinition { Name = "small", Connector = "lmstudio", Model = "qwen/qwen3-8b", IsLocal = true });
         new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(document);
         void Stub(WebApplicationBuilder builder) => builder.Services.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "lmstudio")
