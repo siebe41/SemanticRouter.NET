@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -243,6 +244,32 @@ public sealed class DesktopTests : IDisposable
 
         // The desktop entry escapes backslashes (key-file string rules), which only Windows paths have.
         static string Escaped(string path) => path.Replace("\\", "\\\\", StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true, false, "tray-template@2x.png", new[] { 36 })]
+    [InlineData(false, true, "tray.ico", new[] { 16, 20, 24, 32, 40, 48 })]
+    [InlineData(false, false, "tray.png", new[] { 48 })]
+    public void Each_platform_gets_a_tray_icon_in_the_sizes_its_tray_draws(bool macOS, bool windows, string asset, int[] sizes)
+    {
+        App.TrayIconAsset(macOS, windows).Should().Be(asset);
+
+        Sizes(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "tray-icons", asset))).Should().Equal(sizes);
+
+        // A PNG has its width, height and colour type in its first chunk (IHDR); an ICO lists its frames, 0 meaning 256.
+        static int[] Sizes(byte[] icon)
+        {
+            if (icon.AsSpan(1, 3).SequenceEqual("PNG"u8))
+            {
+                int width = BinaryPrimitives.ReadInt32BigEndian(icon.AsSpan(16));
+                BinaryPrimitives.ReadInt32BigEndian(icon.AsSpan(20)).Should().Be(width, "a tray icon is square");
+                icon[25].Should().Be(6, "a tray icon is RGBA, so the glyph has no background");
+                return [width];
+            }
+
+            int frames = BinaryPrimitives.ReadUInt16LittleEndian(icon.AsSpan(4));
+            return [.. Enumerable.Range(0, frames).Select(i => icon[6 + (16 * i)] is 0 ? 256 : icon[6 + (16 * i)]).Order()];
+        }
     }
 
     [Fact]
