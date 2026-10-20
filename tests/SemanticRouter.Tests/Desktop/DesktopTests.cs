@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Xml.Linq;
+using Avalonia.Input;
 using Microsoft.Extensions.Logging;
 using SemanticRouter.Desktop;
 using SemanticRouter.Host;
@@ -39,6 +40,19 @@ public sealed class DesktopTests : IDisposable
 
         WebViewProfile.CacheDirectories.Should().OnlyContain(c => !Directory.Exists(Path.Combine(profile, c)));
         File.Exists(cookies).Should().BeTrue("the sign-in stays");
+    }
+
+    [Fact]
+    public void The_macOS_edit_menu_sends_the_standard_actions_on_the_standard_keys()
+    {
+        // A Mac's web view copies and pastes on these action messages, and macOS finds ⌘C and the rest by these keys.
+        MacApplication.EditCommands.Select(c => (c.Header, c.Action, c.Key, c.Modifiers)).Should().Equal(
+            ("Undo", "undo:", Key.Z, KeyModifiers.Meta),
+            ("Redo", "redo:", Key.Z, KeyModifiers.Meta | KeyModifiers.Shift),
+            ("Cut", "cut:", Key.X, KeyModifiers.Meta),
+            ("Copy", "copy:", Key.C, KeyModifiers.Meta),
+            ("Paste", "paste:", Key.V, KeyModifiers.Meta),
+            ("Select All", "selectAll:", Key.A, KeyModifiers.Meta));
     }
 
     [Fact]
