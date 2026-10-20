@@ -288,6 +288,48 @@ public class PromptedReplyStreamTests
         PromptedToolCalls.CallKey("Read", "{\"command\":\"ls\",\"cwd\":{\"a\":1,\"b\":[2,{\"d\":4,\"c\":3}]}}").Should().NotBe(key);
     }
 
+    [Theory]
+    [InlineData("```tool_call\n{\"name\": \"Read\", \"input\": {\"path\": \"a\"}}\n```")]
+    [InlineData("```json\n{\"name\": \"Read\", \"input\": {}}\n```")]
+    [InlineData("{\"name\": \"Read\", \"input\": {}}")]
+    [InlineData("```TOOL_CALL-7F3A9C01\n{\"name\": \"Read\", \"input\": {}}\n```")]
+    public void Strict_parsing_says_when_a_call_without_the_runs_label_stayed_text(string call)
+    {
+        (List<(int Fed, string Text)> emitted, PromptedReply end) = Stream("Reading.\n" + call, format: StrictFormat);
+
+        end.Calls.Should().BeEmpty();
+        end.Ignored.Should().Be("tool call without this run's label, kept as text");
+        end.StrictWouldRefuse.Should().BeNull("that is for lenient parsing");
+        (Joined(emitted) + end.Text).Should().Contain("Reading.");
+    }
+
+    [Theory]
+    [InlineData("The file is ordinary.\n```python\nprint('hi')\n```")]
+    [InlineData("A user: {\"name\": \"Bob\"}")]
+    [InlineData("Earlier:\n```tool_call-00000000\n{\"name\": \"Read\", \"input\": {}}\n```")]
+    public void Strict_parsing_says_nothing_about_text_that_holds_no_call(string reply)
+    {
+        PromptedReply end = Stream(reply, format: StrictFormat).End;
+
+        end.Calls.Should().BeEmpty();
+        end.Ignored.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("Reading.\n```tool_call-7f3a9c01\n{\"name\": \"Read\", \"input\": {}}\n```", null)]
+    [InlineData("Reading.\n```tool_call\n{\"name\": \"Read\", \"input\": {}}\n```", "without this run's label")]
+    [InlineData("Reading.\n{\"name\": \"Read\", \"input\": {}}", "without this run's label")]
+    [InlineData("```tool_call-7f3a9c01\n{\"name\": \"Read\", \"input\": {}}\n```\nThen the tests.", "not at the end of the reply")]
+    [InlineData("```json\n{\"name\": \"Read\", \"input\": {}}\n```\nThen the tests.", "without this run's label, not at the end of the reply")]
+    public void Lenient_parsing_says_when_strict_parsing_would_have_kept_the_calls_as_text(string reply, string? refused)
+    {
+        PromptedReply end = Stream(reply, format: StrictFormat with { Parsing = PromptedToolParsing.Lenient }).End;
+
+        end.Calls.Should().ContainSingle();
+        end.Ignored.Should().BeNull();
+        end.StrictWouldRefuse.Should().Be(refused);
+    }
+
     [Fact]
     public void Strict_parsing_takes_several_calls_that_end_the_reply()
     {
