@@ -202,6 +202,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Changed
 
+- Packages: `Microsoft.AspNetCore.Builder` and `Microsoft.Extensions.DependencyInjection` hold only the setup extension classes. `RouterDashboardOptions` moved to `SemanticRouter.AspNetCore`, `SqliteStateOptions` to `SemanticRouter.Storage.Sqlite`, and `SqliteStateBuilderExtensions` (`UseSqliteState`) to `Microsoft.Extensions.DependencyInjection` like the other packages' builder extensions. The dashboard API's request and response records and those of the classify, `/v1/models` and `count_tokens` endpoints (`PromptClassificationResponse`, `RouterModelInfo`, `TokenCountResponse` and the rest) are no longer public; their JSON is unchanged. Binary breaking: rebuild against this version, and add `using SemanticRouter.AspNetCore;` or `using SemanticRouter.Storage.Sqlite;` where code names a moved options type. (#250)
 - Targets .NET 10 (LTS) instead of .NET 9, whose support ends on 10 November 2026: the packages and the tool need the .NET 10 runtime, and the container runs on ASP.NET Core 10. Building needs a 10.0.4xx SDK. (#115, #148)
 - `init` asks before enabling a subscription CLI connector (Claude Code, Codex); declined or non-interactive runs add it disabled. `--yes` restores the old behaviour and `--no-cli` leaves CLIs out. (#141)
 - Prompts go to Claude Code and Copilot CLIs on standard input; `PromptInput: "Argument"` restores the old behaviour. (#114)
