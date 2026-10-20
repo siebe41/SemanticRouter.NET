@@ -9,7 +9,7 @@ namespace SemanticRouter.AspNetCore;
 
 /// <summary>A model a connector offers, and the catalog entry the router suggests for it.</summary>
 /// <param name="Model">What the server reported.</param>
-public sealed record ModelLineupEntry(DiscoveredModel Model)
+internal sealed record ModelLineupEntry(DiscoveredModel Model)
 {
     /// <summary>The suggested catalog entry. <see langword="null"/> for embedding models, which belong under <c>Embeddings</c>.</summary>
     public ModelDefinition? Suggestion { get; init; }
@@ -36,7 +36,7 @@ public sealed record ModelLineupEntry(DiscoveredModel Model)
 /// <summary>Everything a connector offers, for the dashboard's lineup and <c>semantic-router models</c>.</summary>
 /// <param name="Connector">The connector name.</param>
 /// <param name="Type">The connector type.</param>
-public sealed record ModelLineupReport(string Connector, ConnectorType Type)
+internal sealed record ModelLineupReport(string Connector, ConnectorType Type)
 {
     /// <summary>Every model found, with a suggestion for each chat model.</summary>
     public IReadOnlyList<ModelLineupEntry> Entries { get; init; } = [];
@@ -71,7 +71,7 @@ public sealed record ModelLineupReport(string Connector, ConnectorType Type)
 /// others on demand.
 /// </summary>
 /// <remarks>Suggestions are a starting point: prices and model families change, and the dashboard lets every field be edited before adding.</remarks>
-public static partial class ModelLineup
+internal static partial class ModelLineup
 {
     /// <summary>Claude families by capability: each gets its own tier on the default ladder.</summary>
     private static readonly Dictionary<string, (int Tier, string Name)> ClaudeFamilies = new(StringComparer.Ordinal)

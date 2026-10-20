@@ -6,7 +6,7 @@ namespace SemanticRouter.AspNetCore;
 /// links the topic files beside it. Paths in the map are relative to the <c>.claude</c> folder, so each project's notes
 /// sit in their own folder.
 /// </summary>
-public sealed partial class ClaudeCodeMemorySource : IMemorySource
+internal sealed partial class ClaudeCodeMemorySource : IMemorySource
 {
     private static readonly HashSet<string> Markdown = new(StringComparer.OrdinalIgnoreCase) { ".md" };
 

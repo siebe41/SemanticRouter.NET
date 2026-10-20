@@ -33,7 +33,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.AddOptions<TuningOptions>().Bind(configuration.GetSection("Tuning"));
         services.AddOptions<NotificationOptions>().Bind(configuration.GetSection("Notifications"));
         services.AddOptions<StateOptions>().Bind(configuration.GetSection("State"));
-        services.AddOptions<Microsoft.AspNetCore.Builder.RouterDashboardOptions>().Bind(configuration.GetSection("Dashboard"));
+        services.AddOptions<RouterDashboardOptions>().Bind(configuration.GetSection("Dashboard"));
         services.AddOptions<NetworkOptions>().Bind(configuration.GetSection("Network"));
 
         return AddCore(services);
@@ -78,7 +78,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton(sp => new GatewayKeyThrottle(sp.GetService<TimeProvider>() ?? TimeProvider.System));
         services.TryAddSingleton<RoutingActivityLog>();
         services.TryAddSingleton(sp => new GatewayGuard(
-            sp.GetService<IOptions<Microsoft.AspNetCore.Builder.RouterDashboardOptions>>()?.Value.PublicOrigins ?? []));
+            sp.GetService<IOptions<RouterDashboardOptions>>()?.Value.PublicOrigins ?? []));
         services.TryAddSingleton<RoutingFeedbackLog>();
         services.TryAddSingleton(sp => new ModelLatencyTracker(sp.GetRequiredService<RoutingActivityLog>(), sp.GetService<TimeProvider>()));
         services.TryAddSingleton<IModelLatency>(sp => sp.GetRequiredService<ModelLatencyTracker>());

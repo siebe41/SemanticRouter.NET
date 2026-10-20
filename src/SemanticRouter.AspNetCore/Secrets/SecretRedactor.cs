@@ -6,7 +6,7 @@ namespace SemanticRouter.AspNetCore;
 /// bodies relayed to them, activity entries and log messages. A backend that echoes a key back in an error message
 /// must not turn the router into a way of reading it.
 /// </summary>
-public sealed class SecretRedactor
+internal sealed class SecretRedactor
 {
     /// <summary>Values shorter than this are not redacted: they would match ordinary text.</summary>
     public const int MinimumLength = 6;

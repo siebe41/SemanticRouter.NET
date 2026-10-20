@@ -12,14 +12,14 @@ namespace SemanticRouter.AspNetCore;
 /// <param name="MissingTokens">Required tokens the theme does not declare; Machine Dark's values are used for them.</param>
 /// <param name="ContrastIssues">Text and surface pairs below WCAG AA (4.5:1).</param>
 /// <param name="Problem">Why the theme file cannot be used as is, if it cannot.</param>
-public sealed record DashboardTheme(
+internal sealed record DashboardTheme(
     string Id, string Name, string Mode, bool BuiltIn, IReadOnlyList<string> MissingTokens, IReadOnlyList<ThemeContrastIssue> ContrastIssues, string? Problem = null);
 
 /// <summary>A text colour that is too faint on a surface.</summary>
 /// <param name="Foreground">The text token.</param>
 /// <param name="Background">The surface it is drawn on.</param>
 /// <param name="Ratio">The WCAG contrast ratio (AA needs 4.5).</param>
-public sealed record ThemeContrastIssue(string Foreground, string Background, double Ratio);
+internal sealed record ThemeContrastIssue(string Foreground, string Background, double Ratio);
 
 /// <summary>
 /// The dashboard's themes: the built-in token blocks of <c>app.css</c>, plus one <c>{id}.css</c> file per theme in the

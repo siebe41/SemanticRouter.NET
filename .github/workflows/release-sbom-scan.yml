@@ -1,0 +1,106 @@
+name: Release SBOM scan
+
+# The desktop app and the tool are self-contained: a release ships the .NET runtime, the SkiaSharp, HarfBuzz and ANGLE
+# natives, ONNX Runtime and SQLite as they were when it was built, and CI's NuGet check only covers main's lock files.
+# Each week this scans the latest release's own SBOMs (the desktop app on every platform, and the NuGet packages with the
+# tool) for high or critical vulnerabilities that have a fix. If it finds one, or cannot download or scan them, it opens
+# an issue (or comments on the open one) asking for a patch release. Like image-freshness.yml, which does the same for
+# the container image, it changes nothing itself: a release should be a person's decision.
+on:
+  schedule:
+    - cron: '37 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      # The latest release: never a draft or a pre-release (the `media` release that holds the site's videos is one).
+      - name: Download the latest release's SBOMs
+        id: release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName || true)"
+          if [ -z "$tag" ]; then
+            echo "No release yet."
+            exit 0
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          version="${tag#v}"
+          mkdir -p sboms
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir sboms \
+            --pattern "SemanticRouter-$version-desktop.cdx.json" --pattern "SemanticRouter-$version-packages.cdx.json"
+          # Syft names the self-contained .NET runtime `pkg:nuget/runtimepack.Microsoft.NETCore.App.Runtime.<rid>` (and the
+          # same for ASP.NET Core); the advisories name the package without the prefix, so the scan would never match them.
+          for sbom in sboms/*.cdx.json; do
+            jq '(.components[]? | select((.purl // "") | startswith("pkg:nuget/runtimepack.")))
+              |= (.name |= ltrimstr("runtimepack.") | .purl |= sub("^pkg:nuget/runtimepack\\."; "pkg:nuget/"))' \
+              "$sbom" > "$sbom.tmp"
+            mv "$sbom.tmp" "$sbom"
+          done
+          echo "desktop=sboms/SemanticRouter-$version-desktop.cdx.json" >> "$GITHUB_OUTPUT"
+          echo "packages=sboms/SemanticRouter-$version-packages.cdx.json" >> "$GITHUB_OUTPUT"
+
+      - name: Scan the desktop app's SBOM
+        id: desktop
+        if: steps.release.outputs.desktop != ''
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: sbom
+          scan-ref: ${{ steps.release.outputs.desktop }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Scan the NuGet packages' and the tool's SBOM
+        id: packages
+        if: steps.release.outputs.packages != ''
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: sbom
+          scan-ref: ${{ steps.release.outputs.packages }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Ask for a patch release
+        if: steps.release.outcome == 'failure' || steps.desktop.outcome == 'failure' || steps.packages.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          DOWNLOAD: ${{ steps.release.outcome }}
+          DESKTOP: ${{ steps.desktop.outcome }}
+          PACKAGES: ${{ steps.packages.outcome }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="Desktop app and tool: patch release needed"
+          body="The latest release (${TAG:-unknown}) may ship a vulnerable dependency:"$'\n'
+          if [ "$DOWNLOAD" = "failure" ]; then
+            body+=$'\n'"- Its SBOMs could not be found or downloaded, so nothing was scanned: see $RUN."
+          fi
+          if [ "$DESKTOP" = "failure" ]; then
+            body+=$'\n'"- Trivy found a high or critical vulnerability with a fix in the desktop app's SBOM (every platform), or could not scan it: see $RUN."
+          fi
+          if [ "$PACKAGES" = "failure" ]; then
+            body+=$'\n'"- Trivy found a high or critical vulnerability with a fix in the NuGet packages' and the tool's SBOM, or could not scan it: see $RUN."
+          fi
+          body+=$'\n\n'"Update what it names on main (Directory.Packages.props, or the .NET SDK in global.json for the runtime), then tag a patch release so the desktop app updates and the tool and packages ship the fix under their own version."
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label security
+          fi

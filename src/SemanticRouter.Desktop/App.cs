@@ -238,9 +238,9 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     internal static string TrayIconAsset(bool macOS, bool windows) => macOS ? "tray-template@2x.png" : windows ? "tray.ico" : "tray.png";
 
     /// <summary>
-    /// The application menu: About, Check for updates now and Settings (⌘,), where a Mac app has them. The app runs as a
-    /// menu-bar (accessory) app, which macOS gives no menu bar, so it is not shown today; the tray menu and the
-    /// dashboard's More have the same entries, and the dashboard does the editing shortcuts itself (desktop.js).
+    /// The application menu: About, Check for updates now and Settings (⌘,), where a Mac app has them. macOS shows it,
+    /// with the dashboard window's Edit menu, while that window is open (<see cref="MacApplication"/>); otherwise the app
+    /// is a menu-bar app with no menu bar, and the tray menu and the dashboard's More have the same entries.
     /// </summary>
     private NativeMenu BuildApplicationMenu()
     {
@@ -552,6 +552,19 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
                 _preferences.Save(_directory);
             }, log);
             _window.PageAction += OnPageAction;
+            if (OperatingSystem.IsMacOS())
+            {
+                // The menu bar, with the app menu and Edit, while the window is open (MacApplication).
+                NativeMenu.SetMenu(_window, MacApplication.EditMenu());
+                _window.PropertyChanged += (_, e) =>
+                {
+                    if (OperatingSystem.IsMacOS() && e.Property == Visual.IsVisibleProperty)
+                    {
+                        MacApplication.ShowMenuBar(e.GetNewValue<bool>());
+                    }
+                };
+            }
+
             UpdateMenu();
         }
 

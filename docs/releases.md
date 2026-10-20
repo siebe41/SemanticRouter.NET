@@ -9,6 +9,7 @@ Every release on [GitHub Releases](https://github.com/siebe41/SemanticRouter.NET
 | `SHA256SUMS` | The SHA-256 checksum of every other asset. |
 | `SemanticRouter-<version>-<platform>.zip` / `.tar.gz`, the installers, the update feed (`releases.<channel>.json`, `*-full.nupkg`, `*-delta.nupkg`) | The desktop app ([Desktop app](desktop.md)). |
 | `SemanticRouter.*.<version>.nupkg` | The NuGet packages and the `semantic-router` tool, exactly as pushed to nuget.org. |
+| `SemanticRouter.*.<version>.snupkg` | The libraries' symbol packages, as pushed to nuget.org's symbol server: their PDBs, which map to the tagged commit's sources with SourceLink. The tool package carries its PDB inside. |
 | `SemanticRouter-<version>-packages.cdx.json` | CycloneDX SBOM of the NuGet packages and the tool. |
 | `SemanticRouter-<version>-desktop.cdx.json` | CycloneDX SBOM of the desktop app, for every platform (the archives and installers ship the same app). |
 | `SemanticRouter-<version>-image.cdx.json` | CycloneDX SBOM of the container image. It is also attached to the image as a signed attestation. |
@@ -49,6 +50,8 @@ dotnet nuget verify --all SemanticRouter.Host.0.3.0.nupkg
 
 The packages are not author-signed.
 
+A debugger finds the libraries' symbols on nuget.org's symbol server (in Visual Studio, enable **NuGet.org Symbol Server** under Tools > Options > Debugging > Symbols, and turn off **Just My Code**) and steps into the source of the released commit, which SourceLink fetches from GitHub.
+
 ## Check the container image
 
 The image (`ghcr.io/siebe41/semantic-router`) is signed with keyless [cosign](https://docs.sigstore.dev/cosign/) and carries provenance and SBOM attestations in the registry. With cosign 3 or later:
@@ -78,6 +81,8 @@ docker run --rm ghcr.io/siebe41/semantic-router:0.3.0 version
 ## SBOMs and third-party notices
 
 The SBOMs are [CycloneDX](https://cyclonedx.org/) JSON, generated with [Syft](https://github.com/anchore/syft) from what was built: the desktop archives' contents, the NuGet packages' contents and the container image. Feed them to a vulnerability scanner (`grype sbom:SemanticRouter-0.3.0-desktop.cdx.json`) or your inventory.
+
+Syft lists the .NET runtime that the desktop app bundles as `pkg:nuget/runtimepack.Microsoft.NETCore.App.Runtime.<rid>` (and `runtimepack.Microsoft.AspNetCore.App.Runtime.<rid>`), while advisories name the package without the `runtimepack.` prefix; remove it before scanning, or the runtime's advisories are missed. Each week, [Release SBOM scan](../.github/workflows/release-sbom-scan.yml) does that with the latest release's desktop and packages SBOMs, scans them with [Trivy](https://trivy.dev), and opens an issue asking for a patch release when one names a high or critical vulnerability that has a fix (the container image has its own check, [Image freshness](../.github/workflows/image-freshness.yml)).
 
 `THIRD-PARTY-NOTICES.txt` also ships inside everything that redistributes those packages:
 

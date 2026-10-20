@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>Time series and exports over routing activity, for the dashboard and for analysis elsewhere.</summary>
-public static class ActivityReports
+internal static class ActivityReports
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 

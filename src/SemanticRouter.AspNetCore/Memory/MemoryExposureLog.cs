@@ -16,7 +16,7 @@ public sealed record MemoryExposure(
 /// Counts, per memory note, the requests that carried it to each model, split by local and cloud. Kept in memory: it
 /// starts empty on every restart, like the activity log.
 /// </summary>
-public sealed class MemoryExposureLog
+internal sealed class MemoryExposureLog
 {
     private const int MaxNotes = 20_000;
 

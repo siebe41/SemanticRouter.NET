@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Storage.Sqlite;
 using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.AspNetCore;

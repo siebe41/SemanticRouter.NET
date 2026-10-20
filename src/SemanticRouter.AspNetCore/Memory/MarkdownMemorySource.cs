@@ -6,7 +6,7 @@ namespace SemanticRouter.AspNetCore;
 /// (<c>.obsidian</c>, <c>.git</c>, <c>.trash</c>) are skipped, as are files over
 /// <see cref="MemoryOptions.MaxNoteBytes"/>; at most <see cref="MemoryOptions.MaxNotesPerSource"/> notes are read.
 /// </summary>
-public sealed class MarkdownMemorySource : IMemorySource
+internal sealed class MarkdownMemorySource : IMemorySource
 {
     private readonly string _root;
     private readonly IReadOnlyList<string> _exclude;

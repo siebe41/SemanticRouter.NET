@@ -31,6 +31,33 @@
   </PropertyGroup>
 
   <!--
+    What nuget.org shows on each package's page: the README.md in its project folder (what the package is, how to
+    install it, a snippet, links to the docs) and the app icon. Here, not in Directory.Build.props, for the same reason
+    as package validation: IsPackable and PackAsTool are set in the project files. A packable project without a
+    README.md fails the pack (NU5039).
+  -->
+  <PropertyGroup Label="Package page" Condition="'$(IsPackable)' == 'true'">
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+  </PropertyGroup>
+
+  <ItemGroup Label="Package page" Condition="'$(IsPackable)' == 'true'">
+    <None Update="README.md" Pack="true" PackagePath="\" />
+    <None Include="$(MSBuildThisFileDirectory)src/SemanticRouter.Desktop/Assets/icon.png" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+
+  <!--
+    Symbols: each library package gets a symbol package (.snupkg) beside it with its portable PDB, which carries the
+    SourceLink map to this repository's sources at the commit. The release pushes both, so nuget.org's symbol server
+    serves the PDB and a debugger can step into the libraries and show line numbers in stack traces. The tool package
+    carries its PDBs inside, as dotnet tools do, so it needs none. deploy/package-contents-check.sh checks the result.
+  -->
+  <PropertyGroup Label="Symbols" Condition="'$(IsPackable)' == 'true' and '$(PackAsTool)' != 'true'">
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <!--
     The first-party packages are versioned together and depend on each other exactly (CONTRIBUTING.md, Package
     versions and dependencies): Storage.Sqlite, Embeddings.Onnx and Connectors.Copilot are compiled against one build
     of SemanticRouter.AspNetCore, internals included, and AspNetCore against one build of SemanticRouter.Core. By

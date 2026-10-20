@@ -34,7 +34,7 @@ public interface IRouterSecretStore
 /// can be copied or backed up without carrying usable keys. A value encrypted with a key other than the current one
 /// is re-encrypted with the current key when it is read.
 /// </summary>
-public sealed class ProtectedFileSecretStore : IRouterSecretStore
+internal sealed class ProtectedFileSecretStore : IRouterSecretStore
 {
     private const string Purpose = "SemanticRouter.Secrets.v1";
 

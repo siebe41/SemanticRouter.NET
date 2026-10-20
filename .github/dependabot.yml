@@ -48,3 +48,13 @@ updates:
     groups:
       site:
         patterns: [ "*" ]
+
+  # Playwright, node-pty and xterm.js for the demo-video tool (tools/demo-video/README.md). Every directory with a
+  # package-lock.json needs an entry here: CI's npm audit (deploy/npm-audit-check.sh) fails without one.
+  - package-ecosystem: npm
+    directory: /tools/demo-video
+    schedule:
+      interval: weekly
+    groups:
+      demo-video:
+        patterns: [ "*" ]

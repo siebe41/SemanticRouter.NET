@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Storage.Sqlite;
 
 namespace SemanticRouter.Tests.Support;
 
