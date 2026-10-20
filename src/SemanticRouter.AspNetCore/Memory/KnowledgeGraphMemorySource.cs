@@ -10,7 +10,7 @@ namespace SemanticRouter.AspNetCore;
 /// document is read too. Each entity becomes a note in the folder of its entity type, its observations become the
 /// note's lines (so they are recognised when sent to a model), and relations become links.
 /// </summary>
-public sealed class KnowledgeGraphMemorySource : IMemorySource
+internal sealed class KnowledgeGraphMemorySource : IMemorySource
 {
     private static readonly string[] DefaultFileNames = ["memory.jsonl", "memory.json"];
 

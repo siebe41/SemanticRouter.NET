@@ -14,7 +14,7 @@ public interface IEvaluationSetStore
 }
 
 /// <summary>Keeps the evaluation set in memory: it is lost on restart.</summary>
-public sealed class InMemoryEvaluationSetStore : IEvaluationSetStore
+internal sealed class InMemoryEvaluationSetStore : IEvaluationSetStore
 {
     private IReadOnlyList<EvaluationCase> _cases = [];
 
@@ -33,7 +33,7 @@ public sealed class InMemoryEvaluationSetStore : IEvaluationSetStore
 }
 
 /// <summary>Keeps the evaluation set in a JSON Lines file, created on first save.</summary>
-public sealed class JsonLinesEvaluationSetStore : IEvaluationSetStore
+internal sealed class JsonLinesEvaluationSetStore : IEvaluationSetStore
 {
     private readonly string _path;
     private readonly Lock _gate = new();

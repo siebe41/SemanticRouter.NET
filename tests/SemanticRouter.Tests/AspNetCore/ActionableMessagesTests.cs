@@ -34,15 +34,16 @@ public sealed class ActionableMessagesTests : IDisposable
             .Should().Contain("SemanticRouter:Connectors:openai:ApiKey").And.Contain("Providers → Connectors → openai → API key");
 
     [Theory]
-    [InlineData(0, "Logged in using ChatGPT", RouterCheckStatus.Ok, "signed in with ChatGPT")]
-    [InlineData(1, "Not logged in", RouterCheckStatus.Failed, "Run `codex login`")]
-    [InlineData(0, "Logged in using an API key - sk-proj-***abcd", RouterCheckStatus.Warning, "billed to that key")]
-    [InlineData(2, "error: unrecognized subcommand 'login'", RouterCheckStatus.Ok, "could not be checked")]
-    public void Codex_sign_in_is_read_from_codex_login_status(int exit, string output, RouterCheckStatus status, string says)
+    [InlineData(0, "Logged in using ChatGPT", nameof(RouterCheckStatus.Ok), "signed in with ChatGPT")]
+    [InlineData(1, "Not logged in", nameof(RouterCheckStatus.Failed), "Run `codex login`")]
+    [InlineData(0, "Logged in using an API key - sk-proj-***abcd", nameof(RouterCheckStatus.Warning), "billed to that key")]
+    [InlineData(2, "error: unrecognized subcommand 'login'", nameof(RouterCheckStatus.Ok), "could not be checked")]
+    public void Codex_sign_in_is_read_from_codex_login_status(int exit, string output, string status, string says)
     {
+        // The status is passed by name: RouterCheckStatus is internal, and a public test method cannot take it.
         RouterCheck check = RouterDoctor.CodexSignIn("connector codex", "codex-cli 0.161.0", "/usr/bin/codex", exit, output);
 
-        check.Status.Should().Be(status);
+        check.Status.ToString().Should().Be(status);
         check.Message.Should().Contain(says).And.NotContain("sk-proj", "part of a key is still a secret");
     }
 

@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>How a <see cref="RouterCheck"/> came out.</summary>
-public enum RouterCheckStatus
+internal enum RouterCheckStatus
 {
     /// <summary>Works.</summary>
     Ok = 0,
@@ -21,7 +21,7 @@ public enum RouterCheckStatus
 /// <param name="Subject">What was checked, e.g. <c>connector lmstudio</c>.</param>
 /// <param name="Status">The outcome.</param>
 /// <param name="Message">What was found, and for problems the setting to change. Never contains a secret.</param>
-public sealed record RouterCheck(string Subject, RouterCheckStatus Status, string Message);
+internal sealed record RouterCheck(string Subject, RouterCheckStatus Status, string Message);
 
 /// <summary>
 /// Checks the active configuration against the machine it runs on, without calling any model: unresolved secret
@@ -29,7 +29,7 @@ public sealed record RouterCheck(string Subject, RouterCheckStatus Status, strin
 /// offered) and every CLI connector (installed, starts, and for Claude Code signed in). This is what
 /// <c>semantic-router doctor</c> prints; any host can call it.
 /// </summary>
-public static class RouterDoctor
+internal static class RouterDoctor
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(10);
 
