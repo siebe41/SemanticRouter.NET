@@ -3,6 +3,7 @@
 *
 !src/
 !deploy/third-party-notices.cs
+!deploy/third-party/
 !Directory.Build.props
 !Directory.Build.targets
 !Directory.Packages.props

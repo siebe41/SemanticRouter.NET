@@ -108,9 +108,11 @@ jobs:
       - name: Test
         run: dotnet test --configuration Release
 
-      # The tool package carries the licences and notices of the packages it ships.
+      # The tool package carries the licences and notices of the packages it ships, and of the fonts.
       - name: Third-party notices
-        run: dotnet run --file deploy/third-party-notices.cs -- notices/THIRD-PARTY-NOTICES.txt src/SemanticRouter.Host/bin/Release/net10.0
+        run: |
+          dotnet run --file deploy/third-party-notices.cs -- notices/THIRD-PARTY-NOTICES.txt src/SemanticRouter.Host/bin/Release/net10.0
+          deploy/third-party-notices-check.sh notices/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)"
 
       - name: Pack
         run: |
@@ -457,6 +459,7 @@ jobs:
           mkdir -p tool && unzip -q packages/SemanticRouter.Host.*.nupkg -d tool
           dotnet restore src/SemanticRouter.Host/SemanticRouter.Host.csproj --locked-mode
           dotnet run --file deploy/third-party-notices.cs -- artifacts/THIRD-PARTY-NOTICES.txt sbom tool
+          deploy/third-party-notices-check.sh artifacts/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)"             "Velopack native binaries" "AppImage type2-runtime"
 
       - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:

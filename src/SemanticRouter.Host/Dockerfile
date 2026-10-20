@@ -19,12 +19,14 @@ WORKDIR /src
 COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props .editorconfig ./
 COPY src/ src/
 COPY deploy/third-party-notices.cs deploy/
+COPY deploy/third-party/ deploy/third-party/
 ARG VERSION=
 ARG REVISION=
 # Locked restore: exactly the packages in the projects' packages.lock.json files.
 RUN dotnet publish src/SemanticRouter.Host/SemanticRouter.Host.csproj -c Release -o /app /p:UseAppHost=false /p:RestoreLockedMode=true \
       ${VERSION:+"-p:Version=$VERSION"} ${REVISION:+"-p:SourceRevisionId=$REVISION"}
-# The licences and notices of the NuGet packages the image ships, from the packages restore just fetched (no network).
+# The licences and notices of the NuGet packages the image ships, from the packages restore just fetched (no network),
+# and of the fonts the dashboard embeds (deploy/third-party).
 RUN dotnet run --file deploy/third-party-notices.cs -- /app/THIRD-PARTY-NOTICES.txt /app
 # The runtime image has no shell to create the data directory, so it is made here and copied over.
 RUN mkdir -p /data
