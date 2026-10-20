@@ -227,7 +227,7 @@ The preset runs `copilot -s --no-color --stream off --no-ask-user --deny-tool=sh
 
 Uses your Copilot plan through GitHub's official [Copilot SDK](https://github.com/github/copilot-sdk) (`GitHub.Copilot.SDK`), the supported way for an application to use a person's Copilot subscription. Prefer it to the CLI preset above: replies stream, the client's tools are real tool calls instead of text in a prompt, usage is reported, and **Discover** lists the models your account can use. See [Copilot SDK's terms](TERMS.md#github-copilot-sdk).
 
-1. Install the Copilot CLI (`npm install -g @github/copilot`). The SDK runs it as its runtime.
+1. Install the Copilot CLI: `npm install -g @github/copilot` on Linux and macOS; on Windows `winget install GitHub.Copilot`, which installs `copilot.exe`. The SDK runs it as its runtime, started directly like the CLI preset, so on Windows an npm `copilot.cmd` wrapper is refused here too (see [CLIs on Windows](#clis-on-windows)).
 2. Sign in once with `copilot` and `/login`, or with `gh auth login`.
 3. Run `semantic-router doctor`. It starts the runtime and lists your models, or says what is missing.
 
@@ -295,9 +295,9 @@ The router starts a CLI's `.exe` directly and never through a script wrapper (`.
 |---|---|
 | Claude Code | The native installer, in PowerShell: `irm https://claude.ai/install.ps1 \| iex`. It puts `claude.exe` in `%USERPROFILE%\.local\bin`. |
 | Codex | The Windows build from [Codex's releases](https://github.com/openai/codex/releases): `codex-x86_64-pc-windows-msvc.exe`, saved as `codex.exe` in a folder on `PATH`. |
-| GitHub Copilot CLI | `winget install GitHub.Copilot`. |
+| GitHub Copilot CLI | `winget install GitHub.Copilot`. The [Copilot SDK](#github-copilot-sdk) connector runs this same `copilot.exe` as its runtime. |
 
-Or keep the program where it is and set the connector's `Executable` to the `.exe`. A CLI found only as a wrapper is listed by the dashboard's setup as found but not usable as installed, with these steps, and `init` and `doctor` say the same. These routes have not yet been checked on a Windows 11 machine by the project; if one does not give you a startable `.exe`, please open an issue.
+Or keep the program where it is and set the connector's `Executable` to the `.exe`. A CLI found only as a wrapper is listed by the dashboard's setup as found but not usable as installed, with these steps, and `init` and `doctor` say the same. The Claude Code route has been checked on Windows 11 (it gives `%USERPROFILE%\.local\bin\claude.exe`); the Codex and Copilot routes have not been checked on Windows by the project yet. If one does not give you a startable `.exe`, please open an issue.
 
 ## OpenAI API
 
