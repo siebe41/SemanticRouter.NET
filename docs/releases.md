@@ -92,7 +92,18 @@ Syft lists the .NET runtime that the desktop app bundles as `pkg:nuget/runtimepa
 | The `semantic-router` tool | At the package root; once installed, under `~/.dotnet/tools/.store/semanticrouter.host/<version>/semanticrouter.host/<version>/` |
 | Container image | `/app/THIRD-PARTY-NOTICES.txt`. The image has no shell: `docker create --name n ghcr.io/siebe41/semantic-router:0.3.0 && docker cp n:/app/THIRD-PARTY-NOTICES.txt . && docker rm n` |
 
-[`deploy/third-party-notices.cs`](../deploy/third-party-notices.cs) writes it at publish time from the build's `*.deps.json` and each package's `.nuspec` and licence files in the NuGet cache, without network access. The same packages always give the same file. The container's Ubuntu and ASP.NET Core base layers come from Microsoft's image, with their own licence files.
+[`deploy/third-party-notices.cs`](../deploy/third-party-notices.cs) writes it at publish time from the build's `*.deps.json` and each package's `.nuspec` and licence files in the NuGet cache, without network access. It adds what no package names, from [`deploy/third-party/extra.json`](../deploy/third-party/extra.json): the Inter and Fira Sans fonts the dashboard embeds (SIL OFL 1.1), and, for the desktop app, Velopack's native updater, setup and stub, and the AppImage runtime with the libraries linked into it. Every entry has an SPDX licence, and every licence has its text in the file: the package's own licence file, or else the standard text from [`deploy/third-party/licences`](../deploy/third-party/licences). A package that declares a licence file instead of an SPDX expression needs its id in `extra.json`, and a licence without a text fails the generator, so the pull request that adds such a package fails CI. The same packages always give the same file. The container's Ubuntu and ASP.NET Core base layers come from Microsoft's image, with their own licence files.
+
+The `SemanticRouter.AspNetCore` package is `MIT AND OFL-1.1`, because its DLL embeds the fonts; it carries their licences under `licenses/`.
+
+### The embedding models
+
+No release contains an ONNX embedding model: the router downloads the one it is configured with on its first start, from a pinned revision, checked by SHA-256 ([Network access](network.md)). Each model is under its authors' licence:
+
+| Model | Downloaded from | Upstream | Licence |
+|---|---|---|---|
+| `all-MiniLM-L6-v2` (the default) | [`Xenova/all-MiniLM-L6-v2`](https://huggingface.co/Xenova/all-MiniLM-L6-v2), an ONNX export | [`sentence-transformers/all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) | Apache-2.0 |
+| `bge-small-en-v1.5` | [`Xenova/bge-small-en-v1.5`](https://huggingface.co/Xenova/bge-small-en-v1.5), an ONNX export | [`BAAI/bge-small-en-v1.5`](https://huggingface.co/BAAI/bge-small-en-v1.5) | MIT, upstream's; the export declares no licence of its own |
 
 ## Cutting a release
 

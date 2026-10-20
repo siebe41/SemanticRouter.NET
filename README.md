@@ -668,4 +668,4 @@ What changed in each release, and what is merged but not released yet, is in the
 
 ## License
 
-[MIT](LICENSE). The connectors drive third-party services under *their* terms; see [Subscription CLI terms](docs/TERMS.md).
+[MIT](LICENSE). The dashboard's fonts (Inter and Fira Sans) are under the SIL Open Font License 1.1, and what the tool, the image and the desktop app ship from others under its own licence: each carries a `THIRD-PARTY-NOTICES.txt` ([SBOMs and third-party notices](docs/releases.md#sboms-and-third-party-notices)). The connectors drive third-party services under *their* terms; see [Subscription CLI terms](docs/TERMS.md).
