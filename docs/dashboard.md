@@ -257,7 +257,7 @@ The admin API can change where prompts go, so the default is strict and opening 
 }
 ```
 
-The same settings are on `RouterDashboardOptions` (`app.MapRouterDashboard("/router", o => ...)` runs after the bound section). With `RequireLocalClient: false` and no token, remote requests are still refused and the log says what to configure. The three tokens must differ.
+The same settings are on `RouterDashboardOptions` (namespace `SemanticRouter.AspNetCore`; `app.MapRouterDashboard("/router", o => ...)` runs after the bound section). With `RequireLocalClient: false` and no token, remote requests are still refused and the log says what to configure. The three tokens must differ.
 
 Whatever the setup:
 

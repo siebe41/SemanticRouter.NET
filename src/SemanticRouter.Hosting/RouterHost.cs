@@ -11,6 +11,7 @@ using Microsoft.Extensions.Configuration.Json;
 using Microsoft.Extensions.Configuration.Memory;
 using Microsoft.Extensions.Options;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Storage.Sqlite;
 
 namespace SemanticRouter.Host;
 

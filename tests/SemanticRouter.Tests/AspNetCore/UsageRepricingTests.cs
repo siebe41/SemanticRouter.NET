@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Storage.Sqlite;
 using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.AspNetCore;

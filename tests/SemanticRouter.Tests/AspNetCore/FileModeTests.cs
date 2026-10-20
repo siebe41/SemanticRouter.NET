@@ -2,6 +2,7 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using Microsoft.Extensions.Logging.Abstractions;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Storage.Sqlite;
 
 namespace SemanticRouter.Tests.AspNetCore;
 
