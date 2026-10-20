@@ -99,6 +99,17 @@ public sealed class OnnxAvailabilityTests : RouterHostTest, IDisposable
     }
 
     [Fact]
+    public async Task A_lowercase_provider_reaches_the_dashboard_in_the_package_spelling()
+    {
+        // The dashboard shows the Onnx model fields only for 'Onnx', compared exactly.
+        HttpClient client = await StartAsync("onnx");
+
+        JsonNode config = JsonNode.Parse(await client.GetStringAsync("/router/api/config"))!["config"]!;
+
+        ((string?)config["Embeddings"]!["Provider"]).Should().Be(OnnxEmbeddings.Provider);
+    }
+
+    [Fact]
     public async Task The_dashboard_status_says_onnx_cannot_run_here()
     {
         HttpClient client = await StartAsync(EmbeddingProviderKinds.Hashing);

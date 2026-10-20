@@ -210,7 +210,7 @@ internal static partial class ModelLineup
             };
         }
 
-        if (!ConnectorTypes.IsBuiltIn(options.Type) && options.BaseAddress is null)
+        if (!ConnectorTypes.IsBuiltIn(options.Type) && (options.RunsProgram || options.BaseAddress is null))
         {
             return report with
             {

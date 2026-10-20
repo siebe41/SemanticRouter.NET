@@ -9,9 +9,8 @@ namespace SemanticRouter.AspNetCore;
 /// (processes, clients) belong in the factory and are shared.
 /// </summary>
 /// <remarks>
-/// The router treats a connector of such a type by its settings: with a <see cref="ConnectorOptions.BaseAddress"/> it
-/// is an HTTP connector to that address (machine policy and the dashboard check the address); without one it runs a
-/// program, like a <see cref="ConnectorTypes.Cli"/> connector (an offline machine policy blocks it).
+/// The router treats a connector of such a type as one that runs a program, like a <see cref="ConnectorTypes.Cli"/>
+/// connector (an offline machine policy turns it off), unless the factory declares <see cref="UsesBaseAddress"/>.
 /// </remarks>
 public interface IChatConnectorFactory
 {
@@ -20,6 +19,16 @@ public interface IChatConnectorFactory
     /// a factory for one of <see cref="ConnectorTypes.BuiltIn"/> replaces the built-in implementation.
     /// </summary>
     string Type { get; }
+
+    /// <summary>
+    /// Whether connectors of this type send every request to their <see cref="ConnectorOptions.BaseAddress"/> and nowhere
+    /// else. Then the router treats them as HTTP connectors: the machine policy's endpoint rules, offline mode and local
+    /// hosts check that address, the configuration must give one, and the default timeout is 100 seconds. Default
+    /// <see langword="false"/>: they reach their vendor by their own means (a program, an SDK), like a
+    /// <see cref="ConnectorTypes.Cli"/> connector. Offline mode turns them off, they never count as local under a policy's
+    /// local hosts, they count as a subscription for prices, and the default timeout is 5 minutes.
+    /// </summary>
+    bool UsesBaseAddress => false;
 
     /// <summary>Creates the connector called <paramref name="name"/> with <paramref name="options"/>.</summary>
     IChatConnector Create(string name, ConnectorOptions options);

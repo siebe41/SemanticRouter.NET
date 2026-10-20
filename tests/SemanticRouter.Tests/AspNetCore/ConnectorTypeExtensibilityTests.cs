@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Connectors.Copilot;
 using static SemanticRouter.Tests.Support.TestEmbeddings;
 
 namespace SemanticRouter.Tests.AspNetCore;
@@ -13,14 +14,18 @@ namespace SemanticRouter.Tests.AspNetCore;
 /// Connector types and embedding providers are names, so a package outside this repository adds one with a factory and
 /// no change to SemanticRouter.AspNetCore (#201).
 /// </summary>
+/// <remarks>
+/// The router remembers the factories' type names for the whole process (so <c>"copilot"</c> binds as <c>Copilot</c>
+/// everywhere), so each test that registers a factory gives it a name no other test uses with different traits.
+/// </remarks>
 public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
 {
     // Lower case on purpose: type names match case-insensitively, as the enum they replace did.
-    private const string Settings = """
+    private static string Settings(string type) => $$"""
         {
           "SemanticRouter": {
             "Connectors": {
-              "aws": { "Type": "bedrock", "MaxConcurrency": 2 }
+              "aws": { "Type": "{{type}}", "MaxConcurrency": 2 }
             }
           }
         }
@@ -30,7 +35,7 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
 
     public ConnectorTypeExtensibilityTests() => ClassifyAs(tier: 4);
 
-    private Task<HttpClient> StartBedrockAsync(bool withFactory) =>
+    private Task<HttpClient> StartBedrockAsync(bool withFactory, string type = "bedrock") =>
         StartAsync(
             o =>
             {
@@ -46,7 +51,7 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
             },
             s =>
             {
-                IConfiguration configuration = new ConfigurationBuilder().AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes(Settings))).Build();
+                IConfiguration configuration = new ConfigurationBuilder().AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes(Settings(type)))).Build();
                 s.Configure<SemanticRouterConnectorsOptions>(configuration.GetSection(SemanticRouterOptions.SectionName));
                 if (withFactory)
                 {
@@ -63,7 +68,7 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
 
         (await response.Content.ReadAsStringAsync()).Should().Be("""{"from":"bedrock"}""");
         response.Headers.GetValues("X-Prompt-Route-Model").Should().Equal("bedrock-sonnet");
-        _bedrock.Created.Should().ContainSingle().Which.Should().Be(("aws", "bedrock", 2));
+        _bedrock.Created.Should().ContainSingle().Which.Should().Be(("aws", "Bedrock", 2), "a packaged name binds in its package's spelling");
         _bedrock.Served.Should().Equal("anthropic.claude-sonnet");
         Services.GetRequiredService<RouterRuntimeProvider>().Current.Warnings.Should().NotContain(w => w.Contains("aws", StringComparison.Ordinal));
         CloudHttp.Requests.Should().BeEmpty();
@@ -72,12 +77,13 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
     [Fact]
     public async Task A_type_no_package_provides_is_skipped_with_the_reason()
     {
-        HttpClient client = await StartBedrockAsync(withFactory: false);
+        // A name no test registers a factory for, so it stays as written.
+        HttpClient client = await StartBedrockAsync(withFactory: false, type: "vertex");
 
-        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", new StringContent(ChatJson, Encoding.UTF8, "application/json"));
+        await client.PostAsync("/v1/chat/completions", new StringContent(ChatJson, Encoding.UTF8, "application/json"));
 
-        (await response.Content.ReadAsStringAsync()).Should().NotContain("bedrock\"}");
-        const string reason = "no installed connector package provides connector type 'bedrock' (built in: OpenAICompatible, Cli, Anthropic, Responses)";
+        const string reason = "no installed connector package provides connector type 'vertex' (built in: OpenAICompatible, Cli, Anthropic, Responses)";
+        Services.GetRequiredService<RoutingActivityLog>().Recent(1).Single().Detail.Should().Contain(reason);
         Services.GetRequiredService<RouterRuntimeProvider>().Current.Warnings.Should().Contain($"Connector 'aws' is skipped: {reason}.");
         RouterCheck check = (await RouterDoctor.CheckConnectorAsync(Services, "aws")).Single();
         check.Status.Should().Be(RouterCheckStatus.Failed);
@@ -100,31 +106,53 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
     }
 
     [Fact]
-    public void A_packaged_type_is_an_http_connector_with_an_address_and_a_program_without_one()
+    public void A_packaged_type_runs_a_program_unless_its_factory_says_it_calls_its_address()
     {
-        var program = new ConnectorOptions { Type = "Bedrock" };
-        var http = new ConnectorOptions { Type = "Bedrock", BaseAddress = new Uri("https://bedrock.example.com") };
+        ConnectorTypes.Register([new GatewayFactory()]);
+        var program = new ConnectorOptions { Type = "Bedrock", BaseAddress = new Uri("http://localhost:8080") };
+        var http = new ConnectorOptions { Type = "localgateway", BaseAddress = new Uri("https://gateway.example.com") };
         MachinePolicy offline = MachinePolicy.FromJson("""{"Offline": true}""");
 
-        program.RunsProgram.Should().BeTrue();
+        program.RunsProgram.Should().BeTrue("its factory does not say it calls BaseAddress, so the address proves nothing");
         program.EffectiveTimeout.Should().Be(TimeSpan.FromMinutes(5));
         offline.Blocks(program).Should().Contain("offline mode");
+        RouterDashboardEndpoints.Destination(program).Should().Be("Bedrock");
+
+        http.Type.Should().Be("LocalGateway");
         http.RunsProgram.Should().BeFalse();
         http.EffectiveTimeout.Should().Be(TimeSpan.FromSeconds(100));
         offline.Blocks(http).Should().NotBeNull("an offline policy refuses the address like any HTTP connector's");
-        offline.Blocks(new ConnectorOptions { Type = "Bedrock", BaseAddress = new Uri("http://localhost:8080") }).Should().BeNull();
-        RouterDashboardEndpoints.Destination(program).Should().Be("Bedrock");
-        RouterDashboardEndpoints.Destination(http).Should().Be("https://bedrock.example.com:443");
+        offline.Blocks(new ConnectorOptions { Type = "LocalGateway", BaseAddress = new Uri("http://localhost:8080") }).Should().BeNull();
+        RouterDashboardEndpoints.Destination(http).Should().Be("https://gateway.example.com:443");
+        RouterConfiguration.FromJson("""{"Connectors": {"gw": {"Type": "LocalGateway"}}}""").GetDocumentValidationErrors()
+            .Should().Contain("Connector 'gw' needs an absolute BaseAddress.");
+    }
+
+    [Fact]
+    public void A_base_address_does_not_take_copilot_past_offline_mode_or_local_hosts()
+    {
+        // The Copilot SDK never reads BaseAddress: a loopback one must not make it look like a local server.
+        var configuration = new RouterConfiguration();
+        configuration.Connectors["copilot"] = new ConnectorOptions { Type = CopilotConnector.Type, BaseAddress = new Uri("http://localhost:1") };
+        configuration.Models.Add(Model("copilot-gpt", 4, local: true, connector: "copilot"));
+
+        MachinePolicy.FromJson("""{"Offline": true}""").Blocks(configuration.Connectors["copilot"])
+            .Should().Be("Copilot connectors reach their vendor, so they are off in offline mode (your organization's policy)");
+        MachinePolicy.FromJson("""{"LocalHosts": [], "RequireLocalOnly": true}""").Enforce(configuration).Should().Equal(
+            "Model 'copilot-gpt' does not count as local: its connector is not a server in your organization's policy.",
+            "Model 'copilot-gpt' is turned off: your organization's policy allows local models only.");
     }
 
     [Fact]
     public void A_policy_turns_off_a_packaged_type_by_name_in_any_case()
     {
-        MachinePolicy policy = MachinePolicy.FromJson("""{"DisabledConnectorTypes": ["BEDROCK"]}""");
+        MachinePolicy policy = MachinePolicy.FromJson("""{"DisabledConnectorTypes": [" SAGEMAKER ", "Cli "]}""");
 
-        policy.Blocks(new ConnectorOptions { Type = "bedrock", BaseAddress = new Uri("https://bedrock.example.com") })
-            .Should().Be("bedrock connectors are turned off by your organization's policy");
-        policy.Blocks(new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode }).Should().BeNull();
+        policy.Blocks(new ConnectorOptions { Type = "SageMaker", BaseAddress = new Uri("https://sagemaker.example.com") })
+            .Should().Be("SageMaker connectors are turned off by your organization's policy");
+        policy.Blocks(new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode })
+            .Should().Be("Cli connectors are turned off by your organization's policy", "an entry is read without its spaces, as a type is");
+        policy.Blocks(new ConnectorOptions { Type = ConnectorTypes.Anthropic, BaseAddress = new Uri("https://api.anthropic.com") }).Should().BeNull();
         FluentActions.Invoking(() => MachinePolicy.FromJson("""{"DisabledConnectorTypes": [" "]}"""))
             .Should().Throw<InvalidDataException>().WithMessage("*DisabledConnectorTypes may not hold an empty name*");
     }
@@ -132,11 +160,17 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
     [Fact]
     public async Task A_policy_entry_no_package_provides_is_reported()
     {
-        await StartAsync(services: s => s.AddSingleton(MachinePolicy.FromJson("""{"DisabledConnectorTypes": ["Cli", "Copliot"]}""")));
+        await StartAsync(services: s => s.AddSingleton(MachinePolicy.FromJson("""{"DisabledConnectorTypes": ["Cli ", " Copliot"]}""")));
 
         Services.GetRequiredService<RouterRuntimeProvider>().Current.Warnings.Should()
             .Contain("The machine policy turns off connector type 'Copliot', which no installed package provides; check its spelling.")
-            .And.NotContain(w => w.Contains("'Cli'", StringComparison.Ordinal));
+            .And.NotContain(w => w.Contains("'Cli", StringComparison.Ordinal));
+
+        // The doctor fails it: a misspelt entry turns nothing off, so the policy is not doing what it says.
+        IReadOnlyList<RouterCheck> checks = await RouterDoctor.CheckAsync(Services);
+        checks.Should().ContainSingle(c => c.Subject == "machine policy").Which.Should().Match<RouterCheck>(c =>
+            c.Status == RouterCheckStatus.Failed && c.Message.StartsWith("DisabledConnectorTypes names 'Copliot'", StringComparison.Ordinal));
+        checks.Should().NotContain(c => c.Message.Contains("check its spelling;", StringComparison.Ordinal), "the failure replaces the warning");
     }
 
     [Fact]
@@ -151,6 +185,49 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
         await FluentActions.Awaiting(async () => await missing.GenerateEmbeddingAsync("hi", CancellationToken.None))
             .Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("No installed package provides the embedding provider 'Absent' (built in: Hashing, OpenAICompatible).");
+    }
+
+    [Fact]
+    public void A_packaged_embedding_provider_keeps_prompts_local_only_in_process_or_when_declared_local()
+    {
+        EmbeddingProviderKinds.Register([new NamedEmbeddingFactory("InHouseModel", runsInProcess: true)]);
+
+        new EmbeddingProviderOptions { Provider = "RemoteEmbed" }.KeepsPromptsLocal.Should().BeFalse("a factory that does not say it runs here may send text anywhere");
+        new EmbeddingProviderOptions { Provider = "RemoteEmbed", IsLocal = true }.KeepsPromptsLocal.Should().BeTrue();
+        new EmbeddingProviderOptions { Provider = "inhousemodel" }.Should()
+            .Match<EmbeddingProviderOptions>(e => e.Provider == "InHouseModel" && e.KeepsPromptsLocal);
+    }
+
+    [Theory]
+    [InlineData("""{"RequireLocalOnly": true}""", null, null, "The RemoteEmbed embeddings are not allowed by your organization's policy, which allows local models only: routing uses the in-process hashing embeddings.")]
+    [InlineData("""{"Offline": true}""", true, "http://localhost:9000", "The RemoteEmbed embeddings are not used (RemoteEmbed embeddings may reach their vendor, so they are off in offline mode (your organization's policy)): routing uses the in-process hashing embeddings.")]
+    [InlineData("""{"AllowedEndpoints": ["embed.example.com"]}""", null, "https://other.example.com", "The RemoteEmbed embeddings are not used (other.example.com is not an allowed endpoint in your organization's policy): routing uses the in-process hashing embeddings.")]
+    [InlineData("""{"AllowedEndpoints": ["embed.example.com"]}""", null, null, "The RemoteEmbed embeddings are not used (RemoteEmbed embeddings name no Endpoint, and your organization's policy allows only listed endpoints): routing uses the in-process hashing embeddings.")]
+    public void The_policy_replaces_a_packaged_embedding_provider_it_cannot_vouch_for(string policy, bool? isLocal, string? endpoint, string change)
+    {
+        var configuration = new RouterConfiguration();
+        configuration.Embeddings.Provider = "RemoteEmbed";
+        configuration.Embeddings.IsLocal = isLocal;
+        configuration.Embeddings.Endpoint = endpoint is null ? null : new Uri(endpoint);
+
+        MachinePolicy.FromJson(policy).Enforce(configuration).Should().Contain(change);
+        configuration.Embeddings.Provider.Should().Be(EmbeddingProviderKinds.Hashing);
+    }
+
+    [Fact]
+    public void The_policy_keeps_a_packaged_embedding_provider_it_can_vouch_for()
+    {
+        EmbeddingProviderKinds.Register([new NamedEmbeddingFactory("InHouseModel", runsInProcess: true)]);
+        var inProcess = new RouterConfiguration();
+        inProcess.Embeddings.Provider = "InHouseModel";
+        var listed = new RouterConfiguration();
+        listed.Embeddings.Provider = "RemoteEmbed";
+        listed.Embeddings.Endpoint = new Uri("https://embed.example.com");
+
+        MachinePolicy.FromJson("""{"Offline": true, "RequireLocalOnly": true}""").Enforce(inProcess).Should().BeEmpty();
+        inProcess.Embeddings.Provider.Should().Be("InHouseModel");
+        MachinePolicy.FromJson("""{"AllowedEndpoints": ["embed.example.com"]}""").Enforce(listed).Should().BeEmpty();
+        listed.Embeddings.Provider.Should().Be("RemoteEmbed");
     }
 
     private sealed class BedrockFactory : IChatConnectorFactory
@@ -181,11 +258,22 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
         }
     }
 
-    private sealed class NamedEmbeddingFactory(string kind) : IEmbeddingProviderFactory
+    private sealed class GatewayFactory : IChatConnectorFactory
+    {
+        public string Type => "LocalGateway";
+
+        public bool UsesBaseAddress => true;
+
+        public IChatConnector Create(string name, ConnectorOptions options) => new BedrockConnector(name, []);
+    }
+
+    private sealed class NamedEmbeddingFactory(string kind, bool runsInProcess = false) : IEmbeddingProviderFactory
     {
         public IEmbeddingProvider Provider { get; } = new HashingEmbeddingProvider();
 
         public string Kind => kind;
+
+        public bool RunsInProcess => runsInProcess;
 
         public IEmbeddingProvider Create(EmbeddingProviderOptions options) => Provider;
     }

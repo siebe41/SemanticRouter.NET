@@ -190,7 +190,7 @@ public sealed class MachinePolicy
     public string? Blocks(ConnectorOptions connector)
     {
         ArgumentNullException.ThrowIfNull(connector);
-        if (DisabledConnectorTypes.Contains(connector.Type, StringComparer.OrdinalIgnoreCase))
+        if (DisabledConnectorTypes.Any(t => string.Equals(t?.Trim(), connector.Type, StringComparison.OrdinalIgnoreCase)))
         {
             return $"{connector.Type} connectors are turned off by your organization's policy";
         }
@@ -225,7 +225,7 @@ public sealed class MachinePolicy
             : null;
     }
 
-    /// <summary>Whether <see cref="LocalHosts"/> lets a model at <paramref name="address"/> be local (<see langword="null"/>: a CLI or Copilot).</summary>
+    /// <summary>Whether <see cref="LocalHosts"/> lets a model at <paramref name="address"/> be local (<see langword="null"/>: a connector that runs a program, such as a CLI or Copilot).</summary>
     public bool AllowsLocal(Uri? address) =>
         LocalHosts is null || (address is not null && Matches(address, LocalHosts));
 
@@ -279,7 +279,11 @@ public sealed class MachinePolicy
         }
 
         EmbeddingProviderOptions embeddings = configuration.Embeddings;
-        if (embeddings.Provider == EmbeddingProviderKinds.OpenAICompatible && embeddings.Endpoint is { } endpoint)
+        if (!EmbeddingProviderKinds.IsBuiltIn(embeddings.Provider) && !EmbeddingProviderKinds.RunsInProcess(embeddings.Provider))
+        {
+            EnforcePackagedEmbeddings(embeddings, changes);
+        }
+        else if (embeddings.Provider == EmbeddingProviderKinds.OpenAICompatible && embeddings.Endpoint is { } endpoint)
         {
             if (embeddings.IsLocal == true && !AllowsLocal(endpoint))
             {
@@ -320,6 +324,36 @@ public sealed class MachinePolicy
             PromptStorage.Redacted => 1,
             _ => 2,
         };
+    }
+
+    /// <summary>
+    /// Holds a packaged embedding provider that does not run in this process (it may send text anywhere) to the policy:
+    /// offline mode and local-only models replace it with Hashing, as do allowed endpoints that do not include its
+    /// <see cref="EmbeddingProviderOptions.Endpoint"/>, and local hosts that do not include it make it not local.
+    /// </summary>
+    private void EnforcePackagedEmbeddings(EmbeddingProviderOptions embeddings, List<string> changes)
+    {
+        string provider = embeddings.Provider;
+        if (embeddings.IsLocal == true && !AllowsLocal(embeddings.Endpoint))
+        {
+            embeddings.IsLocal = false;
+            changes.Add($"The {provider} embeddings do not count as local in your organization's policy.");
+        }
+
+        string? refused = Offline ? $"{provider} embeddings may reach their vendor, so they are off in offline mode ({OfflineSetting})"
+            : AllowedEndpoints.Count == 0 ? null
+            : embeddings.Endpoint is { } endpoint ? Refuses(endpoint)
+            : $"{provider} embeddings name no Endpoint, and your organization's policy allows only listed endpoints";
+        if (refused is not null)
+        {
+            embeddings.Provider = EmbeddingProviderKinds.Hashing;
+            changes.Add($"The {provider} embeddings are not used ({refused}): routing uses the in-process hashing embeddings.");
+        }
+        else if (RequireLocalOnly && !embeddings.KeepsPromptsLocal)
+        {
+            embeddings.Provider = EmbeddingProviderKinds.Hashing;
+            changes.Add($"The {provider} embeddings are not allowed by your organization's policy, which allows local models only: routing uses the in-process hashing embeddings.");
+        }
     }
 
     /// <summary>What a configuration change would have to give up to keep within the policy; empty when it keeps within it.</summary>

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 
@@ -23,12 +24,44 @@ public static class EmbeddingProviderKinds
     public static bool IsBuiltIn(string? kind) => BuiltIn.Contains(kind, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// <paramref name="kind"/> trimmed, with a built-in name in its canonical spelling and an empty value read as
-    /// <see cref="Hashing"/>. Other names are kept as written.
+    /// The kinds of the factories a router has registered (<see cref="Register"/>), by name: their spelling and whether
+    /// they run in this process. Shared by every router in the process, since a kind name means one package.
     /// </summary>
-    internal static string Normalize(string? kind) =>
-        string.IsNullOrWhiteSpace(kind) ? Hashing
-        : BuiltIn.FirstOrDefault(b => string.Equals(b, kind.Trim(), StringComparison.OrdinalIgnoreCase)) ?? kind.Trim();
+    private static readonly ConcurrentDictionary<string, (string Name, bool RunsInProcess)> Packaged = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// <paramref name="kind"/> trimmed, with a built-in name or the name of a registered factory in its canonical spelling
+    /// (so <c>"onnx"</c> becomes <c>Onnx</c>) and an empty value read as <see cref="Hashing"/>. Other names are kept as written.
+    /// </summary>
+    internal static string Normalize(string? kind)
+    {
+        if (string.IsNullOrWhiteSpace(kind))
+        {
+            return Hashing;
+        }
+
+        string trimmed = kind.Trim();
+        return BuiltIn.FirstOrDefault(b => string.Equals(b, trimmed, StringComparison.OrdinalIgnoreCase))
+            ?? (Packaged.TryGetValue(trimmed, out var packaged) ? packaged.Name : trimmed);
+    }
+
+    /// <summary>Records the kinds of <paramref name="factories"/>, for <see cref="Normalize"/> and <see cref="RunsInProcess"/>.</summary>
+    internal static void Register(IEnumerable<IEmbeddingProviderFactory> factories)
+    {
+        foreach (IEmbeddingProviderFactory factory in factories)
+        {
+            if (!string.IsNullOrWhiteSpace(factory.Kind) && !IsBuiltIn(factory.Kind))
+            {
+                Packaged[factory.Kind.Trim()] = (factory.Kind.Trim(), factory.RunsInProcess);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a registered factory says the packaged <paramref name="kind"/> runs in this process
+    /// (<see cref="IEmbeddingProviderFactory.RunsInProcess"/>). <see langword="false"/> for a kind no factory has declared that for.
+    /// </summary>
+    internal static bool RunsInProcess(string kind) => Packaged.TryGetValue(kind, out var packaged) && packaged.RunsInProcess;
 }
 
 /// <summary>How token vectors become one sentence vector (in-process models such as <c>Onnx</c>).</summary>
@@ -66,6 +99,16 @@ public interface IEmbeddingProviderFactory
     /// library with no build for this platform). The dashboard and <c>doctor</c> then do not suggest it.
     /// </summary>
     string? Unavailable => null;
+
+    /// <summary>
+    /// Whether this kind computes embeddings in this process, so the text never leaves the machine (an in-process model
+    /// such as <c>Onnx</c>). Default <see langword="false"/>: the router treats it as sending text to a vendor. Prompts that
+    /// must stay local are embedded with it only when <see cref="EmbeddingProviderOptions.IsLocal"/> is
+    /// <see langword="true"/>, and the machine policy replaces it with <see cref="EmbeddingProviderKinds.Hashing"/> in
+    /// offline mode, under allowed endpoints that do not include its <see cref="EmbeddingProviderOptions.Endpoint"/>, and
+    /// when it requires local models only.
+    /// </summary>
+    bool RunsInProcess => false;
 }
 
 /// <summary>A model an <see cref="IEmbeddingProviderFactory"/> can provide by name.</summary>
@@ -83,7 +126,8 @@ public sealed class EmbeddingProviderOptions
 {
     /// <summary>
     /// Which provider to use: one of <see cref="EmbeddingProviderKinds"/>, or a kind an installed package provides through
-    /// an <see cref="IEmbeddingProviderFactory"/>. Case-insensitive; built-in names are stored in their canonical spelling.
+    /// an <see cref="IEmbeddingProviderFactory"/>. Case-insensitive; built-in names, and those of the installed factories,
+    /// are stored in their canonical spelling.
     /// Default <see cref="EmbeddingProviderKinds.Hashing"/>.
     /// </summary>
     [AllowNull]
@@ -108,9 +152,17 @@ public sealed class EmbeddingProviderOptions
     /// </summary>
     public bool? IsLocal { get; set; }
 
-    /// <summary>Whether prompts embedded with these settings stay on this machine (or a server declared <see cref="IsLocal"/>).</summary>
-    internal bool KeepsPromptsLocal =>
-        Provider != EmbeddingProviderKinds.OpenAICompatible || (IsLocal ?? Endpoint is { IsLoopback: true });
+    /// <summary>
+    /// Whether prompts embedded with these settings stay on this machine (or a server declared <see cref="IsLocal"/>). A
+    /// packaged provider does when its factory runs in this process (<see cref="IEmbeddingProviderFactory.RunsInProcess"/>)
+    /// or when it is declared <see cref="IsLocal"/>.
+    /// </summary>
+    internal bool KeepsPromptsLocal => Provider switch
+    {
+        EmbeddingProviderKinds.Hashing => true,
+        EmbeddingProviderKinds.OpenAICompatible => IsLocal ?? Endpoint is { IsLoopback: true },
+        _ => EmbeddingProviderKinds.RunsInProcess(Provider) || IsLocal == true,
+    };
 
     /// <summary>Path of the embeddings API. Default <c>/v1/embeddings</c>.</summary>
     public string RequestPath { get; set; } = "/v1/embeddings";
