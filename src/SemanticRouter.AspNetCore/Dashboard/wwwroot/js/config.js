@@ -223,7 +223,8 @@ views.connectors = () => {
     ${Object.entries(conns).map(([name, c]) => {
       const key = 'conn:' + name;
       const type = c.Type || 'OpenAICompatible';
-      // A type from an installed package (or one no package provides) is shown by its settings, as the router runs it.
+      // A type from an installed package (or one no package provides) is shown as the router runs it: calling its base
+      // address when the package says so, otherwise as a program.
       const packaged = !isBuiltInConnectorType(type);
       const program = runsProgram(c);
       const p = `Connectors.${name}`;
@@ -255,7 +256,6 @@ views.connectors = () => {
             <label class="field"><span class="name">Remove environment variables</span><textarea data-bind="${p}.RemoveEnvironmentVariables" data-kind="lines" data-nullable="1" rows="3">${h(lines(c.RemoveEnvironmentVariables))}</textarea><span class="hint">Empty = preset defaults (API keys that would switch billing away from your subscription).</span></label>
             <label class="check wide"><input type="checkbox" data-bind="${p}.AllowRemoteClients" data-kind="bool" ${c.AllowRemoteClients ? 'checked' : ''}> Allow remote clients <span class="muted">— read docs/TERMS.md first; a personal subscription must not serve other people</span></label>`
           : program ? `
-            <label class="field"><span class="name">Base address</span><input type="url" data-bind="${p}.BaseAddress" data-kind="nulltext" value="" placeholder="none: it runs a program"><span class="hint">Empty: ${h(type)} runs a program on this machine. With an address it calls that address instead.</span></label>
             <label class="field"><span class="name">Program</span><input type="text" data-bind="${p}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="the package's default"><span class="hint">Started directly, never through a shell. The package's documentation says what to install and how to sign in; <b>Discover models</b> reports what is missing.</span></label>
             <label class="field"><span class="name">Home directory</span><input type="text" data-bind="${p}.HomeDirectory" data-kind="nulltext" value="${h(c.HomeDirectory || '')}" placeholder="the package's default"><span class="hint">Where the program keeps its sign-in and state, for packages that use one.</span></label>
             ${numField({ bind: `${p}.MaxConcurrency`, value: c.MaxConcurrency, def: 2, label: 'Max concurrency', min: 1, step: 1 })}
@@ -263,7 +263,7 @@ views.connectors = () => {
             ${durationField({ bind: `${p}.Timeout`, value: c.Timeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:05:00', label: 'Timeout', hint: 'Time to first output.' })}
             <label class="check wide"><input type="checkbox" data-bind="${p}.AllowRemoteClients" data-kind="bool" ${c.AllowRemoteClients ? 'checked' : ''}> Allow remote clients <span class="muted">— read docs/TERMS.md first; a personal subscription must not serve other people</span></label>`
           : `
-            <label class="field"><span class="name">Base address</span><input type="url" data-bind="${p}.BaseAddress" data-kind="nulltext" value="${h(c.BaseAddress || '')}" placeholder="${type === 'Anthropic' ? 'https://api.anthropic.com' : 'http://localhost:1234'}">${packaged ? `<span class="hint">Empty: ${h(type)} runs a program on this machine instead.</span>` : ''}</label>
+            <label class="field"><span class="name">Base address</span><input type="url" data-bind="${p}.BaseAddress" data-kind="nulltext" value="${h(c.BaseAddress || '')}" placeholder="${type === 'Anthropic' ? 'https://api.anthropic.com' : 'http://localhost:1234'}"></label>
             <label class="field"><span class="name">Request path</span><input type="text" data-bind="${p}.RequestPath" data-empty="drop" value="${h(c.RequestPath && c.RequestPath !== '/v1/chat/completions' ? c.RequestPath : '')}" placeholder="/v1/chat/completions (default)"><span class="hint">${type === 'Anthropic' ? 'Leave the default; /v1/messages is used.' : 'Gemini: /v1beta/openai/chat/completions · OpenRouter: /api/v1/chat/completions'}</span></label>
             ${secretField(p + '.ApiKey', c.ApiKey, 'API key')}
             ${durationField({ bind: `${p}.Timeout`, value: c.Timeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:01:40', label: 'Timeout', hint: 'Time to response headers.' })}
@@ -352,7 +352,7 @@ views.embeddings = () => {
   return `
     <div class="section-head"><h1>Embeddings</h1><span class="muted">How prompts and utterances are turned into vectors.</span></div>
     <div class="card section"><div class="form-grid">
-      <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${available.map((x) => `<option value="${h(x)}" ${same(x, provider) ? 'selected' : ''}>${h(x)}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only). OpenAICompatible calls a server (LM Studio, Ollama, OpenAI).${packaged.length ? ` ${packaged.map(h).join(', ')}: from installed packages, a real embedding model in this process.` : ''}</span></label>
+      <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${available.map((x) => `<option value="${h(x)}" ${same(x, provider) ? 'selected' : ''}>${h(x)}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only). OpenAICompatible calls a server (LM Studio, Ollama, OpenAI).${packaged.length ? ` ${packaged.map(h).join(', ')}: from installed packages.` : ''}</span></label>
       ${unavailable[provider] ? `<div class="field wide"><span class="name">Not available here</span><span class="small">${h(unavailable[provider])}</span></div>` : ''}
       ${Object.entries(unavailable).filter(([kind]) => !same(kind, provider)).map(([, why]) => `<p class="field wide muted small">${h(why)}</p>`).join('')}
       ${!same(provider, 'Hashing') && !same(provider, 'OpenAICompatible') ? modelFields() : same(provider, 'Hashing') ? numField({ bind: 'Embeddings.Dimensions', value: e.Dimensions, def: 512, label: 'Dimensions', min: 16, step: 1, hint: 'More dimensions, fewer accidental matches between unrelated words.' }) : `

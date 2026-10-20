@@ -11,7 +11,7 @@ import './desktop.js';
 import { reportActions } from './feedback.js';
 import { serviceActions } from './service.js';
 import { actions } from './actions.js';
-import { $, $$, actionKey, api, evaluationEdited, h, isBuiltInConnectorType, isDirty, jsonEdited, metricsOnly, readInput, readOnly, scrollRegions, setPath, showSignIn, state, toast } from './core.js';
+import { $, $$, actionKey, api, evaluationEdited, h, isDirty, jsonEdited, metricsOnly, readInput, readOnly, scrollRegions, setPath, showSignIn, state, toast } from './core.js';
 import { aliasRows, limitRows, writeAliases, writeLimits } from './draft.js';
 import { connectStream } from './live.js';
 import { graph } from './memory.js';
@@ -113,8 +113,6 @@ document.addEventListener('change', (ev) => {
     setPath(state.config, el.dataset.bind, readInput(el));
     // Structural selects (connector type, preset, embeddings provider, enabled) change what is shown.
     if (/\.(Type|Preset|Provider|Enabled)$/.test(el.dataset.bind) || el.dataset.bind === 'Embeddings.Provider') render();
-    // So does an installed package's connector getting or losing its base address: it calls that address, or runs a program.
-    else if (/^Connectors\.[^.]+\.BaseAddress$/.test(el.dataset.bind) && !isBuiltInConnectorType((state.config.Connectors[el.dataset.bind.split('.')[1]] || {}).Type)) render();
     else updateSaveBar();
   } else if (el.dataset.actionInput === 'alias-key' || el.dataset.actionInput === 'ratelimit-key') {
     render(); // a duplicate or empty name is flagged on the row

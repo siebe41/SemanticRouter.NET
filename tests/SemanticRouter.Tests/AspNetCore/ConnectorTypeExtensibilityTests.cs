@@ -35,7 +35,7 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
 
     public ConnectorTypeExtensibilityTests() => ClassifyAs(tier: 4);
 
-    private Task<HttpClient> StartBedrockAsync(bool withFactory, string type = "bedrock") =>
+    private Task<HttpClient> StartBedrockAsync(bool withFactory, string type = "bedrock", IChatConnectorFactory? other = null) =>
         StartAsync(
             o =>
             {
@@ -56,6 +56,11 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
                 if (withFactory)
                 {
                     s.AddSingleton<IChatConnectorFactory>(_bedrock);
+                }
+
+                if (other is not null)
+                {
+                    s.AddSingleton(other);
                 }
             });
 
@@ -85,6 +90,18 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
 
         types.GetProperty("builtIn").EnumerateArray().Select(t => t.GetString()).Should().Equal(ConnectorTypes.BuiltIn);
         types.GetProperty("installed").EnumerateArray().Select(t => t.GetString()).Should().Equal(installed);
+        types.GetProperty("usesBaseAddress").EnumerateArray().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task The_dashboard_learns_which_installed_types_call_their_base_address()
+    {
+        HttpClient client = await StartBedrockAsync(withFactory: true, other: new GatewayFactory());
+
+        JsonElement types = JsonDocument.Parse(await client.GetStringAsync(new Uri("/router/api/status", UriKind.Relative))).RootElement.GetProperty("connectorTypes");
+
+        types.GetProperty("installed").EnumerateArray().Select(t => t.GetString()).Should().Equal("Bedrock", "LocalGateway");
+        types.GetProperty("usesBaseAddress").EnumerateArray().Select(t => t.GetString()).Should().Equal("LocalGateway");
     }
 
     [Fact]

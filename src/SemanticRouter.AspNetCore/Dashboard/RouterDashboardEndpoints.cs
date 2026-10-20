@@ -166,14 +166,7 @@ public static partial class RouterDashboardEndpoints
                 {
                     Unsaved = provider.Unsaved,
                     Instance = provider.Instance,
-                    ConnectorTypes = new(
-                        ConnectorTypes.BuiltIn,
-                        services.GetServices<IChatConnectorFactory>()
-                            .Select(f => f.Type)
-                            .Where(t => !string.IsNullOrWhiteSpace(t) && !ConnectorTypes.IsBuiltIn(t))
-                            .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .Order(StringComparer.OrdinalIgnoreCase)
-                            .ToArray()),
+                    ConnectorTypes = InstalledConnectorTypes(services.GetServices<IChatConnectorFactory>()),
                 };
 
                 // State writes that failed after the configuration was applied (a locked or full disk): shown as they happen.
@@ -1343,16 +1336,29 @@ public static partial class RouterDashboardEndpoints
         public string? Instance { get; init; }
 
         /// <summary>The connector types this router can run: the built-in ones, and those installed packages provide.</summary>
-        public ConnectorTypesStatus ConnectorTypes { get; init; } = new([], []);
+        public ConnectorTypesStatus ConnectorTypes { get; init; } = new([], [], []);
     }
 
     /// <summary>
     /// Connector types: <see cref="SemanticRouter.AspNetCore.ConnectorTypes.BuiltIn"/>, and the types of the registered
     /// <see cref="IChatConnectorFactory"/>s that are not built in. The dashboard offers both, and treats an installed type
-    /// like the router does (<see cref="ConnectorOptions.RunsProgram"/>): with a base address an HTTP connector, without
-    /// one a program.
+    /// like the router does (<see cref="ConnectorOptions.RunsProgram"/>): an HTTP connector when it is in
+    /// <paramref name="UsesBaseAddress"/>, otherwise a program.
     /// </summary>
-    internal sealed record ConnectorTypesStatus(IReadOnlyList<string> BuiltIn, IReadOnlyList<string> Installed);
+    /// <param name="BuiltIn">The router's own types.</param>
+    /// <param name="Installed">The types installed packages provide.</param>
+    /// <param name="UsesBaseAddress">Those of <paramref name="Installed"/> whose factory sets <see cref="IChatConnectorFactory.UsesBaseAddress"/>.</param>
+    internal sealed record ConnectorTypesStatus(IReadOnlyList<string> BuiltIn, IReadOnlyList<string> Installed, IReadOnlyList<string> UsesBaseAddress);
+
+    /// <summary>The connector types for <see cref="StatusResponse.ConnectorTypes"/>: one entry per installed type, sorted.</summary>
+    internal static ConnectorTypesStatus InstalledConnectorTypes(IEnumerable<IChatConnectorFactory> factories)
+    {
+        IChatConnectorFactory[] installed = [.. factories
+            .Where(f => !string.IsNullOrWhiteSpace(f.Type) && !ConnectorTypes.IsBuiltIn(f.Type))
+            .DistinctBy(f => f.Type.Trim(), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(f => f.Type.Trim(), StringComparer.OrdinalIgnoreCase)];
+        return new(ConnectorTypes.BuiltIn, [.. installed.Select(f => f.Type.Trim())], [.. installed.Where(f => f.UsesBaseAddress).Select(f => f.Type.Trim())]);
+    }
 
     /// <summary>Embedding provider in use.</summary>
     internal sealed record EmbeddingsStatus(

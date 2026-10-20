@@ -333,13 +333,13 @@ test("an installed package's connector type is offered and shown by its settings
   const type = page.locator('.item.open select[data-bind="Connectors.local.Type"]');
   await expect(type.locator('option')).toHaveText([...connectorTypes.builtIn, ...connectorTypes.installed]);
   await type.selectOption('Copilot');
-  // With the stub's base address it is an HTTP connector to that address; without one it runs a program.
-  await expect(page.locator('.item.open input[data-bind="Connectors.local.RequestPath"]')).toBeVisible();
-  await page.locator('.item.open input[data-bind="Connectors.local.BaseAddress"]').fill('');
-  await page.locator('.item.open input[data-bind="Connectors.local.BaseAddress"]').blur();
+  // The Copilot package does not call a base address (its factory leaves UsesBaseAddress off), so it gets the fields of
+  // a program, not the HTTP ones, although the connector still has the stub's address.
+  expect(connectorTypes.usesBaseAddress).not.toContain('Copilot');
   await expect(page.locator('.item.open input[data-bind="Connectors.local.Executable"]')).toBeVisible();
   await expect(page.locator('.item.open input[data-bind="Connectors.local.HomeDirectory"]')).toBeVisible();
   await expect(page.locator('.item.open input[data-bind="Connectors.local.RequestPath"]')).toHaveCount(0);
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.BaseAddress"]')).toHaveCount(0);
 });
 
 test("an installed package's embedding provider offers its models", async ({ page, request }) => {

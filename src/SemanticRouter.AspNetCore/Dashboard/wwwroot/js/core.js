@@ -125,12 +125,14 @@ const builtInConnectorTypes = () => (state.status && state.status.connectorTypes
 export const connectorTypes = () => [...builtInConnectorTypes(), ...((state.status && state.status.connectorTypes && state.status.connectorTypes.installed) || [])];
 export const isBuiltInConnectorType = (type) => builtInConnectorTypes().some((t) => t.toLowerCase() === String(type || 'OpenAICompatible').toLowerCase());
 export const isInstalledConnectorType = (type) => connectorTypes().some((t) => t.toLowerCase() === String(type || 'OpenAICompatible').toLowerCase());
+const usesBaseAddress = (type) => ((state.status && state.status.connectorTypes && state.status.connectorTypes.usesBaseAddress) || []).some((t) => t.toLowerCase() === String(type || '').toLowerCase());
 /**
- * Whether a connector (its configuration) runs a program rather than calling an HTTP endpoint, as the router decides
- * (ConnectorOptions.RunsProgram): a Cli connector, or one of an installed type without a base address. Its models are
- * subscriptions: free per request, valued at the API price.
+ * Whether a connector (its configuration) reaches its vendor by its own means rather than calling its base address, as
+ * the router decides (ConnectorOptions.RunsProgram): a Cli connector, or one of an installed type whose package does not
+ * say it calls the address (IChatConnectorFactory.UsesBaseAddress). Its models are subscriptions: free per request,
+ * valued at the API price.
  */
-export const runsProgram = (conn) => !!conn && ((conn.Type || '').toLowerCase() === 'cli' || (!isBuiltInConnectorType(conn.Type) && !conn.BaseAddress));
+export const runsProgram = (conn) => !!conn && ((conn.Type || '').toLowerCase() === 'cli' || (!isBuiltInConnectorType(conn.Type) && !usesBaseAddress(conn.Type)));
 export const lines = (arr) => (arr || []).join('\n');
 export const fromLines = (text) => text.split('\n').map((s) => s.trim()).filter(Boolean);
 export const csv = (arr) => (arr || []).join(', ');
