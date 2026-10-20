@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- The app icon, src/SemanticRouter.Desktop/Assets/icon.png: a pulse line ending in a dot, on a dark rounded tile.
+       deploy/make-tray-icons.py draws the tray icons from the line and the dot, without the tile. -->
+  <rect id="tile" width="256" height="256" rx="48" fill="#0C1013"/>
+  <polyline id="line" points="48,128 112,128 144,64 176,192 208,128" fill="none" stroke="#228FA7" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="dot" cx="208" cy="128" r="22" fill="#D08C34"/>
+</svg>

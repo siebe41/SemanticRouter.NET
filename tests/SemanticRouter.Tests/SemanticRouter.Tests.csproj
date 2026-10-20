@@ -32,6 +32,8 @@
   <ItemGroup>
     <!-- Configuration directories made by each release (tools/upgrade-fixtures), for UpgradeFromReleasedVersionsTests. -->
     <None Include="..\fixtures\upgrade\*.zip" Link="fixtures\upgrade\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The desktop app's tray icons, for DesktopTests. -->
+    <None Include="..\..\src\SemanticRouter.Desktop\Assets\tray*" Link="tray-icons\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
