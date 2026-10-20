@@ -42,10 +42,12 @@ function show(s) {
 }
 
 /*
- * The editing shortcuts on a Mac, in the app window. The app lives in the menu bar and has no Edit menu, and WebKit
- * carries out ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z only through that menu: without it they reach the page as plain key presses, and
- * nothing happens. So they are done here. Where an Edit menu exists (a browser), the menu takes them before the page
- * sees them, so nothing is done twice. Password fields are not copied from, as in a browser.
+ * The editing shortcuts on a Mac, in the app window. WebKit carries out ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z only through the app's
+ * Edit menu: without one they reach the page as plain key presses, and nothing happens. The app window has an Edit menu
+ * (MacApplication in the desktop app), but whether the keys get to it past the app's own window is still to be tried
+ * on a Mac, so they are done here too. Nothing is done twice: a key the page handles it prevents, and WebKit then does
+ * not take it to the menu; one it leaves (a copy from a password field) goes on to the menu, and WebKit does not copy
+ * from a password field either. Password fields are not copied from, as in a browser.
  */
 const isMac = () => /Mac/.test(navigator.platform || '');
 
