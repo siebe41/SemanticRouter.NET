@@ -13,12 +13,20 @@ name: Release
 # jobs that hold the OIDC token build nothing; they sign and attest what the build jobs produced, after any code
 # signing.
 #
+# Nothing is public until everything is ready (docs/releases.md#the-order-of-a-release). Everything is built, signed,
+# checked and attached to a draft GitHub release first, which nobody but the maintainers sees and which the desktop
+# app's updater does not read. SHA256SUMS and the provenance attestation are added to the draft too. Only then, one
+# after another, the image is pushed and signed, the NuGet packages are pushed, and the draft is published. So a
+# failure in a build, installer or signing job leaves a draft and nothing else: no package on nuget.org, no new image
+# tag and no public release. deploy/release-order-check.sh, which CI runs, keeps this order.
+#
 # A tag with a suffix (v1.0.0-rc.1) is a prerelease: the GitHub release is marked as one, so the desktop app's updater
 # (which skips prereleases) never offers it, and the image gets its version tag but not :latest. NuGet treats the
 # suffix as a prerelease by itself. "Cut a release" makes stable releases only; push such a tag by hand for a candidate.
 #
 # The Windows and macOS installers must be code-signed: a release fails at its first job when a platform's signing
-# secrets are missing, unless the variable ALLOW_UNSIGNED_RELEASE is `true` (docs/releases.md#code-signing).
+# secrets are missing, unless the variable ALLOW_UNSIGNED_RELEASE is `true` (docs/releases.md#code-signing). "Cut a
+# release" also asks for its "Allow unsigned installers" box to be ticked before it tags such a release.
 on:
   push:
     tags: [ 'v*' ]
@@ -167,9 +175,11 @@ jobs:
   # NuGet Trusted Publishing: no NuGet key is stored anywhere. This job exchanges its GitHub OIDC token for an API key
   # that nuget.org issues for one hour, under the policy on the nuget.org account (repository, release.yml, environment
   # `release`). It runs nothing but the push, so restore, build and test code in the job above never sees the token.
-  # A release fails here rather than skipping the push: the README tells people to install from nuget.org.
+  # A release fails here rather than skipping the push: the README tells people to install from nuget.org. A version on
+  # nuget.org can never be used again, so the push comes after everything else is signed, attached and checked and the
+  # image is out; only publishing the draft release comes after it.
   nuget:
-    needs: packages
+    needs: [ packages, image-sign ]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -250,12 +260,14 @@ jobs:
           echo "id=$(docker image inspect "$IMAGE:$VERSION" --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
           docker save "$IMAGE:$VERSION" "$IMAGE:latest" -o image.tar
 
+      # Kept for a week, like the installers' full packages below: the push waits for the installers, and a failed
+      # release is finished by re-running its failed jobs, which reuse these (docs/releases.md#when-a-release-fails).
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image
           path: image.tar
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   # No permission, so the job's token can do nothing, and no cache, so a cache entry written elsewhere cannot change
   # the scanner or its database.
@@ -356,8 +368,10 @@ jobs:
           name: sbom-image
           path: SemanticRouter-${{ env.VERSION }}-image.cdx.json
 
+  # The image is pushed, as :VERSION and :latest, only once the draft release is complete: every installer signed and
+  # checked, SHA256SUMS and the attestation attached (checksums). A failed installer or signing job leaves no new tag.
   image:
-    needs: [ image-build, image-scan, image-sbom ]
+    needs: [ image-build, image-scan, image-sbom, checksums ]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -574,8 +588,10 @@ jobs:
           fi
           printf '%s\n' "$notes" > notes.md
 
-      # A version with a suffix (1.0.0-rc.1) is created as a prerelease: the desktop app's updater skips those.
-      - name: Attach to the release
+      # The release is created as a draft, which only the publish job makes public, once everything else is done. A
+      # version with a suffix (1.0.0-rc.1) is created as a prerelease: the desktop app's updater skips those. On a
+      # re-run, gh finds the draft by its tag and the archives replace the ones there.
+      - name: Attach to the draft release
         run: |
           prerelease=()
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
@@ -583,7 +599,7 @@ jobs:
           fi
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
-              --notes-file notes.md --generate-notes --verify-tag "${prerelease[@]}"
+              --notes-file notes.md --generate-notes --verify-tag --draft "${prerelease[@]}"
           gh release upload "$GITHUB_REF_NAME" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
 
   # The app each installer packages, published on the installer's own OS (as before the split), without secrets. Tar
@@ -626,7 +642,8 @@ jobs:
   # fetched for a delta update. These jobs only pack, sign and upload what installer-build published (PUBLISH_DIR);
   # vpk, the packaging and signing tool itself, is the one tool installed. The Windows and macOS jobs sign when the
   # packages job found their platform's signing set up, and then check the signature before anything is uploaded
-  # (docs/desktop.md#signing).
+  # (docs/desktop.md#signing). vpk uploads into the draft release (--merge) and leaves it a draft: without --publish,
+  # the update feeds are public only when the publish job publishes the release.
   installers:
     needs: [ desktop, installer-build ]
     runs-on: ubuntu-latest
@@ -663,7 +680,7 @@ jobs:
           mkdir -p published && tar -C published -xzf publish-linux-x64.tar.gz
           PUBLISH_DIR=published deploy/package-installer.sh linux-x64 "${GITHUB_REF_NAME#v}" installers/linux-x64
           vpk upload github --outputDir installers/linux-x64 --channel linux-x64 \
-            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish $VPK_PRE
+            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $VPK_PRE
 
       # For installer-sbom (with the previous release's full package, when one was downloaded for the delta).
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -671,7 +688,7 @@ jobs:
           name: installer-linux-x64
           path: installers/linux-x64/*-full.nupkg
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   installer-windows:
     needs: [ packages, desktop, installer-build ]
@@ -748,14 +765,14 @@ jobs:
         shell: bash
         run: |
           vpk upload github --outputDir installers/win-x64 --channel win-x64 \
-            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish $VPK_PRE
+            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $VPK_PRE
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-win-x64
           path: installers/win-x64/*-full.nupkg
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   installer-macos:
     needs: [ packages, desktop, installer-build ]
@@ -857,7 +874,7 @@ jobs:
         run: |
           for rid in osx-arm64 osx-x64; do
             vpk upload github --outputDir "installers/$rid" --channel "$rid" \
-              --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish $VPK_PRE
+              --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $VPK_PRE
           done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -865,7 +882,7 @@ jobs:
           name: installer-osx
           path: installers/osx-*/*-full.nupkg
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   # The installers' and update packages' SBOMs, one per platform, SemanticRouter-<version>-<rid>-installer.cdx.json,
   # read from the full update package each installer job built (deploy/installer-sbom.sh): the app as installed, plus
@@ -917,13 +934,13 @@ jobs:
           name: sbom-installers
           path: sboms/*.cdx.json
 
-  # Last, once every asset is signed and attached: SHA256SUMS over all the release's assets; the NuGet and symbol
-  # packages (as pushed to nuget.org, before nuget.org adds its repository signature) and the packages', image's and
-  # installers' SBOMs attached (the archives' came with them); and one build provenance attestation covering every asset
-  # and SHA256SUMS, for `gh attestation verify`. The job downloads, hashes and uploads; it builds and runs nothing from
-  # the repository.
+  # Once every asset is signed and attached to the draft release: SHA256SUMS over all its assets; the NuGet and symbol
+  # packages (as nuget.org will get them, before nuget.org adds its repository signature) and the packages', image's
+  # and installers' SBOMs attached (the archives' came with them); and one build provenance attestation covering every
+  # asset and SHA256SUMS, for `gh attestation verify`. The job downloads, hashes and uploads; it builds and runs nothing
+  # from the repository. Nothing has been published yet: the image, NuGet and publish jobs come after this one.
   checksums:
-    needs: [ packages, image, desktop, installers, installer-windows, installer-macos, installer-sbom ]
+    needs: [ packages, image-sbom, desktop, installers, installer-windows, installer-macos, installer-sbom ]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -960,3 +977,46 @@ jobs:
 
       - name: Attach to the release
         run: gh release upload "$GITHUB_REF_NAME" attach/* release/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+
+  # Last: the draft becomes the public release, and with it the desktop app's update feeds, which the updater reads
+  # from published releases only. It runs only when everything else succeeded: every installer signed and checked, the
+  # checksums and attestation attached, the image pushed and signed, and the NuGet packages pushed. It first checks
+  # that the draft has every channel's update feed, the notices and SHA256SUMS.
+  publish:
+    needs: [ packages, checksums, image-sign, nuget ]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      WINDOWS_SIGNING: ${{ needs.packages.outputs.windows-signing }}
+      MACOS_SIGNING: ${{ needs.packages.outputs.macos-signing }}
+    steps:
+      - name: The draft is complete
+        run: |
+          assets="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          missing=()
+          for asset in SHA256SUMS THIRD-PARTY-NOTICES.txt \
+            releases.linux-x64.json releases.win-x64.json releases.osx-arm64.json releases.osx-x64.json; do
+            grep -qxF "$asset" <<<"$assets" || missing+=("$asset")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::The draft release $GITHUB_REF_NAME has no ${missing[*]}, so it is not published."
+            exit 1
+          fi
+
+      # A stable release becomes the repository's latest release, as a release created published did; a prerelease
+      # (1.0.0-rc.1, created as one) cannot be.
+      - name: Publish the release
+        run: |
+          latest=()
+          if [[ "$GITHUB_REF_NAME" != *-* ]]; then
+            latest=(--latest)
+          fi
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false "${latest[@]}"
+          {
+            echo "Published $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME"
+            echo
+            echo "Windows installers: $WINDOWS_SIGNING. macOS installers: $MACOS_SIGNING."
+          } >> "$GITHUB_STEP_SUMMARY"
