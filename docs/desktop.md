@@ -44,7 +44,7 @@ The app is built in jobs that hold no secret and can only read the repository (`
 
 Locally, `deploy/package-installer.sh` builds and signs in one go with the same settings as environment variables (see the script's header); with `PUBLISH_DIR` it packages an app already published there instead.
 
-Independently of code signing, every installer, archive and update package has a build provenance attestation and a line in the release's `SHA256SUMS`, made after signing, so you can check a download came from this repository's release workflow: see [Verifying a release](releases.md). The release's SBOM and `THIRD-PARTY-NOTICES.txt` cover the app too; the notices also ship next to the executable.
+Independently of code signing, every installer, archive and update package has a build provenance attestation and a line in the release's `SHA256SUMS`, made after signing, so you can check a download came from this repository's release workflow: see [Verifying a release](releases.md). Each platform's archive and installer has its own SBOM on the release, with every package's licence (the installer's also lists Velopack's updater and, on Linux, the AppImage runtime), and `THIRD-PARTY-NOTICES.txt` covers the app too; the notices also ship next to the executable ([SBOMs and third-party notices](releases.md#sboms-and-third-party-notices)).
 
 ### Updates
 

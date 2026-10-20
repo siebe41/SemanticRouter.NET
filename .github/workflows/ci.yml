@@ -140,6 +140,27 @@ jobs:
         if: runner.os == 'Linux'
         run: deploy/package-contents-check.sh artifacts
 
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        if: runner.os == 'Linux'
+        id: syft
+
+      # As in a release: the packages' SBOM names its subject, a licence for every package and the fonts, so a package
+      # whose licence cannot be found fails here rather than in a release (deploy/sbom-complete.cs).
+      - name: SBOM
+        if: runner.os == 'Linux'
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          for package in artifacts/*.nupkg; do
+            name="$(basename "$package" .nupkg)"
+            mkdir -p "sbom/$name" && unzip -q "$package" -d "sbom/$name"
+          done
+          version="$(basename artifacts/SemanticRouter.Core.*.nupkg .nupkg)" && version="${version#SemanticRouter.Core.}"
+          "$SYFT" scan dir:sbom -q -o cyclonedx-json=packages.cdx.json
+          dotnet run --file deploy/sbom-complete.cs -- packages.cdx.json --type library --name SemanticRouter.NET \
+            --version "$version" --purl "pkg:github/${GITHUB_REPOSITORY,,}@v$version" --contents sbom
+          deploy/sbom-check.sh packages.cdx.json SemanticRouter.NET "$version" "Inter (font)" "Fira Sans (font)"
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: runner.os == 'Linux'
         with:
@@ -300,6 +321,18 @@ jobs:
       - name: Run and update
         run: tests/installer/linux.sh SemanticRouter-1.0.0.AppImage installers
 
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+
+      # As in a release: the installer's SBOM, from the AppImage inside the update package, lists the app, Velopack's
+      # binaries and the AppImage runtime.
+      - name: SBOM
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          deploy/installer-sbom.sh linux-x64 1.0.1 installers/SemanticRouter-1.0.1-linux-x64-full.nupkg \
+            installer.cdx.json pkg:generic/SemanticRouter-linux-x64-installer@1.0.1
+
   container:
     name: container image
     runs-on: ubuntu-latest
@@ -314,6 +347,26 @@ jobs:
 
       - name: The image reports the version it was built as
         run: deploy/image-version-check.sh semantic-router:ci "0.0.0-ci.$GITHUB_RUN_NUMBER" "$GITHUB_SHA"
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+
+      # As in a release: the image's SBOM names the image and a licence for every NuGet package, the base image's .NET
+      # runtime included (the release also passes the tool package, for the fonts).
+      - name: SBOM
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          version="0.0.0-ci.$GITHUB_RUN_NUMBER"
+          "$SYFT" scan docker:semantic-router:ci -q -o cyclonedx-json=image.cdx.json
+          dotnet restore src/SemanticRouter.Host/SemanticRouter.Host.csproj --locked-mode
+          dotnet run --file deploy/sbom-complete.cs -- image.cdx.json --type container --name semantic-router \
+            --version "$version" --purl "pkg:docker/semantic-router@$version"
+          deploy/sbom-check.sh image.cdx.json semantic-router "$version"
 
       # The router turns ONNX Runtime's telemetry off itself (the tool's test checks that with a recording proxy); the
       # image also starts it with the variable set.

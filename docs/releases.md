@@ -11,7 +11,8 @@ Every release on [GitHub Releases](https://github.com/siebe41/SemanticRouter.NET
 | `SemanticRouter.*.<version>.nupkg` | The NuGet packages and the `semantic-router` tool, exactly as pushed to nuget.org. |
 | `SemanticRouter.*.<version>.snupkg` | The libraries' symbol packages, as pushed to nuget.org's symbol server: their PDBs, which map to the tagged commit's sources with SourceLink. The tool package carries its PDB inside. |
 | `SemanticRouter-<version>-packages.cdx.json` | CycloneDX SBOM of the NuGet packages and the tool. |
-| `SemanticRouter-<version>-desktop.cdx.json` | CycloneDX SBOM of the desktop app, for every platform (the archives and installers ship the same app). |
+| `SemanticRouter-<version>-<platform>.cdx.json` | CycloneDX SBOM of the desktop app's archive for that platform. |
+| `SemanticRouter-<version>-<platform>-installer.cdx.json` | CycloneDX SBOM of that platform's installer and update package: the app, plus Velopack's updater, setup and stub and, on Linux, the AppImage runtime, which vpk adds. |
 | `SemanticRouter-<version>-image.cdx.json` | CycloneDX SBOM of the container image. It is also attached to the image as a signed attestation. |
 | `THIRD-PARTY-NOTICES.txt` | The licence, copyright and notices of every third-party package the release ships, the .NET runtime included. |
 
@@ -80,9 +81,18 @@ docker run --rm ghcr.io/siebe41/semantic-router:0.3.0 version
 
 ## SBOMs and third-party notices
 
-The SBOMs are [CycloneDX](https://cyclonedx.org/) JSON, generated with [Syft](https://github.com/anchore/syft) from what was built: the desktop archives' contents, the NuGet packages' contents and the container image. Feed them to a vulnerability scanner (`grype sbom:SemanticRouter-0.3.0-desktop.cdx.json`) or your inventory.
+The SBOMs are [CycloneDX](https://cyclonedx.org/) JSON, generated with [Syft](https://github.com/anchore/syft) from what was built: the NuGet packages' contents, each desktop archive's contents, each platform's full update package as vpk built it (on Linux, the contents of the AppImage in it), and the container image. Feed them to a vulnerability scanner (`grype sbom:SemanticRouter-0.6.0-win-x64-installer.cdx.json`) or your inventory (Dependency-Track and the like).
 
-Syft lists the .NET runtime that the desktop app bundles as `pkg:nuget/runtimepack.Microsoft.NETCore.App.Runtime.<rid>` (and `runtimepack.Microsoft.AspNetCore.App.Runtime.<rid>`), while advisories name the package without the `runtimepack.` prefix; remove it before scanning, or the runtime's advisories are missed. Each week, [Release SBOM scan](../.github/workflows/release-sbom-scan.yml) does that with the latest release's desktop and packages SBOMs, scans them with [Trivy](https://trivy.dev), and opens an issue asking for a patch release when one names a high or critical vulnerability that has a fix (the container image has its own check, [Image freshness](../.github/workflows/image-freshness.yml)).
+[`deploy/sbom-complete.cs`](../deploy/sbom-complete.cs) then adds what Syft cannot read, from the NuGet cache that restore filled and without network access:
+
+- **The subject.** `metadata.component` names what the SBOM describes, with the release version and a purl: `pkg:github/siebe41/semanticrouter.net@v<version>` for the packages, `pkg:docker/siebe41/semantic-router@<version>?repository_url=ghcr.io` for the image, and `pkg:generic/SemanticRouter-<platform>[-installer]@<version>?download_url=…` for the desktop app, naming the asset it was made from.
+- **A licence for every NuGet component**: the SPDX expression in the package's `.nuspec`, or for a package that names a licence file instead, the one in [`deploy/third-party/extra.json`](../deploy/third-party/extra.json) (as for the notices); this repository's projects get their package licence. Packages carry their NuGet version, not their assembly's (`0.6.0`, not `0.6.0.0`), and the tool is `pkg:nuget/SemanticRouter.Host`. The desktop app's own assembly is not a NuGet package, so it has no purl.
+- **The .NET runtime under its package id.** Syft names the runtime the desktop app bundles `runtimepack.Microsoft.NETCore.App.Runtime.<rid>` (and the same for ASP.NET Core), which no advisory matches; the SBOMs name `Microsoft.NETCore.App.Runtime.<rid>`.
+- **What no scanner finds**, as `THIRD-PARTY-NOTICES.txt` lists it: the dashboard's fonts and, in the installer SBOMs, Velopack's native binaries (at the Velopack version) and the AppImage runtime with the libraries linked into it.
+
+A NuGet component whose licence cannot be found fails the release, and CI makes the packages', the image's and the Linux installer's SBOMs on every pull request, so a new package without one fails there first. [`deploy/sbom-check.sh`](../deploy/sbom-check.sh) checks each SBOM independently of the generator.
+
+Each week, [Release SBOM scan](../.github/workflows/release-sbom-scan.yml) scans the latest release's packages SBOM and all its desktop SBOMs with [Trivy](https://trivy.dev), and opens an issue asking for a patch release when one names a high or critical vulnerability that has a fix (the container image has its own check, [Image freshness](../.github/workflows/image-freshness.yml)). For releases from before the SBOMs named the runtime's package, it removes the `runtimepack.` prefix first, as you should when you scan one of those.
 
 `THIRD-PARTY-NOTICES.txt` also ships inside everything that redistributes those packages:
 

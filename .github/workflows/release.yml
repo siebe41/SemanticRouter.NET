@@ -7,9 +7,11 @@ name: Release
 #
 # Every release can be verified (docs/releases.md): the image is signed with keyless cosign and carries provenance and
 # SBOM attestations; every release asset, the NuGet packages included, has a build provenance attestation and a line in
-# SHA256SUMS; CycloneDX SBOMs and THIRD-PARTY-NOTICES.txt are attached. Signatures and attestations use short-lived
-# Sigstore certificates issued to this workflow (GitHub OIDC), so no signing key is stored anywhere. The jobs that hold
-# the OIDC token build nothing; they sign and attest what the build jobs produced, after any code signing.
+# SHA256SUMS; CycloneDX SBOMs (the packages, the image, and each platform's archive and installer, each naming what it
+# describes and every package's licence) and THIRD-PARTY-NOTICES.txt are attached. Signatures and attestations use
+# short-lived Sigstore certificates issued to this workflow (GitHub OIDC), so no signing key is stored anywhere. The
+# jobs that hold the OIDC token build nothing; they sign and attest what the build jobs produced, after any code
+# signing.
 #
 # A tag with a suffix (v1.0.0-rc.1) is a prerelease: the GitHub release is marked as one, so the desktop app's updater
 # (which skips prereleases) never offers it, and the image gets its version tag but not :latest. NuGet treats the
@@ -125,7 +127,8 @@ jobs:
         run: deploy/package-contents-check.sh artifacts
 
       # A CycloneDX SBOM of the NuGet packages, read from their contents: the tool's deps.json and each package's
-      # assemblies.
+      # assemblies. deploy/sbom-complete.cs then names the release as its subject, gives every package its licence (from
+      # the nuspecs restore put in the NuGet cache) and adds the fonts, which Syft cannot see (docs/releases.md).
       - name: SBOM input
         run: |
           for package in artifacts/*.nupkg; do
@@ -140,6 +143,14 @@ jobs:
           output-file: SemanticRouter-${{ env.VERSION }}-packages.cdx.json
           upload-artifact: false
           upload-release-assets: false
+
+      - name: Complete the SBOM
+        run: |
+          sbom="SemanticRouter-$VERSION-packages.cdx.json"
+          dotnet run --file deploy/sbom-complete.cs -- "$sbom" --type library --name SemanticRouter.NET --version "$VERSION" \
+            --purl "pkg:github/${GITHUB_REPOSITORY,,}@v$VERSION" \
+            --description "The SemanticRouter NuGet packages and the semantic-router tool" --contents sbom
+          deploy/sbom-check.sh "$sbom" SemanticRouter.NET "$VERSION" "Inter (font)" "Fira Sans (font)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -274,7 +285,8 @@ jobs:
           exit-code: '1'
           cache: 'false'
 
-      # The image's CycloneDX SBOM: attached to the release, and to the image as an attestation (image-sign).
+      # The image's CycloneDX SBOM: completed in image-sbom, then attached to the release, and to the image as an
+      # attestation (image-sign).
       - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: ${{ env.IMAGE }}:latest
@@ -295,11 +307,57 @@ jobs:
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          name: image-syft
+          path: SemanticRouter-${{ env.VERSION }}-image.cdx.json
+          retention-days: 1
+
+  # The image's SBOM gets its subject (the image and its version), its NuGet packages' licences from a restore of the
+  # tool's packages, and the fonts, as the tool package's deps.json says (the image is the tool's build;
+  # deploy/sbom-complete.cs). Here rather than in image-scan, which holds no permission and checks nothing out; before
+  # the push, so no image is published without its completed SBOM.
+  image-sbom:
+    needs: [ image-build, image-scan ]
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      IMAGE: ${{ needs.image-build.outputs.image }}
+      VERSION: ${{ needs.image-build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-syft
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: packages
+
+      - name: Complete the SBOM
+        run: |
+          dotnet restore src/SemanticRouter.Host/SemanticRouter.Host.csproj --locked-mode
+          mkdir -p tool && unzip -q packages/SemanticRouter.Host.*.nupkg -d tool
+          sbom="SemanticRouter-$VERSION-image.cdx.json"
+          dotnet run --file deploy/sbom-complete.cs -- "$sbom" --type container --name "$IMAGE" --version "$VERSION" \
+            --purl "pkg:docker/${IMAGE#ghcr.io/}@$VERSION?repository_url=ghcr.io" --description "The semantic-router container image" \
+            --contents tool
+          deploy/sbom-check.sh "$sbom" "$IMAGE" "$VERSION" "Inter (font)" "Fira Sans (font)"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
           name: sbom-image
           path: SemanticRouter-${{ env.VERSION }}-image.cdx.json
 
   image:
-    needs: [ image-build, image-scan ]
+    needs: [ image-build, image-scan, image-sbom ]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -445,7 +503,7 @@ jobs:
 
       # The release's own THIRD-PARTY-NOTICES.txt covers all it ships: the desktop app for every platform and the tool
       # (whose packages are also the image's). Each archive, installer, the tool package and the image carry their own
-      # copy. The desktop SBOM is read from the archives' contents.
+      # copy. The SBOMs are read from the archives' contents.
       - name: Notices and SBOM input
         run: |
           for archive in artifacts/*.zip artifacts/*.tar.gz; do
@@ -461,13 +519,25 @@ jobs:
           dotnet run --file deploy/third-party-notices.cs -- artifacts/THIRD-PARTY-NOTICES.txt sbom tool
           deploy/third-party-notices-check.sh artifacts/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)"             "Velopack native binaries" "AppImage type2-runtime"
 
-      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          path: sbom
-          format: cyclonedx-json
-          output-file: artifacts/SemanticRouter-${{ env.VERSION }}-desktop.cdx.json
-          upload-artifact: false
-          upload-release-assets: false
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+
+      # One SBOM per platform, SemanticRouter-<version>-<rid>.cdx.json, named after the archive it describes and
+      # completed with its packages' licences and the fonts (deploy/sbom-complete.cs). The installers' are made later,
+      # from what vpk built (installer-sbom).
+      - name: SBOMs
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          for archive in artifacts/*.zip artifacts/*.tar.gz; do
+            file="$(basename "$archive")" && name="${file%.zip}" && name="${name%.tar.gz}" && rid="${name#"SemanticRouter-$VERSION-"}"
+            sbom="artifacts/$name.cdx.json"
+            "$SYFT" scan "dir:sbom/$name" -q -o "cyclonedx-json=$sbom"
+            dotnet run --file deploy/sbom-complete.cs -- "$sbom" --type application --name "SemanticRouter-$rid" --version "$VERSION" \
+              --purl "pkg:generic/SemanticRouter-$rid@$VERSION?download_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$file" \
+              --description "The desktop app for $rid, as in $file" --contents "sbom/$name"
+            deploy/sbom-check.sh "$sbom" "SemanticRouter-$rid" "$VERSION" "Inter (font)" "Fira Sans (font)"
+          done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -595,6 +665,14 @@ jobs:
           vpk upload github --outputDir installers/linux-x64 --channel linux-x64 \
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish $VPK_PRE
 
+      # For installer-sbom (with the previous release's full package, when one was downloaded for the delta).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-linux-x64
+          path: installers/linux-x64/*-full.nupkg
+          if-no-files-found: error
+          retention-days: 1
+
   installer-windows:
     needs: [ packages, desktop, installer-build ]
     environment: release
@@ -671,6 +749,13 @@ jobs:
         run: |
           vpk upload github --outputDir installers/win-x64 --channel win-x64 \
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish $VPK_PRE
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-win-x64
+          path: installers/win-x64/*-full.nupkg
+          if-no-files-found: error
+          retention-days: 1
 
   installer-macos:
     needs: [ packages, desktop, installer-build ]
@@ -775,12 +860,70 @@ jobs:
               --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish $VPK_PRE
           done
 
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-osx
+          path: installers/osx-*/*-full.nupkg
+          if-no-files-found: error
+          retention-days: 1
+
+  # The installers' and update packages' SBOMs, one per platform, SemanticRouter-<version>-<rid>-installer.cdx.json,
+  # read from the full update package each installer job built (deploy/installer-sbom.sh): the app as installed, plus
+  # what vpk adds, Velopack's native binaries and, on Linux, the AppImage runtime. In a job of its own, so that Syft and
+  # the restore never run next to the signing secrets or a token that can write.
+  installer-sbom:
+    needs: [ installers, installer-windows, installer-macos ]
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installer-*
+          path: installers
+
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+
+      - name: SBOMs
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          dotnet restore src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj --locked-mode
+          mkdir -p sboms
+          for rid in linux-x64 win-x64 osx-arm64 osx-x64; do
+            file="SemanticRouter-$version-$rid-full.nupkg"
+            package="$(find installers -name "$file" | head -n 1)"
+            if [ -z "$package" ]; then
+              echo "::error::No $file from the installer jobs."
+              exit 1
+            fi
+            deploy/installer-sbom.sh "$rid" "$version" "$package" "sboms/SemanticRouter-$version-$rid-installer.cdx.json" \
+              "pkg:generic/SemanticRouter-$rid-installer@$version?download_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$file"
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-installers
+          path: sboms/*.cdx.json
+
   # Last, once every asset is signed and attached: SHA256SUMS over all the release's assets; the NuGet and symbol
-  # packages (as pushed to nuget.org, before nuget.org adds its repository signature) and the packages' and image's SBOMs
-  # attached; and one build provenance attestation covering every asset and SHA256SUMS, for `gh attestation verify`. The
-  # job downloads, hashes and uploads; it builds and runs nothing from the repository.
+  # packages (as pushed to nuget.org, before nuget.org adds its repository signature) and the packages', image's and
+  # installers' SBOMs attached (the archives' came with them); and one build provenance attestation covering every asset
+  # and SHA256SUMS, for `gh attestation verify`. The job downloads, hashes and uploads; it builds and runs nothing from
+  # the repository.
   checksums:
-    needs: [ packages, image, desktop, installers, installer-windows, installer-macos ]
+    needs: [ packages, image, desktop, installers, installer-windows, installer-macos, installer-sbom ]
     runs-on: ubuntu-latest
     environment: release
     permissions:
