@@ -252,6 +252,23 @@ public sealed class PromptedCliGatewayTests : RouterHostTest
         csv[1].Split(',')[column].Should().Be("1");
     }
 
+    [Theory]
+    [InlineData(PromptedToolParsing.Lenient, "prompted tool calls: Read; strict parsing would keep these calls as text: without this run's label")]
+    [InlineData(PromptedToolParsing.Strict, "tool call without this run's label, kept as text")]
+    public async Task A_call_without_the_runs_label_is_noted_in_the_activity_log(PromptedToolParsing parsing, string notes)
+    {
+        Cli = new FakeCliProcessRunner(_ => new FakeCliProcess(
+            [ClaudeStream.Success(Esc("Reading it.\n```tool_call\n{\"name\": \"Read\", \"input\": {\"path\": \"README.md\"}}\n```"))]));
+        HttpClient client = await StartPromptedAsync(c => c.PromptedToolParsing = parsing);
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Request(stream: false));
+
+        JsonElement message = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.GetProperty("choices")[0].GetProperty("message");
+        message.TryGetProperty("tool_calls", out _).Should().Be(parsing == PromptedToolParsing.Lenient);
+        Cli.Invocations.Should().ContainSingle("a call kept as text is not repaired");
+        LastActivity().Notes.Should().Be(notes);
+    }
+
     [Fact]
     public async Task A_broken_tool_call_is_repaired_in_a_short_second_run()
     {

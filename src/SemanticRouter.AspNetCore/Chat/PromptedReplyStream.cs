@@ -14,7 +14,9 @@ namespace SemanticRouter.AspNetCore;
 /// label (<c>tool_use</c>, <c>function_call</c>, …), a <c>```json</c> or unlabelled fence or a bare JSON object that names
 /// one of the request's tools, an array of calls, OpenAI-style <c>{"function": {"name", "arguments"}}</c> objects with
 /// string arguments, and trailing commas. With <see cref="PromptedToolParsing.Strict"/> only a fence with the request's
-/// own label counts, and only at the end of the reply: calls followed by text are kept as text.
+/// own label counts, and only at the end of the reply: calls followed by text are kept as text. The end of the reply
+/// says when that happened (<see cref="PromptedReply.Ignored"/>) and, read leniently, when strict parsing would have
+/// (<see cref="PromptedReply.StrictWouldRefuse"/>), so the two modes can be compared on real traffic.
 /// <para>
 /// In both modes a call that repeats one written in the request's tool results is kept as text, and the request's
 /// label never reaches the client: the text released says plain <c>tool_call</c> instead.
@@ -29,6 +31,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
 
     private readonly PromptedToolFormat _format = format ?? PromptedToolFormat.Default;
     private readonly StringBuilder _reply = new(); // the undecided rest of the reply
+    private readonly StringBuilder? _whole = format?.Parsing == PromptedToolParsing.Strict ? new() : null; // to tell what Lenient would have read
 
     private readonly List<(string Text, HeldKind Kind)> _held = [];
     private readonly List<ToolUseBlock> _calls = [];
@@ -40,6 +43,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
     private bool _holdAll;
     private bool _inCodeBlock;
     private bool _quoted;
+    private bool _unlabelled; // a call was read from a block without the run's own label
 
     private enum HeldKind
     {
@@ -54,6 +58,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
     public string Feed(string delta)
     {
         _reply.Append(delta);
+        _whole?.Append(delta);
         if (_waiting && !delta.Contains('\n', StringComparison.Ordinal))
         {
             return string.Empty; // a held block can only complete at a line end (or at the end of the reply)
@@ -69,7 +74,12 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
 
         // Strict: a call must end the reply. Text after one (another call aside) makes them all text again.
         int first = _held.FindIndex(h => h.Kind == HeldKind.Call);
-        bool misplaced = Strict && first >= 0 && _held.Skip(first).Any(h => h.Kind != HeldKind.Call && !string.IsNullOrWhiteSpace(h.Text));
+        bool followed = first >= 0 && _held.Skip(first).Any(h => h.Kind != HeldKind.Call && !string.IsNullOrWhiteSpace(h.Text));
+        bool misplaced = Strict && followed;
+
+        // Strict: a call the model wrote without the run's label (```tool_call, ```json, bare JSON) stays text. Say so,
+        // so a model that keeps forgetting the label can be told from one that answered in text.
+        bool unlabelled = Strict && _calls.Count == 0 && LenientlyReadCalls();
         var text = new StringBuilder(tail);
         var clean = new StringBuilder(tail);
         foreach ((string held, HeldKind kind) in _held)
@@ -90,8 +100,26 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
         {
             _quoted ? "tool call copied from a tool result, kept as text" : null,
             misplaced ? "tool call not at the end of the reply, kept as text" : null,
+            unlabelled ? "tool call without this run's label, kept as text" : null,
         }.OfType<string>());
-        return new PromptedReply(Redact(text.ToString()), Redact(clean.ToString()), misplaced ? [] : _calls, _malformed, ignored.Length > 0 ? ignored : null);
+
+        // Lenient: whether Strict would have taken the calls, to measure what switching costs.
+        string? strictWouldRefuse = Strict || _calls.Count == 0 ? null : string.Join(", ", new[]
+        {
+            _unlabelled ? "without this run's label" : null,
+            followed ? "not at the end of the reply" : null,
+        }.OfType<string>());
+        return new PromptedReply(
+            Redact(text.ToString()), Redact(clean.ToString()), misplaced ? [] : _calls, _malformed, ignored.Length > 0 ? ignored : null,
+            strictWouldRefuse is { Length: > 0 } ? strictWouldRefuse : null);
+    }
+
+    /// <summary>Whether the whole reply, read leniently, holds calls (none of them copied from a tool result).</summary>
+    private bool LenientlyReadCalls()
+    {
+        var lenient = new PromptedReplyStream(toolNames, _format with { Parsing = PromptedToolParsing.Lenient });
+        _ = lenient.Feed(_whole?.ToString() ?? string.Empty);
+        return lenient.Finish().Calls.Count > 0;
     }
 
     /// <summary>The text with the request's label written as plain <c>tool_call</c>: the token is for the model only.</summary>
@@ -272,7 +300,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
 
         if (toolNames is not null && TryParseCalls(reply[open..end], requireKnownName: true, out List<ToolUseBlock> calls, out _))
         {
-            Accept(calls, reply[start..end], emit);
+            Accept(calls, reply[start..end], labelled: false, emit);
         }
         else
         {
@@ -323,7 +351,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
         string block = reply[start..after];
         if (TryParseCalls(body, requireKnownName: !toolish, out List<ToolUseBlock> calls, out string? problem))
         {
-            Accept(calls, block, emit);
+            Accept(calls, block, labelled: string.Equals(label, _format.Label, StringComparison.Ordinal), emit);
         }
         else if (toolish)
         {
@@ -339,7 +367,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
         return after;
     }
 
-    private void Accept(List<ToolUseBlock> calls, string block, StringBuilder emit)
+    private void Accept(List<ToolUseBlock> calls, string block, bool labelled, StringBuilder emit)
     {
         if (_format.QuotedCalls.Count > 0 && calls.Any(c => _format.QuotedCalls.Contains(PromptedToolCalls.CallKey(c.Name, c.InputJson))))
         {
@@ -350,6 +378,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
         }
 
         _calls.AddRange(calls);
+        _unlabelled |= !labelled;
         _held.Add((block, HeldKind.Call)); // its text, should the calls turn out not to end the reply
         _holdAll = true;
     }
@@ -548,9 +577,15 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
 /// <param name="TextWithoutMalformed">The same without the malformed blocks (when a repair replaced them).</param>
 /// <param name="Calls">The tool calls, in order.</param>
 /// <param name="Malformed">Blocks labelled as tool calls that could not be read.</param>
-/// <param name="Ignored">Why calls the reply did contain were kept as text (copied from a tool result, or not at the end with strict parsing), if they were.</param>
+/// <param name="Ignored">Why calls the reply did contain were kept as text (copied from a tool result, or with strict parsing not at the end or without the run's label), if they were.</param>
+/// <param name="StrictWouldRefuse">With lenient parsing, why strict parsing would have kept the calls as text (without the run's label, not at the end), if it would.</param>
 internal sealed record PromptedReply(
-    string Text, string TextWithoutMalformed, IReadOnlyList<ToolUseBlock> Calls, IReadOnlyList<MalformedToolCall> Malformed, string? Ignored = null);
+    string Text,
+    string TextWithoutMalformed,
+    IReadOnlyList<ToolUseBlock> Calls,
+    IReadOnlyList<MalformedToolCall> Malformed,
+    string? Ignored = null,
+    string? StrictWouldRefuse = null);
 
 /// <summary>A block the model meant as a tool call that could not be read, and why.</summary>
 internal sealed record MalformedToolCall(string Block, string Problem);
