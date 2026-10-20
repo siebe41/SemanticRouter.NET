@@ -63,4 +63,19 @@ public sealed class PublicApiNamespaceTests
         typeof(SemanticRouterBuilder).Assembly.GetExportedTypes().Select(t => t.Name).Should().NotContain(
             ["ClassifyPromptRequest", "PromptClassificationResponse", "RouterModelInfo", "RouterModelList", "TokenCountResponse"]);
     }
+
+    [Fact]
+    public void Helpers_only_first_party_code_calls_are_not_public()
+    {
+        // #200: implementation details that the tool, the dashboard and the tests reach through InternalsVisibleTo.
+        typeof(SemanticRouterBuilder).Assembly.GetExportedTypes().Select(t => t.Name).Should().NotContain(
+        [
+            "ActivityReports", "RoutingFeedbackLog", "MemoryExposureLog", "SecretRedactor",
+            "ModelFamily", "ModelFamilyBand", "ModelFamilyFile", "ModelFamilyTable",
+            "InMemoryEvaluationSetStore", "JsonLinesEvaluationSetStore", "ProtectedFileSecretStore",
+            "ClaudeCodeMemorySource", "KnowledgeGraphMemorySource", "MarkdownMemorySource",
+            "ClientTurnFile", "DashboardTheme", "ThemeContrastIssue",
+            "RouterDoctor", "RouterCheck", "RouterCheckStatus", "ModelLineup", "ModelLineupEntry", "ModelLineupReport",
+        ]);
+    }
 }

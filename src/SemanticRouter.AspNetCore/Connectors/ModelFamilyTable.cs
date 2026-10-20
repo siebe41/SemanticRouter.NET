@@ -5,10 +5,10 @@ namespace SemanticRouter.AspNetCore;
 
 /// <summary>Where the local model-family table is (<c>UseModelFamilyFile</c>).</summary>
 /// <param name="Path">The file.</param>
-public sealed record ModelFamilyFile(string Path);
+internal sealed record ModelFamilyFile(string Path);
 
 /// <summary>A size band of a <see cref="ModelFamily"/>: models up to <see cref="UpTo"/> billion parameters get <see cref="Tier"/>.</summary>
-public sealed class ModelFamilyBand
+internal sealed class ModelFamilyBand
 {
     /// <summary>The largest size in the band, in billions of parameters; <see langword="null"/> for every larger model.</summary>
     public double? UpTo { get; set; }
@@ -21,7 +21,7 @@ public sealed class ModelFamilyBand
 /// What is known about a model family, for discovery: its tier (fixed, by size, or relative to the size rule), the
 /// capabilities it has, and notes (<see cref="ModelFamilyTable"/>).
 /// </summary>
-public sealed class ModelFamily
+internal sealed class ModelFamily
 {
     /// <summary>The family's name, e.g. <c>Qwen3 Coder</c>. A local table entry with the same name replaces the built-in one.</summary>
     public string Family { get; set; } = string.Empty;
@@ -59,7 +59,7 @@ public sealed class ModelFamily
 /// Mistral, DeepSeek, Gemma, Phi, gpt-oss, Gemini, …). A versioned table is built in; a <see cref="FileName"/> file in
 /// the configuration directory adds families or replaces built-in ones by name, without a code change.
 /// </summary>
-public sealed class ModelFamilyTable
+internal sealed class ModelFamilyTable
 {
     /// <summary>The local table's file name, next to the configuration file.</summary>
     public const string FileName = "model-families.json";

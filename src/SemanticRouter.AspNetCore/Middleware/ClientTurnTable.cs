@@ -7,7 +7,7 @@ namespace SemanticRouter.AspNetCore;
 
 /// <summary>Where the local client-turn patterns are (<c>UseClientTurnFile</c>).</summary>
 /// <param name="Path">The file.</param>
-public sealed record ClientTurnFile(string Path);
+internal sealed record ClientTurnFile(string Path);
 
 /// <summary>One pattern of a <see cref="ClientTurnTable"/>: which client says it, what kind of turn it marks, and the wording.</summary>
 internal sealed class ClientTurnPattern

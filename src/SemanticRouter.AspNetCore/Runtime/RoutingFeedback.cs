@@ -103,7 +103,7 @@ public interface IRoutingFeedbackStore
 /// Feedback about routing decisions: a bounded in-memory log, optionally backed by an <see cref="IRoutingFeedbackStore"/>.
 /// One piece of feedback per decision and kind.
 /// </summary>
-public sealed class RoutingFeedbackLog
+internal sealed class RoutingFeedbackLog
 {
     private readonly int _capacity;
     private readonly IRoutingFeedbackStore? _store;
