@@ -11,6 +11,11 @@ link between their pages, and sends any other relative link (code, workflows, `L
 other Markdown file stays off the site, this one included. `site/` itself holds only the [home page](index.md), the
 [videos page](videos.md), the theme and the logo.
 
+`package.json` lists Mermaid, which the theme loads in every visitor's browser, under `dependencies` and VitePress under
+`devDependencies`. CI's npm audit ([deploy/npm-audit-check.sh](../deploy/npm-audit-check.sh)) fails on a high or
+critical advisory in `dependencies` and only reports the rest, such as advisories against VitePress's dev server: keep
+anything new that ships to the browser under `dependencies`.
+
 | To | Do |
 |---|---|
 | Add a guide | Add `docs/<name>.md`: it is on the site at `/<name>`. Add it to the sidebar in `config.mjs`, and to the [list of guides](../docs/README.md) in `docs/README.md`. |
