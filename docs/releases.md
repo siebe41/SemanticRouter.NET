@@ -82,6 +82,8 @@ docker run --rm ghcr.io/siebe41/semantic-router:0.3.0 version
 
 The SBOMs are [CycloneDX](https://cyclonedx.org/) JSON, generated with [Syft](https://github.com/anchore/syft) from what was built: the desktop archives' contents, the NuGet packages' contents and the container image. Feed them to a vulnerability scanner (`grype sbom:SemanticRouter-0.3.0-desktop.cdx.json`) or your inventory.
 
+Syft lists the .NET runtime that the desktop app bundles as `pkg:nuget/runtimepack.Microsoft.NETCore.App.Runtime.<rid>` (and `runtimepack.Microsoft.AspNetCore.App.Runtime.<rid>`), while advisories name the package without the `runtimepack.` prefix; remove it before scanning, or the runtime's advisories are missed. Each week, [Release SBOM scan](../.github/workflows/release-sbom-scan.yml) does that with the latest release's desktop and packages SBOMs, scans them with [Trivy](https://trivy.dev), and opens an issue asking for a patch release when one names a high or critical vulnerability that has a fix (the container image has its own check, [Image freshness](../.github/workflows/image-freshness.yml)).
+
 `THIRD-PARTY-NOTICES.txt` also ships inside everything that redistributes those packages:
 
 | | Where |
