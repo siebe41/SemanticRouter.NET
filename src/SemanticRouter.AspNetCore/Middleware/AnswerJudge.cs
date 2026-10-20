@@ -179,13 +179,13 @@ internal sealed partial class AnswerJudge : IDisposable
     /// <summary>
     /// Whether the judge may read this request and its answer: it is the one model that sees them besides the one that
     /// answered, so it keeps the same rules (local-only, the routing profile's allowed and denied models and connectors,
-    /// and a CLI or Copilot connector that serves only this machine is not sent a remote client's text).
+    /// and a connector that runs a program (a CLI, Copilot) that serves only this machine is not sent a remote client's text).
     /// </summary>
     private static bool MaySee(RouterRuntime runtime, ModelDefinition judge, bool localOnly, string? profile, bool remote) =>
         (!localOnly || judge.IsLocal)
         && (profile is null || (runtime.Router.Profiles.TryGetValue(profile, out RoutingProfile? rules) && rules.Allows(judge)))
         && (!remote || !runtime.Configuration.Connectors.TryGetValue(judge.Connector, out ConnectorOptions? connector)
-            || connector.Type is not (ConnectorType.Cli or ConnectorType.Copilot) || connector.AllowRemoteClients);
+            || !connector.RunsProgram || connector.AllowRemoteClients);
 
     private static ModelDefinition? JudgeModel(RouterRuntime runtime) =>
         runtime.Configuration.Middleware.Judge.Model is { Length: > 0 } name

@@ -36,7 +36,7 @@ internal sealed record ModelLineupEntry(DiscoveredModel Model)
 /// <summary>Everything a connector offers, for the dashboard's lineup and <c>semantic-router models</c>.</summary>
 /// <param name="Connector">The connector name.</param>
 /// <param name="Type">The connector type.</param>
-internal sealed record ModelLineupReport(string Connector, ConnectorType Type)
+internal sealed record ModelLineupReport(string Connector, string Type)
 {
     /// <summary>Every model found, with a suggestion for each chat model.</summary>
     public IReadOnlyList<ModelLineupEntry> Entries { get; init; } = [];
@@ -163,7 +163,7 @@ internal static partial class ModelLineup
     /// <param name="services">The application's services.</param>
     /// <param name="connector">The connector's name (its HTTP client's name, and the suggestions' <c>Connector</c>).</param>
     /// <param name="options">Its settings, with secret references resolved.</param>
-    /// <param name="live">A connector that lists models itself (Copilot), if there is one.</param>
+    /// <param name="live">A connector of a packaged type that lists models itself (Copilot), if there is one.</param>
     /// <param name="catalog">The catalog the suggestions are checked against (names in use, models already added).</param>
     /// <param name="redactor">Removes secrets from failure messages.</param>
     /// <param name="cancellationToken">Cancels discovery.</param>
@@ -197,7 +197,7 @@ internal static partial class ModelLineup
             return report;
         }
 
-        if (options.Type == ConnectorType.Cli)
+        if (options.Type == ConnectorTypes.Cli)
         {
             IReadOnlyList<string> ids = CliModelIds(options.Preset);
             return report with
@@ -207,6 +207,16 @@ internal static partial class ModelLineup
                     ? "A CLI has no model list to ask; these are the names its preset accepts. Any other model id the CLI knows works too."
                     : "A custom CLI has no model list to ask; add models by the names it accepts.",
                 Entries = Suggest(connector, options, ids.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, models, families),
+            };
+        }
+
+        if (!ConnectorTypes.IsBuiltIn(options.Type) && options.BaseAddress is null)
+        {
+            return report with
+            {
+                Note = services.GetServices<IChatConnectorFactory>().Any(f => options.IsType(f.Type))
+                    ? $"A {options.Type} connector has no model list to ask; add models by the names it accepts."
+                    : $"No installed connector package provides connector type '{options.Type}'.",
             };
         }
 
@@ -282,15 +292,15 @@ internal static partial class ModelLineup
 
         string id = model.Id;
         string lower = id.ToLowerInvariant();
-        bool localAddress = connector.Type == ConnectorType.OpenAICompatible && connector.BaseAddress is { } address && ConnectorProbe.IsLocalAddress(address);
+        bool localAddress = connector.Type == ConnectorTypes.OpenAICompatible && connector.BaseAddress is { } address && ConnectorProbe.IsLocalAddress(address);
         bool local = localAddress && model.Remote != true;
-        bool subscription = connector.Type is ConnectorType.Cli or ConnectorType.Copilot;
+        bool subscription = connector.RunsProgram;
         bool carriesTools = connector.Type switch
         {
-            ConnectorType.Cli => connector.ToolCalling == CliToolCalling.Prompted,
+            ConnectorTypes.Cli => connector.ToolCalling == CliToolCalling.Prompted,
             _ => true,
         };
-        bool carriesImages = connector.Type is ConnectorType.OpenAICompatible or ConnectorType.Anthropic or ConnectorType.Responses;
+        bool carriesImages = connector.Type is ConnectorTypes.OpenAICompatible or ConnectorTypes.Anthropic or ConnectorTypes.Responses;
 
         var suggestion = new ModelDefinition { Connector = connectorName, Model = id, IsLocal = local };
         var reasons = new List<string>();
@@ -320,12 +330,12 @@ internal static partial class ModelLineup
             familyName = family.Split(':')[0];
             string normalized = lower.Replace('.', '-'); // Copilot writes claude-sonnet-5.5
             (string Prefix, int Context, decimal Input, decimal Output, decimal? CacheRead)[] listed = AnthropicModels.Where(m => normalized.StartsWith(m.Prefix, StringComparison.Ordinal)).Take(1).ToArray();
-            if (connector.Preset == CliPreset.ClaudeCode && connector.Type == ConnectorType.Cli)
+            if (connector.Preset == CliPreset.ClaudeCode && connector.Type == ConnectorTypes.Cli)
             {
                 suggestion.ContextWindow = 200_000;
                 reasons.Add("context 200K, the conservative assumption for Claude Code; raise it if your plan has 1M");
             }
-            else if (connector.Type == ConnectorType.Anthropic && listed.Length == 1)
+            else if (connector.Type == ConnectorTypes.Anthropic && listed.Length == 1)
             {
                 (_, int context, decimal input, decimal output, decimal? cacheRead) = listed[0];
                 suggestion.ContextWindow = model.MaxContextLength ?? context;

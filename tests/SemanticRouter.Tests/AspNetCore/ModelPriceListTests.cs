@@ -26,7 +26,7 @@ public sealed class ModelPriceListTests : RouterHostTest
 
     private static readonly ModelPriceList Prices = ModelPriceList.Parse(List, ModelPriceList.DefaultSource, DateTimeOffset.UnixEpoch);
 
-    private static ConnectorOptions Http(string address, ConnectorType type = ConnectorType.OpenAICompatible) => new() { Type = type, BaseAddress = new Uri(address) };
+    private static ConnectorOptions Http(string address, string type = ConnectorTypes.OpenAICompatible) => new() { Type = type, BaseAddress = new Uri(address) };
 
     [Fact]
     public void Prices_are_per_million_tokens_and_variable_prices_are_left_out()
@@ -43,7 +43,7 @@ public sealed class ModelPriceListTests : RouterHostTest
     [InlineData("claude-opus-5-5", "anthropic/claude-opus-5.5")]
     public void An_anthropic_connector_finds_anthropics_price_by_its_own_model_id(string model, string expected)
     {
-        ModelPriceMatch? match = Prices.Find(Http("https://api.anthropic.com", ConnectorType.Anthropic), model);
+        ModelPriceMatch? match = Prices.Find(Http("https://api.anthropic.com", ConnectorTypes.Anthropic), model);
         match.Should().NotBeNull();
         (match!.Price.Id, match.SameProvider).Should().Be((expected, true));
     }
@@ -66,11 +66,11 @@ public sealed class ModelPriceListTests : RouterHostTest
     [Fact]
     public void Subscriptions_are_valued_at_the_model_makers_price_claude_code_aliases_included()
     {
-        var claudeCode = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        var claudeCode = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode };
         Prices.Find(claudeCode, "opus")!.Price.Id.Should().Be("~anthropic/claude-opus-latest");
         Prices.Find(claudeCode, "claude-sonnet-5-5")!.SameProvider.Should().BeTrue();
 
-        ModelPriceMatch copilot = Prices.Find(new ConnectorOptions { Type = ConnectorType.Copilot }, "claude-sonnet-5.5")!;
+        ModelPriceMatch copilot = Prices.Find(new ConnectorOptions { Type = "Copilot" }, "claude-sonnet-5.5")!;
         (copilot.Price.Id, copilot.SameProvider).Should().Be(("anthropic/claude-sonnet-5.5", true));
     }
 

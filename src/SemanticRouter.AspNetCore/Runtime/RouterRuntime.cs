@@ -204,7 +204,29 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     /// have to give up to keep within the machine policy. Empty when it could be applied.
     /// </summary>
     public IReadOnlyList<string> ValidateChange(RouterConfiguration configuration) =>
-        [.. Validate(configuration), .. Policy.Violations(configuration).Select(v => "Not allowed: " + v)];
+        [.. Validate(configuration), .. UninstalledTypeChanges(configuration), .. Policy.Violations(configuration).Select(v => "Not allowed: " + v)];
+
+    /// <summary>The connector types this router can build: the built-in ones and those of the registered factories.</summary>
+    private string[] InstalledConnectorTypes() => [.. ConnectorTypes.BuiltIn, .. _services.GetServices<IChatConnectorFactory>().Select(f => f.Type)];
+
+    /// <summary>
+    /// Errors for connectors a change gives a type no installed package provides. A connector the running configuration
+    /// already has with that type is only warned about (as at start-up), so a configuration shared with a router that has
+    /// the package stays editable.
+    /// </summary>
+    private IEnumerable<string> UninstalledTypeChanges(RouterConfiguration configuration)
+    {
+        string[] installed = InstalledConnectorTypes();
+        IDictionary<string, ConnectorOptions>? running = Volatile.Read(ref _current)?.Configuration.Connectors;
+        foreach ((string name, ConnectorOptions connector) in configuration.Connectors)
+        {
+            if (!installed.Contains(connector.Type, StringComparer.OrdinalIgnoreCase)
+                && !(running is not null && running.TryGetValue(name, out ConnectorOptions? before) && before.IsType(connector.Type)))
+            {
+                yield return $"Connectors:{name}:Type: {ConnectorCatalog.NotInstalled(connector.Type)}.";
+            }
+        }
+    }
 
     /// <summary>Validation errors for a document; empty when it could be applied.</summary>
     public static IReadOnlyList<string> Validate(RouterConfiguration configuration)
@@ -547,6 +569,19 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             warnings.Add(state);
         }
 
+        // A type no installed package provides is not an error (the configuration or policy may be shared with a router
+        // that has the package), but it must not go unnoticed: its connector is skipped, and a policy entry disables nothing.
+        string[] installed = InstalledConnectorTypes();
+        foreach ((string name, ConnectorOptions connector) in configuration.Connectors.Where(c => !installed.Contains(c.Value.Type, StringComparer.OrdinalIgnoreCase)))
+        {
+            warnings.Add($"Connector '{name}' is skipped: {ConnectorCatalog.NotInstalled(connector.Type)}.");
+        }
+
+        foreach (string type in Policy.DisabledConnectorTypes.Where(t => !installed.Contains(t, StringComparer.OrdinalIgnoreCase)))
+        {
+            warnings.Add($"The machine policy turns off connector type '{type}', which no installed package provides; check its spelling.");
+        }
+
         if (configuration.Middleware.Mode == PromptRouterMode.Dispatch && !configuration.Models.Any(m => m.Enabled))
         {
             // Allowed so a fresh install can start and be set up from the dashboard; until then every request is refused.
@@ -676,14 +711,13 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
     internal IEmbeddingProvider CreateEmbeddingProvider(EmbeddingProviderOptions options) => options.Provider switch
     {
-        EmbeddingProviderKind.Hashing => new HashingEmbeddingProvider(options.Dimensions),
-        EmbeddingProviderKind.OpenAICompatible => new OpenAICompatibleEmbeddingProvider(
+        EmbeddingProviderKinds.Hashing => new HashingEmbeddingProvider(options.Dimensions),
+        EmbeddingProviderKinds.OpenAICompatible => new OpenAICompatibleEmbeddingProvider(
             () => _services.GetRequiredService<IHttpClientFactory>().CreateClient(SemanticRouterServiceCollectionExtensions.EmbeddingsClientName),
             options),
-        _ => _services.GetServices<IEmbeddingProviderFactory>().FirstOrDefault(f => f.Kind == options.Provider)?.Create(options)
-             ?? new UnavailableEmbeddingProvider(options.Provider == EmbeddingProviderKind.Onnx
-                 ? "The Onnx embedding provider needs the SemanticRouter.Embeddings.Onnx package: add it and call builder.UseOnnxEmbeddings() (the semantic-router tool includes it)."
-                 : $"No embedding provider is registered for '{options.Provider}'."),
+        _ => _services.GetServices<IEmbeddingProviderFactory>().FirstOrDefault(f => string.Equals(f.Kind, options.Provider, StringComparison.OrdinalIgnoreCase))?.Create(options)
+             ?? new UnavailableEmbeddingProvider(
+                 $"No installed package provides the embedding provider '{options.Provider}' (built in: {string.Join(", ", EmbeddingProviderKinds.BuiltIn)})."),
     };
 
     private void ScheduleWarmUp(RouterRuntime runtime)

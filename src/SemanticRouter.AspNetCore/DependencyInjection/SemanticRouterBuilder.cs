@@ -52,7 +52,7 @@ public sealed class SemanticRouterBuilder
     {
         Services.Configure<EmbeddingProviderOptions>(o =>
         {
-            o.Provider = EmbeddingProviderKind.Hashing;
+            o.Provider = EmbeddingProviderKinds.Hashing;
             o.Dimensions = dimensions;
         });
         return this;
@@ -63,7 +63,7 @@ public sealed class SemanticRouterBuilder
     {
         Services.Configure<EmbeddingProviderOptions>(o =>
         {
-            o.Provider = EmbeddingProviderKind.OpenAICompatible;
+            o.Provider = EmbeddingProviderKinds.OpenAICompatible;
             configure?.Invoke(o);
         });
         return this;

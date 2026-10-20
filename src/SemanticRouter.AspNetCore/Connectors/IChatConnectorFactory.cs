@@ -3,14 +3,23 @@ using Microsoft.AspNetCore.Http;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>
-/// Creates the connector for a <see cref="ConnectorType"/> that a separate package provides (for example
-/// <see cref="ConnectorType.Copilot"/>). Register one in DI; the router asks it for a connector every time a
-/// configuration is applied, so expensive resources (processes, clients) belong in the factory and are shared.
+/// Creates the connectors of a type that a separate package provides (for example <c>Copilot</c>, from
+/// <c>SemanticRouter.Connectors.Copilot</c>): configuration selects it with <c>"Type": "&lt;its name&gt;"</c>. Register
+/// one in DI; the router asks it for a connector every time a configuration is applied, so expensive resources
+/// (processes, clients) belong in the factory and are shared.
 /// </summary>
+/// <remarks>
+/// The router treats a connector of such a type by its settings: with a <see cref="ConnectorOptions.BaseAddress"/> it
+/// is an HTTP connector to that address (machine policy and the dashboard check the address); without one it runs a
+/// program, like a <see cref="ConnectorTypes.Cli"/> connector (an offline machine policy blocks it).
+/// </remarks>
 public interface IChatConnectorFactory
 {
-    /// <summary>The connector type this factory creates.</summary>
-    ConnectorType Type { get; }
+    /// <summary>
+    /// The <see cref="ConnectorOptions.Type"/> this factory creates, such as <c>Copilot</c>. Matched case-insensitively;
+    /// a factory for one of <see cref="ConnectorTypes.BuiltIn"/> replaces the built-in implementation.
+    /// </summary>
+    string Type { get; }
 
     /// <summary>Creates the connector called <paramref name="name"/> with <paramref name="options"/>.</summary>
     IChatConnector Create(string name, ConnectorOptions options);

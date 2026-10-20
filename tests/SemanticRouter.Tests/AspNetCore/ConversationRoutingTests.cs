@@ -233,7 +233,7 @@ public sealed class ConversationRoutingTests : RouterHostTest
                 .AddSingleton<TimeProvider>(time)
                 .Configure<SemanticRouterConnectorsOptions>(o => o.Connectors["anthropic-native"] = new ConnectorOptions
                 {
-                    Type = ConnectorType.Anthropic,
+                    Type = ConnectorTypes.Anthropic,
                     BaseAddress = new Uri("https://api.anthropic.example"),
                     ApiKey = "sk-ant-test",
                     CacheTtl = ttl,
@@ -251,11 +251,11 @@ public sealed class ConversationRoutingTests : RouterHostTest
     }
 
     [Theory]
-    [InlineData("""{"type":"ephemeral","ttl":"1h"}""", ConnectorType.Anthropic, 60)]
-    [InlineData("""{"type":"ephemeral"}""", ConnectorType.Anthropic, 5)]
-    [InlineData(null, ConnectorType.Anthropic, 60)]
-    [InlineData("""{"type":"ephemeral","ttl":"1h"}""", ConnectorType.OpenAICompatible, null)]
-    public void A_cache_entrys_lifetime_comes_from_the_clients_markers_or_the_connector(string? marker, ConnectorType type, int? minutes)
+    [InlineData("""{"type":"ephemeral","ttl":"1h"}""", ConnectorTypes.Anthropic, 60)]
+    [InlineData("""{"type":"ephemeral"}""", ConnectorTypes.Anthropic, 5)]
+    [InlineData(null, ConnectorTypes.Anthropic, 60)]
+    [InlineData("""{"type":"ephemeral","ttl":"1h"}""", ConnectorTypes.OpenAICompatible, null)]
+    public void A_cache_entrys_lifetime_comes_from_the_clients_markers_or_the_connector(string? marker, string type, int? minutes)
     {
         // The connector asks for one-hour entries; a client's own markers replace the router's.
         string body = marker is null
@@ -268,7 +268,7 @@ public sealed class ConversationRoutingTests : RouterHostTest
 
         lifetime.Should().Be(minutes is { } m ? TimeSpan.FromMinutes(m) : null);
         PromptCacheLifetime.Of(chat, new ConnectorOptions { Type = type, PromptCaching = PromptCaching.Off })
-            .Should().Be(marker is null || type != ConnectorType.Anthropic ? null : TimeSpan.FromMinutes(minutes == 60 ? 60 : 5), "Off adds no markers of its own");
+            .Should().Be(marker is null || type != ConnectorTypes.Anthropic ? null : TimeSpan.FromMinutes(minutes == 60 ? 60 : 5), "Off adds no markers of its own");
     }
 
     [Fact]

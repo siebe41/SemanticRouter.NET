@@ -190,7 +190,7 @@ public sealed class AnthropicGatewayTests : RouterHostTest
             routing: o => o.Models.Add(Model("opus-api", 5, costPerMillion: 15m, connector: "anthropic-native", capabilities: "tools")),
             services: s => s.Configure<SemanticRouterConnectorsOptions>(o => o.Connectors["anthropic-native"] = new ConnectorOptions
             {
-                Type = ConnectorType.Anthropic,
+                Type = ConnectorTypes.Anthropic,
                 BaseAddress = new Uri("https://api.anthropic.example"),
                 ApiKey = "sk-ant-test",
             }));
@@ -220,7 +220,7 @@ public sealed class AnthropicGatewayTests : RouterHostTest
             routing: o => o.Models.Add(Model("opus-api", 5, costPerMillion: 15m, connector: "anthropic-native") is { } m ? Set(m, "claude-opus-5-5") : null!),
             services: s => s.Configure<SemanticRouterConnectorsOptions>(o => o.Connectors["anthropic-native"] = new ConnectorOptions
             {
-                Type = ConnectorType.Anthropic,
+                Type = ConnectorTypes.Anthropic,
                 BaseAddress = new Uri("https://api.anthropic.example"),
                 ApiKey = "sk-ant-test",
             }));

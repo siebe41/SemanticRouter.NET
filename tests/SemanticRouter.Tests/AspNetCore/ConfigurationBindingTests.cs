@@ -94,7 +94,7 @@ public class ConfigurationBindingTests
         connectors["LMSTUDIO"].BaseAddress.Should().Be(new Uri("http://localhost:1234"));
         connectors["openai"].Headers.Should().Contain("OpenAI-Organization", "org");
         connectors["claude"].Should().Match<ConnectorOptions>(c =>
-            c.Type == ConnectorType.Cli && c.Preset == CliPreset.ClaudeCode && c.MaxConcurrency == 1 && c.Timeout == TimeSpan.FromMinutes(2));
+            c.Type == ConnectorTypes.Cli && c.Preset == CliPreset.ClaudeCode && c.MaxConcurrency == 1 && c.Timeout == TimeSpan.FromMinutes(2));
         connectors["claude"].Arguments.Should().Equal("--effort", "low");
         connectors["claude"].RemoveEnvironmentVariables.Should().BeNull("the preset defaults apply unless overridden");
     }

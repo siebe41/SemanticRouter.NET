@@ -30,7 +30,7 @@ public sealed class PromptCacheReportingTests : RouterHostTest
     private static void AddNativeAnthropic(IServiceCollection services) =>
         services.Configure<SemanticRouterConnectorsOptions>(o => o.Connectors["anthropic-native"] = new ConnectorOptions
         {
-            Type = ConnectorType.Anthropic,
+            Type = ConnectorTypes.Anthropic,
             BaseAddress = new Uri("https://api.anthropic.example"),
             ApiKey = "sk-ant-test",
         });

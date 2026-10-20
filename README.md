@@ -364,7 +364,7 @@ builder.Services
         o.Routes.Add(new RouteDefinition { Name = "design", Tier = 4, Utterances = { "design a scalable architecture" } });
     })
     .AddConnector("lmstudio", c => c.BaseAddress = new Uri("http://localhost:1234"))
-    .AddConnector("claude-cli", c => { c.Type = ConnectorType.Cli; c.Preset = CliPreset.ClaudeCode; })
+    .AddConnector("claude-cli", c => { c.Type = ConnectorTypes.Cli; c.Preset = CliPreset.ClaudeCode; })
     .AddModel(new ModelDefinition { Name = "local", Connector = "lmstudio", Model = "qwen/qwen3-8b", Tier = 1, IsLocal = true })
     .AddModel(new ModelDefinition { Name = "claude", Connector = "claude-cli", Model = "sonnet", Tier = 4 })
     .UseOpenAICompatibleEmbeddings(e =>
@@ -612,9 +612,9 @@ What the router itself adds, with no model behind it: the `semantic-router` tool
 
 | To… | Do this |
 |---|---|
-| Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. To make a new connector type selectable in configuration, register an `IChatConnectorFactory`; implement `IModelDiscovery` for the dashboard's Discover button. |
+| Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. To make a new connector type selectable in configuration (`"Type": "Bedrock"`), register an `IChatConnectorFactory` whose `Type` is that name; implement `IModelDiscovery` for the dashboard's Discover button and the doctor. Type names match case-insensitively. A connector of such a type with a `BaseAddress` is held to the policy's endpoint rules like any HTTP connector; one without counts as running a program, like a CLI. |
 | Keep configuration somewhere other than a file | Implement `IRouterConfigurationStore` and call `.UseConfigurationStore<T>()`. |
-| Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. For an in-process model: `.UseOnnxEmbeddings()` from `SemanticRouter.Embeddings.Onnx`. To make a new kind selectable in configuration, register an `IEmbeddingProviderFactory`. |
+| Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. For an in-process model: `.UseOnnxEmbeddings()` from `SemanticRouter.Embeddings.Onnx`. To make a new provider selectable in configuration (`"Provider": "MyModel"`), register an `IEmbeddingProviderFactory` whose `Kind` is that name. |
 | Change how requirements are derived | Implement `IRouteSelector` or `IComplexityAnalyzer`. |
 | Change how models are ranked (budgets, time of day) | Implement `IModelSelector`. |
 | Persist cooldowns, affinity, activity and history | `.UseSqliteState("semantic-router.db")` from `SemanticRouter.Storage.Sqlite`, or implement `ICooldownStore`, `IToolCallAffinity`, `IWarmCacheStore`, `IRoutingActivityStore`, `IRouterConfigurationHistory`. See [Durable state](docs/architecture.md#durable-state). |

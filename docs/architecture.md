@@ -151,8 +151,9 @@ Do not put the file on a network share: SQLite's locking is unreliable there. Fo
 | To… | Implement or call |
 |---|---|
 | Reach a provider with its own protocol | `IChatConnector`, then `.AddConnector<T>()` |
-| Add a connector type that configuration can select | `IChatConnectorFactory` (and `IModelDiscovery` for the Discover button), as `SemanticRouter.Connectors.Copilot` does |
+| Add a connector type that configuration can select | `IChatConnectorFactory`, whose `Type` is the name configuration uses (and `IModelDiscovery` for the Discover button and the doctor), as `SemanticRouter.Connectors.Copilot` does for `Copilot` |
 | Use another embedding backend | `IEmbeddingProvider`, then `.UseEmbeddingProvider<T>()` |
+| Add an embedding provider that configuration can select | `IEmbeddingProviderFactory`, whose `Kind` is the name `Embeddings:Provider` uses, as `SemanticRouter.Embeddings.Onnx` does for `Onnx` |
 | Change how requirements are derived | `IRouteSelector`, `IComplexityAnalyzer`, or `IPromptClassifier` |
 | Change how models are ranked | `IModelSelector` |
 | Persist or share cooldowns | `ICooldownStore` (Core; `ModelHealthTracker` writes through to it), or replace `IModelHealth` |
@@ -164,6 +165,27 @@ Do not put the file on a network share: SQLite's locking is unreliable there. Fo
 | Support another payload shape | `IPromptExtractor` |
 | Keep configuration somewhere other than a file | `IRouterConfigurationStore`, then `.UseConfigurationStore<T>()` |
 | Keep secrets in a vault or the OS keychain | `IRouterSecretStore`, then `.UseSecretStore<T>()` |
+
+### Connector types and embedding providers
+
+`ConnectorOptions.Type` and `EmbeddingProviderOptions.Provider` are names. The built-in ones are the constants in `ConnectorTypes` (`OpenAICompatible`, `Anthropic`, `Responses`, `Cli`) and `EmbeddingProviderKinds` (`Hashing`, `OpenAICompatible`). A package adds another by registering a factory for its name, so `SemanticRouter.AspNetCore` needs no release for it:
+
+```csharp
+public sealed class BedrockConnectorFactory : IChatConnectorFactory
+{
+    public string Type => "Bedrock";
+    public IChatConnector Create(string name, ConnectorOptions options) => new BedrockConnector(name, options);
+}
+
+builder.Services.AddSingleton<IChatConnectorFactory, BedrockConnectorFactory>();
+// configuration: "Connectors": { "aws": { "Type": "Bedrock", "BaseAddress": "https://bedrock-runtime.us-east-1.amazonaws.com" } }
+```
+
+- Names match case-insensitively. The built-in names are kept in their canonical spelling (`"cli"` reads as `Cli`), so configuration files written for the old enums keep working.
+- The router treats a packaged type by its settings. With a `BaseAddress`, it is an HTTP connector to that address: the machine policy's endpoint rules and offline mode check the address, and the default timeout is 100 seconds. Without one it runs a program, like a CLI: offline mode turns it off, it counts as a subscription for prices, and the default timeout is 5 minutes.
+- A connector whose type no installed package provides is skipped with that reason. The router warns about it on every apply, and `doctor` fails it. The dashboard refuses a change that introduces one, but keeps one the running configuration already has, so a file shared with a router that has the package stays editable.
+- `MachinePolicy.DisabledConnectorTypes` takes any name. One that no installed package provides is warned about, because a misspelling turns nothing off.
+- A connector that implements `IModelDiscovery` gets the dashboard's **Discover** button and a `doctor` check that its models are offered. An embedding factory's `Models` and `Unavailable` feed the dashboard's model list and `doctor`.
 
 ## Safety rules that shape the design
 

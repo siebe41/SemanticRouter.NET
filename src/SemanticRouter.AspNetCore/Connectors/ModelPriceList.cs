@@ -147,7 +147,7 @@ public sealed partial class ModelPriceList
         }
 
         string id = model.Trim();
-        string? host = connector.Type is ConnectorType.OpenAICompatible or ConnectorType.Anthropic or ConnectorType.Responses ? connector.BaseAddress?.Host.ToLowerInvariant() : null;
+        string? host = connector.Type is ConnectorTypes.OpenAICompatible or ConnectorTypes.Anthropic or ConnectorTypes.Responses ? connector.BaseAddress?.Host.ToLowerInvariant() : null;
         if (host is "openrouter.ai" or "www.openrouter.ai")
         {
             return _byId.TryGetValue(id, out ModelPrice? exact) ? new ModelPriceMatch(exact, SameProvider: true) : null;
@@ -180,8 +180,8 @@ public sealed partial class ModelPriceList
 
         ModelPrice best = candidates.OrderBy(p => Rank(p.Id[..p.Id.IndexOf('/', StringComparison.Ordinal)])).First();
 
-        // A CLI or Copilot subscription is valued at the model maker's own price; a gateway may charge differently.
-        return new ModelPriceMatch(best, SameProvider: connector.Type is ConnectorType.Cli or ConnectorType.Copilot);
+        // A subscription (a CLI, Copilot) is valued at the model maker's own price; a gateway may charge differently.
+        return new ModelPriceMatch(best, SameProvider: connector.RunsProgram);
     }
 
     private static int Rank(string vendor) => Array.IndexOf(FirstParty, vendor) is var rank && rank >= 0 ? rank : int.MaxValue;
@@ -189,15 +189,14 @@ public sealed partial class ModelPriceList
     /// <summary>Whose prices a connector pays: <c>anthropic</c>, <c>openai</c>, …, or <see langword="null"/> when its host is not a known provider's.</summary>
     private static string? VendorOf(ConnectorOptions connector, string? host) => connector.Type switch
     {
-        ConnectorType.Anthropic when host is null || host.EndsWith("anthropic.com", StringComparison.Ordinal) => "anthropic",
-        ConnectorType.Cli => connector.Preset switch
+        ConnectorTypes.Anthropic when host is null || host.EndsWith("anthropic.com", StringComparison.Ordinal) => "anthropic",
+        ConnectorTypes.Cli => connector.Preset switch
         {
             CliPreset.ClaudeCode => "anthropic",
             CliPreset.Codex => "openai",
             _ => null,
         },
-        ConnectorType.Copilot => null,
-        _ when host is null => connector.Type == ConnectorType.Responses ? "openai" : null,
+        _ when host is null => connector.Type == ConnectorTypes.Responses ? "openai" : null,
         _ => Hosts.FirstOrDefault(h => host == h.Host || host.EndsWith("." + h.Host, StringComparison.Ordinal)).Vendor,
     };
 

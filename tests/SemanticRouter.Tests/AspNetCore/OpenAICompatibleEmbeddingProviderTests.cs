@@ -9,7 +9,7 @@ public class OpenAICompatibleEmbeddingProviderTests
 {
     private static EmbeddingProviderOptions Options(int batchSize = 64) => new()
     {
-        Provider = EmbeddingProviderKind.OpenAICompatible,
+        Provider = EmbeddingProviderKinds.OpenAICompatible,
         Endpoint = new Uri("http://ollama:11434"),
         Model = "nomic-embed-text",
         ApiKey = "secret",

@@ -97,9 +97,8 @@ internal static partial class SetupApi
                     detected.Add(entry);
                 }
 
-                bool copilotSdk = services.GetServices<IChatConnectorFactory>().Any(f => f.Type == ConnectorType.Copilot);
                 var presets = new JsonArray();
-                foreach (SetupPreset preset in Presets(copilotSdk).Where(p => policy.Blocks(p.Connector) is null))
+                foreach (SetupPreset preset in Presets(services.GetServices<SetupPresetReplacement>()).Where(p => policy.Blocks(p.Connector) is null))
                 {
                     string name = FreeName(config, preset.Name, preset.Connector);
                     JsonObject entry = Entry(preset.Id, preset.Title, preset.Detail, preset.Kind, name, preset.Connector, models: null);
@@ -190,17 +189,33 @@ internal static partial class SetupApi
         string Id, string Title, string Detail, string Kind, string Name, ConnectorOptions Connector, string? KeyVariable = null, string? Consent = null);
 
     /// <summary>
+    /// A preset a connector package offers in place of the built-in one with the same <see cref="SetupPreset.Id"/>
+    /// (registered in DI by <c>AddCopilotConnector</c>, so the setup offers the Copilot SDK instead of the copilot CLI).
+    /// </summary>
+    /// <param name="Preset">The preset.</param>
+    internal sealed record SetupPresetReplacement(SetupPreset Preset);
+
+    /// <summary>
     /// Whether <paramref name="variable"/> is the key of a preset whose address is <paramref name="destination"/>'s scheme,
     /// host and port: <c>OPENAI_API_KEY</c> for <c>https://api.openai.com</c>, as the setup writes it.
     /// </summary>
     internal static bool IsPresetKey(string variable, Uri? destination) =>
         destination is { IsAbsoluteUri: true }
-        && Presets(copilotSdk: false).Any(p => string.Equals(p.KeyVariable, variable, StringComparison.Ordinal)
+        && Presets().Any(p => string.Equals(p.KeyVariable, variable, StringComparison.Ordinal)
             && p.Connector.BaseAddress is { } address
             && Uri.Compare(address, destination, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0);
 
-    /// <summary>The providers the setup offers. With the Copilot SDK package, GitHub Copilot goes through it (docs/providers.md prefers it).</summary>
-    internal static IReadOnlyList<SetupPreset> Presets(bool copilotSdk) =>
+    /// <summary>
+    /// The providers the setup offers, with any a connector package replaces: with the Copilot SDK package, GitHub
+    /// Copilot goes through it (docs/providers.md prefers it).
+    /// </summary>
+    internal static IReadOnlyList<SetupPreset> Presets(IEnumerable<SetupPresetReplacement>? replacements = null)
+    {
+        Dictionary<string, SetupPreset> replaced = (replacements ?? []).ToDictionary(r => r.Preset.Id, r => r.Preset, StringComparer.Ordinal);
+        return [.. BuiltInPresets.Select(p => replaced.GetValueOrDefault(p.Id, p))];
+    }
+
+    private static IReadOnlyList<SetupPreset> BuiltInPresets =>
     [
         new("lmstudio", "LM Studio", "Local models from LM Studio's server (localhost:1234)", "local", "lmstudio",
             new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234"), Timeout = TimeSpan.FromMinutes(2) }),
@@ -209,7 +224,7 @@ internal static partial class SetupApi
         new("openai", "OpenAI", "OpenAI's API (api.openai.com), billed per token to your API key", "cloud", "openai",
             new ConnectorOptions { BaseAddress = new Uri("https://api.openai.com"), ApiKey = "${env:OPENAI_API_KEY}" }, "OPENAI_API_KEY"),
         new("anthropic", "Anthropic", "Anthropic's API (api.anthropic.com), billed per token to your API key", "cloud", "anthropic",
-            new ConnectorOptions { Type = ConnectorType.Anthropic, BaseAddress = new Uri("https://api.anthropic.com"), ApiKey = "${env:ANTHROPIC_API_KEY}" }, "ANTHROPIC_API_KEY"),
+            new ConnectorOptions { Type = ConnectorTypes.Anthropic, BaseAddress = new Uri("https://api.anthropic.com"), ApiKey = "${env:ANTHROPIC_API_KEY}" }, "ANTHROPIC_API_KEY"),
         new("openrouter", "OpenRouter", "Many vendors' models through one OpenRouter key (openrouter.ai)", "cloud", "openrouter",
             new ConnectorOptions { BaseAddress = new Uri("https://openrouter.ai"), RequestPath = "/api/v1/chat/completions", ApiKey = "${env:OPENROUTER_API_KEY}" },
             "OPENROUTER_API_KEY"),
@@ -222,21 +237,18 @@ internal static partial class SetupApi
         new("claude-code", "Claude Code", "Your Claude subscription through the claude CLI (install it and sign in first)", "cli", "claude-cli",
             new ConnectorOptions
             {
-                Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode, MaxConcurrency = 2, Timeout = TimeSpan.FromMinutes(3), ToolCalling = CliToolCalling.Prompted,
+                Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode, MaxConcurrency = 2, Timeout = TimeSpan.FromMinutes(3), ToolCalling = CliToolCalling.Prompted,
             },
             Consent: Consent(CliPreset.ClaudeCode)),
         new("codex", "Codex", "Your ChatGPT plan through the codex CLI (install it and sign in first)", "cli", "codex-cli",
-            new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.Codex, MaxConcurrency = 1, Timeout = TimeSpan.FromMinutes(3), ToolCalling = CliToolCalling.None },
+            new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.Codex, MaxConcurrency = 1, Timeout = TimeSpan.FromMinutes(3), ToolCalling = CliToolCalling.None },
             Consent: Consent(CliPreset.Codex)),
-        copilotSdk
-            ? new("copilot", "GitHub Copilot", "Your GitHub Copilot plan through the Copilot SDK (install the copilot CLI and sign in first)", "cli", "copilot",
-                new ConnectorOptions { Type = ConnectorType.Copilot, MaxConcurrency = 2 }, Consent: Consent(CliPreset.GitHubCopilot))
-            : new("copilot", "GitHub Copilot", "Your GitHub Copilot plan through the copilot CLI (install it and sign in first)", "cli", "copilot-cli",
-                new ConnectorOptions
-                {
-                    Type = ConnectorType.Cli, Preset = CliPreset.GitHubCopilot, MaxConcurrency = 2, Timeout = TimeSpan.FromMinutes(3), ToolCalling = CliToolCalling.None,
-                },
-                Consent: Consent(CliPreset.GitHubCopilot)),
+        new("copilot", "GitHub Copilot", "Your GitHub Copilot plan through the copilot CLI (install it and sign in first)", "cli", "copilot-cli",
+            new ConnectorOptions
+            {
+                Type = ConnectorTypes.Cli, Preset = CliPreset.GitHubCopilot, MaxConcurrency = 2, Timeout = TimeSpan.FromMinutes(3), ToolCalling = CliToolCalling.None,
+            },
+            Consent: Consent(CliPreset.GitHubCopilot)),
     ];
 
     /// <summary>What enabling a subscription CLI means for the user's account (the setup shows it before enabling).</summary>
@@ -266,7 +278,7 @@ internal static partial class SetupApi
         }
 
         string? signIn = null;
-        if (connector.Type == ConnectorType.Cli && connector.Preset == CliPreset.ClaudeCode)
+        if (connector.Type == ConnectorTypes.Cli && connector.Preset == CliPreset.ClaudeCode)
         {
             (int authExit, string auth) = await RouterDoctor.RunAsync(runner, path, ["auth", "status"], connector, cancellationToken).ConfigureAwait(false);
             (bool? loggedIn, string? method) = RouterDoctor.ReadClaudeAuthStatus(auth);
@@ -276,7 +288,7 @@ internal static partial class SetupApi
                     ? "Signed in with an API key, so requests are billed per token, not to your subscription"
                     : loggedIn == true ? "Signed in" : null;
         }
-        else if (connector.Type == ConnectorType.Cli && connector.Preset == CliPreset.Codex)
+        else if (connector.Type == ConnectorTypes.Cli && connector.Preset == CliPreset.Codex)
         {
             // `codex login status` says "Logged in using ChatGPT", "… using an API key" or "Not logged in"; anything else is
             // left unsaid. Its output is not quoted: with an API key it shows part of the key.

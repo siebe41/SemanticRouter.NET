@@ -45,7 +45,7 @@ public sealed class CopilotConnectorTests : RouterHostTest
             {
                 s.Configure<SemanticRouterConnectorsOptions>(o =>
                 {
-                    var options = new ConnectorOptions { Type = ConnectorType.Copilot };
+                    var options = new ConnectorOptions { Type = CopilotConnector.Type };
                     connector?.Invoke(options);
                     o.Connectors["copilot"] = options;
                 });
@@ -193,7 +193,7 @@ public sealed class CopilotConnectorTests : RouterHostTest
         HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
 
         response.Headers.GetValues("X-Prompt-Route-Model").Should().Equal("cloud");
-        Services.GetRequiredService<RoutingActivityLog>().Recent(1).Single().Detail.Should().Contain("SemanticRouter.Connectors.Copilot");
+        Services.GetRequiredService<RoutingActivityLog>().Recent(1).Single().Detail.Should().Contain("no installed connector package provides connector type 'Copilot'");
     }
 
     [Fact]
@@ -214,12 +214,28 @@ public sealed class CopilotConnectorTests : RouterHostTest
         int created = 0;
         var factory = new CopilotConnectorFactory(NullLoggerFactory.Instance, _ => { created++; return _copilot; });
 
-        factory.Create("a", new ConnectorOptions { Type = ConnectorType.Copilot });
-        factory.Create("a", new ConnectorOptions { Type = ConnectorType.Copilot });
-        factory.Create("b", new ConnectorOptions { Type = ConnectorType.Copilot, HomeDirectory = "/elsewhere" });
+        factory.Create("a", new ConnectorOptions { Type = CopilotConnector.Type });
+        factory.Create("a", new ConnectorOptions { Type = CopilotConnector.Type });
+        factory.Create("b", new ConnectorOptions { Type = CopilotConnector.Type, HomeDirectory = "/elsewhere" });
         await factory.DisposeAsync();
 
         created.Should().Be(2);
+    }
+
+    [Fact]
+    public void The_setup_offers_copilot_through_the_sdk_once_the_package_is_added()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSemanticPromptRouting(_ => { }).AddCopilotConnector().AddCopilotConnector();
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        SetupApi.SetupPresetReplacement[] replacements = [.. provider.GetServices<SetupApi.SetupPresetReplacement>()];
+
+        replacements.Should().ContainSingle("adding the package twice offers it once");
+        SetupApi.SetupPreset copilot = SetupApi.Presets(replacements).Single(p => p.Id == "copilot");
+        (copilot.Name, copilot.Connector.Type).Should().Be(("copilot", CopilotConnector.Type));
+        SetupApi.Presets().Single(p => p.Id == "copilot").Connector.Preset.Should().Be(CliPreset.GitHubCopilot, "without the package, the CLI preset");
     }
 
     /// <summary>Plays back one scripted turn per call and records what it was asked.</summary>

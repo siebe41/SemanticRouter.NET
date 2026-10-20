@@ -8,7 +8,7 @@ namespace SemanticRouter.Tests.AspNetCore;
 /// <summary>Suggesting catalog entries for what a connector offers: Claude's families on their own tiers, local models by size.</summary>
 public sealed class ModelLineupTests : RouterHostTest
 {
-    private static readonly ConnectorOptions ClaudeCli = new() { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode, ToolCalling = CliToolCalling.Prompted };
+    private static readonly ConnectorOptions ClaudeCli = new() { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode, ToolCalling = CliToolCalling.Prompted };
     private static readonly ConnectorOptions LmStudio = new() { BaseAddress = new Uri("http://localhost:1234") };
 
     private static IReadOnlyList<ModelLineupEntry> Suggest(string connector, ConnectorOptions options, params string[] ids) =>
@@ -36,7 +36,7 @@ public sealed class ModelLineupTests : RouterHostTest
     [Fact]
     public void A_cli_without_prompted_tool_calling_does_not_claim_tools()
     {
-        var plain = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        var plain = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode };
 
         Suggest("claude", plain, "sonnet").Single().Suggestion!.Capabilities.Should().NotContain("tools");
     }
@@ -44,7 +44,7 @@ public sealed class ModelLineupTests : RouterHostTest
     [Fact]
     public void The_anthropic_api_gets_list_prices_context_and_vision()
     {
-        var api = new ConnectorOptions { Type = ConnectorType.Anthropic, BaseAddress = new Uri("https://api.anthropic.com") };
+        var api = new ConnectorOptions { Type = ConnectorTypes.Anthropic, BaseAddress = new Uri("https://api.anthropic.com") };
 
         IReadOnlyList<ModelLineupEntry> lineup = Suggest("anthropic", api, "claude-opus-5-5", "claude-haiku-4-5", "claude-fable-5-1");
 
@@ -60,7 +60,7 @@ public sealed class ModelLineupTests : RouterHostTest
     [Fact]
     public void Copilot_claude_models_are_recognised_and_unknown_families_are_left_to_the_user()
     {
-        var copilot = new ConnectorOptions { Type = ConnectorType.Copilot };
+        var copilot = new ConnectorOptions { Type = "Copilot" };
 
         IReadOnlyList<ModelLineupEntry> lineup = Suggest("copilot", copilot, "claude-sonnet-5.5", "gpt-6.1-sol", "gpt-6-mini");
 
