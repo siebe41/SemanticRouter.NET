@@ -69,6 +69,19 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
         CloudHttp.Requests.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData(true, new[] { "Bedrock" })]
+    [InlineData(false, new string[0])]
+    public async Task The_dashboard_offers_the_built_in_types_and_those_installed_packages_provide(bool withFactory, string[] installed)
+    {
+        HttpClient client = await StartBedrockAsync(withFactory);
+
+        JsonElement types = JsonDocument.Parse(await client.GetStringAsync(new Uri("/router/api/status", UriKind.Relative))).RootElement.GetProperty("connectorTypes");
+
+        types.GetProperty("builtIn").EnumerateArray().Select(t => t.GetString()).Should().Equal(ConnectorTypes.BuiltIn);
+        types.GetProperty("installed").EnumerateArray().Select(t => t.GetString()).Should().Equal(installed);
+    }
+
     [Fact]
     public async Task A_type_no_package_provides_is_skipped_with_the_reason()
     {

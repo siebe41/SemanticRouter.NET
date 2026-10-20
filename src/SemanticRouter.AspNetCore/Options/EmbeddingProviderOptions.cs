@@ -58,7 +58,10 @@ public interface IEmbeddingProviderFactory
     /// <summary>Builds a provider for <paramref name="options"/>. Slow work (downloads, model loading) belongs in the first call, not here.</summary>
     IEmbeddingProvider Create(EmbeddingProviderOptions options);
 
-    /// <summary>Models the dashboard offers for this kind (by <see cref="EmbeddingProviderOptions.Model"/> name).</summary>
+    /// <summary>
+    /// Models the dashboard offers for this kind (by <see cref="EmbeddingProviderOptions.Model"/> name). The first is the
+    /// one it shows as chosen while no model is set, so it should be the provider's default.
+    /// </summary>
     IReadOnlyList<EmbeddingModelChoice> Models => [];
 
     /// <summary>

@@ -324,6 +324,37 @@ test('an Anthropic connector\'s prompt caching settings are saved', async ({ pag
   expect(config.Connectors.local).toMatchObject({ Type: 'Anthropic', PromptCaching: 'Off', CacheTtl: '1h' });
 });
 
+test("an installed package's connector type is offered and shown by its settings", async ({ page, request }) => {
+  // The host has the Copilot package, so api/status lists its type after the built-in ones; the page names none of them.
+  const { connectorTypes } = await (await request.get('/router/api/status')).json();
+  expect(connectorTypes.installed).toContain('Copilot');
+  await open(page, 'connectors');
+  await page.locator('.item-head', { hasText: 'local' }).first().click();
+  const type = page.locator('.item.open select[data-bind="Connectors.local.Type"]');
+  await expect(type.locator('option')).toHaveText([...connectorTypes.builtIn, ...connectorTypes.installed]);
+  await type.selectOption('Copilot');
+  // With the stub's base address it is an HTTP connector to that address; without one it runs a program.
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.RequestPath"]')).toBeVisible();
+  await page.locator('.item.open input[data-bind="Connectors.local.BaseAddress"]').fill('');
+  await page.locator('.item.open input[data-bind="Connectors.local.BaseAddress"]').blur();
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.Executable"]')).toBeVisible();
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.HomeDirectory"]')).toBeVisible();
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.RequestPath"]')).toHaveCount(0);
+});
+
+test("an installed package's embedding provider offers its models", async ({ page, request }) => {
+  const { embeddings } = await (await request.get('/router/api/status')).json();
+  const kind = embeddings.available.find((k) => !['Hashing', 'OpenAICompatible'].includes(k) && !embeddings.unavailable[k]);
+  test.skip(!kind, 'no installed embedding provider can run on this machine');
+  const models = embeddings.models.filter((m) => m.provider === kind);
+  await open(page, 'embeddings');
+  await page.locator('select[data-bind="Embeddings.Provider"]').selectOption(kind);
+  const model = page.locator('select[data-bind="Embeddings.Model"]');
+  await expect(model.locator('option')).toHaveCount(models.length);
+  await expect(model).toHaveValue(models[0].name);
+  await expect(page.locator('input[data-bind="Embeddings.ModelPath"]')).toBeVisible();
+});
+
 test('validation lists problems and discard restores the configuration', async ({ page }) => {
   await open(page, 'routes');
   await page.locator('.item-head', { hasText: 'architecture' }).click();

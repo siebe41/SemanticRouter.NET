@@ -162,7 +162,19 @@ public static partial class RouterDashboardEndpoints
                 StatusResponse status = BuildStatus(
                     provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>(),
                     services.GetService<IModelCacheShare>(), Listening(services), options.PublicOrigins);
-                status = status with { Unsaved = provider.Unsaved, Instance = provider.Instance };
+                status = status with
+                {
+                    Unsaved = provider.Unsaved,
+                    Instance = provider.Instance,
+                    ConnectorTypes = new(
+                        ConnectorTypes.BuiltIn,
+                        services.GetServices<IChatConnectorFactory>()
+                            .Select(f => f.Type)
+                            .Where(t => !string.IsNullOrWhiteSpace(t) && !ConnectorTypes.IsBuiltIn(t))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .Order(StringComparer.OrdinalIgnoreCase)
+                            .ToArray()),
+                };
 
                 // State writes that failed after the configuration was applied (a locked or full disk): shown as they happen.
                 if (services.GetService<IStateStorageHealth>()?.Problem is { } state && !status.Warnings.Contains(state))
@@ -1329,7 +1341,18 @@ public static partial class RouterDashboardEndpoints
         /// instance knows the configuration may have changed even when the version number is the same.
         /// </summary>
         public string? Instance { get; init; }
+
+        /// <summary>The connector types this router can run: the built-in ones, and those installed packages provide.</summary>
+        public ConnectorTypesStatus ConnectorTypes { get; init; } = new([], []);
     }
+
+    /// <summary>
+    /// Connector types: <see cref="SemanticRouter.AspNetCore.ConnectorTypes.BuiltIn"/>, and the types of the registered
+    /// <see cref="IChatConnectorFactory"/>s that are not built in. The dashboard offers both, and treats an installed type
+    /// like the router does (<see cref="ConnectorOptions.RunsProgram"/>): with a base address an HTTP connector, without
+    /// one a program.
+    /// </summary>
+    internal sealed record ConnectorTypesStatus(IReadOnlyList<string> BuiltIn, IReadOnlyList<string> Installed);
 
     /// <summary>Embedding provider in use.</summary>
     internal sealed record EmbeddingsStatus(

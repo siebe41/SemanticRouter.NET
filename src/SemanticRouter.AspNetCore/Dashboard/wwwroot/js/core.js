@@ -16,7 +16,8 @@ export const API = PREFIX + '/api';
 export const CAPABILITY_HINTS = ['chat', 'code', 'tools', 'vision', 'reasoning'];
 export const STRATEGIES = ['CheapestCapable', 'MostCapable', 'Priority', 'Fastest', 'Balanced'];
 export const SCORING = ['MaxSimilarity', 'Centroid'];
-export const CONNECTOR_TYPES = ['OpenAICompatible', 'Anthropic', 'Responses', 'Cli', 'Copilot'];
+// The router's own connector types, until api/status says which it has; installed packages add more (api/status).
+const BUILT_IN_CONNECTOR_TYPES = ['OpenAICompatible', 'Anthropic', 'Responses', 'Cli'];
 export const PRESETS = ['ClaudeCode', 'GitHubCopilot', 'Codex', 'Custom'];
 export const MESSAGE_SELECTION = ['LastUserMessage', 'AllUserMessages', 'AllMessages'];
 
@@ -119,6 +120,17 @@ export const tierName = (level) => {
 };
 export const tiers = () => (state.config && state.config.Tiers && state.config.Tiers.length ? state.config.Tiers : (state.status ? state.status.tiers.map((t) => ({ Level: t.level, Name: t.name, Description: t.description })) : []));
 export const connectorNames = () => Object.keys((state.config && state.config.Connectors) || {});
+const builtInConnectorTypes = () => (state.status && state.status.connectorTypes && state.status.connectorTypes.builtIn.length ? state.status.connectorTypes.builtIn : BUILT_IN_CONNECTOR_TYPES);
+/** The connector types to offer: the built-in ones, then those installed packages provide. */
+export const connectorTypes = () => [...builtInConnectorTypes(), ...((state.status && state.status.connectorTypes && state.status.connectorTypes.installed) || [])];
+export const isBuiltInConnectorType = (type) => builtInConnectorTypes().some((t) => t.toLowerCase() === String(type || 'OpenAICompatible').toLowerCase());
+export const isInstalledConnectorType = (type) => connectorTypes().some((t) => t.toLowerCase() === String(type || 'OpenAICompatible').toLowerCase());
+/**
+ * Whether a connector (its configuration) runs a program rather than calling an HTTP endpoint, as the router decides
+ * (ConnectorOptions.RunsProgram): a Cli connector, or one of an installed type without a base address. Its models are
+ * subscriptions: free per request, valued at the API price.
+ */
+export const runsProgram = (conn) => !!conn && ((conn.Type || '').toLowerCase() === 'cli' || (!isBuiltInConnectorType(conn.Type) && !conn.BaseAddress));
 export const lines = (arr) => (arr || []).join('\n');
 export const fromLines = (text) => text.split('\n').map((s) => s.trim()).filter(Boolean);
 export const csv = (arr) => (arr || []).join(', ');

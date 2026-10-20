@@ -1,6 +1,6 @@
 /* Semantic Router dashboard: Actions behind data-action buttons, and applying configuration. */
 import { lineDiff } from './config.js';
-import { $, ask, api, connectorNames, evaluationEdited, h, isDirty, jsonEdited, lineupFor, plural, readOnly, setPath, state, tiers, toast } from './core.js';
+import { $, ask, api, connectorNames, evaluationEdited, h, isDirty, jsonEdited, lineupFor, plural, readOnly, runsProgram, setPath, state, tiers, toast } from './core.js';
 import { loadAudit } from './audit.js';
 import { loadTrends } from './charts.js';
 import { aliasRows, draftChanges, limitRows, localProblems, pageForPath, writeAliases, writeLimits } from './draft.js';
@@ -467,7 +467,7 @@ export const actions = {
       });
       render();
       if (!found.length) { toast(problem || `${source} has no price for ${missing.join(', ')}.`, problem ? 'danger' : ''); return; }
-      const what = conn && (conn.Type === 'Cli' || conn.Type === 'Copilot') ? 'API prices' : 'prices';
+      const what = runsProgram(conn) ? 'API prices' : 'prices';
       toast(`${what[0].toUpperCase() + what.slice(1)} from ${source}: ${found.join('; ')}.${missing.length ? ` None for ${missing.join(', ')}.` : ''}${elsewhere.length ? ` Check ${elsewhere.join(', ')}: that is the model maker's price, and ${connector} may charge differently.` : ''} Apply & save to use them; past usage is priced again too.`, 'ok', { sticky: true });
     } catch (e) { toast("Couldn't look up prices: " + e.message, 'danger'); } finally { el.disabled = false; }
   },

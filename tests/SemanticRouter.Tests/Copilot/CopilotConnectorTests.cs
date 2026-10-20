@@ -223,6 +223,17 @@ public sealed class CopilotConnectorTests : RouterHostTest
     }
 
     [Fact]
+    public async Task The_dashboard_offers_the_copilot_type_once_the_package_is_added()
+    {
+        HttpClient client = await StartCopilotAsync();
+
+        JsonElement types = JsonDocument.Parse(await client.GetStringAsync("/router/api/status")).RootElement.GetProperty("connectorTypes");
+
+        types.GetProperty("installed").EnumerateArray().Select(t => t.GetString()).Should().Equal(CopilotConnector.Type);
+        types.GetProperty("builtIn").EnumerateArray().Select(t => t.GetString()).Should().NotContain(CopilotConnector.Type);
+    }
+
+    [Fact]
     public void The_setup_offers_copilot_through_the_sdk_once_the_package_is_added()
     {
         var services = new ServiceCollection();
