@@ -1,0 +1,4145 @@
+{
+  "$comment": [
+    "Written by deploy/third-party/velopack-crates.py (see it for how): the crates.io crates statically linked",
+    "into Velopack's native binaries at the tag below, with the runtime identifier prefixes they ship under.",
+    "deploy/third-party-notices.cs lists them with the Velopack package of the same version. Licence and",
+    "copyright are ClearlyDefined's, through GitHub's dependency graph ('metadataFrom' when that had another",
+    "version of the crate), or the licence was read by hand ('licenceFrom', the LICENCES table in the script).",
+    "A null licence is unknown: add the crate to that table, or the generator refuses the file."
+  ],
+  "velopack": "1.2.161",
+  "lock": "https://github.com/velopack/velopack/blob/92d6a1c91716729d449034df5c50307dcce39493/Cargo.lock",
+  "crates": [
+    {
+      "name": "ab_glyph",
+      "version": "0.2.32",
+      "licence": "Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "ab_glyph_rasterizer",
+      "version": "0.1.10",
+      "licence": "Apache-2.0",
+      "copyright": "copyright (c) 2020 Alex Butler, Copyright 2015 Google Inc.",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "adler2",
+      "version": "2.0.1",
+      "licence": "0BSD OR MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Jonas Schievink <jonasschievink@gmail.com>",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "ahash",
+      "version": "0.8.12",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2018 Tom Kaitchuck",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "aho-corasick",
+      "version": "1.1.5",
+      "licence": "Unlicense OR MIT",
+      "copyright": "(c) 83, // a, Copyright (c) 2015 Andrew Gallant",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "aligned",
+      "version": "0.4.3",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2017 Jorge Aparicio",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "aligned-vec",
+      "version": "0.6.4",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2022 sarah",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "anstream",
+      "version": "1.0.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Individual contributors",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "anstyle",
+      "version": "1.0.14",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Individual contributors",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "anstyle-parse",
+      "version": "1.0.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Individual contributors",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "anstyle-query",
+      "version": "1.1.5",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Individual contributors",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "anstyle-wincon",
+      "version": "3.0.11",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Individual contributors",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "anyhow",
+      "version": "1.0.104",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "arg_enum_proc_macro",
+      "version": "0.3.4",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2018 Luca Barbato",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "arrayref",
+      "version": "0.3.9",
+      "licence": "BSD-2-Clause",
+      "copyright": "Copyright (c) 2015 David Roundy <roundyd@physics.oregonstate.edu>",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "arrayvec",
+      "version": "0.7.8",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Ulrik Sverdrup, Copyright 2012-2016 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "win-"
+      ]
+    },
+    {
+      "name": "as-raw-xcb-connection",
+      "version": "1.0.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright 2019 as-raw-xcb-connection Contributers",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "as-slice",
+      "version": "0.2.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2018 Jorge Aparicio",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "async-broadcast",
+      "version": "0.7.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2020 Yoshua Wuyts, Copyright 2020 Yoshua Wuyts",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "async-channel",
+      "version": "2.5.0",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "async-executor",
+      "version": "1.14.0",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "async-io",
+      "version": "2.6.0",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "async-lock",
+      "version": "3.4.2",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "async-process",
+      "version": "2.5.0",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "async-recursion",
+      "version": "1.1.1",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "async-recursion 1.2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "async-signal",
+      "version": "0.2.14",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "async-task",
+      "version": "4.7.1",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "async-trait",
+      "version": "0.1.92",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "atomic-waker",
+      "version": "1.1.2",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright (c) 2016 Alex Crichton, Copyright (c) 2017 The Tokio Authors",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "av-scenechange",
+      "version": "0.14.1",
+      "licence": "MIT",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "av1-grain",
+      "version": "0.2.5",
+      "licence": "BSD-2-Clause",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "avif-serialize",
+      "version": "0.8.9",
+      "licence": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2020, Cloudflare, Inc.",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "base64",
+      "version": "0.23.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2025 Alice Maz, Marshall Pierce",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "bit_field",
+      "version": "0.10.3",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "bitflags",
+      "version": "2.13.2",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "bitstream-io",
+      "version": "4.10.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2017 Brian Langenberger, Copyright 2017 Brian Langenberger",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "block-buffer",
+      "version": "0.12.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2018-2025 The RustCrypto Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "block2",
+      "version": "0.6.2",
+      "licence": "MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "blocking",
+      "version": "1.7.0",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "bumpalo",
+      "version": "3.20.3",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2019 Nick Fitzgerald, Copyright 2012-2014 The Rust Project Developers, Copyright 2012-2017 The Rust Project Developers, Copyright 2014 The Rust Project Developers, Copyright 2015 The Rust Project Developers, Copyright 2018 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "bytemuck",
+      "version": "1.25.2",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "copyright": "Copyright (c) 2019 Daniel Lokathor Gee",
+      "runtimes": [
+        "linux-",
+        "win-"
+      ]
+    },
+    {
+      "name": "bytemuck_derive",
+      "version": "1.12.1",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-",
+        "win-"
+      ]
+    },
+    {
+      "name": "byteorder-lite",
+      "version": "0.1.0",
+      "licence": "Unlicense OR MIT",
+      "copyright": "Copyright (c) 2015 Andrew Gallant",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "bytes",
+      "version": "1.12.1",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2018 Carl Lerche",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "calloop",
+      "version": "0.13.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2018 Victor Berger",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "calloop-wayland-source",
+      "version": "0.3.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2023 Kirill Chibisov",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "cfg-if",
+      "version": "1.0.5",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "chacha20",
+      "version": "0.10.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2019-2026 The RustCrypto Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "chrono",
+      "version": "0.4.45",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014-2026, Kang Seonghoon and contributors, Copyright (c) 2014, Kang Seonghoon, Copyright 2012-2014 The Rust Project Developers, Portions copyright (c) 2015, John Nagle",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "clap",
+      "version": "4.6.7",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "clap_builder",
+      "version": "4.6.7",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "clap_derive",
+      "version": "4.6.7",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "clap_lex",
+      "version": "1.1.1",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "color_quant",
+      "version": "1.1.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 1994 Anthony Dekker, Copyright (c) 2014 The Piston Developers, Copyright (c) 2016 PistonDevelopers",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "colorchoice",
+      "version": "1.0.5",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Individual contributors",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "concurrent-queue",
+      "version": "2.5.0",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "const-oid",
+      "version": "0.10.2",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright (c) 2020-2026 The RustCrypto Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "core-foundation-sys",
+      "version": "0.8.7",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2012-2013 Mozilla Foundation, Copyright 2013 The Servo Project, Copyright 2013 The Servo Project Developers, Copyright 2013-2015 The Servo Project, Copyright 2013-2015 The Servo Project Developers, Copyright 2016 The Servo Project, Copyright 2016 The Servo Project Developers, Copyright 2019 The Servo Project, Copyright 2019 The Servo Project Developers, Copyright 2023 The Servo Project, Copyright 2023 The Servo Project Developers",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "core_maths",
+      "version": "0.1.1",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2024 Robert Bastian",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "cosmic-text",
+      "version": "0.19.0",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "cpufeatures",
+      "version": "0.3.1",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "crc32fast",
+      "version": "1.5.2",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "crossbeam-deque",
+      "version": "0.8.8",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "crossbeam-epoch",
+      "version": "0.9.21",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "crossbeam-utils",
+      "version": "0.8.23",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2019 The Crossbeam Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "crypto-common",
+      "version": "0.2.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2021-2026 RustCrypto Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "ctor",
+      "version": "0.10.1",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "cursor-icon",
+      "version": "1.2.0",
+      "licence": "MIT OR Apache-2.0 OR Zlib",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "cvt",
+      "version": "0.1.2",
+      "licence": "Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "deranged",
+      "version": "0.5.8",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2024 Jacob Pratt, Copyright 2024 Jacob Pratt",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "derivative",
+      "version": "2.2.0",
+      "licence": "MIT OR Apache-2.0",
+      "licenceFrom": "https://github.com/mcarton/rust-derivative/blob/master/Cargo.toml",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "digest",
+      "version": "0.11.3",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2017 Artyom Pavlov, Copyright (c) 2017-2025 RustCrypto Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "dispatch2",
+      "version": "0.3.1",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "displaydoc",
+      "version": "0.2.7",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "dlib",
+      "version": "0.5.3",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2015 Victor Berger",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "document-features",
+      "version": "0.2.12",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2020 Olivier Goffart <ogoffart@sixtyfps.io>, Copyright (c) SixtyFPS GmbH <info@sixtyfps.io>, Copyright © SixtyFPS GmbH",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "downcast-rs",
+      "version": "1.2.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2020 Ashish Myles and contributors, Copyright 2020, Ashish Myles (maintainer) and contributors",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "dpi",
+      "version": "0.1.2",
+      "licence": "Apache-2.0 AND MIT",
+      "copyright": "Copyright (c) 1993,2004 Sun Microsystems, Copyright (c) 2003-2009 Bruce D. Evans, Copyright (c) 2003-2009 Steven G. Kargl, Copyright (c) 2003-2011 David Schultz, Copyright (c) 2005-2020 Rich Felker, Copyright (c) 2008 Stephen L. Moshier, Copyright (c) 2017-2018 Arm Limited, Copyright (c) 2018 Jorge Aparicio, Copyright © 1993, 2004 Sun Microsystems or, copyrights Copyright (c) 2018 Jorge Aparicio",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "drm",
+      "version": "0.14.1",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "drm-ffi",
+      "version": "0.9.1",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "drm-fourcc",
+      "version": "2.2.0",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "drm-sys",
+      "version": "0.8.1",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "dtor",
+      "version": "0.8.1",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "dyn-clone",
+      "version": "1.0.20",
+      "licence": "MIT OR Apache-2.0",
+      "licenceFrom": "https://github.com/dtolnay/dyn-clone/blob/master/Cargo.toml",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "either",
+      "version": "1.18.0",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "either 1.19.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "endi",
+      "version": "1.1.1",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "enum-map",
+      "version": "2.7.3",
+      "licence": "MIT OR Apache-2.0",
+      "licenceFrom": "https://github.com/KamilaBorowska/enum-map/blob/master/enum-map/Cargo.toml",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "enum-map-derive",
+      "version": "0.17.0",
+      "licence": "MIT OR Apache-2.0",
+      "licenceFrom": "https://github.com/KamilaBorowska/enum-map/blob/master/enum-map-derive/Cargo.toml",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "enumflags2",
+      "version": "0.7.12",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2017-2023 Maik Klein, Maja Kadziolka, Copyright 2017-2023 Maik Klein, Maja Kadziolka",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "enumflags2_derive",
+      "version": "0.7.12",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2017 Maik Klein, Copyright 2017 Maik Klein",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "equator",
+      "version": "0.4.2",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2023 sarah",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "equator-macro",
+      "version": "0.4.2",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2023 sarah",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "equivalent",
+      "version": "1.0.2",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright (c) 2016-2023, Copyright (c) 2016-2023 Permission",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "errno",
+      "version": "0.3.14",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 Chris Wong, Copyright 2014 The Rust Project, Copyright 2014 The Rust Project Developers, Copyright 2015 The Rust Project, Copyright 2015 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-"
+      ]
+    },
+    {
+      "name": "euclid",
+      "version": "0.22.14",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "event-listener",
+      "version": "5.4.2",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "event-listener-strategy",
+      "version": "0.5.4",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "exr",
+      "version": "1.74.2",
+      "licence": "BSD-3-Clause",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "fast_image_resize",
+      "version": "6.1.0",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "fastrand",
+      "version": "2.5.0",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "fdeflate",
+      "version": "0.3.7",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "win-"
+      ]
+    },
+    {
+      "name": "flate2",
+      "version": "1.1.10",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014-2026 Alex Crichton, Copyright 2013 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "fluent",
+      "version": "0.17.0",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright 2017 Mozilla",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "fluent-bundle",
+      "version": "0.16.0",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright 2017 Mozilla",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "fluent-langneg",
+      "version": "0.13.1",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "fluent-langneg",
+      "version": "0.14.2",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "fluent-syntax",
+      "version": "0.12.0",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright 2017 Mozilla",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "font-types",
+      "version": "0.11.3",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "font-types",
+      "version": "0.12.5",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "font-types 0.12.6",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "fontconfig-parser",
+      "version": "0.5.8",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "fontdb",
+      "version": "0.23.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2020 Yevhenii Reizner",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "form_urlencoded",
+      "version": "1.2.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2013-2016 The rust-url developers, Copyright 2013-2016 The rust-url developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "fs_at",
+      "version": "0.2.1",
+      "licence": "Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "fs_extra",
+      "version": "1.3.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2017 Denis Kurilenko",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "futures-core",
+      "version": "0.3.34",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2016 Alex Crichton, Copyright (c) 2017 The Tokio Authors",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "futures-io",
+      "version": "0.3.34",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2016 Alex Crichton, Copyright (c) 2017 The Tokio Authors",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "futures-lite",
+      "version": "2.6.1",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright (c) 2016 Alex Crichton, Copyright (c) 2017 The Tokio Authors",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "gethostname",
+      "version": "1.1.0",
+      "licence": "Apache-2.0",
+      "copyright": "Copyright Sebastian Wiesner <sebastian@swsnr.de>",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "getrandom",
+      "version": "0.2.17",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project Developers, Copyright (c) 2018-2024 The rust-random Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "getrandom",
+      "version": "0.3.4",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project, Copyright (c) 2014 The Rust Project Developers, Copyright (c) 2018-2025 The rust-random Project Developers",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "getrandom",
+      "version": "0.4.3",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project Developers, Copyright (c) 2018-2026 The rust-random Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "gif",
+      "version": "0.14.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2015 nwin",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "glob",
+      "version": "0.3.4",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project Developers, Copyright 2013-2014 The Rust Project Developers, Copyright 2014 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "half",
+      "version": "2.7.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "2021 Kathryn Long, Copyright 2021 Kathryn Long <squeeself@gmail.com>, Copyright Kathryn Long <squeeself@gmail.com>",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "harfrust",
+      "version": "0.5.2",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "hashbrown",
+      "version": "0.17.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2016 Amanieu d'Antras",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "heck",
+      "version": "0.5.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2015 The Rust Project, Copyright (c) 2015 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "hex",
+      "version": "0.4.3",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2013-2014 The Rust Project, Copyright (c) 2013-2014 The Rust Project Developers, Copyright (c) 2015-2020 The rust-hex, Copyright (c) 2015-2020 The rust-hex Developers",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "http",
+      "version": "1.5.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2017 http-rs authors, Copyright 2017 http-rs authors",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "httparse",
+      "version": "1.10.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2015-2025 Sean McArthur",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "hybrid-array",
+      "version": "0.4.15",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "iana-time-zone",
+      "version": "0.1.65",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2020 Andrew D. Straw, Copyright 2020 Andrew Straw",
+      "runtimes": [
+        "linux-",
+        "osx-"
+      ]
+    },
+    {
+      "name": "icu_collections",
+      "version": "2.3.0",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc., Copyright (c) 2021 Unicode, Inc. and others",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "icu_locale_core",
+      "version": "2.3.0",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "icu_locid",
+      "version": "1.5.0",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "icu_locid_transform",
+      "version": "1.5.0",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "icu_locid_transform_data",
+      "version": "1.5.1",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "icu_normalizer",
+      "version": "2.3.0",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, (c) 2025 Unicode(r), Inc., Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "icu_normalizer_data",
+      "version": "2.3.0",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "icu_properties",
+      "version": "2.3.0",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "icu_properties_data",
+      "version": "2.3.0",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "icu_provider",
+      "version": "1.5.0",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc., Copyright 2015 The Rust Project, Copyright 2015 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "icu_provider",
+      "version": "2.3.1",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc., Copyright 2015 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "icu_provider_macros",
+      "version": "1.5.0",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "idna",
+      "version": "1.1.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "(c) 2024 Unicode(r), Inc., Copyright (c) 2013-2025 The rust-url developers, Copyright 2013 The rust-url developers, Copyright 2013-2014 The rust-url developers, Copyright 2016 The rust-url developers, Copyright The rust-url developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "idna_adapter",
+      "version": "1.2.2",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright (c) The rust-url developers, Copyright The rust-url developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "image",
+      "version": "0.25.10",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "copyright (c) 1991-2014, Thomas G. Lane, Guido Vollbeding, Copyright (c) 2018 Guillaume Gomez",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "imgref",
+      "version": "1.12.3",
+      "licence": "CC0-1.0 OR Apache-2.0",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "indexmap",
+      "version": "2.14.2",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright (c) 2016-2017",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "intl-memoizer",
+      "version": "0.5.3",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright 2017 Mozilla",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "intl_pluralrules",
+      "version": "7.0.2",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "is_terminal_polyfill",
+      "version": "1.70.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Individual contributors",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "itertools",
+      "version": "0.14.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2015, Copyright (c) 2015 Permission",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "itoa",
+      "version": "1.0.18",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "lazy_static",
+      "version": "1.5.0",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "lazy_static 1.5.1",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "lebe",
+      "version": "0.5.3",
+      "licence": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2022 Contributors",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "libc",
+      "version": "0.2.189",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "libc 0.2.190",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "libloading",
+      "version": "0.8.9",
+      "licence": "ISC",
+      "copyright": "Copyright (c) 2015, Simonas Kazlauskas",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "libloading",
+      "version": "0.9.0",
+      "licence": "ISC",
+      "copyright": "Copyright (c) 2015, Simonas Kazlauskas",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "libm",
+      "version": "0.2.16",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 1993 by Sun Microsystems, Inc., Copyright (c) 1993,2004 Sun Microsystems, Copyright (c) 2003-2009 Bruce D. Evans, Copyright (c) 2003-2009 Steven G. Kargl, Copyright (c) 2003-2011 David Schultz, Copyright (c) 2004 by Sun Microsystems, Inc., Copyright (c) 2005 David Schultz <das@FreeBSD.ORG>, Copyright (c) 2005-2020 Rich Felker, Copyright (c) 2008 Stephen L. Moshier, Copyright (c) 2017-2018 Arm Limited, Copyright (c) 2018 Jorge Aparicio, Copyright (c) 2021-2022 Alexei Sibidanov., Copyright (C) 2021-2022 Alexei Sibidanov., Copyright (c) 2021-2022 Alexei Sibidanov. Ported, Copyright 2004 Sun Microsystems, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "linebender_resource_handle",
+      "version": "0.1.1",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "linux-raw-sys",
+      "version": "0.12.1",
+      "licence": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "linux-raw-sys",
+      "version": "0.4.15",
+      "licence": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "linux-raw-sys",
+      "version": "0.9.4",
+      "licence": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "litemap",
+      "version": "0.7.5",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "litemap",
+      "version": "0.8.3",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "litrs",
+      "version": "1.0.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2020 Project Developers",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "log",
+      "version": "0.4.34",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project Developers, Copyright 2014-2015 The Rust Project Developers, Copyright 2015 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "log-panics",
+      "version": "2.1.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2016 The rust-log-panics",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "loop9",
+      "version": "0.1.5",
+      "licence": "MIT",
+      "copyright": "(c) Kornel Lesinski",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "lyon_geom",
+      "version": "1.0.19",
+      "licence": "MIT OR Apache-2.0",
+      "licenceFrom": "https://github.com/nical/lyon/blob/main/crates/geom/Cargo.toml",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "maybe-rayon",
+      "version": "0.1.1",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2021 Joshua Holmer",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "memchr",
+      "version": "2.8.3",
+      "licence": "Unlicense OR MIT",
+      "copyright": "(c) 83, // a, Copyright (c) 2015 Andrew Gallant",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "memmap2",
+      "version": "0.9.11",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "win-"
+      ]
+    },
+    {
+      "name": "mina",
+      "version": "0.1.1",
+      "licence": "MIT",
+      "licenceFrom": "https://github.com/focustense/mina/blob/main/Cargo.toml",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "mina_core",
+      "version": "0.1.0",
+      "licence": "MIT",
+      "licenceFrom": "https://github.com/focustense/mina/blob/main/core/Cargo.toml",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "mina_macros",
+      "version": "0.1.0",
+      "licence": "MIT",
+      "licenceFrom": "https://github.com/focustense/mina/blob/main/macros/Cargo.toml",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "miniz_oxide",
+      "version": "0.8.9",
+      "licence": "MIT OR Zlib OR Apache-2.0",
+      "copyright": "Copyright (c) 2017 Frommi, Copyright (c) 2017-2024 oyvindln, Copyright (c) 2020 Frommi, Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC, Copyright 2013-2014 RAD Game",
+      "runtimes": [
+        "linux-",
+        "win-"
+      ]
+    },
+    {
+      "name": "miniz_oxide",
+      "version": "0.9.1",
+      "licence": "MIT OR Zlib OR Apache-2.0",
+      "copyright": "Copyright (c) 2017 Frommi, Copyright (c) 2017-2024 oyvindln, Copyright (c) 2020 Frommi, Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC, Copyright 2013-2014 RAD Game",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "moxcms",
+      "version": "0.8.1",
+      "licence": "BSD-3-Clause OR Apache-2.0",
+      "copyright": "Copyright (c) Radzivon Bartoshyk, Copyright (c) Radzivon Bartoshyk 12/2025, Copyright (c) Radzivon Bartoshyk 2/2025, Copyright (c) Radzivon Bartoshyk 3/2025, Copyright (c) Radzivon Bartoshyk 4/2025, Copyright (c) Radzivon Bartoshyk 5/2025, Copyright (c) Radzivon Bartoshyk 6/2025, Copyright (c) Radzivon Bartoshyk 7/2025, Copyright (c) Radzivon Bartoshyk 8/2025, Copyright 2024 (c) the Radzivon Bartoshyk, Copyright 2024 Radzivon Bartoshyk",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "multiversion",
+      "version": "0.8.0",
+      "licence": "MIT OR Apache-2.0",
+      "licenceFrom": "https://github.com/calebzulawski/multiversion/blob/master/multiversion/Cargo.toml",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "multiversion-macros",
+      "version": "0.8.0",
+      "licence": "MIT OR Apache-2.0",
+      "licenceFrom": "https://github.com/calebzulawski/multiversion/blob/master/multiversion-macros/Cargo.toml",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "new_debug_unreachable",
+      "version": "1.0.6",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2015 Jonathan Reem",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "nix",
+      "version": "0.29.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2015 Carl Lerche, Copyright (c) 2015 Carl Lerche + nix-rust Authors, Copyright 2014 The Rust Project, Copyright 2014 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-"
+      ]
+    },
+    {
+      "name": "nix",
+      "version": "0.31.3",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2015 Carl Lerche",
+      "runtimes": [
+        "linux-",
+        "osx-"
+      ]
+    },
+    {
+      "name": "no_std_io2",
+      "version": "0.9.4",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright (c) 2020-2021 Brendan Molloy <brendan@bbqsrc.net>",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "nom",
+      "version": "8.0.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2014-2019 Geoffroy Couprie",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "noop_proc_macro",
+      "version": "0.3.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2019 Luca Barbato",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "normpath",
+      "version": "1.5.2",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "num-bigint",
+      "version": "0.4.8",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2013-2014 The Rust Project Developers, Copyright (c) 2014 The Rust Project Developers, Copyright 2013-2014 The Rust Project Developers",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "num-complex",
+      "version": "0.4.6",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project, Copyright (c) 2014 The Rust Project Developers, Copyright 2013 The Rust Project, Copyright 2013 The Rust Project Developers",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "num-conv",
+      "version": "0.2.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Jacob Pratt",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "num-derive",
+      "version": "0.4.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project, Copyright (c) 2014 The Rust Project Developers, Copyright 2012-2015 The Rust Project, Copyright 2012-2015 The Rust Project Developers, Copyright 2013-2015 The Rust Project, Copyright 2013-2015 The Rust Project Developers",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "num-integer",
+      "version": "0.1.47",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project Developers, Copyright 2013-2014 The Rust Project Developers",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "num-rational",
+      "version": "0.4.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project, Copyright (c) 2014 The Rust Project Developers, Copyright 2013-2014 The Rust Project, Copyright 2013-2014 The Rust Project Developers",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "num-traits",
+      "version": "0.2.19",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project, Copyright (c) 2014 The Rust Project Developers, Copyright 2013-2014 The Rust Project, Copyright 2013-2014 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "num_threads",
+      "version": "0.1.7",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2021 Jacob Pratt, Copyright 2021 Jacob Pratt",
+      "runtimes": [
+        "linux-",
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2",
+      "version": "0.6.4",
+      "licence": "MIT",
+      "metadataFrom": "objc2 0.6.5",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-app-kit",
+      "version": "0.3.2",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-cloud-kit",
+      "version": "0.3.2",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-core-data",
+      "version": "0.3.2",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-core-foundation",
+      "version": "0.3.2",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-core-graphics",
+      "version": "0.3.2",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-core-image",
+      "version": "0.3.2",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-core-text",
+      "version": "0.3.2",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-core-video",
+      "version": "0.3.2",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-encode",
+      "version": "4.1.0",
+      "licence": "MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-foundation",
+      "version": "0.3.2",
+      "licence": "MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-io-surface",
+      "version": "0.3.2",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "objc2-quartz-core",
+      "version": "0.3.2",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "osx-"
+      ]
+    },
+    {
+      "name": "once_cell",
+      "version": "1.21.4",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "once_cell_polyfill",
+      "version": "1.70.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Individual contributors",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "oneshot",
+      "version": "0.2.1",
+      "licence": "MIT OR Apache-2.0",
+      "licenceFrom": "https://github.com/faern/oneshot/blob/main/Cargo.toml",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "ordered-stream",
+      "version": "0.2.0",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "os_info",
+      "version": "3.15.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2017 Stanislav Tkach",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "owned_ttf_parser",
+      "version": "0.25.1",
+      "licence": "Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "parking",
+      "version": "2.2.1",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright 2014-2020 The Rust Project, Copyright 2014-2020 The Rust Project Developers",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "paste",
+      "version": "1.0.15",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "pastey",
+      "version": "0.1.1",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "percent-encoding",
+      "version": "2.3.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2013-2025 The rust-url developers, Copyright 2013-2016 The rust-url developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "pin-project-lite",
+      "version": "0.2.17",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "piper",
+      "version": "0.2.5",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "png",
+      "version": "0.18.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2015 nwin",
+      "runtimes": [
+        "linux-",
+        "win-"
+      ]
+    },
+    {
+      "name": "polling",
+      "version": "3.11.0",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "potential_utf",
+      "version": "0.1.6",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "powerfmt",
+      "version": "0.2.0",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "powerfmt 0.2.1",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "pretty-bytes-rust",
+      "version": "0.3.0",
+      "licence": "Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "proc-macro-crate",
+      "version": "3.5.0",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "proc-macro2",
+      "version": "1.0.107",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "profiling",
+      "version": "1.0.18",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "profiling-procmacros",
+      "version": "1.0.18",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "progress-streams",
+      "version": "1.1.0",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "pulp",
+      "version": "0.22.3",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2021 sarah",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "pulp-wasm-simd-flag",
+      "version": "0.1.1",
+      "licence": "MIT",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "pxfm",
+      "version": "0.1.30",
+      "licence": "BSD-3-Clause OR Apache-2.0",
+      "copyright": "Copyright (c) Radzivon Bartoshyk, Copyright (c) Radzivon Bartoshyk 4/2025, Copyright (c) Radzivon Bartoshyk 6/2025, Copyright (c) Radzivon Bartoshyk 7/2025, Copyright (c) Radzivon Bartoshyk 8/2025, Copyright (c) Radzivon Bartoshyk 9/2025, Copyright 2024 Radzivon Bartoshyk",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "quick-error",
+      "version": "2.0.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2015, Copyright (c) 2015 The quick-error Developers",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "quick-xml",
+      "version": "0.41.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2016 Johann Tuffe",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "quote",
+      "version": "1.0.47",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "rand",
+      "version": "0.10.3",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "rand_core",
+      "version": "0.10.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2018-2026 The Rand Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "rangemap",
+      "version": "1.8.0",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "rav1e",
+      "version": "0.8.1",
+      "licence": "BSD-2-Clause",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "ravif",
+      "version": "0.13.0",
+      "licence": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2020, Kornel",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "raw-cpuid",
+      "version": "11.6.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2015 Gerd Zellweger",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "raw-window-handle",
+      "version": "0.6.2",
+      "licence": "MIT OR Apache-2.0 OR Zlib",
+      "copyright": "Copyright (c) 2019 Osspial, Copyright (c) 2020 Osspial",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "rayon",
+      "version": "1.12.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "(c) Continue (c), Continue (c) Continue (c), Copyright (c) 2010 The Rust Project Developers, Ok (c) Continue (c)",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "rayon-core",
+      "version": "1.13.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2010 The Rust Project, Copyright (c) 2010 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "read-fonts",
+      "version": "0.37.0",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "read-fonts",
+      "version": "0.41.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2019 Fontations Developers, Copyright 2002-2019 Adobe (http://www.adobe.com/), Copyright 2015-2021 Google LLC., Copyright 2019 Fontations Developers, Copyright 2022 The Noto Project",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "reborrow",
+      "version": "0.5.5",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2022 sarah",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "regex",
+      "version": "1.13.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "regex-automata",
+      "version": "0.4.18",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "regex-syntax",
+      "version": "0.8.11",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "(c) 83, // a, Copyright (c) 1991-2018 Unicode, Inc., Copyright (c) 2014 The Rust Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "remove_dir_all",
+      "version": "1.0.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2017 Aaron Power, Copyright 2017 Aaron Power",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "rgb",
+      "version": "0.8.53",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2019 Kornel",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "ring",
+      "version": "0.17.14",
+      "licence": "Apache-2.0 AND ISC",
+      "copyright": "Copyright (c) 2002, Oracle and/or its affiliates, Copyright (c) 2009 The Go Authors, Copyright (c) 2014, Google Inc., Copyright (c) 2014, Intel Corporation, Copyright (c) 2015 CloudFlare, Inc., Copyright (c) 2015, CloudFlare Ltd., Copyright (c) 2015, Google Inc., Copyright (c) 2015, Intel Inc., Copyright (c) 2019, Google Inc., Copyright (c) 2020, CloudFlare Ltd., Copyright (c) 2022, ARM Inc., Copyright 1995-2016 The OpenSSL Project Authors, Copyright 1995-2018 The OpenSSL Project Authors, Copyright 1999-2016 The OpenSSL Project Authors, Copyright 1999-2018 The OpenSSL Project Authors, Copyright 2001-2016 The OpenSSL Project Authors, Copyright 2002-2016 The OpenSSL Project Authors, Copyright 2005-2016 The OpenSSL Project Authors, Copyright 2007-2016 The OpenSSL Project Authors, Copyright 2009-2016 The OpenSSL Project Authors, Copyright 2010-2016 The OpenSSL Project Authors, Copyright 2010-2018 The OpenSSL Project Authors, Copyright 2011-2016 The OpenSSL Project Authors, Copyright 2012-2016 The OpenSSL Project Authors, Copyright 2013-2016 The OpenSSL Project Authors, Copyright 2014 The BoringSSL Authors, Copyright 2014-2016 The OpenSSL Project Authors, Copyright 2014-2020 The OpenSSL Project Authors, Copyright 2015 Brian Smith, Copyright 2015 The BoringSSL Authors, Copyright 2015 The Chromium Authors, Copyright 2015-2016 Brian Smith, Copyright 2015-2016 The OpenSSL Project Authors, Copyright 2015-2017 Brian Smith, Copyright 2015-2019 Brian Smith, Copyright 2015-2020 the fiat-crypto authors, Copyright 2015-2020 The OpenSSL Project Authors, Copyright 2015-2021 Brian Smith, Copyright 2015-2022 Brian Smith, Copyright 2015-2023 Brian Smith, Copyright 2015-2024 Brian Smith, Copyright 2015-2025 Brian Smith, Copyright 2016 Brian Smith, Copyright 2016 David Judd, Copyright 2016 Simon Sapin, Copyright 2016 The OpenSSL Project Authors, Copyright 2016-2017 Brian Smith, Copyright 2016-2019 Brian Smith, Copyright 2016-2021 Brian Smith, Copyright 2016-2023 Brian Smith, Copyright 2016-2024 Brian Smith, Copyright 2016-2025 Brian Smith, Copyright 2017 Brian Smith, Copyright 2017-2023 Brian Smith, Copyright 2017-2025 Brian Smith, Copyright 2018 Brian Smith, Copyright 2018 Trent Clarke, Copyright 2018-2024 Brian Smith, Copyright 2018-2025 Brian Smith, Copyright 2019-2024 Brian Smith, Copyright 2019-2025 Brian Smith, Copyright 2020 Brian Smith, Copyright 2020 The BoringSSL Authors, Copyright 2021 Brian Smith, Copyright 2022 Brian Smith, Copyright 2023 Brian Smith, Copyright 2023 The BoringSSL Authors, Copyright 2024 Brian Smith, Copyright 2024 The BoringSSL Authors, Copyright 2024-2025 Brian Smith, Copyright 2025 Brian Smith, Portions Copyright (c) 2014, 2015, Google Inc., Portions Copyright (c) 2014, Google Inc., Portions Copyright (c) 2016, Google Inc., Portions Copyright 2020-2024 Brian Smith",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "roxmltree",
+      "version": "0.20.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2018 Yevhenii Reizner",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "rustc-hash",
+      "version": "2.1.3",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "rustix",
+      "version": "0.38.44",
+      "licence": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "rustix",
+      "version": "1.1.5",
+      "licence": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-",
+        "osx-"
+      ]
+    },
+    {
+      "name": "rustls",
+      "version": "0.23.45",
+      "licence": "Apache-2.0 OR ISC OR MIT",
+      "metadataFrom": "rustls 0.23.46",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "rustls-pki-types",
+      "version": "1.15.1",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "rustls-webpki",
+      "version": "0.103.15",
+      "licence": "ISC",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "same-file",
+      "version": "1.0.6",
+      "licence": "Unlicense OR MIT",
+      "copyright": "Copyright (c) 2017 Andrew Gallant",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "scoped-tls",
+      "version": "1.0.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 Alex Crichton, Copyright 2014-2015 The Rust Project, Copyright 2014-2015 The Rust Project Developers",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "sctk-adwaita",
+      "version": "0.10.1",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2009-2011, Understanding Limited (dave@understandinglimited.com), Copyright (c) 2010-2011, Jakub Steiner (jimmac@gmail.com), Copyright (c) 2022 Bartlomiej Marynczak",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "self_cell",
+      "version": "1.3.0",
+      "licence": "Apache-2.0 OR GPL-2.0-only",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "semver",
+      "version": "1.0.28",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "serde",
+      "version": "1.0.229",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "serde_core",
+      "version": "1.0.229",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "serde_derive",
+      "version": "1.0.229",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "serde_json",
+      "version": "1.0.151",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "serde_json 1.0.154",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "serde_repr",
+      "version": "0.1.21",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "sha1",
+      "version": "0.11.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2006-2009 Graydon Hoare, Copyright (c) 2009-2013 Mozilla Foundation, Copyright (c) 2016 Artyom Pavlov, Copyright (c) 2016-2026 The RustCrypto Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "sha1_smol",
+      "version": "1.0.1",
+      "licence": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2006-2009 Graydon Hoare, Copyright (c) 2009-2013 Mozilla Foundation, Copyright (c) 2018, the respective contributors",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "sha2",
+      "version": "0.11.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2006-2009 Graydon Hoare, Copyright (c) 2009-2013 Mozilla Foundation, Copyright (c) 2016 Artyom Pavlov, Copyright (c) 2016-2026 The RustCrypto Project Developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "signal-hook-registry",
+      "version": "1.4.8",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2017 tokio-jsonrpc developers",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "simd-adler32",
+      "version": "0.3.10",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2021 Marvin Countryman",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "simd_helpers",
+      "version": "0.1.0",
+      "licence": "MIT",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "simple-stopwatch",
+      "version": "0.1.4",
+      "licence": "MIT",
+      "licenceFrom": "https://github.com/huwb/rust-simple-stopwatch/blob/master/Cargo.toml",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "simplelog",
+      "version": "0.12.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2015 Victor Brekenfeld, Copyright 2016 Victor Brekenfeld",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "skrifa",
+      "version": "0.40.0",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "skrifa",
+      "version": "0.44.0",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "slab",
+      "version": "0.4.12",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2019 Carl Lerche",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "slotmap",
+      "version": "1.1.1",
+      "licence": "Zlib",
+      "copyright": "Copyright (c) 2021 Orson Peters <orsonpeters@gmail.com>",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "smallvec",
+      "version": "1.16.1",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "smallvec 1.16.3",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "smithay-client-toolkit",
+      "version": "0.19.2",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2018 Victor Berger",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "smol_str",
+      "version": "0.2.2",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "smol_str",
+      "version": "0.3.6",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "softbuffer",
+      "version": "0.4.8",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright 2022 Kirill Chibisov",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "stable_deref_trait",
+      "version": "1.2.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2017 Robert Grosse, Copyright 2017 Robert Grosse",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "strict-num",
+      "version": "0.1.1",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2022 Yevhenii Reizner",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "strsim",
+      "version": "0.11.1",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2015 Danny Guo, Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com>, Copyright (c) 2018 Akash Kurdekar",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "strum",
+      "version": "0.28.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2019 Peter Glotfelty",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "strum_macros",
+      "version": "0.28.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2019 Peter Glotfelty",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "subtle",
+      "version": "2.6.1",
+      "licence": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2016-2017 Isis Agora Lovecruft, Henry de Valence, Copyright (c) 2016-2018 isis lovecruft, Henry de Valence, Copyright (c) 2016-2024 Isis Agora Lovecruft",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "swash",
+      "version": "0.2.10",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "syn",
+      "version": "1.0.109",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "syn",
+      "version": "2.0.119",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "syn",
+      "version": "3.0.6",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "syn 3.0.8",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "synstructure",
+      "version": "0.13.2",
+      "licence": "MIT",
+      "copyright": "Copyright 2016 Nika Layzell",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "synstructure",
+      "version": "0.14.0",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "sys-locale",
+      "version": "0.3.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2021 1Password",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "target-features",
+      "version": "0.1.6",
+      "licence": "MIT OR Apache-2.0",
+      "licenceFrom": "https://github.com/calebzulawski/target-features/blob/master/target-features/Cargo.toml",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "termcolor",
+      "version": "1.4.1",
+      "licence": "Unlicense OR MIT",
+      "copyright": "Copyright (c) 2015 Andrew Gallant",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "thiserror",
+      "version": "1.0.69",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "thiserror",
+      "version": "2.0.20",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "thiserror 2.0.21",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "thiserror-impl",
+      "version": "1.0.69",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "thiserror-impl",
+      "version": "2.0.20",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "thiserror-impl 2.0.21",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "time",
+      "version": "0.1.45",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Jacob Pratt",
+      "metadataFrom": "time 0.3.55",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "time",
+      "version": "0.3.55",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Jacob Pratt",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "time-core",
+      "version": "0.1.9",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Jacob Pratt",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "time-macros",
+      "version": "0.2.32",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Jacob Pratt",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "tiny-skia",
+      "version": "0.11.4",
+      "licence": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2011 Google Inc., Copyright (c) 2020 Yevhenii Reizner, Copyright 2006 The Android Open Source Project, Copyright 2009 The Android Open Source Project, Copyright 2011 Google Inc., Copyright 2011 The Android Open Source Project, Copyright 2012 Google Inc., Copyright 2016 Google Inc., Copyright 2018 Google Inc., Copyright 2020 Yevhenii Reizner",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "tiny-skia",
+      "version": "0.12.0",
+      "licence": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2011 Google Inc., Copyright (c) 2020 Yevhenii Reizner, Copyright 2006 The Android Open Source Project, Copyright 2009 The Android Open Source Project, Copyright 2011 Google Inc., Copyright 2011 The Android Open Source Project, Copyright 2012 Google Inc., Copyright 2016 Google Inc., Copyright 2018 Google Inc., Copyright 2020 Yevhenii Reizner",
+      "metadataFrom": "tiny-skia 0.11.4",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "tiny-skia-path",
+      "version": "0.11.4",
+      "licence": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2011 Google Inc., Copyright (c) 2020 Yevhenii Reizner, Copyright 2006 The Android Open Source Project, Copyright 2008 The Android Open Source Project, Copyright 2014 Google Inc., Copyright 2020 Yevhenii Reizner",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "tiny-skia-path",
+      "version": "0.12.0",
+      "licence": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2011 Google Inc., Copyright (c) 2020 Yevhenii Reizner, Copyright 2006 The Android Open Source Project, Copyright 2008 The Android Open Source Project, Copyright 2014 Google Inc., Copyright 2020 Yevhenii Reizner",
+      "metadataFrom": "tiny-skia-path 0.11.4",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "tiny-xlib",
+      "version": "0.2.5",
+      "licence": "MIT OR Apache-2.0 OR Zlib",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "tinystr",
+      "version": "0.7.6",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "tinystr",
+      "version": "0.8.4",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "tinyvec",
+      "version": "1.13.3",
+      "licence": "Zlib OR Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "toml_datetime",
+      "version": "1.1.1+spec-1.1.0",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "toml_datetime 1.1.2%2Bspec-1.1.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "toml_edit",
+      "version": "0.25.15+spec-1.1.0",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "toml_edit 0.25.17%2Bspec-1.1.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "toml_parser",
+      "version": "1.1.3+spec-1.1.0",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "toml_parser 1.1.5%2Bspec-1.1.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "tracing",
+      "version": "0.1.44",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2019 Tokio Contributors",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "tracing-attributes",
+      "version": "0.1.31",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2019 Tokio Contributors",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "tracing-core",
+      "version": "0.1.36",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2014 Mathijs van de Nes, Copyright (c) 2019 Tokio Contributors",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "ttf-parser",
+      "version": "0.25.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2015 by FontTools, Copyright (c) 2018 Yevhenii Reizner",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "type-map",
+      "version": "0.5.1",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "typed-path",
+      "version": "0.12.3",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "typenum",
+      "version": "1.20.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 Paho Lurie-Gregg, Copyright 2014 Paho Lurie-Gregg",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "unic-langid",
+      "version": "0.9.6",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "unic-langid-impl",
+      "version": "0.9.6",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 1991-2023 Unicode, Inc., Copyright © 1991-2023 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "unicode-bidi",
+      "version": "0.3.18",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2015 The Rust Project, Copyright (c) 2015 The Rust Project Developers, Copyright 2015 The Servo Project, Copyright 2015 The Servo Project Developers, copyright 2015, The Servo Project, copyright 2015, The Servo Project Developers, Copyright 2017 The Servo Project, Copyright 2017 The Servo Project Developers, Copyright 2023 The Mozilla Foundation",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "unicode-ident",
+      "version": "1.0.26",
+      "licence": "(MIT OR Apache-2.0) AND Unicode-3.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "unicode-linebreak",
+      "version": "0.1.5",
+      "licence": "Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "unicode-script",
+      "version": "0.5.8",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2019 Manish Goregaokar, Copyright 2011-2015 The Rust Project Developers, Copyright 2012-2018 The Rust Project Developers, Copyright 2021 The Unicode-rs Developers",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "unicode-segmentation",
+      "version": "1.13.3",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2015 The Rust Project Developers, Copyright 2012-2014 The Rust Project Developers, Copyright 2012-2015 The Rust Project Developers, Copyright 2012-2018 The Rust Project Developers, COPYRIGHT LICENSE-MIT LICENSE-APACHE",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "untrusted",
+      "version": "0.9.0",
+      "licence": "ISC",
+      "copyright": "Copyright 2015-2016 Brian Smith, Copyright 2015-2019 Brian Smith, Copyright 2015-2021 Brian Smith, Copyright 2020 Brian Smith",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "ureq",
+      "version": "3.4.2",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "ureq-proto",
+      "version": "0.6.4",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "url",
+      "version": "2.5.8",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2013-2025 The rust-url developers, Copyright 2013-2014 The rust-url developers, Copyright 2013-2015 The rust-url developers, Copyright 2013-2016 The rust-url developers, Copyright 2016 The rust-url developers",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "utf8-zero",
+      "version": "0.8.1",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "utf8_iter",
+      "version": "1.0.4",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "COPYRIGHT (https://github.com/hsivonen/utf8_iter/blob/master/COPYRIGHT), Copyright Mozilla Foundation",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "utf8parse",
+      "version": "0.2.2",
+      "licence": "Apache-2.0 OR MIT",
+      "copyright": "Copyright (c) 2016 Joe Wilm",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "uuid",
+      "version": "1.26.1",
+      "licence": "Apache-2.0 OR MIT",
+      "metadataFrom": "uuid 1.28.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "v_frame",
+      "version": "0.3.9",
+      "licence": "BSD-2-Clause",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "wait-timeout",
+      "version": "0.2.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2014 Alex Crichton",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "waitpid-any",
+      "version": "0.3.0",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-"
+      ]
+    },
+    {
+      "name": "walkdir",
+      "version": "2.5.0",
+      "licence": "Unlicense OR MIT",
+      "copyright": "Copyright (c) 2015 Andrew Gallant",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "wasm-bindgen",
+      "version": "0.2.128",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "wasm-bindgen 0.2.129",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "wasm-bindgen-macro",
+      "version": "0.2.128",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "wasm-bindgen-macro 0.2.129",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "wasm-bindgen-macro-support",
+      "version": "0.2.128",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "wasm-bindgen-macro-support 0.2.129",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "wasm-bindgen-shared",
+      "version": "0.2.128",
+      "licence": "MIT OR Apache-2.0",
+      "metadataFrom": "wasm-bindgen-shared 0.2.129",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "wayland-backend",
+      "version": "0.3.17",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "wayland-client",
+      "version": "0.31.15",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2008-2011 Kristian Hogsberg, Copyright (c) 2010-2011 Intel Corporation, Copyright (c) 2012-2013 Collabora, Ltd., Copyright (c) 2015 Elinor Berger",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "wayland-csd-frame",
+      "version": "0.3.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2023 Kirill Chibisov",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "wayland-cursor",
+      "version": "0.31.14",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2015 Elinor Berger",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "wayland-protocols",
+      "version": "0.32.13",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "wayland-protocols-plasma",
+      "version": "0.3.12",
+      "licence": "MIT",
+      "copyright": "2012 Digia Plc and/or its subsidiary(-ies)., 2012, 2013 Intel Corporation, 2013-2014 Pier Luigi Fiorini, 2015 Martin Gräßlin, 2015 Sebastian Kügler, 2015, 2016 Jan Arne Petersen, 2016 Oleg Chernovskiy, 2017 David Edmundson, 2017-2018 NVIDIA CORPORATION. All rights reserved., 2018 Marco Martin, 2019 Aleix Pol Gonzalez, 2019 Vlad Zahorodnii, 2020 Aleix Pol Gonzalez, 2020 Volker Krause, 2020-2021 Aleix Pol Gonzalez, 2021 Aleix Pol Gonzalez, 2021 Méven Car, 2022 Aleix Pol Gonzalez, 2022 Xaver Hugl, 2023 Vlad Zahorodnii, 2023 Xaver Hugl, 2024 David Redondo, 2024 Xaver Hugl, Copyright (c) <owner>, Copyright (c) 1991, 1999 Free Software Foundation, Inc., Copyright (c) 2015 Elinor Berger, Copyright 2008-2011 Kristian Hogsberg, Copyright 2010-2011 Intel Corporation, Copyright 2012 Digia Plc and/or its subsidiary(-ies). Contact http://www.qt-project.org/legal, Copyright 2012-2013 Collabora, Ltd., Copyright 2012, 2013 Intel Corporation, Copyright 2013-2014 Pier Luigi Fiorini, Copyright 2015 Marco Martin, Copyright 2015 Martin Grasslin, Copyright 2015 Sebastian Kugler <sebas@kde.org>, Copyright 2015, 2016 Jan Arne Petersen, Copyright 2016 Oleg Chernovskiy, Copyright 2017 David Edmundson, Copyright 2017-2018, NVIDIA CORPORATION., Copyright 2018 Marco Martin, Copyright 2019 Aleix Pol Gonzalez <aleixpol@kde.org>, Copyright 2019 Vlad Zahorodnii <vlad.zahorodnii@kde.org>, Copyright 2020 Aleix Pol Gonzalez <aleixpol@kde.org>, Copyright 2020 Volker Krause <vkrause@kde.org>, Copyright 2020-2021 Aleix Pol Gonzalez <aleixpol@kde.org>, Copyright 2021 Aleix Pol Gonzalez <aleixpol@kde.org>, Copyright 2021 Meven Car <meven.car@enioka.com>, Copyright 2022 Aleix Pol Gonzalez <aleixpol@kde.org>, Copyright 2022 Xaver Hugl <xaver.hugl@gmail.com>, Copyright 2023 Vlad Zahorodnii, Copyright 2023 Xaver Hugl <xaver.hugl@kde.org>, Copyright 2024 David Redondo <kde@david-redondo.de>, Copyright 2024 Xaver Hugl <xaver.hugl@gmail.com>, copyrighted by the Free Software Foundation",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "wayland-protocols-wlr",
+      "version": "0.3.12",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "wayland-scanner",
+      "version": "0.31.11",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2015 Elinor Berger",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "wayland-sys",
+      "version": "0.31.11",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2015 Elinor Berger",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "webpki-roots",
+      "version": "1.0.9",
+      "licence": "CDLA-Permissive-2.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "webview2-com-sys",
+      "version": "0.39.1",
+      "licence": "MIT",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "weezl",
+      "version": "0.1.12",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) HeroicKatora 2020",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "widestring",
+      "version": "1.2.1",
+      "licence": "MIT OR Apache-2.0",
+      "licenceFrom": "https://github.com/VoidStarKat/widestring-rs/blob/main/Cargo.toml",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "winapi",
+      "version": "0.3.9",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2015-2018, Copyright (c) 2015-2018 The winapi-rs, Copyright (c) 2015-2018 The winapi-rs Developers",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "winapi-util",
+      "version": "0.1.11",
+      "licence": "Unlicense OR MIT",
+      "copyright": "Copyright (c) 2017 Andrew Gallant",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows",
+      "version": "0.62.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-collections",
+      "version": "0.3.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-core",
+      "version": "0.62.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-future",
+      "version": "0.3.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-implement",
+      "version": "0.60.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-interface",
+      "version": "0.59.3",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-link",
+      "version": "0.2.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-numerics",
+      "version": "0.3.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-result",
+      "version": "0.4.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-strings",
+      "version": "0.5.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.52.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.59.0",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-sys",
+      "version": "0.61.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-targets",
+      "version": "0.52.6",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows-threading",
+      "version": "0.2.1",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows_aarch64_msvc",
+      "version": "0.52.6",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows_i686_msvc",
+      "version": "0.52.6",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "windows_x86_64_msvc",
+      "version": "0.52.6",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) Microsoft Corporation",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "winit",
+      "version": "0.30.13",
+      "licence": "Apache-2.0",
+      "copyright": "Copyright (c) 2017 W3C(r) (MIT, ERCIM, Keio, Beihang), Copyright (c) 2021 World Wide Web Consortium, (Massachusetts Institute of Technology, European Research Consortium for Informatics and Mathematics, Keio University, Beihang), Copyright (c) YEAR W3C(r) (MIT, ERCIM, Keio, Beihang)",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "winnow",
+      "version": "1.0.4",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "winreg",
+      "version": "0.56.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2015 Igor Shaula, Copyright 2017, Igor Shaula, Copyright 2023, Igor Shaula, Copyright 2026, Igor Shaula",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "writeable",
+      "version": "0.5.5",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "writeable",
+      "version": "0.6.4",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "x11-dl",
+      "version": "2.21.0",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "x11rb",
+      "version": "0.13.2",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) 2001-2002 Bart Massey and Jamey Sharp, Copyright (c) 2001-2006 Bart Massey, Jamey Sharp, and Josh Triplett, Copyright (c) 2002 Keith Packard, Copyright (c) 2013 Michael Stapelberg, Copyright (c) 2016 Ingo Burk, Copyright 2019 x11rb Contributers",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "x11rb-protocol",
+      "version": "0.13.2",
+      "licence": "MIT OR Apache-2.0",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "xcursor",
+      "version": "0.3.11",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "xdialog",
+      "version": "3.1.9",
+      "licence": "MIT",
+      "metadataFrom": "xdialog 4.1.2",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "xkbcommon-dl",
+      "version": "0.4.2",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2023 Kirill Chibisov",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "xkeysym",
+      "version": "0.2.1",
+      "licence": "MIT OR Apache-2.0 OR Zlib",
+      "copyright": "Copyright (c) 2009 Dan Nicholson, Copyright (c) 2022-2023 John Nunley, Copyright 2022-2023 John Nunley",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "xml",
+      "version": "1.4.0",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "y4m",
+      "version": "0.8.0",
+      "licence": "MIT",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "yazi",
+      "version": "0.2.1",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "yoke",
+      "version": "0.7.5",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "yoke",
+      "version": "0.8.3",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "yoke-derive",
+      "version": "0.7.5",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "yoke-derive",
+      "version": "0.8.3",
+      "licence": "Unicode-3.0",
+      "metadataFrom": "yoke-derive 0.8.4",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zbus",
+      "version": "5.19.0",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2024 Zeeshan Ali Khan & zbus contributors",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "zbus_macros",
+      "version": "5.19.0",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "zbus_names",
+      "version": "4.3.4",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2024 Zeeshan Ali Khan & zbus contributors",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "zcheapstr",
+      "version": "1.1.0",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "zeno",
+      "version": "0.3.3",
+      "licence": "Apache-2.0 OR MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "zerocopy",
+      "version": "0.8.57",
+      "licence": "BSD-2-Clause OR Apache-2.0 OR MIT",
+      "metadataFrom": "zerocopy 0.8.62",
+      "runtimes": [
+        "linux-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zerocopy-derive",
+      "version": "0.8.57",
+      "licence": "BSD-2-Clause OR Apache-2.0 OR MIT",
+      "metadataFrom": "zerocopy-derive 0.8.62",
+      "runtimes": [
+        "linux-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zerofrom",
+      "version": "0.1.8",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zerofrom-derive",
+      "version": "0.1.8",
+      "licence": "Unicode-3.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zeroize",
+      "version": "1.9.0",
+      "licence": "Apache-2.0 OR MIT",
+      "metadataFrom": "zeroize 1.9.1",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zerotrie",
+      "version": "0.2.5",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zerovec",
+      "version": "0.10.4",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zerovec",
+      "version": "0.11.8",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zerovec-derive",
+      "version": "0.10.4",
+      "licence": "Unicode-3.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zerovec-derive",
+      "version": "0.11.6",
+      "licence": "Unicode-3.0",
+      "copyright": "(c) 1995-2016 International Business Machines Corporation and others, Copyright (c) 2020-2024 Unicode, Inc.",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zip",
+      "version": "8.6.0",
+      "licence": "MIT",
+      "metadataFrom": "zip 9.0.4",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zlib-rs",
+      "version": "0.6.8",
+      "licence": "Zlib",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zmij",
+      "version": "1.0.23",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zopfli",
+      "version": "0.8.3",
+      "licence": "Apache-2.0",
+      "metadataFrom": "zopfli 0.8.4",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zstd",
+      "version": "0.14.0",
+      "licence": "BSD-3-Clause",
+      "metadataFrom": "zstd 0.14.2",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zstd-safe",
+      "version": "8.0.0",
+      "licence": "BSD-3-Clause",
+      "metadataFrom": "zstd-safe 8.1.0",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zstd-sys",
+      "version": "2.1.0+zstd.1.5.7",
+      "licence": "BSD-3-Clause",
+      "metadataFrom": "zstd-sys 2.1.1%2Bzstd.1.5.7",
+      "runtimes": [
+        "linux-",
+        "osx-",
+        "win-"
+      ]
+    },
+    {
+      "name": "zune-core",
+      "version": "0.5.3",
+      "licence": "MIT OR Apache-2.0 OR Zlib",
+      "copyright": "Copyright (c) 2023",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "zune-inflate",
+      "version": "0.2.54",
+      "licence": "MIT OR Apache-2.0 OR Zlib",
+      "copyright": "Copyright (c) 2023",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "zune-jpeg",
+      "version": "0.5.15",
+      "licence": "MIT OR Apache-2.0 OR Zlib",
+      "copyright": "Copyright (c) 2023, Copyright (c) 2025",
+      "runtimes": [
+        "win-"
+      ]
+    },
+    {
+      "name": "zvariant",
+      "version": "5.15.0",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "zvariant_derive",
+      "version": "5.15.0",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    },
+    {
+      "name": "zvariant_utils",
+      "version": "4.2.0",
+      "licence": "MIT",
+      "runtimes": [
+        "linux-"
+      ]
+    }
+  ]
+}

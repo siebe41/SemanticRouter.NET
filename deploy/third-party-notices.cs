@@ -1,6 +1,7 @@
 // Writes THIRD-PARTY-NOTICES.txt for what a build ships: every NuGet package (and .NET runtime pack) named in the
 // *.deps.json files given, with its licence, copyright and project page from the package's .nuspec, and the components
-// no deps.json names (the embedded fonts, Velopack's native binaries) from deploy/third-party/extra.json. The licence
+// no deps.json names (the embedded fonts, Velopack's native binaries) from deploy/third-party/extra.json, and the Rust
+// crates linked into those binaries from deploy/third-party/velopack-crates.json. The licence
 // and notice files the packages carry follow, each distinct text once, and the standard text of every licence an entry
 // has no text of its own for (deploy/third-party/licences, from the SPDX License List). A .NET 10 file-based app, so it
 // runs wherever the SDK does (the release jobs on every OS and the container build) with nothing to install:
@@ -195,11 +196,7 @@ foreach (var component in extra.RootElement.GetProperty("components").EnumerateA
     string[] Values(string name) =>
         component.TryGetProperty(name, out var value) ? [.. value.EnumerateArray().Select(e => e.GetString()!)] : [];
 
-    var with = Value("with")!;
-    var runtimes = Values("runtimes");
-    if (!targets.Any(target => target.Libraries.Contains(with)
-        && (runtimes.Length == 0 || target.Runtime.Length == 0
-            || runtimes.Any(prefix => target.Runtime.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))))
+    if (!Ships(Value("with")!, Values("runtimes")))
     {
         continue;
     }
@@ -225,6 +222,39 @@ foreach (var component in extra.RootElement.GetProperty("components").EnumerateA
 
     AddStandardTexts(expression, hasLicenceText, title, numbers);
     components.Add(new Entry(title, expression, Value("copyright"), Value("project"), Value("description"), [.. numbers]));
+}
+
+// The Rust crates statically linked into Velopack's native binaries, which ship with the Velopack package: listed for
+// one Velopack release (deploy/third-party/velopack-crates.py writes the file), so it has to be the package's.
+using var velopackCrates = JsonDocument.Parse(File.ReadAllText(Path.Combine(deployDirectory, "third-party", "velopack-crates.json")));
+var crates = new List<Entry>();
+if (packageVersions.TryGetValue("Velopack", out var velopackVersion))
+{
+    var listed = velopackCrates.RootElement.GetProperty("velopack").GetString();
+    if (!string.Equals(listed, velopackVersion, StringComparison.OrdinalIgnoreCase))
+    {
+        problems.Add($"deploy/third-party/velopack-crates.json lists the crates of Velopack {listed}, but the package is {velopackVersion}: run python deploy/third-party/velopack-crates.py {velopackVersion}");
+    }
+
+    foreach (var crate in velopackCrates.RootElement.GetProperty("crates").EnumerateArray())
+    {
+        string? Value(string name) => crate.TryGetProperty(name, out var value) ? value.GetString() : null;
+        if (!Ships("Velopack", [.. crate.GetProperty("runtimes").EnumerateArray().Select(e => e.GetString()!)]))
+        {
+            continue;
+        }
+
+        var (name, version) = (Value("name")!, Value("version")!);
+        if (Value("licence") is not { } expression)
+        {
+            problems.Add($"{name} {version} (in deploy/third-party/velopack-crates.json) has no licence: read it in the crate's sources, add it to LICENCES in deploy/third-party/velopack-crates.py and rerun that");
+            continue;
+        }
+
+        var numbers = new SortedSet<int>();
+        AddStandardTexts(expression, false, $"{name} {version}", numbers);
+        crates.Add(new Entry($"{name} {version}", expression, Value("copyright"), $"https://crates.io/crates/{name}/{version}", null, [.. numbers]));
+    }
 }
 
 if (missing.Count > 0)
@@ -264,6 +294,13 @@ if (components.Count > 0)
     AppendEntries(components);
 }
 
+if (crates.Count > 0)
+{
+    text.Append('\n').Append(rule).Append('\n');
+    text.Append("\nRust crates in Velopack's native binaries (sources on crates.io; copyright lines as ClearlyDefined found them)\n");
+    AppendEntries(crates);
+}
+
 for (var i = 0; i < texts.Count; i++)
 {
     text.Append('\n').Append(rule).Append('\n');
@@ -274,8 +311,15 @@ for (var i = 0; i < texts.Count; i++)
 
 Directory.CreateDirectory(Path.GetDirectoryName(output)!);
 File.WriteAllText(output, text.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-Console.WriteLine($"{output}: {entries.Count} packages, {components.Count} other components, {texts.Count} licence and notice texts");
+Console.WriteLine($"{output}: {entries.Count} packages, {components.Count} other components, {crates.Count} Rust crates, {texts.Count} licence and notice texts");
 return 0;
+
+// Whether a deps.json given names the library and, when runtimes are given, targets one starting with one of them (a
+// deps.json without a runtime identifier matches all).
+bool Ships(string with, string[] runtimes) =>
+    targets.Any(target => target.Libraries.Contains(with)
+        && (runtimes.Length == 0 || target.Runtime.Length == 0
+            || runtimes.Any(prefix => target.Runtime.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))));
 
 void AppendEntries(List<Entry> list)
 {

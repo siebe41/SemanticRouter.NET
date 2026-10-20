@@ -122,6 +122,12 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release --logger "trx" --collect:"XPlat Code Coverage"
 
+      # The vpk every workflow installs builds the installers with its own native binaries, which the notices name by
+      # the Velopack package's version and list the Rust crates of (deploy/third-party/velopack-crates.json).
+      - name: Velopack versions
+        if: runner.os == 'Linux'
+        run: deploy/velopack-version-check.sh
+
       # As in a release, the tool package carries the licences and notices of the packages it ships, and of the fonts.
       - name: Third-party notices
         if: runner.os == 'Linux'
