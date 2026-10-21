@@ -127,6 +127,12 @@ jobs:
         if: runner.os == 'Linux'
         run: deploy/signing-dry-run-check.sh .github/workflows/signing-dry-run.yml .github/workflows/release.yml
 
+      # Every workflow gives each secret to the steps that use it, and no job that builds holds one
+      # (docs/releases.md#where-the-secrets-are).
+      - name: Workflow secrets
+        if: runner.os == 'Linux'
+        run: deploy/workflow-secrets-check.sh
+
       - name: Build
         run: dotnet build --no-restore --configuration Release
 

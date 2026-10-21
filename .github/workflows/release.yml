@@ -32,11 +32,13 @@ on:
   push:
     tags: [ 'v*' ]
 
-# Read-only by default; each job that publishes, signs or attests asks for the extra permissions it needs (id-token and
-# attestations only in image-sign and checksums, the jobs that build nothing). Every publishing job runs in the `release`
-# environment, so the repository owner can require an approval under Settings > Environments (and restrict it to `main`
-# and v* tags: cut-release.yml runs there from main). Publishing to nuget.org needs the `NUGET_USER` variable there (see
-# the nuget job).
+# Read-only by default; each job that publishes, signs or attests asks for the extra permissions it needs (id-token only
+# in nuget, image-sign, installer-windows and checksums, and attestations only in image-sign and checksums, all jobs that
+# build nothing). Each secret, the workflow's token included, goes to the steps that use it rather than to a whole job,
+# and no job that builds holds one (deploy/workflow-secrets-check.sh, which CI runs). Every publishing job runs in the
+# `release` environment, so the repository owner can require an approval under Settings > Environments (and restrict it
+# to `main` and v* tags: cut-release.yml runs there from main). Publishing to nuget.org needs the `NUGET_USER` variable
+# there (see the nuget job).
 permissions:
   contents: read
 
@@ -89,7 +91,6 @@ jobs:
           WINDOWS: >-
             AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID != '' }}
             AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID != '' }}
-            AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET != '' }}
             AZURE_SIGNING_ENDPOINT=${{ vars.AZURE_SIGNING_ENDPOINT != '' }}
             AZURE_SIGNING_ACCOUNT=${{ vars.AZURE_SIGNING_ACCOUNT != '' }}
             AZURE_SIGNING_PROFILE=${{ vars.AZURE_SIGNING_PROFILE != '' }}
@@ -565,8 +566,6 @@ jobs:
     environment: release
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -576,6 +575,8 @@ jobs:
       # The release notes are the version's section of CHANGELOG.md at the tag (or its Unreleased section, when that was
       # not renamed before the release), followed by GitHub's list of merged pull requests.
       - name: Release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           gh api -H "Accept: application/vnd.github.raw" "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$GITHUB_REF_NAME" > CHANGELOG.md \
@@ -593,6 +594,8 @@ jobs:
       # version with a suffix (1.0.0-rc.1) is created as a prerelease: the desktop app's updater skips those. On a
       # re-run, gh finds the draft by its tag and the archives replace the ones there.
       - name: Attach to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           prerelease=()
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
@@ -644,7 +647,10 @@ jobs:
   # vpk, the packaging and signing tool itself, is the one tool installed. The Windows and macOS jobs sign when the
   # packages job found their platform's signing set up, and then check the signature before anything is uploaded
   # (docs/desktop.md#signing). vpk uploads into the draft release (--merge) and leaves it a draft: without --publish,
-  # the update feeds are public only when the publish job publishes the release.
+  # the update feeds are public only when the publish job publishes the release. Each secret goes to the steps that use
+  # it, not to the job (deploy/workflow-secrets-check.sh): the token to the steps that fetch the previous release and
+  # upload, the signing credentials to the signing setup. vpk is installed before either, so its restore never runs
+  # next to them; Windows signs with an Azure login by OIDC, which leaves no secret to steal.
   installers:
     needs: [ desktop, installer-build ]
     runs-on: ubuntu-latest
@@ -654,7 +660,6 @@ jobs:
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
       # A version with a suffix (1.0.0-rc.1) goes into a prerelease, which the desktop app's updater does not take.
       VPK_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
@@ -676,7 +681,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends squashfs-tools zstd
           dotnet tool install -g vpk --version 1.2.161
 
+      # The token fetches the previous release's package (for the delta) and uploads.
       - name: Package and attach
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p published && tar -C published -xzf publish-linux-x64.tar.gz
           PUBLISH_DIR=published deploy/package-installer.sh linux-x64 "${GITHUB_REF_NAME#v}" installers/linux-x64
@@ -698,22 +706,16 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+      # For the Azure login: the job's GitHub OIDC token, which Azure exchanges for a short-lived access token under the
+      # app registration's federated credential (docs/desktop.md#signing).
+      id-token: write
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
       # A version with a suffix (1.0.0-rc.1) goes into a prerelease, which the desktop app's updater does not take.
       VPK_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
       SIGNING: ${{ needs.packages.outputs.windows-signing }}
-      # Azure Trusted Signing: the credentials (DefaultAzureCredential reads them from the environment) and the
-      # account's endpoint, name and certificate profile (repository variables).
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-      SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-      SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-      SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -734,13 +736,34 @@ jobs:
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       # The signing setup and the signature check are scripts that the signing dry run (signing-dry-run.yml) runs too.
+      # Azure Trusted Signing: the app registration that may sign (its ids are secrets) and the account's endpoint, name
+      # and certificate profile (variables). The setup names any that are missing.
       - name: Signing metadata
         if: env.SIGNING == 'signed'
         shell: bash
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
         run: deploy/signing-setup.sh windows
 
+      # OIDC: no client secret is stored anywhere. vpk's signing (DefaultAzureCredential) uses this Azure CLI login, and
+      # the action logs out again when the job ends.
+      - name: Azure login
+        if: env.SIGNING == 'signed'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      # The token fetches the previous release's package, for the delta.
       - name: Package
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p published && tar -C published -xzf publish-win-x64.tar.gz
           PUBLISH_DIR=published deploy/package-installer.sh win-x64 "${GITHUB_REF_NAME#v}" installers/win-x64
@@ -752,6 +775,8 @@ jobs:
 
       - name: Attach
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           vpk upload github --outputDir installers/win-x64 --channel win-x64 \
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $VPK_PRE
@@ -772,21 +797,10 @@ jobs:
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
       # A version with a suffix (1.0.0-rc.1) goes into a prerelease, which the desktop app's updater does not take.
       VPK_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
       SIGNING: ${{ needs.packages.outputs.macos-signing }}
-      # Signing and notarization (an Apple Developer account): the two Developer ID certificates as base64 .p12 files,
-      # their password, the identities, and the Apple ID that notarizes.
-      BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_BUILD_CERTIFICATE_BASE64 }}
-      INSTALLER_CERTIFICATE_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_BASE64 }}
-      P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-      APPLE_TEAM: ${{ secrets.APPLE_TEAM_ID }}
-      APP_IDENTITY: ${{ vars.APPLE_SIGN_APP_IDENTITY }}
-      INSTALL_IDENTITY: ${{ vars.APPLE_SIGN_INSTALL_IDENTITY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -805,12 +819,26 @@ jobs:
         run: dotnet tool install -g vpk --version 1.2.161
 
       # A throw-away keychain with both certificates, and the notarytool profile vpk uses. The signing setup and the
-      # signature check are scripts that the signing dry run (signing-dry-run.yml) runs too.
+      # signature check are scripts that the signing dry run (signing-dry-run.yml) runs too. Signing and notarization
+      # (an Apple Developer account): the two Developer ID certificates as base64 .p12 files, their password, the
+      # identities, and the Apple ID that notarizes. Only this step sees them; later steps use the keychain.
       - name: Signing keychain
         if: env.SIGNING == 'signed'
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_BUILD_CERTIFICATE_BASE64 }}
+          INSTALLER_CERTIFICATE_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          APP_IDENTITY: ${{ vars.APPLE_SIGN_APP_IDENTITY }}
+          INSTALL_IDENTITY: ${{ vars.APPLE_SIGN_INSTALL_IDENTITY }}
         run: deploy/signing-setup.sh macos
 
+      # The token fetches the previous release's packages, for the deltas.
       - name: Package
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for rid in osx-arm64 osx-x64; do
             mkdir -p "published/$rid" && tar -C "published/$rid" -xzf "publish-$rid.tar.gz"
@@ -827,6 +855,8 @@ jobs:
           deploy/check-signature-macos.sh ${required[@]+"${required[@]}"} installers/osx-arm64 installers/osx-x64
 
       - name: Attach
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for rid in osx-arm64 osx-x64; do
             vpk upload github --outputDir "installers/$rid" --channel "$rid" \
@@ -907,7 +937,6 @@ jobs:
       id-token: write
       attestations: write
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       LC_ALL: C
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -922,6 +951,8 @@ jobs:
           path: attach
 
       - name: Checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir release --clobber
           cp attach/* release/
@@ -948,6 +979,8 @@ jobs:
           subject-path: release/*
 
       - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" attach/* release/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
 
   # Last: the draft becomes the public release, and with it the desktop app's update feeds, which the updater reads
@@ -961,11 +994,12 @@ jobs:
     permissions:
       contents: write
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       WINDOWS_SIGNING: ${{ needs.packages.outputs.windows-signing }}
       MACOS_SIGNING: ${{ needs.packages.outputs.macos-signing }}
     steps:
       - name: The draft is complete
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           assets="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
           missing=()
@@ -981,6 +1015,8 @@ jobs:
       # A stable release becomes the repository's latest release, as a release created published did; a prerelease
       # (1.0.0-rc.1, created as one) cannot be.
       - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           latest=()
           if [[ "$GITHUB_REF_NAME" != *-* ]]; then

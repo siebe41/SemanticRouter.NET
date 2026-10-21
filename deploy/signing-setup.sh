@@ -8,7 +8,8 @@
 #                                     # APPLE_NOTARY_PROFILE and APPLE_KEYCHAIN
 #
 # The settings come from the environment, under the names the workflows give them:
-#   windows: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (which vpk's DefaultAzureCredential reads itself),
+#   windows: AZURE_TENANT_ID and AZURE_CLIENT_ID (the app registration that signs; checked here, then used by the
+#     workflow's azure/login step, whose OIDC login vpk's DefaultAzureCredential picks up: no client secret),
 #     SIGNING_ENDPOINT, SIGNING_ACCOUNT, SIGNING_PROFILE
 #   macos: BUILD_CERTIFICATE_BASE64, INSTALLER_CERTIFICATE_BASE64, P12_PASSWORD, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM,
 #     APP_IDENTITY, INSTALL_IDENTITY
@@ -22,7 +23,7 @@ case "$platform" in
   # Each pair is the environment variable and the repository secret or variable it comes from.
   windows)
     label=Windows
-    settings="AZURE_TENANT_ID:AZURE_TENANT_ID AZURE_CLIENT_ID:AZURE_CLIENT_ID AZURE_CLIENT_SECRET:AZURE_CLIENT_SECRET
+    settings="AZURE_TENANT_ID:AZURE_TENANT_ID AZURE_CLIENT_ID:AZURE_CLIENT_ID
       SIGNING_ENDPOINT:AZURE_SIGNING_ENDPOINT SIGNING_ACCOUNT:AZURE_SIGNING_ACCOUNT SIGNING_PROFILE:AZURE_SIGNING_PROFILE"
     ;;
   macos)

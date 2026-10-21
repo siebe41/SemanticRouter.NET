@@ -16,8 +16,9 @@
 # there (deploy/publish-desktop.sh) is packaged and nothing is built: the release signs in a job that builds nothing.
 #
 # Signing, when configured (unsigned otherwise):
-#   Windows (on Windows): AZURE_SIGN_METADATA=<metadata.json> for Azure Trusted Signing; the Azure credentials come
-#     from the environment (AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET).
+#   Windows (on Windows): AZURE_SIGN_METADATA=<metadata.json> for Azure Trusted Signing; vpk finds the Azure
+#     credentials as DefaultAzureCredential does: the release logs the Azure CLI in by OIDC (azure/login); locally,
+#     `az login`, or AZURE_TENANT_ID, AZURE_CLIENT_ID and AZURE_CLIENT_SECRET in the environment.
 #   macOS: APPLE_SIGN_APP_IDENTITY, APPLE_SIGN_INSTALL_IDENTITY, APPLE_NOTARY_PROFILE and APPLE_KEYCHAIN.
 set -euo pipefail
 

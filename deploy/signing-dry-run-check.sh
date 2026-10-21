@@ -2,7 +2,8 @@
 # Whether the signing dry run still signs as the release does and uploads nothing, for CI (docs/releases.md#code-signing).
 # In .github/workflows/signing-dry-run.yml and release.yml, or the workflows given:
 #
-# - the dry run starts only by hand (workflow_dispatch), asks for no write permission, uses no GITHUB_TOKEN, and runs
+# - the dry run starts only by hand (workflow_dispatch), asks for no write permission (apart from id-token, for the
+#   Azure login by OIDC), uses no GITHUB_TOKEN, and runs
 #   nothing that publishes or uploads (vpk upload or download, gh, nuget push, docker push, cosign, git push); the only
 #   artifact it uploads is the unsigned build (publish-*), for its own signing jobs;
 # - both workflows set up signing and check signatures with the same scripts (deploy/signing-setup.sh,
@@ -10,7 +11,7 @@
 #   and no workflow in the directory signs or checks a signature inline instead (security import, notarytool,
 #   stapler, pkgutil --check-signature, Get-AuthenticodeSignature, the Trusted Signing metadata), so there is one copy
 #   of each signing step;
-# - both install the same vpk version.
+# - both install the same vpk version, and log in to Azure with the same azure/login commit.
 #
 #   deploy/signing-dry-run-check.sh [dry-run-workflow] [release-workflow]
 #
@@ -36,8 +37,11 @@ triggers="$(awk '/^on:/ { on = 1; next } on && /^[^[:space:]]/ { exit } on && /^
 if [ "$triggers" != workflow_dispatch ]; then
   error "$dry_run" "the dry run should start only by hand (on: workflow_dispatch), but its triggers are: $(tr '\n' ' ' <<<"$triggers")"
 fi
-if grep -qE ':[[:space:]]*write([[:space:]]|$)' <<<"$dry"; then
-  error "$dry_run" "the dry run asks for a write permission: $(grep -E ':[[:space:]]*write([[:space:]]|$)' <<<"$dry" | sed 's/^[[:space:]]*//' | tr '\n' ' ')It needs contents: read only."
+# id-token: write is the one exception: it lets a job ask for its own OIDC token (for the Azure login), which writes to
+# nothing on GitHub.
+writes="$(grep -E ':[[:space:]]*write([[:space:]]|$)' <<<"$dry" | grep -vE '^[[:space:]]*id-token:[[:space:]]*write[[:space:]]*$' || true)"
+if [ -n "$writes" ]; then
+  error "$dry_run" "the dry run asks for a write permission: $(sed 's/^[[:space:]]*//' <<<"$writes" | tr '\n' ' ')It needs contents: read only (and id-token: write for the Azure login)."
 fi
 if grep -qE 'GITHUB_TOKEN|github\.token' <<<"$dry"; then
   error "$dry_run" "the dry run uses the workflow's token. It reads the repository with the default checkout and needs no token."
@@ -77,7 +81,17 @@ elif [ "$(wc -l <<<"$versions")" -ne 1 ]; then
   error "$dry_run" "the release and the signing dry run install different vpk versions: $(tr '\n' ' ' <<<"$versions")"
 fi
 
+# The same Azure login, pinned to the same commit.
+logins="$(cat "$dry_run" "$release" | tr -d '\r' | grep -vE '^[[:space:]]*#' | grep -oE 'azure/login@[^[:space:]]+' | sort -u || true)"
+for file in "$dry_run" "$release"; do
+  code "$file" | grep -q 'uses: azure/login@' \
+    || error "$file" "does not log in to Azure (azure/login). The release and the signing dry run sign on Windows with the same OIDC login."
+done
+if [ -n "$logins" ] && [ "$(wc -l <<<"$logins")" -ne 1 ]; then
+  error "$dry_run" "the release and the signing dry run use different azure/login versions: $(tr '\n' ' ' <<<"$logins")"
+fi
+
 if [ "$failed" = true ]; then
   exit 1
 fi
-echo "$dry_run uploads nothing, and signs and checks as $release does (vpk $versions)."
+echo "$dry_run uploads nothing, and signs and checks as $release does (vpk $versions, $logins)."

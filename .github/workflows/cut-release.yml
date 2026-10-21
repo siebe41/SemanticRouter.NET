@@ -43,7 +43,8 @@ jobs:
     env:
       VERSION: ${{ inputs.version }}
       OWNER: ${{ github.repository_owner }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    # Each secret, the workflow's token included, goes to the steps that use it, not to the whole job
+    # (deploy/workflow-secrets-check.sh).
     steps:
       - name: Only the repository owner, from main
         env:
@@ -64,6 +65,8 @@ jobs:
           persist-credentials: false
 
       - name: The version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if ! [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
             echo "::error::'$VERSION' is not a version like 0.3.0 (three numbers, no v, no suffix)."
@@ -84,6 +87,8 @@ jobs:
       # CI must have passed on this exact commit: release.yml runs the tests again, but not the installers, the
       # container image or the dashboard end-to-end tests.
       - name: CI passed on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           runs="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --json status,conclusion --limit 20)"
           if jq -e 'any(.[]; .status == "completed" and .conclusion == "success")' <<<"$runs" >/dev/null; then
@@ -105,7 +110,6 @@ jobs:
           WINDOWS: >-
             AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID != '' }}
             AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID != '' }}
-            AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET != '' }}
             AZURE_SIGNING_ENDPOINT=${{ vars.AZURE_SIGNING_ENDPOINT != '' }}
             AZURE_SIGNING_ACCOUNT=${{ vars.AZURE_SIGNING_ACCOUNT != '' }}
             AZURE_SIGNING_PROFILE=${{ vars.AZURE_SIGNING_PROFILE != '' }}

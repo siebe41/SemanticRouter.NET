@@ -199,7 +199,7 @@ The release workflow signs the Windows installer with Azure Trusted Signing and 
 - on both platforms, before you delete `ALLOW_UNSIGNED_RELEASE`: the first signed release then is not the first run of the signing steps;
 - for a platform, after you rotate or renew any of its secrets, certificates or the app-specific password, and before the next release.
 
-A failure points to the same fixes as a failed release's signing job ([When a release fails](#when-a-release-fails)), with no tag, version or draft to clean up. [`deploy/signing-dry-run-check.sh`](../deploy/signing-dry-run-check.sh), which CI runs, fails when the dry run could upload or publish anything, asks for a write permission, or runs other than by hand. It also fails when the release and the dry run stop calling the shared scripts, when a workflow signs or checks a signature inline instead, or when they install different vpk versions.
+A failure points to the same fixes as a failed release's signing job ([When a release fails](#when-a-release-fails)), with no tag, version or draft to clean up. [`deploy/signing-dry-run-check.sh`](../deploy/signing-dry-run-check.sh), which CI runs, fails when the dry run could upload or publish anything, asks for a write permission (other than `id-token`, for the Azure login), or runs other than by hand. It also fails when the release and the dry run stop calling the shared scripts, when a workflow signs or checks a signature inline instead, or when they install different vpk versions or log in to Azure with different `azure/login` versions.
 
 To check an installer you downloaded:
 
@@ -213,8 +213,26 @@ pkgutil --check-signature SemanticRouter-osx-arm64-Setup.pkg     # "Status: sign
 
 The Linux AppImage and the `.zip` and `.tar.gz` archives are not code-signed; check them with `gh attestation verify` as above.
 
+### Where the secrets are
+
+Each secret goes to the steps that use it, never to a whole job or workflow, and the jobs that build hold none. Where a federated (OIDC) login exists, the release uses it instead of a stored key:
+
+| What | Stored secret | Which steps get it |
+|---|---|---|
+| Windows signing (Azure Trusted Signing) | none: an OIDC login under a federated credential for the `release` environment ([Signing in to Azure](desktop.md#signing-in-to-azure)); the tenant and app ids are kept as secrets but grant nothing | the signing setup and the `azure/login` step of `installer-windows` and of the dry run's `windows` job |
+| macOS signing and notarization | the two `.p12` certificates, their password, the Apple ID and its app-specific password, the team id | the **Signing keychain** step of `installer-macos` and of the dry run's `macos` job; later steps use the temporary keychain |
+| nuget.org | none: Trusted Publishing, an OIDC exchange for a key that lasts an hour | the `nuget` job's login step |
+| Container image signature | none: keyless cosign (Sigstore, OIDC) | `image-sign` |
+| The workflow's own token (`contents: write` where a job attaches to the release) | issued per run | the steps that call `gh` or `vpk upload` / `vpk download`, and the registry logins |
+| `RELEASE_TAG_TOKEN` (the owner's token that creates the tag) | a fine-grained token | the tag step of "Cut a release" |
+
+The release's first job, which runs the tests and packs, sees only whether each signing secret is set (`true` or `false`), never its value. The signing jobs build nothing: they install vpk first, before any step that holds a secret or logs in, because a login and a keychain outlast the step that made them.
+
+[`deploy/workflow-secrets-check.sh`](../deploy/workflow-secrets-check.sh), which CI runs on every pull request, keeps it so in every workflow. It fails when a job's or a workflow's `env:` holds a secret or the workflow's token (a test such as `secrets.X != ''`, which passes only whether it is set, is allowed), when a job that builds (`dotnet restore`, `build`, `publish`, `test` or `pack`, or `deploy/publish-desktop.sh`) holds a secret in any step, and when a step runs `dotnet` while holding a secret or after a step that held one or logged in to Azure.
+
 ## Not covered yet
 
 - **Code signing until the certificates exist.** While `ALLOW_UNSIGNED_RELEASE` is set, the installers are unsigned and SmartScreen and Gatekeeper warn on first start ([Code signing](#code-signing)). The archives' contents are not signed in any case.
 - **NuGet author signatures.** Only nuget.org's repository signature, as above.
+- **Federated credentials on macOS.** Apple has no OIDC login: the macOS signing certificates and the Apple ID's app-specific password are stored secrets, given only to the step that sets up signing ([Where the secrets are](#where-the-secrets-are)). An App Store Connect API key could replace the app-specific password, but it is a stored key too.
 - **Signing with the production credentials.** The [signing dry run](#the-signing-dry-run) exists, but it can't pass until the certificates exist ([#102](https://github.com/siebe41/SemanticRouter.NET/issues/102)), so the signing steps have never run with real certificates. Until it passes on both platforms, keep `ALLOW_UNSIGNED_RELEASE`.

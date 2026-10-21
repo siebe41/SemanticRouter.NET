@@ -8,12 +8,13 @@ name: Signing dry run
 #
 # The build is win-x64 and osx-arm64, version 0.0.0-dryrun.<run number>, published in a job that holds no secret and
 # can only read the repository, as in release.yml. The signing jobs then run the release's own scripts:
-# deploy/signing-setup.sh (the Trusted Signing metadata; the keychain and the notarytool profile),
-# deploy/package-installer.sh, which has vpk sign (and on macOS notarize and staple), and
-# deploy/check-signature-windows.ps1 and deploy/check-signature-macos.sh. Unlike a release, a platform whose secrets are
-# missing fails the run: there is no unsigned dry run. Nothing is uploaded anywhere: no artifact of the signed files, no
-# release, no update feed, and the token can only read. The run's summary names who signed each installer.
-# deploy/signing-dry-run-check.sh, which CI runs, keeps it that way.
+# deploy/signing-setup.sh (the Trusted Signing metadata, then the same Azure login by OIDC; the keychain and the
+# notarytool profile), deploy/package-installer.sh, which has vpk sign (and on macOS notarize and staple), and
+# deploy/check-signature-windows.ps1 and deploy/check-signature-macos.sh. As in the release, each secret goes only to the
+# step that uses it. Unlike a release, a platform whose secrets are missing fails the run: there is no unsigned dry run.
+# Nothing is uploaded anywhere: no artifact of the signed files, no release, no update feed, and the token can only
+# read (the Windows job may also ask for an OIDC token, for the Azure login). The run's summary names who signed each
+# installer. deploy/signing-dry-run-check.sh, which CI runs, keeps it that way.
 run-name: Signing dry run (${{ inputs.platforms }})
 
 on:
@@ -93,16 +94,14 @@ jobs:
     if: inputs.platforms != 'macos'
     runs-on: windows-latest
     environment: release
+    permissions:
+      contents: read
+      # For the Azure login by OIDC, as in the release; it can write nothing.
+      id-token: write
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       VERSION: 0.0.0-dryrun.${{ github.run_number }}
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-      SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-      SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-      SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -124,7 +123,20 @@ jobs:
 
       - name: Signing metadata
         shell: bash
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
         run: deploy/signing-setup.sh windows
+
+      - name: Azure login
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
 
       - name: Package and sign
         shell: bash
@@ -147,14 +159,6 @@ jobs:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       VERSION: 0.0.0-dryrun.${{ github.run_number }}
-      BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_BUILD_CERTIFICATE_BASE64 }}
-      INSTALLER_CERTIFICATE_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_BASE64 }}
-      P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-      APPLE_TEAM: ${{ secrets.APPLE_TEAM_ID }}
-      APP_IDENTITY: ${{ vars.APPLE_SIGN_APP_IDENTITY }}
-      INSTALL_IDENTITY: ${{ vars.APPLE_SIGN_INSTALL_IDENTITY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -172,6 +176,15 @@ jobs:
         run: dotnet tool install -g vpk --version 1.2.161
 
       - name: Signing keychain
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_BUILD_CERTIFICATE_BASE64 }}
+          INSTALLER_CERTIFICATE_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          APP_IDENTITY: ${{ vars.APPLE_SIGN_APP_IDENTITY }}
+          INSTALL_IDENTITY: ${{ vars.APPLE_SIGN_INSTALL_IDENTITY }}
         run: deploy/signing-setup.sh macos
 
       - name: Package, sign and notarize
