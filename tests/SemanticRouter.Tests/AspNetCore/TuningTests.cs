@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Tests.Support;
 using static SemanticRouter.Tests.Support.TestEmbeddings;
 
 namespace SemanticRouter.Tests.AspNetCore;
@@ -20,7 +21,7 @@ public sealed class TuningTests : RouterHostTest
     /// Small talk ("hello") uses the default threshold, 0.80; reasoning ("design a system") has its own, 0.90.
     /// Small-talk prompts sit at 0.765 (right from 0.76), reasoning prompts at 0.825 (right from 0.82).
     /// </summary>
-    private async Task<HttpClient> StartTunedAsync(Action<TuningOptions>? tuning = null, int smallTalk = 3, int reasoning = 3)
+    private async Task<HttpClient> StartTunedAsync(Action<TuningOptions>? tuning = null, int smallTalk = 3, int reasoning = 3, TimeProvider? time = null)
     {
         var cases = new List<EvaluationCase> { new(_embeddings.At("what is the weather in paris", 0, 0.3f), 3) };
         for (int i = 0; i < smallTalk; i++)
@@ -47,6 +48,11 @@ public sealed class TuningTests : RouterHostTest
             services: s =>
             {
                 s.AddSingleton<IEmbeddingProvider>(_embeddings);
+                if (time is not null)
+                {
+                    s.AddSingleton(time);
+                }
+
                 s.Configure<TuningOptions>(t =>
                 {
                     t.MinimumPrompts = 4;
@@ -237,6 +243,67 @@ public sealed class TuningTests : RouterHostTest
         linked.GetProperty("learnedNote").GetString().Should().EndWith(": default threshold 0.80 → 0.78");
         entries.Single(e => e.GetProperty("promptPreview").GetString() == clear).GetProperty("learned").ValueKind
             .Should().Be(JsonValueKind.Null, "0.95 matched before the change too");
+    }
+
+    [Fact]
+    public async Task A_change_an_hour_old_lists_its_effect_on_the_decisions_it_touches_before_and_after()
+    {
+        // The changes are made three hours ago; the decisions around them are written with their own times.
+        var time = new ManualTimeProvider();
+        time.Advance(DateTimeOffset.UtcNow.AddHours(-3) - time.GetUtcNow());
+        HttpClient client = await StartTunedAsync(time: time);
+        await RunAsync(client);
+        DateTimeOffset changed = time.GetUtcNow();
+        RoutingActivityLog activity = Services.GetRequiredService<RoutingActivityLog>();
+        RoutingFeedbackLog feedback = Services.GetRequiredService<RoutingFeedbackLog>();
+        RoutingActivityEntry Decision(TimeSpan at, string? route, long? learned = null, bool continuation = false, RoutingReason reason = RoutingReason.SemanticMatch) =>
+            activity.Add(new RoutingActivityEntry
+            {
+                Id = activity.Reserve(),
+                Timestamp = changed + at,
+                Route = route,
+                Learned = learned,
+                ToolContinuation = continuation,
+                Reason = reason,
+                Tier = 1,
+            });
+        void Judged(RoutingActivityEntry entry) =>
+            feedback.Add(new RoutingFeedback { EntryId = entry.Id, Timestamp = entry.Timestamp.AddMinutes(1), Kind = FeedbackKind.Corrected, Route = entry.Route });
+
+        Decision(TimeSpan.FromHours(-4), "smalltalk");                    // before the window: as long before as there is after
+        Judged(Decision(TimeSpan.FromHours(-1), "smalltalk"));
+        Decision(TimeSpan.FromHours(-1), "reasoning");
+        Judged(Decision(TimeSpan.FromHours(1), "smalltalk", learned: 1));
+        Judged(Decision(TimeSpan.FromHours(1), "reasoning", learned: 2));
+        Decision(TimeSpan.FromHours(1), null);
+        Decision(TimeSpan.FromHours(1), "smalltalk", continuation: true);  // not a routing decision
+        Decision(TimeSpan.FromHours(1), null, reason: RoutingReason.ModelOverride);
+
+        JsonElement[] changes = Changes(await JsonOf(await client.GetAsync("/router/api/tuning")));
+
+        JsonElement threshold = changes.Single(c => c.GetProperty("id").GetInt64() == 1);
+        JsonElement route = changes.Single(c => c.GetProperty("id").GetInt64() == 2);
+        threshold.GetProperty("kind").GetString().Should().Be("DefaultThreshold");
+        route.GetProperty("route").GetString().Should().Be("reasoning");
+        Effect(threshold).Should().Be((3, 2, 1, 3, 2, 1), "the default threshold touches every decision");
+        Effect(route).Should().Be((3, 1, 0, 1, 1, 1), "a route's threshold touches that route's decisions and those it rerouted");
+
+        static (int, int, int, int, int, int) Effect(JsonElement change)
+        {
+            JsonElement e = change.GetProperty("effect");
+            return (e.GetProperty("hours").GetInt32(), e.GetProperty("decisionsBefore").GetInt32(), e.GetProperty("feedbackBefore").GetInt32(),
+                e.GetProperty("decisionsAfter").GetInt32(), e.GetProperty("feedbackAfter").GetInt32(), e.GetProperty("rerouted").GetInt32());
+        }
+    }
+
+    [Fact]
+    public async Task A_change_less_than_an_hour_old_has_no_effect_yet()
+    {
+        HttpClient client = await StartTunedAsync(smallTalk: 3, reasoning: 0);
+        await RunAsync(client);
+
+        Changes(await JsonOf(await client.GetAsync("/router/api/tuning"))).Should().ContainSingle()
+            .Which.GetProperty("effect").ValueKind.Should().Be(JsonValueKind.Null);
     }
 
     [Fact]

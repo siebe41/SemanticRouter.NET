@@ -95,6 +95,64 @@ public sealed class MachinePolicyTests : RouterHostTest
     }
 
     [Fact]
+    public void Registry_values_of_other_kinds_are_read_as_what_they_hold()
+    {
+        JsonObject root = MachinePolicyLoader.FromValues(new Dictionary<string, object?>
+        {
+            ["Qword"] = 5_000_000_000L,
+            ["Binary"] = new byte[] { 1, 2 },
+            ["Missing"] = null,
+            ["Switch"] = " true ",
+            ["Object"] = """ {"Mode":"Off"} """,
+            ["NotAList"] = "[gpu.corp.example",
+            ["NotANumber"] = "12 Monkeys",
+            ["Empty"] = string.Empty,
+        });
+
+        root["Qword"]!.GetValue<long>().Should().Be(5_000_000_000L);
+        root["Binary"].Should().BeNull("a binary value is not a setting");
+        root["Missing"].Should().BeNull();
+        root["Switch"]!.GetValue<bool>().Should().BeTrue();
+        root["Object"]!["Mode"]!.GetValue<string>().Should().Be("Off");
+        root["NotAList"]!.GetValue<string>().Should().Be("[gpu.corp.example", "text that only looks like JSON is the text itself");
+        root["NotANumber"]!.GetValue<string>().Should().Be("12 Monkeys");
+        root["Empty"]!.GetValue<string>().Should().BeEmpty();
+    }
+
+    [Fact]
+    public void A_missing_property_list_is_no_policy()
+    {
+        string missing = Path.Combine(Path.GetTempPath(), "sr-" + Guid.NewGuid().ToString("N"), "io.github.siebe41.semantic-router.plist");
+
+        MachinePolicyLoader.FromPropertyList(missing).Should().BeSameAs(MachinePolicy.None);
+    }
+
+    [Fact]
+    public void A_policy_file_that_cannot_be_read_stops_the_router_and_names_the_file()
+    {
+        string directory = Directory.CreateTempSubdirectory("policy").FullName;
+        string path = Path.Combine(directory, "policy.json");
+        File.WriteAllText(path, """{"RequireLocalOnly":true}""");
+        try
+        {
+            // Held open without sharing: reading it fails (on Unix .NET takes an advisory lock for FileShare.None).
+            using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                FluentActions.Invoking(() => MachinePolicyLoader.FromFile(path))
+                    .Should().Throw<InvalidDataException>().WithMessage($"The machine policy {path} cannot be read: *")
+                    .WithInnerException<IOException>();
+            }
+
+            MachinePolicyLoader.FromFile(path).RequireLocalOnly.Should().BeTrue();
+            FluentActions.Invoking(() => MachinePolicyLoader.FromFile(null!)).Should().Throw<ArgumentNullException>();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Enforcing_turns_off_what_breaks_it_and_says_so()
     {
         var configuration = new RouterConfiguration();
