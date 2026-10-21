@@ -155,6 +155,18 @@ Windows SmartScreen and macOS Gatekeeper check a publisher's code signature, not
 
 The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([Signing the desktop app](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true`; until the signing certificates exist, that variable is what lets a release through, and those installers are unsigned. The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before anything is uploaded.
 
+What is checked covers the code that ends up running, not just the installer, and the update package the installed app updates to (the `-full.nupkg` on the release):
+
+| Platform | Checked | How |
+| --- | --- | --- |
+| Windows | `SemanticRouter-win-x64-Setup.exe` | `Get-AuthenticodeSignature`: `Valid` |
+| Windows | `SemanticRouter.exe`, `Squirrel.exe` (Velopack's updater) and `SemanticRouter_ExecutionStub.exe` in the update package's `lib/app/`, and every other executable file there (a program or library, by its `MZ` header) | `Get-AuthenticodeSignature`: `Valid` |
+| macOS | `SemanticRouter-<rid>-Setup.pkg` | `pkgutil --check-signature`, and `xcrun stapler validate` for the notarization ticket |
+| macOS | the `.app` inside the `.pkg` (`pkgutil --expand-full`) | `codesign --verify --deep --strict` with a Developer ID signature, and `spctl --assess` (Gatekeeper) |
+| macOS | the `.app` in the update package | `codesign --verify --deep --strict` with a Developer ID signature, as the desktop app checks an update with `Updates:Publisher` |
+
+The checks are [`deploy/installer-signature-check.ps1`](../deploy/installer-signature-check.ps1) and [`deploy/installer-signature-check.sh`](../deploy/installer-signature-check.sh). On a platform that is meant to be signed, any check that does not pass fails the release; otherwise each line in the summary says **unsigned**. A file that is missing fails either way. CI runs both on its unsigned installer builds, so a change in what Velopack puts where is caught before a release.
+
 To check an installer you downloaded:
 
 ```powershell

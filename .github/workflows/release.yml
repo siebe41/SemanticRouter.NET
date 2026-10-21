@@ -650,21 +650,11 @@ jobs:
           mkdir -p published && tar -C published -xzf publish-win-x64.tar.gz
           PUBLISH_DIR=published deploy/package-installer.sh win-x64 "${GITHUB_REF_NAME#v}" installers/win-x64
 
-      # A release meant to be signed uploads nothing whose signature does not check out.
-      - name: Check the signature
+      # A release meant to be signed uploads nothing whose signature does not check out: the installer, and the
+      # programs in the update package it installs (deploy/installer-signature-check.ps1).
+      - name: Check the signatures
         shell: pwsh
-        run: |
-          $setup = @(Get-ChildItem installers/win-x64 -Filter '*-Setup.exe')
-          if ($setup.Count -eq 0) { Write-Output '::error::No Setup.exe in installers/win-x64.'; exit 1 }
-          foreach ($file in $setup) {
-            $status = (Get-AuthenticodeSignature $file.FullName).Status
-            if ($env:SIGNING -eq 'signed' -and $status -ne 'Valid') {
-              Write-Output "::error::$($file.Name) should be signed, but its signature is $status."
-              exit 1
-            }
-            $line = if ($status -eq 'Valid') { 'signed, signature checked' } else { "**unsigned** ($status)" }
-            Add-Content $env:GITHUB_STEP_SUMMARY "Windows installer ``$($file.Name)``: $line"
-          }
+        run: deploy/installer-signature-check.ps1 -Installers installers/win-x64 -Version ($env:GITHUB_REF_NAME -replace '^v', '')
 
       - name: Attach
         shell: bash
@@ -743,29 +733,12 @@ jobs:
             PUBLISH_DIR="published/$rid" deploy/package-installer.sh "$rid" "${GITHUB_REF_NAME#v}" "installers/$rid"
           done
 
-      # A release meant to be signed uploads nothing whose signature or notarization ticket does not check out.
-      - name: Check the signature
+      # A release meant to be signed uploads nothing whose signature or notarization ticket does not check out: the
+      # installer, the app in it, and the app in the update package (deploy/installer-signature-check.sh).
+      - name: Check the signatures
         run: |
-          shopt -s nullglob
           for rid in osx-arm64 osx-x64; do
-            pkgs=("installers/$rid"/*-Setup.pkg)
-            if [ ${#pkgs[@]} -eq 0 ]; then
-              echo "::error::No Setup.pkg in installers/$rid."
-              exit 1
-            fi
-            for pkg in "${pkgs[@]}"; do
-              status="$(pkgutil --check-signature "$pkg" || true)"
-              if grep -q 'Status: signed' <<<"$status" && xcrun stapler validate "$pkg" >/dev/null 2>&1; then
-                line="signed and notarized, checked"
-              elif [ "$SIGNING" = signed ]; then
-                echo "$status"
-                echo "::error::$(basename "$pkg") should be signed and notarized, but is not."
-                exit 1
-              else
-                line="**unsigned**"
-              fi
-              echo "macOS installer \`$(basename "$pkg")\`: $line" >> "$GITHUB_STEP_SUMMARY"
-            done
+            deploy/installer-signature-check.sh "installers/$rid" "${GITHUB_REF_NAME#v}" "$rid"
           done
 
       - name: Attach
