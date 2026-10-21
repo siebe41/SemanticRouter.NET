@@ -17,7 +17,7 @@ The security fixes in each release are listed under **Security** in the [changel
 
 ### Before and after 1.0
 
-Versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0 they are 0.x, and a minor version can break the .NET API of the packages, the configuration, the HTTP endpoints or behaviour; its changelog lines say what broke. From 1.0.0 on, a break waits for the next major version. The .NET API of the library packages is checked against the latest 1.x release on every pull request ([Public API and package validation](CONTRIBUTING.md#public-api-and-package-validation)); the configuration, the HTTP endpoints and behaviour are held to the same rule in review. <!-- owner: confirm the exception --> The exception is a security fix that can only close a hole by changing a default or refusing something that used to work: it ships in the next minor or patch release, and its line under **Security** in the changelog says what to change.
+Versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0 they are 0.x, and a minor version can break the .NET API of the packages, the configuration, the HTTP endpoints or behaviour; its changelog lines say what broke. From 1.0.0 on, a break waits for the next major version. The .NET API of the library packages is checked against the latest 1.x release on every pull request ([Public API and package validation](CONTRIBUTING.md#public-api-and-package-validation)); the configuration, the HTTP endpoints and behaviour are held to the same rule in review. <!-- owner: confirm the exception --> The exception is a security fix that can only close a hole by changing a default or refusing something that used to work: it ships in the next minor or patch release, and its line under **Security** in the changelog says what to change. The .NET API is not part of this exception: a break there still waits for the next major version.
 
 ## Verifying a release
 
@@ -27,7 +27,7 @@ Every release asset has a build provenance attestation and a line in `SHA256SUMS
 
 Please do not open a public issue, discussion or pull request for a security problem.
 
-Report it privately through GitHub's private vulnerability reporting: on the repository's **Security** tab, choose **Report a vulnerability**. This opens a private advisory that only you and the maintainers can see. If you cannot use GitHub, email `<<ANDREW: address>>` instead. <!-- owner: replace the marker with a contact address, or delete this sentence --> If neither works for you, open a public issue that only asks for a private contact, with nothing about the problem in it: the maintainer opens a private advisory and adds you to it. Include:
+Report it privately through GitHub's private vulnerability reporting: on the repository's **Security** tab, choose **Report a vulnerability**. This opens a private advisory that only you and the maintainers can see. If you cannot use GitHub, email `<<ANDREW: address>>` instead. <!-- owner: replace the marker with a contact address, or delete this sentence --> Include:
 
 - what is affected (package or component, version or commit);
 - how to reproduce it, with the configuration involved (replace real keys with placeholders);
