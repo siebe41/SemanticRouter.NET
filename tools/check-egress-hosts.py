@@ -37,7 +37,9 @@ def hosts(text):
 def model_urls():
     source = open(MODELS, encoding="utf-8").read()
     urls = []
-    for repository, revision, model_file in re.findall(r'"([\w.-]+/[\w.-]+)", "([0-9a-f]{40})", "([\w./-]+\.onnx)"', source):
+    # Matches the object initializers (Repository = "...", Revision = "...", ModelFile = "...") in that order.
+    pinned = r'Repository = "([\w.-]+/[\w.-]+)",\s*Revision = "([0-9a-f]{40})",\s*ModelFile = "([\w./-]+\.onnx)"'
+    for repository, revision, model_file in re.findall(pinned, source):
         base = f"https://huggingface.co/{repository}/resolve/{revision}/"
         urls += [base + model_file, base + "vocab.txt"]
     if not urls:

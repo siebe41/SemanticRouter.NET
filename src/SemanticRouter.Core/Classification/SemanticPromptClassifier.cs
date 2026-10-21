@@ -37,16 +37,16 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
     /// <summary>Creates a classifier.</summary>
     /// <param name="embeddingProvider">Embeds utterances and prompts.</param>
     /// <param name="options">Routes and thresholds. Validated eagerly.</param>
-    /// <param name="dependencies">Collaborators that replace the defaults.</param>
+    /// <param name="dependencies">Collaborators that replace the defaults; <see langword="null"/> keeps them all.</param>
     /// <exception cref="InvalidOperationException"><paramref name="options"/> is invalid.</exception>
     public SemanticPromptClassifier(
         IEmbeddingProvider embeddingProvider,
         SemanticRouterOptions options,
-        SemanticPromptClassifierDependencies dependencies)
+        SemanticPromptClassifierDependencies? dependencies)
     {
         ArgumentNullException.ThrowIfNull(embeddingProvider);
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(dependencies);
+        dependencies ??= new();
         options.Validate();
 
         _embeddingProvider = embeddingProvider;

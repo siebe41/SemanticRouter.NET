@@ -159,7 +159,7 @@ public sealed record RouteThresholdRecommendation
     public float? Current { get; init; }
 
     /// <summary>The suggested threshold (<see langword="null"/>: use the default).</summary>
-    public float? Recommended { get; init; }
+    public required float? Recommended { get; init; }
 
     /// <summary>Correct prompts with the route's current setting (and the recommended default).</summary>
     public required int CorrectBefore { get; init; }

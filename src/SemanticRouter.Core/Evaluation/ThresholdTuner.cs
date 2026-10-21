@@ -4,7 +4,7 @@ namespace SemanticRouter;
 public sealed record ThresholdStep
 {
     /// <summary>The route whose own threshold moves, or <see langword="null"/> for <see cref="SemanticRouterOptions.DefaultSimilarityThreshold"/>.</summary>
-    public string? Route { get; init; }
+    public required string? Route { get; init; }
 
     /// <summary>The value now (for a route, <see langword="null"/>: it uses the default).</summary>
     public float? Current { get; init; }

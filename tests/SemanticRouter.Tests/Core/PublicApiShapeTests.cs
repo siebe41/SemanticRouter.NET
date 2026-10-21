@@ -1,7 +1,9 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
+using Moq;
 using SemanticRouter.Embeddings.Onnx;
+using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.Core;
 
@@ -36,18 +38,37 @@ public sealed class PublicApiShapeTests
     }
 
     [Fact]
-    public void Collaborators_with_a_default_can_be_left_out()
+    public async Task Collaborators_in_a_dependencies_object_are_used_and_null_means_the_defaults()
     {
+        var time = new ManualTimeProvider();
+        var health = new ModelHealthTracker(null, new ModelHealthTrackerDependencies { Time = time });
         var options = new SemanticRouterOptions();
-        var classifier = new SemanticPromptClassifier(new HashingEmbeddingProvider(), options, new SemanticPromptClassifierDependencies());
-        var time = new Support.ManualTimeProvider();
-        var health = new ModelHealthTracker(options.Selection, new ModelHealthTrackerDependencies { Time = time });
+        options.Models.Add(TestEmbeddings.Model("cooling", 1));
+        options.Models.Add(TestEmbeddings.Model("ready", 1));
+        var classifier = new Mock<IPromptClassifier>();
+        classifier.Setup(c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PromptClassificationResult
+            {
+                RequiredTier = 1,
+                Reason = RoutingReason.SemanticMatch,
+                Complexity = new ComplexityAnalysis { EstimatedTokens = 10 },
+            });
+        var router = new PromptRouter(classifier.Object, options, new PromptRouterDependencies { Health = health });
 
-        var router = new PromptRouter(classifier, options, new PromptRouterDependencies { Health = health, Time = time });
+        // The router skips a model in cooldown on the health it was given, which measures it with the clock it was given.
+        health.ReportFailure(options.Models[0], ModelFailureKind.Unavailable);
+        (await router.RouteAsync(new PromptRoutingRequest { Prompt = "hello" })).Candidates.Select(c => c.Model.Name)
+            .Should().Equal("ready");
+        time.Advance(TimeSpan.FromHours(1));
+        (await router.RouteAsync(new PromptRoutingRequest { Prompt = "hello" })).Candidates.Select(c => c.Model.Name)
+            .Should().Contain("cooling");
 
-        router.Models.Should().BeEmpty();
-        new DefaultModelSelector(null, new DefaultModelSelectorDependencies())
-            .RankCandidates(new ModelRequirements { RequiredTier = 1 }, []).Should().BeEmpty();
+        // No dependencies object is the same as an empty one.
+        new PromptRouter(classifier.Object, options, null).Models.Should().HaveCount(2);
+        new SemanticPromptClassifier(new HashingEmbeddingProvider(), new SemanticRouterOptions(), null).Should().NotBeNull();
+        new ModelHealthTracker(null, null).IsAvailable(options.Models[0]).Should().BeTrue();
+        new DefaultModelSelector(null, null).RankCandidates(new ModelRequirements { RequiredTier = 1 }, [.. options.Models])
+            .Should().HaveCount(2);
     }
 
     // The compiler generates Deconstruct only for a positional record's primary constructor.

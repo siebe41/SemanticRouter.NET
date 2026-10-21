@@ -203,12 +203,12 @@ public sealed class PromptRouter : IPromptRouter
     /// <summary>Creates a router.</summary>
     /// <param name="classifier">Decides the requirements.</param>
     /// <param name="options">The catalog, routes, profiles and selection settings.</param>
-    /// <param name="dependencies">Collaborators that replace the defaults.</param>
-    public PromptRouter(IPromptClassifier classifier, SemanticRouterOptions options, PromptRouterDependencies dependencies)
+    /// <param name="dependencies">Collaborators that replace the defaults; <see langword="null"/> keeps them all.</param>
+    public PromptRouter(IPromptClassifier classifier, SemanticRouterOptions options, PromptRouterDependencies? dependencies)
     {
         ArgumentNullException.ThrowIfNull(classifier);
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(dependencies);
+        dependencies ??= new();
 
         _classifier = classifier;
         _selector = dependencies.Selector ?? new DefaultModelSelector(options.Selection);

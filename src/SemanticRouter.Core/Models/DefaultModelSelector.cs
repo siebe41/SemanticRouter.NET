@@ -50,10 +50,12 @@ public sealed class DefaultModelSelector : IModelSelector
 
     /// <summary>Creates a selector.</summary>
     /// <param name="options">The selection settings, or <see langword="null"/> for the defaults.</param>
-    /// <param name="dependencies">What the selector learns about the models while the router runs.</param>
-    public DefaultModelSelector(ModelSelectionOptions? options, DefaultModelSelectorDependencies dependencies)
+    /// <param name="dependencies">
+    /// What the selector learns about the models while the router runs, or <see langword="null"/> for none.
+    /// </param>
+    public DefaultModelSelector(ModelSelectionOptions? options, DefaultModelSelectorDependencies? dependencies)
     {
-        ArgumentNullException.ThrowIfNull(dependencies);
+        dependencies ??= new();
         _options = options ?? new ModelSelectionOptions();
         _latency = dependencies.Latency;
         _cache = dependencies.CacheShare;

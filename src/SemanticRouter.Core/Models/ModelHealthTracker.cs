@@ -97,10 +97,10 @@ public sealed class ModelHealthTracker : IModelHealth
 
     /// <summary>Creates a tracker.</summary>
     /// <param name="options">The cooldown durations, or <see langword="null"/> for the defaults.</param>
-    /// <param name="dependencies">The clock and the store for cooldowns.</param>
-    public ModelHealthTracker(ModelSelectionOptions? options, ModelHealthTrackerDependencies dependencies)
+    /// <param name="dependencies">The clock and the store for cooldowns, or <see langword="null"/> for the defaults.</param>
+    public ModelHealthTracker(ModelSelectionOptions? options, ModelHealthTrackerDependencies? dependencies)
     {
-        ArgumentNullException.ThrowIfNull(dependencies);
+        dependencies ??= new();
         _options = options ?? new ModelSelectionOptions();
         _time = dependencies.Time ?? TimeProvider.System;
         _store = dependencies.Store;
