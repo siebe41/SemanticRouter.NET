@@ -191,6 +191,16 @@ Windows SmartScreen and macOS Gatekeeper check a publisher's code signature, not
 
 The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([Signing the desktop app](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true` and, when cutting the release, ticked **Allow unsigned installers** ("Cut a release" asks for both; a tag pushed by hand needs only the variable). Until the signing certificates exist, that is what lets a release through, and those installers are unsigned. A signature, notarization or check that fails stops the release while it is still a draft, before anything is published ([When a release fails](#when-a-release-fails)). The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before anything is uploaded.
 
+### The signing dry run
+
+[`signing-dry-run.yml`](../.github/workflows/signing-dry-run.yml) signs a throw-away build with the release's own secrets and checks the signatures, but uploads nothing: no release, no update feed, no artifact of what it signed, and its token can only read. It runs the release's own scripts, so it signs and checks exactly as a release would: [`deploy/signing-setup.sh`](../deploy/signing-setup.sh) writes the Trusted Signing metadata, or creates the keychain and the `notarytool` profile; `deploy/package-installer.sh` has vpk sign, notarize and staple; [`deploy/check-signature-windows.ps1`](../deploy/check-signature-windows.ps1) and [`deploy/check-signature-macos.sh`](../deploy/check-signature-macos.sh) check the signatures. It builds `win-x64` and `osx-arm64` as version `0.0.0-dryrun.<run number>`, in a job without secrets, and signs them in the `release` environment. A platform whose secrets or variables are missing fails the run and names them: unlike a release, the dry run has no unsigned mode.
+
+**Actions > Signing dry run > Run workflow**, on `main`, with **both**, **windows** or **macos**. Only the repository owner can run it. The run's summary names the certificate that signed each installer. Run it, and have it pass:
+- on both platforms, before you delete `ALLOW_UNSIGNED_RELEASE`: the first signed release then is not the first run of the signing steps;
+- for a platform, after you rotate or renew any of its secrets, certificates or the app-specific password, and before the next release.
+
+A failure points to the same fixes as a failed release's signing job ([When a release fails](#when-a-release-fails)), with no tag, version or draft to clean up. [`deploy/signing-dry-run-check.sh`](../deploy/signing-dry-run-check.sh), which CI runs, fails when the dry run could upload or publish anything, asks for a write permission, or runs other than by hand. It also fails when the release and the dry run stop calling the shared scripts, when a workflow signs or checks a signature inline instead, or when they install different vpk versions.
+
 To check an installer you downloaded:
 
 ```powershell
@@ -207,4 +217,4 @@ The Linux AppImage and the `.zip` and `.tar.gz` archives are not code-signed; ch
 
 - **Code signing until the certificates exist.** While `ALLOW_UNSIGNED_RELEASE` is set, the installers are unsigned and SmartScreen and Gatekeeper warn on first start ([Code signing](#code-signing)). The archives' contents are not signed in any case.
 - **NuGet author signatures.** Only nuget.org's repository signature, as above.
-- **A signing dry run.** The signing steps have not yet run with real certificates, so the first signed release will be their first run. A failure there now leaves only a draft ([The order of a release](#the-order-of-a-release)), but a workflow that signs and notarizes a throwaway build with the production credentials, and uploads nothing, is still to come ([#220](https://github.com/siebe41/SemanticRouter.NET/issues/220)).
+- **Signing with the production credentials.** The [signing dry run](#the-signing-dry-run) exists, but it can't pass until the certificates exist ([#102](https://github.com/siebe41/SemanticRouter.NET/issues/102)), so the signing steps have never run with real certificates. Until it passes on both platforms, keep `ALLOW_UNSIGNED_RELEASE`.

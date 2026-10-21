@@ -733,13 +733,11 @@ jobs:
           dotnet tool install -g vpk --version 1.2.161
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
+      # The signing setup and the signature check are scripts that the signing dry run (signing-dry-run.yml) runs too.
       - name: Signing metadata
         if: env.SIGNING == 'signed'
         shell: bash
-        run: |
-          printf '{"Endpoint":"%s","CodeSigningAccountName":"%s","CertificateProfileName":"%s"}' \
-            "$SIGNING_ENDPOINT" "$SIGNING_ACCOUNT" "$SIGNING_PROFILE" > "$RUNNER_TEMP/metadata.json"
-          echo "AZURE_SIGN_METADATA=$RUNNER_TEMP/metadata.json" >> "$GITHUB_ENV"
+        run: deploy/signing-setup.sh windows
 
       - name: Package
         shell: bash
@@ -750,18 +748,7 @@ jobs:
       # A release meant to be signed uploads nothing whose signature does not check out.
       - name: Check the signature
         shell: pwsh
-        run: |
-          $setup = @(Get-ChildItem installers/win-x64 -Filter '*-Setup.exe')
-          if ($setup.Count -eq 0) { Write-Output '::error::No Setup.exe in installers/win-x64.'; exit 1 }
-          foreach ($file in $setup) {
-            $status = (Get-AuthenticodeSignature $file.FullName).Status
-            if ($env:SIGNING -eq 'signed' -and $status -ne 'Valid') {
-              Write-Output "::error::$($file.Name) should be signed, but its signature is $status."
-              exit 1
-            }
-            $line = if ($status -eq 'Valid') { 'signed, signature checked' } else { "**unsigned** ($status)" }
-            Add-Content $env:GITHUB_STEP_SUMMARY "Windows installer ``$($file.Name)``: $line"
-          }
+        run: ./deploy/check-signature-windows.ps1 installers/win-x64 -Required:($env:SIGNING -eq 'signed')
 
       - name: Attach
         shell: bash
@@ -817,28 +804,11 @@ jobs:
       - name: Install vpk
         run: dotnet tool install -g vpk --version 1.2.161
 
-      # A throw-away keychain with both certificates, and the notarytool profile vpk uses.
+      # A throw-away keychain with both certificates, and the notarytool profile vpk uses. The signing setup and the
+      # signature check are scripts that the signing dry run (signing-dry-run.yml) runs too.
       - name: Signing keychain
         if: env.SIGNING == 'signed'
-        run: |
-          keychain="$RUNNER_TEMP/signing.keychain-db"
-          password="$(uuidgen)"
-          echo "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/build.p12"
-          echo "$INSTALLER_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/installer.p12"
-          security create-keychain -p "$password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          security import "$RUNNER_TEMP/build.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
-          security import "$RUNNER_TEMP/installer.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
-          security list-keychain -d user -s "$keychain"
-          xcrun notarytool store-credentials --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM" --password "$APPLE_PASSWORD" \
-            --keychain "$keychain" semantic-router-notary
-          {
-            echo "APPLE_SIGN_APP_IDENTITY=$APP_IDENTITY"
-            echo "APPLE_SIGN_INSTALL_IDENTITY=$INSTALL_IDENTITY"
-            echo "APPLE_NOTARY_PROFILE=semantic-router-notary"
-            echo "APPLE_KEYCHAIN=$keychain"
-          } >> "$GITHUB_ENV"
+        run: deploy/signing-setup.sh macos
 
       - name: Package
         run: |
@@ -850,27 +820,11 @@ jobs:
       # A release meant to be signed uploads nothing whose signature or notarization ticket does not check out.
       - name: Check the signature
         run: |
-          shopt -s nullglob
-          for rid in osx-arm64 osx-x64; do
-            pkgs=("installers/$rid"/*-Setup.pkg)
-            if [ ${#pkgs[@]} -eq 0 ]; then
-              echo "::error::No Setup.pkg in installers/$rid."
-              exit 1
-            fi
-            for pkg in "${pkgs[@]}"; do
-              status="$(pkgutil --check-signature "$pkg" || true)"
-              if grep -q 'Status: signed' <<<"$status" && xcrun stapler validate "$pkg" >/dev/null 2>&1; then
-                line="signed and notarized, checked"
-              elif [ "$SIGNING" = signed ]; then
-                echo "$status"
-                echo "::error::$(basename "$pkg") should be signed and notarized, but is not."
-                exit 1
-              else
-                line="**unsigned**"
-              fi
-              echo "macOS installer \`$(basename "$pkg")\`: $line" >> "$GITHUB_STEP_SUMMARY"
-            done
-          done
+          required=()
+          if [ "$SIGNING" = signed ]; then
+            required=(--required)
+          fi
+          deploy/check-signature-macos.sh ${required[@]+"${required[@]}"} installers/osx-arm64 installers/osx-x64
 
       - name: Attach
         run: |
