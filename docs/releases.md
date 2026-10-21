@@ -153,17 +153,20 @@ Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag st
 
 Windows SmartScreen and macOS Gatekeeper check a publisher's code signature, not these attestations. Provenance shows where a file came from; it does not stop the warnings on first start.
 
-The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([Signing the desktop app](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true`; until the signing certificates exist, that variable is what lets a release through, and those installers are unsigned. The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before anything is uploaded.
+The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([Signing the desktop app](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true`; until the signing certificates exist, that variable is what lets a release through, and those installers are unsigned. The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before that platform's job uploads anything.
 
 What is checked covers the code that ends up running, not just the installer, and the update package the installed app updates to (the `-full.nupkg` on the release):
 
 | Platform | Checked | How |
 | --- | --- | --- |
-| Windows | `SemanticRouter-win-x64-Setup.exe` | `Get-AuthenticodeSignature`: `Valid` |
-| Windows | `SemanticRouter.exe`, `Squirrel.exe` (Velopack's updater) and `SemanticRouter_ExecutionStub.exe` in the update package's `lib/app/`, and every other executable file there (a program or library, by its `MZ` header) | `Get-AuthenticodeSignature`: `Valid` |
-| macOS | `SemanticRouter-<rid>-Setup.pkg` | `pkgutil --check-signature`, and `xcrun stapler validate` for the notarization ticket |
-| macOS | the `.app` inside the `.pkg` (`pkgutil --expand-full`) | `codesign --verify --deep --strict` with a Developer ID signature, and `spctl --assess` (Gatekeeper) |
-| macOS | the `.app` in the update package | `codesign --verify --deep --strict` with a Developer ID signature, as the desktop app checks an update with `Updates:Publisher` |
+| Windows | `SemanticRouter-win-x64-Setup.exe` | `Get-AuthenticodeSignature`: `Valid`. Its signer is taken as the publisher for the rows below |
+| Windows | `SemanticRouter.exe`, `Squirrel.exe` (Velopack's updater) and `SemanticRouter_ExecutionStub.exe` in the update package's `lib/app/`, and the app's own `SemanticRouter.*` files there | `Get-AuthenticodeSignature`: `Valid`, signed by the publisher |
+| Windows | every other executable file in `lib/app/` (a program or library, by its `MZ` header) | `Get-AuthenticodeSignature`: `Valid`, signed by the publisher or by Microsoft |
+| macOS | `SemanticRouter-<rid>-Setup.pkg` | `pkgutil --check-signature`, signed by the team, and `xcrun stapler validate` for the notarization ticket |
+| macOS | the `.app` inside the `.pkg` (`pkgutil --expand-full`) | `codesign --verify --deep --strict` with the team's Developer ID signature, and `spctl --assess` (Gatekeeper) reporting `source=Notarized Developer ID` |
+| macOS | the `.app` in the update package | `codesign --verify --deep --strict` with the team's Developer ID signature |
+
+These are the signature rules the desktop app applies to an update when `Updates:Publisher` is set ([UpdatePublisher](../src/SemanticRouter.Desktop/UpdatePublisher.cs)), with the publisher taken from the release itself: the installer's signer on Windows, the repository's Apple team ID (`APPLE_TEAM_ID`) on macOS. The app's check also refuses .NET host files (`*.runtimeconfig.json`, `*.deps.json`) that point outside the package; the release does not check those.
 
 The checks are [`deploy/installer-signature-check.ps1`](../deploy/installer-signature-check.ps1) and [`deploy/installer-signature-check.sh`](../deploy/installer-signature-check.sh). On a platform that is meant to be signed, any check that does not pass fails the release; otherwise each line in the summary says **unsigned**. A file that is missing fails either way. CI runs both on its unsigned installer builds, so a change in what Velopack puts where is caught before a release.
 

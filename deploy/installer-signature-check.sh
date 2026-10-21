@@ -5,13 +5,16 @@
 #   deploy/installer-signature-check.sh <dir> <version> <rid>
 #   deploy/installer-signature-check.sh installers/osx-arm64 0.5.0 osx-arm64
 #
-# - SemanticRouter-<rid>-Setup.pkg in <dir>: signed (pkgutil --check-signature), with its notarization ticket stapled
-#   (xcrun stapler validate);
-# - the .app inside it (pkgutil --expand-full): codesign --verify --deep --strict with a Developer ID signature, and
-#   accepted by Gatekeeper (spctl --assess);
+# - SemanticRouter-<rid>-Setup.pkg in <dir>: signed by the team (pkgutil --check-signature), with its notarization
+#   ticket stapled (xcrun stapler validate);
+# - the .app inside it (pkgutil --expand-full): codesign --verify --deep --strict with the team's Developer ID
+#   signature, and accepted by Gatekeeper as notarized (spctl --assess, source=Notarized Developer ID);
 # - the app in the update package SemanticRouter-<version>-<rid>-full.nupkg in <dir>, which the installed app updates
-#   to: codesign --verify --deep --strict with a Developer ID signature, as the desktop app checks an update with
-#   Updates:Publisher (src/SemanticRouter.Desktop/UpdatePublisher.cs).
+#   to: codesign --verify --deep --strict with the team's Developer ID signature, the signature and team ID the desktop
+#   app checks an update for with Updates:Publisher (src/SemanticRouter.Desktop/UpdatePublisher.cs).
+#
+# The team is TEAM_ID, or the (TEAMID) at the end of APP_IDENTITY ("Developer ID Application: Name (TEAMID)"). With
+# SIGNING=signed one of them must be set.
 #
 # With SIGNING=signed each must pass, or the script exits 1; otherwise it reports what is unsigned. A file that is
 # missing fails either way: then nothing was checked. A list item per check goes to $GITHUB_STEP_SUMMARY when it is
@@ -25,6 +28,21 @@ summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
 # Apple's requirement for Developer ID applications, as CodesignSignatures checks it: an ad-hoc signature (which vpk
 # gives an app it does not sign) or another certificate does not pass.
 developer_id='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+team="${TEAM_ID:-}"
+if [ -z "$team" ] && [[ "${APP_IDENTITY:-}" =~ \(([A-Z0-9]+)\)$ ]]; then
+  team="${BASH_REMATCH[1]}"
+fi
+if [ -n "$team" ]; then
+  if ! [[ "$team" =~ ^[A-Z0-9]{10}$ ]]; then
+    echo "::error::The team ID '$team' is not ten capital letters and digits."
+    exit 1
+  fi
+  # The team's own certificate, as UpdatePublisher.Matches compares the team ID: another team's Developer ID fails.
+  developer_id="$developer_id and certificate leaf[subject.OU] = \"$team\""
+elif [ "${SIGNING:-}" = signed ]; then
+  echo "::error::No team ID to check the signatures against: set TEAM_ID, or APP_IDENTITY ending in (TEAMID)."
+  exit 1
+fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 failed=false
@@ -56,6 +74,7 @@ done
 
 ok=false
 if detail="$(pkgutil --check-signature "$pkg" 2>&1)" && grep -q 'Status: signed' <<<"$detail" \
+  && { [ -z "$team" ] || grep -qF "($team)" <<<"$detail"; } \
   && detail="$(xcrun stapler validate "$pkg" 2>&1)"; then
   ok=true
 fi
@@ -68,8 +87,10 @@ if [ -z "$app" ]; then
   exit 1
 fi
 ok=false
+# spctl also says "accepted" when Gatekeeper is switched off (override=security disabled), so require the source.
 if detail="$(codesign --verify --deep --strict -R "=$developer_id" "$app" 2>&1)" \
-  && detail="$(spctl --assess --type execute -vv "$app" 2>&1)"; then
+  && detail="$(spctl --assess --type execute -vv "$app" 2>&1)" \
+  && grep -q '^source=Notarized Developer ID$' <<<"$detail"; then
   ok=true
 fi
 report "\`$(basename "$app")\` in \`$(basename "$pkg")\`" "$ok" "signed and notarized, checked" "$detail"

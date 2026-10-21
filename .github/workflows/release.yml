@@ -734,8 +734,11 @@ jobs:
           done
 
       # A release meant to be signed uploads nothing whose signature or notarization ticket does not check out: the
-      # installer, the app in it, and the app in the update package (deploy/installer-signature-check.sh).
+      # installer, the app in it, and the app in the update package, each signed by this team
+      # (deploy/installer-signature-check.sh).
       - name: Check the signatures
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           for rid in osx-arm64 osx-x64; do
             deploy/installer-signature-check.sh "installers/$rid" "${GITHUB_REF_NAME#v}" "$rid"
