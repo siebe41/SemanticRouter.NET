@@ -683,6 +683,7 @@ jobs:
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $VPK_PRE
 
       # For installer-sbom (with the previous release's full package, when one was downloaded for the delta).
+      # Kept 7 days, so a failed installer-sbom can be re-run after the day the release was cut.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-linux-x64

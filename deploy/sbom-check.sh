@@ -29,17 +29,23 @@ subject_purl="$(jq -r '.metadata.component.purl // ""' "$sbom")"
 
 nuget='.components[]? | select((.purl // "") | startswith("pkg:nuget/"))'
 licensed='[.licenses[]? | .expression // .license.id // .license.name // empty] | length > 0'
-if [ "$(jq -r "[$nuget] | length" "$sbom")" -eq 0 ]; then
+# Each jq result is captured before it is read, so a jq that fails stops the script (set -e) instead of reading as
+# "nothing missing".
+count="$(jq -r "[$nuget] | length" "$sbom")"
+unlicensed="$(jq -r "[$nuget | select(($licensed) | not) | .purl] | unique | .[]" "$sbom")"
+runtimepacks="$(jq -r "[$nuget | select(.purl | startswith(\"pkg:nuget/runtimepack.\")) | .purl] | unique | .[]" "$sbom")"
+
+if [ "$count" -eq 0 ]; then
   error "it has no NuGet components."
 fi
 
 while IFS= read -r purl; do
   if [ -n "$purl" ]; then error "$purl has no licence."; fi
-done < <(jq -r "[$nuget | select(($licensed) | not) | .purl] | unique | .[]" "$sbom")
+done <<< "$unlicensed"
 
 while IFS= read -r purl; do
   if [ -n "$purl" ]; then error "$purl is named after Syft's runtime pack, not its package."; fi
-done < <(jq -r "[$nuget | select(.purl | startswith(\"pkg:nuget/runtimepack.\")) | .purl] | unique | .[]" "$sbom")
+done <<< "$runtimepacks"
 
 for component in "$@"; do
   if ! jq -e --arg name "$component" "any(.components[]?; .name == \$name and ($licensed))" "$sbom" >/dev/null; then

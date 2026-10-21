@@ -60,7 +60,9 @@ jobs:
             echo "::error::$tag has no desktop SBOM."
             exit 1
           fi
-          jq -s '.[0] + { components: ([.[].components[]?] | unique_by(."bom-ref")), dependencies: [] }' "${desktop[@]}" \
+          # The same package from several platforms is one component: Syft's bom-refs differ per file, so they are
+          # merged by purl, and only a component without one by its bom-ref (or, with neither, by its whole content).
+          jq -s '.[0] + { components: ([.[].components[]?] | unique_by(.purl // ."bom-ref" // tojson)), dependencies: [] }' "${desktop[@]}" \
             > desktop.cdx.json
           echo "desktop=desktop.cdx.json" >> "$GITHUB_OUTPUT"
           echo "packages=sboms/SemanticRouter-$version-packages.cdx.json" >> "$GITHUB_OUTPUT"

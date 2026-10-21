@@ -275,14 +275,29 @@ foreach (var entry in extra.RootElement.GetProperty("components").EnumerateArray
     }
 
     var component = new JsonObject { ["bom-ref"] = bomRef, ["type"] = Value("type") ?? "library", ["name"] = name };
+    // A version the notices word as prose ("as vendored by Velopack 1.2.161") is not one an inventory tool can read: the
+    // component gets no version, and the prose goes in its description.
+    string? prose = null;
     if (Value("version") is { } template)
     {
-        component["version"] = ExpandVersion(template);
+        var version = ExpandVersion(template);
+        if (version.Any(char.IsWhiteSpace))
+        {
+            prose = version;
+        }
+        else
+        {
+            component["version"] = version;
+        }
     }
 
     if (Value("description") is { } what)
     {
-        component["description"] = what;
+        component["description"] = prose is null ? what : $"{what} ({prose})";
+    }
+    else if (prose is not null)
+    {
+        component["description"] = prose;
     }
 
     if (Value("copyright") is { } copyright)
