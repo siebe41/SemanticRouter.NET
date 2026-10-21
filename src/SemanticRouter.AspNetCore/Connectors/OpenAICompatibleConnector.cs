@@ -255,7 +255,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
         try
         {
-            if (JsonNode.Parse(body.Span) is JsonObject json)
+            if (JsonHelpers.ParseEditable(body) is JsonObject json)
             {
                 if (!string.IsNullOrEmpty(model))
                 {

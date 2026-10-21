@@ -922,7 +922,7 @@ public static partial class RouterDashboardEndpoints
         JsonNode? document = null;
         try
         {
-            JsonNode? node = JsonNode.Parse(raw, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+            JsonNode? node = JsonHelpers.ParseEditable(raw, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
             document = node is JsonObject obj && obj.TryGetPropertyValue("config", out JsonNode? inner) ? inner : node;
             if (document is not JsonObject)
             {
@@ -958,7 +958,7 @@ public static partial class RouterDashboardEndpoints
         {
             JsonObject? body = string.IsNullOrWhiteSpace(raw)
                 ? null
-                : JsonNode.Parse(raw, documentOptions: new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true }) as JsonObject;
+                : JsonHelpers.ParseEditable(raw, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true }) as JsonObject;
             string? name = body?["name"] is JsonValue value && value.TryGetValue(out string? text) ? text?.Trim() : null;
             if (string.IsNullOrEmpty(name) || body!["settings"] is not JsonObject settings)
             {
