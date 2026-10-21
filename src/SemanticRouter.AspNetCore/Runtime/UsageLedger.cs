@@ -3,38 +3,95 @@ using System.Text.Json.Serialization;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>What one served request used.</summary>
-/// <param name="Timestamp">When it finished.</param>
-/// <param name="Model">The catalog model that served it.</param>
-/// <param name="Connector">Its connector.</param>
-/// <param name="Route">The matched route, if any.</param>
-/// <param name="Client">The gateway key name, if any.</param>
-/// <param name="IsLocal">Whether the model is local.</param>
-/// <param name="InputTokens">Input tokens, excluding cached ones.</param>
-/// <param name="OutputTokens">Output tokens.</param>
-/// <param name="CacheReadTokens">Input tokens read from the prompt cache.</param>
-/// <param name="CacheWriteTokens">Input tokens written to the prompt cache.</param>
-/// <param name="CostUsd">Cost at the model's configured prices.</param>
-/// <param name="ReferenceCostUsd">Cost at the reference model's prices (<see cref="UsageOptions.ReferenceModel"/>), or <see cref="CostUsd"/>.</param>
-/// <param name="Profile">The routing profile the request was routed under, if any.</param>
-/// <param name="SubscriptionValueUsd">
-/// For a subscription model, the request at the provider's API prices (<see cref="ModelDefinition.ApiValue"/>): value
-/// received, not spend. 0 otherwise.
-/// </param>
-public sealed record UsageRecord(
-    DateTimeOffset Timestamp, string Model, string Connector, string? Route, string? Client, bool IsLocal,
-    long InputTokens, long OutputTokens, long CacheReadTokens, long CacheWriteTokens, decimal CostUsd, decimal ReferenceCostUsd,
-    string? Profile = null, decimal SubscriptionValueUsd = 0m);
+public sealed record UsageRecord
+{
+    /// <summary>When it finished.</summary>
+    public required DateTimeOffset Timestamp { get; init; }
+
+    /// <summary>The catalog model that served it.</summary>
+    public required string Model { get; init; }
+
+    /// <summary>Its connector.</summary>
+    public required string Connector { get; init; }
+
+    /// <summary>The matched route, if any.</summary>
+    public string? Route { get; init; }
+
+    /// <summary>The gateway key name, if any.</summary>
+    public string? Client { get; init; }
+
+    /// <summary>Whether the model is local.</summary>
+    public required bool IsLocal { get; init; }
+
+    /// <summary>Input tokens, excluding cached ones.</summary>
+    public required long InputTokens { get; init; }
+
+    /// <summary>Output tokens.</summary>
+    public required long OutputTokens { get; init; }
+
+    /// <summary>Input tokens read from the prompt cache.</summary>
+    public required long CacheReadTokens { get; init; }
+
+    /// <summary>Input tokens written to the prompt cache.</summary>
+    public required long CacheWriteTokens { get; init; }
+
+    /// <summary>Cost at the model's configured prices.</summary>
+    public required decimal CostUsd { get; init; }
+
+    /// <summary>Cost at the reference model's prices (<see cref="UsageOptions.ReferenceModel"/>), or <see cref="CostUsd"/>.</summary>
+    public required decimal ReferenceCostUsd { get; init; }
+
+    /// <summary>The routing profile the request was routed under, if any.</summary>
+    public string? Profile { get; init; }
+
+    /// <summary>
+    /// For a subscription model, the request at the provider's API prices (<see cref="ModelDefinition.ApiValue"/>): value
+    /// received, not spend. 0 otherwise.
+    /// </summary>
+    public decimal SubscriptionValueUsd { get; init; }
+}
 
 /// <summary>
 /// Usage added up. <c>SubscriptionValueUsd</c> is what the subscriptions' requests would have cost at API prices; it is
 /// not part of <c>CostUsd</c>.
 /// </summary>
-public sealed record UsageTotals(
-    long Requests, long InputTokens, long OutputTokens, long CacheReadTokens, long CacheWriteTokens, decimal CostUsd, decimal ReferenceCostUsd,
-    decimal SubscriptionValueUsd = 0m)
+public sealed record UsageTotals
 {
+    /// <summary>Served requests.</summary>
+    public required long Requests { get; init; }
+
+    /// <summary>Input tokens, excluding cached ones.</summary>
+    public required long InputTokens { get; init; }
+
+    /// <summary>Output tokens.</summary>
+    public required long OutputTokens { get; init; }
+
+    /// <summary>Input tokens read from the prompt cache.</summary>
+    public required long CacheReadTokens { get; init; }
+
+    /// <summary>Input tokens written to the prompt cache.</summary>
+    public required long CacheWriteTokens { get; init; }
+
+    /// <summary>Cost at the models' prices.</summary>
+    public required decimal CostUsd { get; init; }
+
+    /// <summary>Cost at the reference model's prices.</summary>
+    public required decimal ReferenceCostUsd { get; init; }
+
+    /// <summary>The subscription requests at the providers' API prices (<see cref="UsageRecord.SubscriptionValueUsd"/>).</summary>
+    public decimal SubscriptionValueUsd { get; init; }
+
     /// <summary>Nothing.</summary>
-    public static UsageTotals Zero { get; } = new(0, 0, 0, 0, 0, 0, 0);
+    public static UsageTotals Zero { get; } = new UsageTotals
+    {
+        Requests = 0,
+        InputTokens = 0,
+        OutputTokens = 0,
+        CacheReadTokens = 0,
+        CacheWriteTokens = 0,
+        CostUsd = 0,
+        ReferenceCostUsd = 0,
+    };
 
     /// <summary>All tokens: input, output and cache.</summary>
     public long TotalTokens => InputTokens + OutputTokens + CacheReadTokens + CacheWriteTokens;
@@ -46,18 +103,34 @@ public sealed record UsageTotals(
     public UsageTotals Add(UsageRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        return new(Requests + 1, InputTokens + record.InputTokens, OutputTokens + record.OutputTokens, CacheReadTokens + record.CacheReadTokens,
-            CacheWriteTokens + record.CacheWriteTokens, CostUsd + record.CostUsd, ReferenceCostUsd + record.ReferenceCostUsd,
-            SubscriptionValueUsd + record.SubscriptionValueUsd);
+        return new UsageTotals
+        {
+            Requests = Requests + 1,
+            InputTokens = InputTokens + record.InputTokens,
+            OutputTokens = OutputTokens + record.OutputTokens,
+            CacheReadTokens = CacheReadTokens + record.CacheReadTokens,
+            CacheWriteTokens = CacheWriteTokens + record.CacheWriteTokens,
+            CostUsd = CostUsd + record.CostUsd,
+            ReferenceCostUsd = ReferenceCostUsd + record.ReferenceCostUsd,
+            SubscriptionValueUsd = SubscriptionValueUsd + record.SubscriptionValueUsd,
+        };
     }
 
     /// <summary>Adds other totals.</summary>
     public UsageTotals Add(UsageTotals other)
     {
         ArgumentNullException.ThrowIfNull(other);
-        return new(Requests + other.Requests, InputTokens + other.InputTokens, OutputTokens + other.OutputTokens, CacheReadTokens + other.CacheReadTokens,
-            CacheWriteTokens + other.CacheWriteTokens, CostUsd + other.CostUsd, ReferenceCostUsd + other.ReferenceCostUsd,
-            SubscriptionValueUsd + other.SubscriptionValueUsd);
+        return new UsageTotals
+        {
+            Requests = Requests + other.Requests,
+            InputTokens = InputTokens + other.InputTokens,
+            OutputTokens = OutputTokens + other.OutputTokens,
+            CacheReadTokens = CacheReadTokens + other.CacheReadTokens,
+            CacheWriteTokens = CacheWriteTokens + other.CacheWriteTokens,
+            CostUsd = CostUsd + other.CostUsd,
+            ReferenceCostUsd = ReferenceCostUsd + other.ReferenceCostUsd,
+            SubscriptionValueUsd = SubscriptionValueUsd + other.SubscriptionValueUsd,
+        };
     }
 }
 
@@ -88,13 +161,30 @@ public enum UsageGrouping
 }
 
 /// <summary>One group of a usage summary.</summary>
-public sealed record UsageGroup(string Key, UsageTotals Totals);
+public sealed record UsageGroup
+{
+    /// <summary>The group: a model, connector, route, day, client, profile or location, by the grouping asked for.</summary>
+    public required string Key { get; init; }
+
+    /// <summary>The group's usage.</summary>
+    public required UsageTotals Totals { get; init; }
+}
 
 /// <summary>
-/// One model's usage within one group of a summary (<paramref name="Key"/>, as in <see cref="UsageGroup"/>), at the
+/// One model's usage within one group of a summary (<see cref="Key"/>, as in <see cref="UsageGroup"/>), at the
 /// prices it was recorded at.
 /// </summary>
-public sealed record UsageModelTotals(string Key, string Model, UsageTotals Totals);
+public sealed record UsageModelTotals
+{
+    /// <summary>The group, as in <see cref="UsageGroup.Key"/>.</summary>
+    public required string Key { get; init; }
+
+    /// <summary>The catalog model.</summary>
+    public required string Model { get; init; }
+
+    /// <summary>The model's usage in the group.</summary>
+    public required UsageTotals Totals { get; init; }
+}
 
 /// <summary>Records what every served request used, for the dashboard and for budgets.</summary>
 public interface IUsageLedger
@@ -232,7 +322,7 @@ internal sealed class UsageModelTotalsBuilder
     public void Add(string key, string model, UsageTotals totals) =>
         _totals[(key, model)] = _totals.TryGetValue((key, model), out UsageModelTotals? sum)
             ? sum with { Totals = sum.Totals.Add(totals) }
-            : new UsageModelTotals(key, model, totals);
+            : new UsageModelTotals { Key = key, Model = model, Totals = totals };
 
     public void Add(IEnumerable<UsageModelTotals> totals)
     {
@@ -308,14 +398,14 @@ public static class UsageSummaries
         ArgumentNullException.ThrowIfNull(zone);
         return Order(records
             .GroupBy(r => KeyOf(r, by, zone), StringComparer.OrdinalIgnoreCase)
-            .Select(g => new UsageGroup(g.Key, g.Aggregate(UsageTotals.Zero, (total, r) => total.Add(r)))), by);
+            .Select(g => new UsageGroup { Key = g.Key, Totals = g.Aggregate(UsageTotals.Zero, (total, r) => total.Add(r)) }), by);
     }
 
     /// <summary>Adds up <paramref name="totals"/> per group, in the order of the groups of records.</summary>
     internal static IReadOnlyList<UsageGroup> Group(IEnumerable<UsageModelTotals> totals, UsageGrouping by) =>
         Order(totals
             .GroupBy(t => t.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new UsageGroup(g.Key, g.Aggregate(UsageTotals.Zero, (total, t) => total.Add(t.Totals)))), by);
+            .Select(g => new UsageGroup { Key = g.Key, Totals = g.Aggregate(UsageTotals.Zero, (total, t) => total.Add(t.Totals)) }), by);
 
     private static UsageGroup[] Order(IEnumerable<UsageGroup> groups, UsageGrouping by) => groups
         .OrderByDescending(g => by == UsageGrouping.Day ? 0 : g.Totals.CostUsd)

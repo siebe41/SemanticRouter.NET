@@ -1,22 +1,37 @@
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Moq;
+using SemanticRouter.AspNetCore;
+using SemanticRouter.Connectors.Copilot;
 using SemanticRouter.Embeddings.Onnx;
+using SemanticRouter.Storage.Sqlite;
 using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.Core;
 
 /// <summary>
-/// Core and Embeddings.Onnx grow by addition (#199; CONTRIBUTING.md, "Adding a field or a dependency without a break"):
-/// their records are not positional, except the frozen ones, and no public constructor has optional parameters.
+/// The library packages grow by addition (#199; CONTRIBUTING.md, "Adding a field or a dependency without a break"):
+/// their records are not positional, except the frozen ones, no public constructor has optional parameters, and every
+/// enum has a zero member, except the documented ones.
 /// </summary>
 public sealed class PublicApiShapeTests
 {
-    private static readonly Assembly[] Packages = [typeof(PromptRouter).Assembly, typeof(OnnxEmbeddingOptions).Assembly];
+    private static readonly Assembly[] Packages =
+    [
+        typeof(PromptRouter).Assembly,
+        typeof(OnnxEmbeddingOptions).Assembly,
+        typeof(RoutingActivityLog).Assembly,
+        typeof(SqliteStateOptions).Assembly,
+        typeof(CopilotConnector).Assembly,
+    ];
 
     // Complete by definition, and documented as frozen.
     private static readonly Type[] FrozenPositionalRecords = [typeof(RouteScore), typeof(TimeWindow)];
+
+    // A plain-text reply is no ResponseFormat at all, and ResponseFormat.Kind is required (see its remarks).
+    private static readonly Type[] EnumsWithoutZero = [typeof(ResponseFormatKind)];
 
     [Fact]
     public void Public_records_are_not_positional_except_the_frozen_ones()
@@ -35,6 +50,16 @@ public sealed class PublicApiShapeTests
             .ToArray();
 
         optional.Should().BeEmpty("a parameter appended to a shipped constructor removes it; add a dependencies property or an overload");
+    }
+
+    [Fact]
+    public void Public_enums_define_zero_except_the_documented_ones()
+    {
+        Type[] withoutZero = Packages.SelectMany(a => a.GetExportedTypes())
+            .Where(t => t.IsEnum && !Enum.GetValuesAsUnderlyingType(t).Cast<object>().Any(v => Convert.ToInt64(v, CultureInfo.InvariantCulture) == 0))
+            .ToArray();
+
+        withoutZero.Should().BeEquivalentTo(EnumsWithoutZero, "default(T) of an enum is zero, which should be a value the type defines (CA1008)");
     }
 
     [Fact]
@@ -69,6 +94,15 @@ public sealed class PublicApiShapeTests
         new ModelHealthTracker(null, null).IsAvailable(options.Models[0]).Should().BeTrue();
         new DefaultModelSelector(null, null).RankCandidates(new ModelRequirements { RequiredTier = 1 }, [.. options.Models])
             .Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void Converted_records_keep_the_defaults_their_parameters_had()
+    {
+        new ActivityPurgeResult { Removed = 1 }.Complete.Should().BeTrue();
+        new ToolDefinition { Name = "Read", InputSchemaJson = "{}" }.Kind.Should().Be(ToolKind.Function);
+        new UsageTotals { Requests = 0, InputTokens = 0, OutputTokens = 0, CacheReadTokens = 0, CacheWriteTokens = 0, CostUsd = 0, ReferenceCostUsd = 0 }
+            .Should().Be(UsageTotals.Zero);
     }
 
     // The compiler generates Deconstruct only for a positional record's primary constructor.

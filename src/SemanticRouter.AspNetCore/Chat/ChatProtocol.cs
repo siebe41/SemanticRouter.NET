@@ -28,45 +28,79 @@ public abstract record ContentBlock
 }
 
 /// <summary>Plain text.</summary>
-/// <param name="Text">The text.</param>
-public sealed record TextBlock(string Text) : ContentBlock;
+public sealed record TextBlock : ContentBlock
+{
+    /// <summary>The text.</summary>
+    public required string Text { get; init; }
+}
 
 /// <summary>An image, either inline (base64) or by URL.</summary>
-/// <param name="MediaType">MIME type for inline data, e.g. <c>image/png</c>.</param>
-/// <param name="Data">Base64 data when inline.</param>
-/// <param name="Url">The URL (or data URL) when referenced.</param>
-public sealed record ImageBlock(string? MediaType, string? Data, string? Url) : ContentBlock;
+public sealed record ImageBlock : ContentBlock
+{
+    /// <summary>MIME type for inline data, e.g. <c>image/png</c>.</summary>
+    public string? MediaType { get; init; }
+
+    /// <summary>Base64 data when inline.</summary>
+    public string? Data { get; init; }
+
+    /// <summary>The URL (or data URL) when referenced.</summary>
+    public string? Url { get; init; }
+}
 
 /// <summary>A tool call issued by the assistant.</summary>
-/// <param name="Id">Opaque call id, echoed back by the matching <see cref="ToolResultBlock"/>.</param>
-/// <param name="Name">The tool name.</param>
-/// <param name="InputJson">The call arguments as a JSON object.</param>
-public sealed record ToolUseBlock(string Id, string Name, string InputJson) : ContentBlock;
+public sealed record ToolUseBlock : ContentBlock
+{
+    /// <summary>Opaque call id, echoed back by the matching <see cref="ToolResultBlock"/>.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>The tool name.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>The call arguments as a JSON object.</summary>
+    public required string InputJson { get; init; }
+}
 
 /// <summary>
 /// The model's visible reasoning ("extended thinking"). Carried back by clients on tool-loop continuations; only an
 /// Anthropic backend can use it again, and only with the signature it issued.
 /// </summary>
-/// <param name="Text">The reasoning text (empty for redacted thinking).</param>
-/// <param name="Signature">The backend's signature, or the router's marker for reasoning it relayed from elsewhere.</param>
-/// <param name="RedactedData">Encrypted content of a <c>redacted_thinking</c> block.</param>
-public sealed record ThinkingBlock(string Text, string? Signature, string? RedactedData = null) : ContentBlock
+public sealed record ThinkingBlock : ContentBlock
 {
     /// <summary>The signature the router puts on reasoning it relays from a non-Anthropic backend.</summary>
     public const string RouterSignature = "semantic-router-relayed";
+
+    /// <summary>The reasoning text (empty for redacted thinking).</summary>
+    public required string Text { get; init; }
+
+    /// <summary>The backend's signature, or the router's marker for reasoning it relayed from elsewhere.</summary>
+    public string? Signature { get; init; }
+
+    /// <summary>Encrypted content of a <c>redacted_thinking</c> block.</summary>
+    public string? RedactedData { get; init; }
 }
 
 /// <summary>The result of a tool call, sent by the client.</summary>
-/// <param name="ToolUseId">The <see cref="ToolUseBlock.Id"/> this answers.</param>
-/// <param name="Content">The result, flattened to text.</param>
-/// <param name="IsError">Whether the tool failed.</param>
-public sealed record ToolResultBlock(string ToolUseId, string Content, bool IsError) : ContentBlock;
+public sealed record ToolResultBlock : ContentBlock
+{
+    /// <summary>The <see cref="ToolUseBlock.Id"/> this answers.</summary>
+    public required string ToolUseId { get; init; }
+
+    /// <summary>The result, flattened to text.</summary>
+    public required string Content { get; init; }
+
+    /// <summary>Whether the tool failed.</summary>
+    public required bool IsError { get; init; }
+}
 
 /// <summary>One message in the conversation, with its structured content.</summary>
-/// <param name="Role"><c>system</c>, <c>user</c> or <c>assistant</c>. Tool results are <c>user</c> turns.</param>
-/// <param name="Blocks">The content parts, in order.</param>
-public sealed record ChatTurn(string Role, IReadOnlyList<ContentBlock> Blocks)
+public sealed record ChatTurn
 {
+    /// <summary><c>system</c>, <c>user</c> or <c>assistant</c>. Tool results are <c>user</c> turns.</summary>
+    public required string Role { get; init; }
+
+    /// <summary>The content parts, in order.</summary>
+    public required IReadOnlyList<ContentBlock> Blocks { get; init; }
+
     /// <summary>The text parts joined with newlines (tool calls and results excluded).</summary>
     public string Text => string.Join('\n', Blocks.OfType<TextBlock>().Select(b => b.Text).Where(t => t.Length > 0));
 
@@ -74,7 +108,7 @@ public sealed record ChatTurn(string Role, IReadOnlyList<ContentBlock> Blocks)
     public bool IsToolResultOnly => Blocks.Count > 0 && Blocks.All(b => b is ToolResultBlock);
 
     /// <summary>Creates a turn with a single text block.</summary>
-    public static ChatTurn FromText(string role, string text) => new(role, [new TextBlock(text)]);
+    public static ChatTurn FromText(string role, string text) => new ChatTurn { Role = role, Blocks = [new TextBlock { Text = text }] };
 }
 
 /// <summary>What kind of tool a client offers.</summary>
@@ -91,15 +125,26 @@ public enum ToolKind
 }
 
 /// <summary>A tool the client offers the model.</summary>
-/// <param name="Name">The name used with backends: unique and safe for every protocol (namespaces are folded in).</param>
-/// <param name="Description">What it does.</param>
-/// <param name="InputSchemaJson">JSON Schema of its arguments (an object schema).</param>
-/// <param name="Kind">Function or custom (free-text input).</param>
-/// <param name="Namespace">The Responses API namespace the client declared it in, when not the default.</param>
-/// <param name="ClientName">The name the client uses, when it differs from <paramref name="Name"/>.</param>
-public sealed record ToolDefinition(
-    string Name, string? Description, string InputSchemaJson, ToolKind Kind = ToolKind.Function, string? Namespace = null, string? ClientName = null)
+public sealed record ToolDefinition
 {
+    /// <summary>The name used with backends: unique and safe for every protocol (namespaces are folded in).</summary>
+    public required string Name { get; init; }
+
+    /// <summary>What it does.</summary>
+    public string? Description { get; init; }
+
+    /// <summary>JSON Schema of its arguments (an object schema).</summary>
+    public required string InputSchemaJson { get; init; }
+
+    /// <summary>Function or custom (free-text input).</summary>
+    public ToolKind Kind { get; init; } = ToolKind.Function;
+
+    /// <summary>The Responses API namespace the client declared it in, when not the default.</summary>
+    public string? Namespace { get; init; }
+
+    /// <summary>The name the client uses, when it differs from <see cref="Name"/>.</summary>
+    public string? ClientName { get; init; }
+
     /// <summary>The schema a custom tool is given when a backend only knows functions.</summary>
     public const string CustomInputSchema = """{"type":"object","properties":{"input":{"type":"string","description":"The tool's raw input."}},"required":["input"]}""";
 
@@ -111,10 +156,14 @@ public sealed record ToolDefinition(
 }
 
 /// <summary>A request for the model to reason before answering.</summary>
-/// <param name="Effort"><c>minimal</c>, <c>low</c>, <c>medium</c> or <c>high</c>, when the client gave one.</param>
-/// <param name="BudgetTokens">The thinking budget, when the client gave one (Anthropic).</param>
-public sealed record ReasoningRequest(string? Effort, int? BudgetTokens)
+public sealed record ReasoningRequest
 {
+    /// <summary><c>minimal</c>, <c>low</c>, <c>medium</c> or <c>high</c>, when the client gave one.</summary>
+    public string? Effort { get; init; }
+
+    /// <summary>The thinking budget, when the client gave one (Anthropic).</summary>
+    public int? BudgetTokens { get; init; }
+
     /// <summary>The effort, derived from the budget when the client only gave a budget.</summary>
     public string EffectiveEffort => Effort ?? BudgetTokens switch
     {
@@ -135,6 +184,12 @@ public sealed record ReasoningRequest(string? Effort, int? BudgetTokens)
 }
 
 /// <summary>What shape the reply must have.</summary>
+/// <remarks>
+/// There is deliberately no zero member. A plain-text reply is no <see cref="ResponseFormat"/> at all
+/// (<see cref="ChatCompletionRequest.ResponseFormat"/> is <see langword="null"/>), and every request builder treats a
+/// format that is present as a request for JSON. <see cref="ResponseFormat.Kind"/> is required, so it is never left
+/// at <c>default</c>.
+/// </remarks>
 public enum ResponseFormatKind
 {
     /// <summary>Any JSON object.</summary>
@@ -145,11 +200,20 @@ public enum ResponseFormatKind
 }
 
 /// <summary>Structured output: OpenAI <c>response_format</c> or Responses <c>text.format</c>.</summary>
-/// <param name="Kind">JSON object or JSON schema.</param>
-/// <param name="Name">The schema's name.</param>
-/// <param name="SchemaJson">The JSON schema.</param>
-/// <param name="Strict">Whether the schema must be followed exactly.</param>
-public sealed record ResponseFormat(ResponseFormatKind Kind, string? Name = null, string? SchemaJson = null, bool Strict = false);
+public sealed record ResponseFormat
+{
+    /// <summary>JSON object or JSON schema.</summary>
+    public required ResponseFormatKind Kind { get; init; }
+
+    /// <summary>The schema's name.</summary>
+    public string? Name { get; init; }
+
+    /// <summary>The JSON schema.</summary>
+    public string? SchemaJson { get; init; }
+
+    /// <summary>Whether the schema must be followed exactly.</summary>
+    public bool Strict { get; init; }
+}
 
 /// <summary>How the model may use the offered tools.</summary>
 public enum ToolChoiceMode
@@ -168,9 +232,14 @@ public enum ToolChoiceMode
 }
 
 /// <summary>The request's tool choice.</summary>
-/// <param name="Mode">The mode.</param>
-/// <param name="Name">The required tool for <see cref="ToolChoiceMode.Named"/>.</param>
-public readonly record struct ToolChoice(ToolChoiceMode Mode, string? Name = null);
+public readonly record struct ToolChoice
+{
+    /// <summary>The mode.</summary>
+    public required ToolChoiceMode Mode { get; init; }
+
+    /// <summary>The required tool for <see cref="ToolChoiceMode.Named"/>.</summary>
+    public string? Name { get; init; }
+}
 
 /// <summary>Why a reply ended.</summary>
 public enum ChatStopReason
@@ -195,12 +264,20 @@ public enum ChatStopReason
 }
 
 /// <summary>Token usage reported by a backend.</summary>
-/// <param name="InputTokens">Prompt tokens.</param>
-/// <param name="OutputTokens">Completion tokens.</param>
-/// <param name="CacheReadTokens">Prompt tokens served from a prompt cache, when reported.</param>
-/// <param name="CacheCreationTokens">Prompt tokens written to a prompt cache, when reported.</param>
-public readonly record struct ChatUsage(int? InputTokens, int? OutputTokens, int? CacheReadTokens = null, int? CacheCreationTokens = null)
+public readonly record struct ChatUsage
 {
+    /// <summary>Prompt tokens.</summary>
+    public int? InputTokens { get; init; }
+
+    /// <summary>Completion tokens.</summary>
+    public int? OutputTokens { get; init; }
+
+    /// <summary>Prompt tokens served from a prompt cache, when reported.</summary>
+    public int? CacheReadTokens { get; init; }
+
+    /// <summary>Prompt tokens written to a prompt cache, when reported.</summary>
+    public int? CacheCreationTokens { get; init; }
+
     /// <summary>Whether any count is known.</summary>
     public bool IsEmpty => InputTokens is null && OutputTokens is null && CacheReadTokens is null && CacheCreationTokens is null;
 }

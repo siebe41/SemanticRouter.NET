@@ -6,22 +6,40 @@ using Microsoft.Extensions.DependencyInjection;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>A cloud model's list prices, in USD per million tokens.</summary>
-/// <param name="Id">The price list's id for the model, e.g. <c>anthropic/claude-sonnet-5.5</c>.</param>
-/// <param name="Input">Input tokens.</param>
-/// <param name="Output">Output tokens.</param>
-/// <param name="CacheRead">Input tokens read from the prompt cache, when the list prices them.</param>
-/// <param name="CacheWrite">Input tokens written to the prompt cache, when the list prices them (most providers charge the input price).</param>
-/// <param name="ContextWindow">The context window, when the list gives it.</param>
-public sealed record ModelPrice(string Id, decimal Input, decimal Output, decimal? CacheRead, decimal? CacheWrite, int? ContextWindow);
+public sealed record ModelPrice
+{
+    /// <summary>The price list's id for the model, e.g. <c>anthropic/claude-sonnet-5.5</c>.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>Input tokens.</summary>
+    public required decimal Input { get; init; }
+
+    /// <summary>Output tokens.</summary>
+    public required decimal Output { get; init; }
+
+    /// <summary>Input tokens read from the prompt cache, when the list prices them.</summary>
+    public decimal? CacheRead { get; init; }
+
+    /// <summary>Input tokens written to the prompt cache, when the list prices them (most providers charge the input price).</summary>
+    public decimal? CacheWrite { get; init; }
+
+    /// <summary>The context window, when the list gives it.</summary>
+    public int? ContextWindow { get; init; }
+}
 
 /// <summary>A price the list has for a catalog model.</summary>
-/// <param name="Price">The list's entry.</param>
-/// <param name="SameProvider">
-/// Whether the entry is the connector's own provider (Anthropic for an Anthropic connector, OpenAI for api.openai.com, the
-/// exact model on OpenRouter). <see langword="false"/> when the connector's host is not one the list knows, such as a
-/// gateway serving the same model, which may charge differently.
-/// </param>
-public sealed record ModelPriceMatch(ModelPrice Price, bool SameProvider);
+public sealed record ModelPriceMatch
+{
+    /// <summary>The list's entry.</summary>
+    public required ModelPrice Price { get; init; }
+
+    /// <summary>
+    /// Whether the entry is the connector's own provider (Anthropic for an Anthropic connector, OpenAI for api.openai.com, the
+    /// exact model on OpenRouter). <see langword="false"/> when the connector's host is not one the list knows, such as a
+    /// gateway serving the same model, which may charge differently.
+    /// </summary>
+    public required bool SameProvider { get; init; }
+}
 
 /// <summary>
 /// Cloud providers' list prices, from OpenRouter's public model list (<c>GET https://openrouter.ai/api/v1/models</c>,
@@ -125,7 +143,15 @@ public sealed partial class ModelPriceList
             }
 
             int? context = model.TryGetProperty("context_length", out JsonElement length) && length.TryGetInt32(out int tokens) && tokens > 0 ? tokens : null;
-            prices.Add(new ModelPrice(name, input, output, PerMillion(pricing, "input_cache_read"), PerMillion(pricing, "input_cache_write"), context));
+            prices.Add(new ModelPrice
+            {
+                Id = name,
+                Input = input,
+                Output = output,
+                CacheRead = PerMillion(pricing, "input_cache_read"),
+                CacheWrite = PerMillion(pricing, "input_cache_write"),
+                ContextWindow = context,
+            });
         }
 
         return new ModelPriceList(prices, source, fetched);
@@ -150,7 +176,7 @@ public sealed partial class ModelPriceList
         string? host = connector.Type is ConnectorTypes.OpenAICompatible or ConnectorTypes.Anthropic or ConnectorTypes.Responses ? connector.BaseAddress?.Host.ToLowerInvariant() : null;
         if (host is "openrouter.ai" or "www.openrouter.ai")
         {
-            return _byId.TryGetValue(id, out ModelPrice? exact) ? new ModelPriceMatch(exact, SameProvider: true) : null;
+            return _byId.TryGetValue(id, out ModelPrice? exact) ? new ModelPriceMatch { Price = exact, SameProvider = true } : null;
         }
 
         string? vendor = VendorOf(connector, host);
@@ -159,12 +185,16 @@ public sealed partial class ModelPriceList
         if (vendor == "anthropic" && id.ToLowerInvariant() is "haiku" or "sonnet" or "opus" or "fable"
             && _byId.TryGetValue($"~anthropic/claude-{id.ToLowerInvariant()}-latest", out ModelPrice? latest))
         {
-            return new ModelPriceMatch(latest, SameProvider: true);
+            return new ModelPriceMatch { Price = latest, SameProvider = true };
         }
 
         if (id.Contains('/', StringComparison.Ordinal) && _byId.TryGetValue(id, out ModelPrice? named))
         {
-            return new ModelPriceMatch(named, SameProvider: vendor is null || named.Id.StartsWith(vendor + "/", StringComparison.OrdinalIgnoreCase));
+            return new ModelPriceMatch
+            {
+                Price = named,
+                SameProvider = vendor is null || named.Id.StartsWith(vendor + "/", StringComparison.OrdinalIgnoreCase),
+            };
         }
 
         if (!_bySlug.TryGetValue(Slug(id), out List<ModelPrice>? candidates))
@@ -175,13 +205,13 @@ public sealed partial class ModelPriceList
         if (vendor is not null)
         {
             ModelPrice? own = candidates.FirstOrDefault(p => p.Id.StartsWith(vendor + "/", StringComparison.OrdinalIgnoreCase));
-            return own is null ? null : new ModelPriceMatch(own, SameProvider: true);
+            return own is null ? null : new ModelPriceMatch { Price = own, SameProvider = true };
         }
 
         ModelPrice best = candidates.OrderBy(p => Rank(p.Id[..p.Id.IndexOf('/', StringComparison.Ordinal)])).First();
 
         // A subscription (a CLI, Copilot) is valued at the model maker's own price; a gateway may charge differently.
-        return new ModelPriceMatch(best, SameProvider: connector.RunsProgram);
+        return new ModelPriceMatch { Price = best, SameProvider = connector.RunsProgram };
     }
 
     private static int Rank(string vendor) => Array.IndexOf(FirstParty, vendor) is var rank && rank >= 0 ? rank : int.MaxValue;

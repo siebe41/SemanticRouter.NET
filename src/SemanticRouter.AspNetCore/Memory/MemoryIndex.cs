@@ -5,13 +5,26 @@ using Microsoft.Extensions.Logging;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>A memory source as last scanned.</summary>
-/// <param name="Name">The source's name.</param>
-/// <param name="Kind">The source's kind, e.g. <c>Markdown</c>.</param>
-/// <param name="Location">Where it reads from.</param>
-/// <param name="Notes">Notes read.</param>
-/// <param name="Skipped">Notes left out because the source holds more than the limit.</param>
-/// <param name="Error">Why the source could not be read, if it could not.</param>
-public sealed record MemorySourceStatus(string Name, string Kind, string? Location, int Notes, int Skipped, string? Error);
+public sealed record MemorySourceStatus
+{
+    /// <summary>The source's name.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>The source's kind, e.g. <c>Markdown</c>.</summary>
+    public required string Kind { get; init; }
+
+    /// <summary>Where it reads from.</summary>
+    public string? Location { get; init; }
+
+    /// <summary>Notes read.</summary>
+    public required int Notes { get; init; }
+
+    /// <summary>Notes left out because the source holds more than the limit.</summary>
+    public required int Skipped { get; init; }
+
+    /// <summary>Why the source could not be read, if it could not.</summary>
+    public string? Error { get; init; }
+}
 
 /// <summary>A note (or, when <see cref="Missing"/>, a link target with no note behind it) in the memory map.</summary>
 internal sealed class MemoryNoteInfo
@@ -224,12 +237,27 @@ internal sealed partial class MemoryIndex : IDisposable
                     ClaudeCodeMemorySource claude => claude.Skipped,
                     _ => 0,
                 };
-                statuses.Add(new MemorySourceStatus(source.Name, source.Kind, source.Location, added, skipped, null));
+                statuses.Add(new MemorySourceStatus
+                {
+                    Name = source.Name,
+                    Kind = source.Kind,
+                    Location = source.Location,
+                    Notes = added,
+                    Skipped = skipped,
+                });
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 LogSourceFailed(_logger, source.Name, ex);
-                statuses.Add(new MemorySourceStatus(source.Name, source.Kind, source.Location, 0, 0, ex.Message));
+                statuses.Add(new MemorySourceStatus
+                {
+                    Name = source.Name,
+                    Kind = source.Kind,
+                    Location = source.Location,
+                    Notes = 0,
+                    Skipped = 0,
+                    Error = ex.Message,
+                });
             }
         }
 
@@ -577,7 +605,15 @@ internal sealed partial class MemoryIndex : IDisposable
                 // fact (a knowledge-graph observation, a line of CLAUDE.md) is exactly what this is meant to catch.
                 if (hits > 0)
                 {
-                    results.Add(new MemoryReference(note.Id, note.Title, note.Source, MemoryShareKind.Content, hits, note.Fingerprints));
+                    results.Add(new MemoryReference
+                    {
+                        Id = note.Id,
+                        Title = note.Title,
+                        Source = note.Source,
+                        Kind = MemoryShareKind.Content,
+                        Lines = hits,
+                        TotalLines = note.Fingerprints,
+                    });
                 }
             }
 
@@ -586,7 +622,15 @@ internal sealed partial class MemoryIndex : IDisposable
                 MemoryNoteInfo note = snapshot.Notes[index];
                 if (!results.Any(r => r.Id == note.Id))
                 {
-                    results.Add(new MemoryReference(note.Id, note.Title, note.Source, MemoryShareKind.Reference, 0, note.Fingerprints));
+                    results.Add(new MemoryReference
+                    {
+                        Id = note.Id,
+                        Title = note.Title,
+                        Source = note.Source,
+                        Kind = MemoryShareKind.Reference,
+                        Lines = 0,
+                        TotalLines = note.Fingerprints,
+                    });
                 }
             }
 

@@ -11,16 +11,16 @@ public sealed class ServiceHealthTests
         IReadOnlyList<ClientAddress> addresses = ServiceHealth.Addresses(["http://[::]:5080"], [], "desk", ["192.168.1.20"]);
 
         addresses.Should().Equal(
-            new ClientAddress("http://localhost:5080", Local: true, Encrypted: true),
-            new ClientAddress("http://desk:5080", Local: false, Encrypted: false),
-            new ClientAddress("http://192.168.1.20:5080", Local: false, Encrypted: false));
+            new ClientAddress { Url = "http://localhost:5080", Local = true, Encrypted = true },
+            new ClientAddress { Url = "http://desk:5080", Local = false, Encrypted = false },
+            new ClientAddress { Url = "http://192.168.1.20:5080", Local = false, Encrypted = false });
     }
 
     [Fact]
     public void A_loopback_bind_is_this_machine_only()
     {
         ServiceHealth.Addresses(["http://127.0.0.1:5080", "http://localhost:5080"], [], "desk", ["192.168.1.20"])
-            .Should().Equal(new ClientAddress("http://localhost:5080", Local: true, Encrypted: true));
+            .Should().Equal(new ClientAddress { Url = "http://localhost:5080", Local = true, Encrypted = true });
     }
 
     [Fact]
@@ -70,11 +70,20 @@ public sealed class ServiceHealthTests
         problems.Should().Equal("The route index could not be embedded: connection refused", "Model 'x' has no tier.");
     }
 
-    private static EndpointStatus Endpoint(string connector, string state, string? note = null) => new(
-        connector, "OpenAICompatible", "localhost:1234", "http", null, null, Local: true, Encrypted: true,
-        state, note, Models: state == "unused" ? 0 : 1, ModelsCoolingDown: 0, CooldownUntil: null,
-        Attempts: 0, Failures: 0, SuccessRate: null, LastUsed: null, LastSuccess: null, LastFailure: null, LastError: null,
-        FailingSince: null, LimitDays: 0,
-        FirstByteP50: null, FirstByteP95: null, TotalP50: null, TotalP95: null, TokensPerSecond: null,
-        Check: null);
+    private static EndpointStatus Endpoint(string connector, string state, string? note = null) => new EndpointStatus
+    {
+        Connector = connector,
+        Kind = "OpenAICompatible",
+        Host = "localhost:1234",
+        Scheme = "http",
+        Local = true,
+        Encrypted = true,
+        State = state,
+        StateNote = note,
+        Models = state == "unused" ? 0 : 1,
+        ModelsCoolingDown = 0,
+        Attempts = 0,
+        Failures = 0,
+        LimitDays = 0,
+    };
 }

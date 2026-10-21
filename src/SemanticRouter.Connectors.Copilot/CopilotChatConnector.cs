@@ -173,7 +173,13 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
             return ConnectorResult.Failed(ModelFailureKind.Unavailable, "empty reply");
         }
 
-        await writer.CompleteAsync(calls > 0 ? ChatStopReason.ToolUse : ChatStopReason.EndTurn, new ChatUsage(input, output, cached, written), cancellationToken)
+        await writer.CompleteAsync(calls > 0 ? ChatStopReason.ToolUse : ChatStopReason.EndTurn, new ChatUsage
+        {
+            InputTokens = input,
+            OutputTokens = output,
+            CacheReadTokens = cached,
+            CacheCreationTokens = written,
+        }, cancellationToken)
             .ConfigureAwait(false);
         return ConnectorResult.Completed;
     }

@@ -32,7 +32,15 @@ public sealed class ModelPriceListTests : RouterHostTest
     public void Prices_are_per_million_tokens_and_variable_prices_are_left_out()
     {
         ModelPrice sonnet = Prices.Prices.Single(p => p.Id == "anthropic/claude-sonnet-5.5");
-        sonnet.Should().Be(new ModelPrice("anthropic/claude-sonnet-5.5", 2m, 10m, 0.1m, 2.5m, 1_000_000));
+        sonnet.Should().Be(new ModelPrice
+        {
+            Id = "anthropic/claude-sonnet-5.5",
+            Input = 2m,
+            Output = 10m,
+            CacheRead = 0.1m,
+            CacheWrite = 2.5m,
+            ContextWindow = 1_000_000,
+        });
         sonnet.Input.ToString(System.Globalization.CultureInfo.InvariantCulture).Should().Be("2", "no trailing zeros in the draft");
         Prices.Prices.Should().NotContain(p => p.Id == "openrouter/auto");
     }

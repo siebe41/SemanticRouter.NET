@@ -356,7 +356,16 @@ public sealed class AuditTests : RouterHostTest
         DateTimeOffset start = DateTimeOffset.UnixEpoch;
         for (int i = 0; i < 5; i++)
         {
-            log.Append(new AuditEntry(0, start.AddMinutes(i), "this machine", null, "POST", "/router/api/x", null, 200, "did " + i));
+            log.Append(new AuditEntry
+            {
+                Id = 0,
+                Timestamp = start.AddMinutes(i),
+                Actor = "this machine",
+                Method = "POST",
+                Path = "/router/api/x",
+                Status = 200,
+                Summary = "did " + i,
+            });
         }
 
         log.Query(null, null, 10).Select(e => (e.Id, e.Summary)).Should().Equal((5, "did 4"), (4, "did 3"), (3, "did 2"));
@@ -384,7 +393,18 @@ public sealed class SqliteAuditLogTests : IDisposable
         return new SqliteRouterDatabase(Options.Create(new SqliteStateOptions { Path = DbPath }), factory.CreateLogger<SqliteRouterDatabase>(), _time);
     }
 
-    private AuditEntry Entry(string summary) => new(0, _time.GetUtcNow(), "alice@corp.example", "203.0.113.9", "PUT", "/router/api/config", "/router/api/config", 200, summary);
+    private AuditEntry Entry(string summary) => new AuditEntry
+    {
+        Id = 0,
+        Timestamp = _time.GetUtcNow(),
+        Actor = "alice@corp.example",
+        Client = "203.0.113.9",
+        Method = "PUT",
+        Path = "/router/api/config",
+        Route = "/router/api/config",
+        Status = 200,
+        Summary = summary,
+    };
 
     [Fact]
     public void Entries_survive_a_restart_and_are_pruned_only_past_the_retention()

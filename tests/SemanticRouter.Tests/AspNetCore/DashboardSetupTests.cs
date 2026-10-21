@@ -456,9 +456,13 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
     public async Task Setup_lists_the_presets_and_what_the_detector_found_without_changing_anything()
     {
         var detector = new FixedDetector(
-            new SetupDetection("claude-code", "Claude Code", "cli", "claude-cli",
-                new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode, ToolCalling = CliToolCalling.Prompted })
+            new SetupDetection
             {
+                Id = "claude-code",
+                Title = "Claude Code",
+                Kind = "cli",
+                ConnectorName = "claude-cli",
+                Connector = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode, ToolCalling = CliToolCalling.Prompted },
                 Detail = "Signed in · claude 2.1.3 at /usr/local/bin/claude",
                 Consent = SetupApi.Consent(CliPreset.ClaudeCode),
                 Models = [new ModelDefinition { Name = "claude-sonnet", Connector = "claude-cli", Model = "sonnet", Tier = 3 }],
@@ -498,7 +502,14 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
     [Fact]
     public async Task Setup_says_when_a_model_is_needed_and_leaves_out_what_the_policy_or_offline_mode_turns_off()
     {
-        var detector = new FixedDetector(new SetupDetection("claude-code", "Claude Code", "cli", "claude-cli", new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode }));
+        var detector = new FixedDetector(new SetupDetection
+        {
+            Id = "claude-code",
+            Title = "Claude Code",
+            Kind = "cli",
+            ConnectorName = "claude-cli",
+            Connector = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode },
+        });
         HttpClient client = await StartDispatchAsync(
             routing: o => o.Models.ToList().ForEach(m => m.Enabled = false),
             services: s =>

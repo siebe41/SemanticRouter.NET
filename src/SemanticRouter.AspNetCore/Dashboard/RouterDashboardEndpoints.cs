@@ -349,7 +349,8 @@ public static partial class RouterDashboardEndpoints
         // recovered from its files; complete is false when another reader kept its write-ahead log past the busy timeout.
         api.MapDelete("/activity", (HttpContext context, ActivityPurge purge, DateTimeOffset? since, DateTimeOffset? until) =>
             {
-                (int removed, bool complete) = purge.Run(since ?? DateTimeOffset.MinValue, until ?? DateTimeOffset.MaxValue);
+                ActivityPurgeResult result = purge.Run(since ?? DateTimeOffset.MinValue, until ?? DateTimeOffset.MaxValue);
+                (int removed, bool complete) = (result.Removed, result.Complete);
                 DashboardAudit.Detail(
                     context,
                     $"{removed} {(removed == 1 ? "entry" : "entries")}" + (since is null && until is null ? ", everything" : $" from {since?.ToString("u") ?? "the start"} to {until?.ToString("u") ?? "now"}")
@@ -939,7 +940,10 @@ public static partial class RouterDashboardEndpoints
         }
 
         static IResult NotADocument() => Results.Json(
-            new ValidationResult(["Expected a configuration document: a JSON object such as GET api/config returns."]) { Issues = [new ConfigurationIssue(null, "Expected a configuration document: a JSON object such as GET api/config returns.")] },
+            new ValidationResult(["Expected a configuration document: a JSON object such as GET api/config returns."])
+            {
+                Issues = [new ConfigurationIssue { Message = "Expected a configuration document: a JSON object such as GET api/config returns." }],
+            },
             ApiJson,
             statusCode: StatusCodes.Status400BadRequest);
     }
@@ -962,7 +966,7 @@ public static partial class RouterDashboardEndpoints
             string? name = body?["name"] is JsonValue value && value.TryGetValue(out string? text) ? text?.Trim() : null;
             if (string.IsNullOrEmpty(name) || body!["settings"] is not JsonObject settings)
             {
-                return (null, Results.Json(new ValidationResult([expected]) { Issues = [new ConfigurationIssue(null, expected)] }, ApiJson, statusCode: StatusCodes.Status400BadRequest));
+                return (null, Results.Json(new ValidationResult([expected]) { Issues = [new ConfigurationIssue { Message = expected }] }, ApiJson, statusCode: StatusCodes.Status400BadRequest));
             }
 
             // Parsed as part of a document, so it reads exactly as PUT api/config would read it.

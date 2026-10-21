@@ -34,9 +34,11 @@ public enum ModelLoading
 }
 
 /// <summary>One model a connector's server reports, with whatever details the server gives.</summary>
-/// <param name="Id">The id to send as <see cref="ModelDefinition.Model"/>.</param>
-public sealed record DiscoveredModel(string Id)
+public sealed record DiscoveredModel
 {
+    /// <summary>The id to send as <see cref="ModelDefinition.Model"/>.</summary>
+    public required string Id { get; init; }
+
     /// <summary>Chat, vision or embedding.</summary>
     public DiscoveredModelKind Kind { get; init; }
 

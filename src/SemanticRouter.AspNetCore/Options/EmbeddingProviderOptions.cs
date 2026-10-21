@@ -112,11 +112,20 @@ public interface IEmbeddingProviderFactory
 }
 
 /// <summary>A model an <see cref="IEmbeddingProviderFactory"/> can provide by name.</summary>
-/// <param name="Name">The value for <see cref="EmbeddingProviderOptions.Model"/>.</param>
-/// <param name="Description">What it is.</param>
-/// <param name="SuggestedThreshold">A starting <c>DefaultSimilarityThreshold</c>.</param>
-/// <param name="DownloadBytes">Size of the first-use download.</param>
-public sealed record EmbeddingModelChoice(string Name, string Description, float SuggestedThreshold, long DownloadBytes);
+public sealed record EmbeddingModelChoice
+{
+    /// <summary>The value for <see cref="EmbeddingProviderOptions.Model"/>.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>What it is.</summary>
+    public required string Description { get; init; }
+
+    /// <summary>A starting <c>DefaultSimilarityThreshold</c>.</summary>
+    public required float SuggestedThreshold { get; init; }
+
+    /// <summary>Size of the first-use download.</summary>
+    public required long DownloadBytes { get; init; }
+}
 
 /// <summary>
 /// Embedding provider configuration. Bound from <c>SemanticRouter:Embeddings</c>.

@@ -152,7 +152,7 @@ internal sealed partial class PromptDispatcher
                 span?.SetTag("semantic_router.attempt", tried);
                 try
                 {
-                    result = await connector.SendAsync(new ConnectorRequest(chat, model, body), context, context.RequestAborted).ConfigureAwait(false);
+                    result = await connector.SendAsync(new ConnectorRequest { Chat = chat, Model = model, RawBody = body }, context, context.RequestAborted).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is OperationCanceledException or IOException && context.RequestAborted.IsCancellationRequested)
                 {
@@ -224,7 +224,7 @@ internal sealed partial class PromptDispatcher
             void EndedEarly(string outcome, string detail)
             {
                 activity?.SentTo.Add(model.Name);
-                RecordUsage(runtime, model, connector.Name, capture.Usage ?? new ChatUsage(chat.EstimatedInputTokens, null), activity, plan.Requirements.Profile);
+                RecordUsage(runtime, model, connector.Name, capture.Usage ?? new ChatUsage { InputTokens = chat.EstimatedInputTokens }, activity, plan.Requirements.Profile);
                 if (activity is not null)
                 {
                     activity.AttemptMilliseconds = Math.Round(_time.GetElapsedTime(current.Started).TotalMilliseconds, 1);
@@ -415,9 +415,23 @@ internal sealed partial class PromptDispatcher
             activity.CostUsd = cost;
         }
 
-        _ledger?.Record(new UsageRecord(
-            _time.GetUtcNow(), model.Name, connector, activity?.Route, activity?.Client, model.IsLocal,
-            input, output, cacheRead, cacheWrite, cost, referenceCost, profile, model.ApiValue(input, output, cacheRead, cacheWrite)));
+        _ledger?.Record(new UsageRecord
+        {
+            Timestamp = _time.GetUtcNow(),
+            Model = model.Name,
+            Connector = connector,
+            Route = activity?.Route,
+            Client = activity?.Client,
+            IsLocal = model.IsLocal,
+            InputTokens = input,
+            OutputTokens = output,
+            CacheReadTokens = cacheRead,
+            CacheWriteTokens = cacheWrite,
+            CostUsd = cost,
+            ReferenceCostUsd = referenceCost,
+            Profile = profile,
+            SubscriptionValueUsd = model.ApiValue(input, output, cacheRead, cacheWrite),
+        });
     }
 
     /// <summary>The model being tried, for the response-started callback.</summary>
