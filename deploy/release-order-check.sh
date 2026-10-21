@@ -5,7 +5,8 @@
 #
 # - the GitHub release is created as a draft (`gh release create ... --draft`), and `vpk upload` never publishes it
 #   (`--publish`);
-# - every job that publishes (`dotnet nuget push`, `docker push`, `cosign sign`, `gh release edit ... --draft=false`)
+# - every job that publishes (`dotnet nuget push`, `docker push`, `docker buildx imagetools create`, a `push: true`,
+#   `cosign sign`, `gh release edit ... --draft=false` or `gh api ... draft=false`)
 #   waits, through its `needs`, for every job that writes to the draft release (`gh release create`,
 #   `gh release upload`, `vpk upload`);
 # - one job publishes the release, and it waits for every other job;
@@ -63,8 +64,10 @@ while IFS=$'\t' read -r job kind text; do
     needs) needs[$job]+=" $text" ;;
     line)
       if [[ "$text" =~ gh\ release\ (create|upload)|vpk\ upload ]]; then staging[$job]=1; fi
-      if [[ "$text" =~ dotnet\ nuget\ push|docker\ push|cosign\ sign ]]; then publishing[$job]=1; fi
-      if [[ "$text" =~ gh\ release\ edit.*--draft=false ]]; then publishing[$job]=1 releasing[$job]=1; fi
+      if [[ "$text" =~ dotnet\ nuget\ push|docker\ push|docker\ buildx\ imagetools\ create|cosign\ sign|^push:\ *true ]]; then
+        publishing[$job]=1 # push: true is docker/build-push-action's
+      fi
+      if [[ "$text" =~ gh\ release\ edit.*--draft=false|gh\ api.*draft[=:]\ *false ]]; then publishing[$job]=1 releasing[$job]=1; fi
       if [[ "$text" == *"vpk upload"* && "$text" =~ --publish([^-[:alnum:]]|$) ]]; then
         error "$job: vpk upload publishes the release (--publish). Drop --publish: the publish job publishes the release last."
       fi
@@ -130,4 +133,4 @@ if [ "$failed" = true ]; then
 fi
 sorted() { tr ' ' '\n' <<<"$*" | sort | tr '\n' ' ' | sed 's/ $//'; }
 echo "$workflow publishes last. Jobs that write to the draft release: $(sorted "${!staging[@]}")."
-echo "Jobs that publish, after all of those: $(sorted "${!publishing[@]}"); $(sorted "${!releasing[@]}") waits for all ${#jobs[@]} jobs."
+echo "Jobs that publish, after all of those: $(sorted "${!publishing[@]}"); $(sorted "${!releasing[@]}") waits for all $(( ${#jobs[@]} - 1 )) other jobs."

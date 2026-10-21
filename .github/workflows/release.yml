@@ -17,8 +17,9 @@ name: Release
 # checked and attached to a draft GitHub release first, which nobody but the maintainers sees and which the desktop
 # app's updater does not read. SHA256SUMS and the provenance attestation are added to the draft too. Only then, one
 # after another, the image is pushed and signed, the NuGet packages are pushed, and the draft is published. So a
-# failure in a build, installer or signing job leaves a draft and nothing else: no package on nuget.org, no new image
-# tag and no public release. deploy/release-order-check.sh, which CI runs, keeps this order.
+# failure in a build, installer or signing job leaves a draft (and, after checksums, its public attestation) and nothing
+# else: no package on nuget.org, no new image tag and no public release. deploy/release-order-check.sh, which CI runs,
+# keeps this order.
 #
 # A tag with a suffix (v1.0.0-rc.1) is a prerelease: the GitHub release is marked as one, so the desktop app's updater
 # (which skips prereleases) never offers it, and the image gets its version tag but not :latest. NuGet treats the
@@ -939,7 +940,10 @@ jobs:
   # packages (as nuget.org will get them, before nuget.org adds its repository signature) and the packages', image's
   # and installers' SBOMs attached (the archives' came with them); and one build provenance attestation covering every
   # asset and SHA256SUMS, for `gh attestation verify`. The job downloads, hashes and uploads; it builds and runs nothing
-  # from the repository. Nothing has been published yet: the image, NuGet and publish jobs come after this one.
+  # from the repository. It first checks that the draft has every channel's update feed and the notices. Nothing has
+  # been pushed or published yet (the image, NuGet and publish jobs come after this one), but the attestation is
+  # public: it goes to the public Sigstore log and the repository's attestations, and stays there if the version is
+  # given up.
   checksums:
     needs: [ packages, image-sbom, desktop, installers, installer-windows, installer-macos, installer-sbom ]
     runs-on: ubuntu-latest
@@ -970,6 +974,19 @@ jobs:
           rm -f release/SHA256SUMS
           (cd release && sha256sum -- * > SHA256SUMS)
           cat release/SHA256SUMS
+
+      # The check publish makes again, here before anything irreversible: the image push and nuget come after this job.
+      - name: The draft is complete
+        run: |
+          missing=()
+          for asset in THIRD-PARTY-NOTICES.txt \
+            releases.linux-x64.json releases.win-x64.json releases.osx-arm64.json releases.osx-x64.json; do
+            [ -f "release/$asset" ] || missing+=("$asset")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::The draft release $GITHUB_REF_NAME has no ${missing[*]}; nothing is published."
+            exit 1
+          fi
 
       - name: Provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

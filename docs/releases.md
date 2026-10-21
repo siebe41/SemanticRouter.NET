@@ -122,7 +122,7 @@ For the maintainer. A release is published by one workflow run, which only the r
 1. **Optional:** rename **Unreleased** in the [changelog](../CHANGELOG.md) to `[<version>] - <date>` in a pull request, and merge it. The release notes are that section; without it, they are the Unreleased section.
 2. Wait for CI to pass on `main`'s latest commit.
 3. **Actions > Cut a release > Run workflow**, on `main`, with the version (`0.3.0`: three numbers, no `v`). Normally that is `VersionPrefix` in [`Directory.Build.props`](../Directory.Build.props), the version CI has been packing. Tick **Allow unsigned installers** only while a platform has no signing certificates yet ([Code signing](#code-signing)).
-4. Approve the `release` environment when asked (if it requires a reviewer), once for this run and once for the release run it starts.
+4. Approve the `release` environment when asked (if it requires a reviewer). GitHub asks for each job that uses it, as it comes up: once in this run, then in the release run for each installer job, `checksums`, `image`, `nuget` and `publish`. Rejecting one after `image` has run leaves the image tags pushed ([When a release fails](#when-a-release-fails)).
 5. Once the release run's last job (`publish`) has published the release and nuget.org lists the new packages, move the package validation baseline and the next version on ([After a release](#after-a-release)). If the run fails instead, see [When a release fails](#when-a-release-fails).
 
 [`cut-release.yml`](../.github/workflows/cut-release.yml) refuses to tag when:
@@ -153,12 +153,12 @@ Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag st
 
 ### The order of a release
 
-`release.yml` makes nothing public until everything is built, signed and checked. A job that fails before the last stage leaves a draft release and nothing else: no package on nuget.org, no new image tag, no public release, and no update for installed desktop apps.
+`release.yml` makes nothing public until everything is built, signed and checked. A job that fails before the last stage leaves a draft release (and, after `checksums`, its provenance attestation) and nothing else: no package on nuget.org, no new image tag, no public release, and no update for installed desktop apps.
 
 1. **Build and check.** `packages` checks who released and that the tag is on `main`, checks code signing, runs the tests and packs the NuGet packages. The image is built, scanned and given its SBOM (`image-build`, `image-scan`, `image-sbom`), and the desktop app is built for every platform (`desktop-build`, `installer-build`). None of these jobs can write anywhere.
 2. **The draft release.** `desktop` creates the GitHub release as a **draft**, with its notes, the archives, their SBOMs and `THIRD-PARTY-NOTICES.txt`. Only people with write access to the repository see a draft; the desktop app's updater does not.
 3. **The installers.** `installers` (Linux), `installer-windows` and `installer-macos` pack the installers and update packages, sign them (on macOS also notarize), check each signature, and upload them with their update feeds to the draft, which vpk leaves a draft. `installer-sbom` makes their SBOMs.
-4. **Checksums.** `checksums` attaches the NuGet packages and the remaining SBOMs, writes `SHA256SUMS` over every asset and makes the build provenance attestation. The attestation names only the files' digests.
+4. **Checksums.** `checksums` checks that the draft has every platform's update feed and `THIRD-PARTY-NOTICES.txt`, attaches the NuGet packages and the remaining SBOMs, writes `SHA256SUMS` over every asset and makes the build provenance attestation. The attestation names only the files' digests, but it is public from here on: it is written to the public Sigstore log and the repository's attestations, and stays there if the version is given up.
 5. **Publishing**, one job after another:
    1. `image` pushes `:<version>`, and for a stable version `:latest`, to GHCR;
    2. `image-sign` signs the image and attaches its provenance and SBOM attestations;
@@ -173,7 +173,7 @@ Open the run under **Actions > Release** and read the failed job's log. The usua
 
 - **Nothing in the repository has to change** (an outage, or a secret or variable you have since corrected): use **Re-run failed jobs** on the same run. The jobs that succeeded are kept, and the rest continue from there into the same draft. Do it within a week: the image and the installers' update packages are kept as artifacts for 7 days.
   - An installer job that failed after it had started uploading cannot upload the same files again: GitHub refuses an asset name that is already there, and vpk refuses an update feed that is already there. Delete that platform's files from the draft first (`gh release delete-asset v0.6.0 <name>`, or edit the draft on the Releases page), then re-run.
-- **The code has to change**: give up the version. Delete the draft (`gh release delete v0.6.0`). The tag stays, since `v*` tags cannot be deleted. Merge the fix and cut the next patch version. Nothing was published, so nobody has the version you gave up. Delete the draft rather than leaving it: the installer jobs look for the previous version's update package (for the delta update) in the latest releases, drafts included.
+- **The code has to change**: give up the version. Delete the draft (`gh release delete v0.6.0`). Leave the tag: once the `v*` tag ruleset is applied ([CONTRIBUTING.md](../CONTRIBUTING.md#branch-and-tag-rulesets)) it cannot be deleted, and a version that was tagged is not reused either way. Merge the fix and cut the next patch version. Nothing was published, so nobody has the version you gave up. Delete the draft rather than leaving it: the installer jobs look for the previous version's update package (for the delta update) in the latest releases, drafts included.
 - **A publishing job failed** (`image`, `image-sign`, `nuget` or `publish`): what was already pushed stays public, and every installer is signed and attached. Re-run the failed jobs. Pushing and signing the image again is harmless, `nuget` skips packages that are already on nuget.org, and publishing a release that is already public changes nothing. If the version cannot be finished, unlist its packages on nuget.org, and move `:latest` back to the previous version with `docker buildx imagetools create -t ghcr.io/siebe41/semantic-router:latest ghcr.io/siebe41/semantic-router:<previous>`. Then delete the draft and release the next patch version.
 
 ### After a release
