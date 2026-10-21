@@ -19,8 +19,9 @@ public enum RouterDashboardRole
     /// <summary>
     /// View status, activity and the (masked) configuration. No changes, and nothing that spends embedding or API calls
     /// or scans the disk: classifying, evaluating, testing embeddings, checking or discovering connectors, rescanning memory.
-    /// Prompt previews show on the pages, but exports leave the prompt text out (activity's <c>prompts=true</c> and the
-    /// evaluation set's <c>localOnly=true</c> need <see cref="Admin"/>).
+    /// Prompt previews show on the pages and in <c>api/activity</c> and <c>api/events</c>, and the evaluation set's prompts
+    /// can be read, except those labelled local-only. Activity's stored prompt text (<c>prompts=true</c> on the export) and
+    /// the local-only prompts need <see cref="Admin"/>.
     /// </summary>
     ReadOnly = 1,
 
@@ -107,6 +108,7 @@ internal sealed class DashboardAccess
 {
     public const string CookieName = "semantic-router-session";
     private const string RoleKey = "SemanticRouter.DashboardRole";
+    private const string SignedInRoleKey = "SemanticRouter.DashboardSignedInRole";
     private const string ActorKey = "SemanticRouter.DashboardActor";
     private const string ProxyUserKey = "SemanticRouter.DashboardProxyUser";
     private const string WrongTokenKey = "SemanticRouter.DashboardWrongToken";
@@ -162,6 +164,14 @@ internal sealed class DashboardAccess
     /// <summary>The role the current request was admitted with, once the filter has run.</summary>
     public static RouterDashboardRole? RoleOf(HttpContext context) =>
         context.Items.TryGetValue(RoleKey, out object? role) ? role as RouterDashboardRole? : null;
+
+    /// <summary>
+    /// The role the current request signed in with, before a read-only machine policy clamped it (<see cref="RoleOf"/>
+    /// is the clamped one), once the filter has run. What only an admin may read is decided on this one, as the audit log
+    /// and the prompt-text exports are: reading changes nothing.
+    /// </summary>
+    public static RouterDashboardRole? SignedInRoleOf(HttpContext context) =>
+        context.Items.TryGetValue(SignedInRoleKey, out object? role) ? role as RouterDashboardRole? : null;
 
     /// <summary>
     /// Who the current request acts as, once the filter has run: the user a trusted proxy named, <c>admin token</c>,
@@ -362,6 +372,7 @@ internal sealed class DashboardAccess
                 $"Only the admin role can export prompt text ({export.Parameter}=true). Leave {export.Parameter} out to export without it.");
         }
 
+        context.Items[SignedInRoleKey] = role;
         if (_policy == DashboardPolicy.ReadOnly && role == RouterDashboardRole.Admin)
         {
             // Nobody changes the router from here: the role is clamped, so the page shows it read-only too.

@@ -266,7 +266,8 @@ public sealed class DashboardRoleTests : RouterHostTest
         (HttpStatusCode activity, string activityBody) = await GetAsync("/router/api/activity/export?format=jsonl", ReadOnlyToken);
         (HttpStatusCode set, string setBody) = await GetAsync("/router/api/evaluation/set/export", ReadOnlyToken);
         activity.Should().Be(HttpStatusCode.OK);
-        activityBody.Should().Contain("private").And.NotContain(Secret + "-PROMPT");
+        activityBody.Should().Contain("private").And.NotContain(Secret, "prompt previews, CLI output and the judge's notes are prompt text");
+        (await GetAsync("/router/api/activity/export?format=csv", ReadOnlyToken)).Body.Should().Contain("private").And.NotContain(Secret);
         set.Should().Be(HttpStatusCode.OK);
         setBody.Should().Contain("shared prompt").And.NotContain(Secret + "-LOCAL");
 
@@ -282,9 +283,18 @@ public sealed class DashboardRoleTests : RouterHostTest
         }
 
         (await GetAsync("/router/api/activity/export?prompts=false", ReadOnlyToken)).Status.Should().Be(HttpStatusCode.OK);
-        (await GetAsync("/router/api/activity/export?prompts=true", AdminToken)).Body.Should().Contain(Secret + "-PROMPT");
+        (await GetAsync("/router/api/activity/export?format=jsonl&prompts=true", AdminToken)).Body.Should()
+            .Contain(Secret + "-PROMPT").And.Contain(Secret + "-REPLY-ERROR").And.Contain(Secret + "-JUDGE");
+        (await GetAsync("/router/api/activity/export?prompts=true", AdminToken)).Body.Should().Contain(Secret + "-REPLY-ERROR");
         (await GetAsync("/router/api/evaluation/set/export?localOnly=true", AdminToken)).Body.Should().Contain(Secret + "-LOCAL");
         Audit().Should().Contain(e => e.Actor == "read-only token" && e.Status == 403 && e.Summary == "exported activity");
+
+        // Nor can it read them from the set itself: only their number.
+        (HttpStatusCode read, string readBody) = await GetAsync("/router/api/evaluation/set", ReadOnlyToken);
+        read.Should().Be(HttpStatusCode.OK);
+        readBody.Should().Contain("shared prompt").And.NotContain(Secret + "-LOCAL");
+        JsonNode.Parse(readBody)!["localOnlyWithheld"]!.GetValue<int>().Should().Be(1);
+        (await GetAsync("/router/api/evaluation/set", AdminToken)).Body.Should().Contain(Secret + "-LOCAL");
     }
 
     [Fact]
@@ -298,6 +308,12 @@ public sealed class DashboardRoleTests : RouterHostTest
         export.StatusCode.Should().Be(HttpStatusCode.OK, "exporting changes nothing, as reading the audit log does not");
         (await export.Content.ReadAsStringAsync()).Should().Contain(Secret + "-PROMPT");
         (await client.SendAsync(Request(HttpMethod.Get, "/router/api/activity/export?prompts=true", ReadOnlyToken))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+        Services.GetRequiredService<IEvaluationSetStore>().Save([new EvaluationCase(Secret + "-LOCAL", 2) { LocalOnly = true }]);
+        string adminSet = await (await client.SendAsync(Request(HttpMethod.Get, "/router/api/evaluation/set", AdminToken))).Content.ReadAsStringAsync();
+        adminSet.Should().Contain(Secret + "-LOCAL", "the admin can export the local-only prompts, so it sees them too");
+        string readOnlySet = await (await client.SendAsync(Request(HttpMethod.Get, "/router/api/evaluation/set", ReadOnlyToken))).Content.ReadAsStringAsync();
+        readOnlySet.Should().NotContain(Secret + "-LOCAL");
     }
 
     [Fact]
