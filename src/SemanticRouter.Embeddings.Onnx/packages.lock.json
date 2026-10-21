@@ -41,7 +41,7 @@
       "semanticrouter.aspnetcore": {
         "type": "Project",
         "dependencies": {
-          "SemanticRouter.Core": "[0.1.0, )"
+          "SemanticRouter.Core": "[0.6.0, )"
         }
       },
       "semanticrouter.core": {
