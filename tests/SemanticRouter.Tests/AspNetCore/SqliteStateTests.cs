@@ -477,6 +477,19 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void A_configuration_version_past_the_cap_leaves_the_files_too()
+    {
+        var history = new SqliteConfigurationHistory(Open(o => o.HistoryMaxEntries = 2));
+        history.Record(new RouterConfiguration { FallbackTier = 1 }, "admin API", "capped-actor 0b5e", "capped-note 0b5e");
+        history.Record(new RouterConfiguration { FallbackTier = 2 }, "admin API");
+        history.Record(new RouterConfiguration { FallbackTier = 3 }, "admin API");
+        Settle();
+
+        history.List().Should().HaveCount(2);
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("0b5e", "the write-ahead log is emptied after the cap deletes a version");
+    }
+
+    [Fact]
     public async Task Concurrent_writers_on_one_file_lose_nothing()
     {
         var a = new SqliteToolCallAffinity(Open());

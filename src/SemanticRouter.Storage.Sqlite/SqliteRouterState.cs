@@ -1584,10 +1584,24 @@ internal sealed class SqliteConfigurationHistory(SqliteRouterDatabase database) 
                 connection,
                 "INSERT INTO config_history (timestamp_ticks, source, actor, note, document) VALUES ($ts, $source, $actor, $note, $document);" +
                 "DELETE FROM config_history WHERE id NOT IN (SELECT id FROM config_history ORDER BY id DESC LIMIT $max);" +
-                "SELECT last_insert_rowid();",
+                "SELECT last_insert_rowid(), changes();",
                 ("$ts", database.Time.GetUtcNow().UtcTicks), ("$source", source), ("$actor", actor), ("$note", note),
                 ("$document", document.ToJson()), ("$max", database.HistoryMaxEntries));
-            return (long)command.ExecuteScalar()!;
+            long recorded;
+            long capped;
+            using (SqliteDataReader reader = command.ExecuteReader())
+            {
+                reader.Read();
+                (recorded, capped) = (reader.GetInt64(0), reader.GetInt64(1));
+            }
+
+            // A version past the cap is still in the write-ahead log, as it was written: empty the log, as a prune does.
+            if (capped > 0)
+            {
+                database.EmptyLog(connection);
+            }
+
+            return recorded;
         });
 
         return id >= 0 ? id : _fallback.Record(document, source, actor, note);
