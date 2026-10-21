@@ -116,6 +116,12 @@ jobs:
         if: runner.os == 'Linux'
         run: dotnet format --verify-no-changes --no-restore
 
+      # The release publishes nothing until every installer is signed and attached to its draft: no job that pushes to
+      # nuget.org or the registry, or publishes the release, may run before one that can still fail (docs/releases.md).
+      - name: Release order
+        if: runner.os == 'Linux'
+        run: deploy/release-order-check.sh .github/workflows/release.yml
+
       - name: Build
         run: dotnet build --no-restore --configuration Release
 

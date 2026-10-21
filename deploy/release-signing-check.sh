@@ -2,8 +2,9 @@
 # Whether a release's installers will be code-signed, per platform, for the release workflows (docs/releases.md).
 #
 # Each platform's signing is complete (signed), absent (fails, unless ALLOW_UNSIGNED_RELEASE is `true`: unsigned) or
-# partial (always fails: the installer job would stop half-way, after the packages are on nuget.org). The workflow
+# partial (always fails: the installer job would stop half-way, and the release would stay a draft). The workflow
 # passes only whether each secret and variable is set, as NAME=true or NAME=false in WINDOWS and MACOS, never a value.
+# ALLOW_UNSIGNED_HOW, when set, says in the error how to allow unsigned installers (cut-release.yml also has a box).
 #
 # Writes windows=<state> and macos=<state> to $GITHUB_OUTPUT and a table to $GITHUB_STEP_SUMMARY when they are set,
 # and exits 1 when a release would fail.
@@ -13,6 +14,7 @@ failed=false
 output="${GITHUB_OUTPUT:-/dev/null}"
 # A variable typed into the settings page can carry stray spaces or capitals: `True ` means true too.
 allow_unsigned="$(tr -d '[:space:]' <<<"${ALLOW_UNSIGNED_RELEASE:-}" | tr '[:upper:]' '[:lower:]')"
+allow_how="${ALLOW_UNSIGNED_HOW:-set the variable ALLOW_UNSIGNED_RELEASE to true}"
 summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
 {
   echo "## Code signing"
@@ -38,7 +40,7 @@ for platform in windows macos; do
     echo "::warning::The $name installers will be unsigned: no signing secrets are set and ALLOW_UNSIGNED_RELEASE is true."
     state=unsigned line="**unsigned**: no signing secrets, and ALLOW_UNSIGNED_RELEASE is true"
   else
-    echo "::error::No $name signing secrets are set. Add them (docs/desktop.md#signing), or set the variable ALLOW_UNSIGNED_RELEASE to true to publish unsigned installers."
+    echo "::error::No $name signing secrets are set. Add them (docs/desktop.md#signing), or, to publish unsigned installers, $allow_how."
     failed=true state=missing line="**failed**: no signing secrets, and ALLOW_UNSIGNED_RELEASE is not true"
   fi
   echo "$platform=$state" >> "$output"

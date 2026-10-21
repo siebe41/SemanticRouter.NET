@@ -17,6 +17,13 @@ on:
         description: Version to release, without the v (e.g. 0.3.0)
         required: true
         type: string
+      # Each unsigned release is chosen when it is cut, not only by the standing ALLOW_UNSIGNED_RELEASE variable: a
+      # platform without its signing secrets is refused unless this box is ticked and the variable is true.
+      allow_unsigned:
+        description: Allow unsigned installers (a platform without signing secrets; also needs ALLOW_UNSIGNED_RELEASE)
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -89,10 +96,12 @@ jobs:
           fi
           exit 1
 
-      # The same check as release.yml's first job, so a release that would fail on signing never gets a tag.
+      # The same check as release.yml's first job, so a release that would fail on signing never gets a tag. Stricter in
+      # one way: unsigned installers also need the allow_unsigned box, so the variable alone does not let one through.
       - name: Code signing
         env:
-          ALLOW_UNSIGNED_RELEASE: ${{ vars.ALLOW_UNSIGNED_RELEASE }}
+          ALLOW_UNSIGNED_RELEASE: ${{ inputs.allow_unsigned && vars.ALLOW_UNSIGNED_RELEASE || 'false' }}
+          ALLOW_UNSIGNED_HOW: set the variable ALLOW_UNSIGNED_RELEASE to true and tick "Allow unsigned installers" when you run Cut a release
           WINDOWS: >-
             AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID != '' }}
             AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID != '' }}

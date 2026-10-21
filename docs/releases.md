@@ -121,17 +121,18 @@ For the maintainer. A release is published by one workflow run, which only the r
 
 1. **Optional:** rename **Unreleased** in the [changelog](../CHANGELOG.md) to `[<version>] - <date>` in a pull request, and merge it. The release notes are that section; without it, they are the Unreleased section.
 2. Wait for CI to pass on `main`'s latest commit.
-3. **Actions > Cut a release > Run workflow**, on `main`, with the version (`0.3.0`: three numbers, no `v`). Normally that is `VersionPrefix` in [`Directory.Build.props`](../Directory.Build.props), the version CI has been packing.
-4. Approve the `release` environment when asked (if it requires a reviewer), once for this run and once for the release run it starts.
-5. Once nuget.org lists the new packages, move the package validation baseline and the next version on ([After a release](#after-a-release)).
+3. **Actions > Cut a release > Run workflow**, on `main`, with the version (`0.3.0`: three numbers, no `v`). Normally that is `VersionPrefix` in [`Directory.Build.props`](../Directory.Build.props), the version CI has been packing. Tick **Allow unsigned installers** only while a platform has no signing certificates yet ([Code signing](#code-signing)).
+4. Approve the `release` environment when asked (if it requires a reviewer). GitHub asks for each job that uses it, as it comes up: once in this run, then in the release run for each installer job, `checksums`, `image`, `nuget` and `publish`. Rejecting one after `image` has run leaves the image tags pushed ([When a release fails](#when-a-release-fails)).
+5. Once the release run's last job (`publish`) has published the release and nuget.org lists the new packages, move the package validation baseline and the next version on ([After a release](#after-a-release)). If the run fails instead, see [When a release fails](#when-a-release-fails).
 
 [`cut-release.yml`](../.github/workflows/cut-release.yml) refuses to tag when:
 - it wasn't started by the owner, or not from `main`;
 - the version isn't a new `X.Y.Z` above the latest release;
 - CI hasn't passed on that commit;
-- code signing or NuGet publishing isn't set up (the same checks the release makes, so a release that would fail never gets a tag).
+- code signing or NuGet publishing isn't set up (the same checks the release makes, so a release that would fail never gets a tag);
+- a platform has no signing secrets and **Allow unsigned installers** wasn't ticked, even with `ALLOW_UNSIGNED_RELEASE` set.
 
-Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag starts [`release.yml`](../.github/workflows/release.yml), which builds, tests, signs and publishes everything, creates the GitHub release with its notes, and attaches the assets and `SHA256SUMS`. Follow it under **Actions > Release**. It also refuses a tag that someone other than the owner pushed.
+Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag starts [`release.yml`](../.github/workflows/release.yml), which builds, tests and signs everything into a draft GitHub release with its notes, the assets and `SHA256SUMS`, and only then pushes the image and the NuGet packages and publishes the release ([The order of a release](#the-order-of-a-release)). Follow it under **Actions > Release**. It also refuses a tag that someone other than the owner pushed.
 
 **After each release,** add its upgrade fixture in a pull request: `tools/upgrade-fixtures/make-fixture.sh <version>` installs the release from nuget.org into a throwaway home, sets it up and uses it through its own API against a stub server, and writes `tests/fixtures/upgrade/<version>.zip`. `UpgradeFromReleasedVersionsTests` then starts every build on every released version's home, on every pull request: it fails when the build cannot start on one, loses a row, cannot decrypt the release's API key, refuses its gateway key, cannot roll back to its first configuration, or leaves its template behind. The installer jobs install the desktop app on the newest release's home and check its usage is still there after the update. Every night the **Downgrade** workflow (`tests/installer/downgrade.sh`) migrates that home with the current build, then starts the newest published release on it, which must refuse or report the newer database, and on the copy the upgrade kept, where it must find the home's usage again.
 
@@ -150,6 +151,31 @@ Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag st
   - Add yourself as a required reviewer to approve each release before anything is published.
 - **`NUGET_USER`** and the signing settings, or `ALLOW_UNSIGNED_RELEASE`, as described in [Code signing](#code-signing) and [Signing the desktop app](desktop.md#signing).
 
+### The order of a release
+
+`release.yml` makes nothing public until everything is built, signed and checked. A job that fails before the last stage leaves a draft release (and, after `checksums`, its provenance attestation) and nothing else: no package on nuget.org, no new image tag, no public release, and no update for installed desktop apps.
+
+1. **Build and check.** `packages` checks who released and that the tag is on `main`, checks code signing, runs the tests and packs the NuGet packages. The image is built, scanned and given its SBOM (`image-build`, `image-scan`, `image-sbom`), and the desktop app is built for every platform (`desktop-build`, `installer-build`). None of these jobs can write anywhere.
+2. **The draft release.** `desktop` creates the GitHub release as a **draft**, with its notes, the archives, their SBOMs and `THIRD-PARTY-NOTICES.txt`. Only people with write access to the repository see a draft; the desktop app's updater does not.
+3. **The installers.** `installers` (Linux), `installer-windows` and `installer-macos` pack the installers and update packages, sign them (on macOS also notarize), check each signature, and upload them with their update feeds to the draft, which vpk leaves a draft. `installer-sbom` makes their SBOMs.
+4. **Checksums.** `checksums` checks that the draft has every platform's update feed and `THIRD-PARTY-NOTICES.txt`, attaches the NuGet packages and the remaining SBOMs, writes `SHA256SUMS` over every asset and makes the build provenance attestation. The attestation names only the files' digests, but it is public from here on: it is written to the public Sigstore log and the repository's attestations, and stays there if the version is given up.
+5. **Publishing**, one job after another:
+   1. `image` pushes `:<version>`, and for a stable version `:latest`, to GHCR;
+   2. `image-sign` signs the image and attaches its provenance and SBOM attestations;
+   3. `nuget` pushes the packages to nuget.org;
+   4. `publish` checks that the draft has every platform's update feed, `THIRD-PARTY-NOTICES.txt` and `SHA256SUMS`, and publishes it, as the repository's latest release for a stable version.
+
+The image goes before NuGet because an image tag can be deleted or moved back, but a version on nuget.org can never be pushed again. The release is published last because that is when installed desktop apps start to update. [`deploy/release-order-check.sh`](../deploy/release-order-check.sh), which CI runs on every pull request, fails when a job that publishes doesn't wait for every job that writes to the draft, when the release is created already published, or when vpk is asked to publish it.
+
+### When a release fails
+
+Open the run under **Actions > Release** and read the failed job's log. The usual causes are a missing or wrong secret or variable, an expired certificate or password, or an outage at Apple's notary service or Azure Trusted Signing. Then do one of the following.
+
+- **Nothing in the repository has to change** (an outage, or a secret or variable you have since corrected): use **Re-run failed jobs** on the same run. The jobs that succeeded are kept, and the rest continue from there into the same draft. Do it within a week: the image and the installers' update packages are kept as artifacts for 7 days.
+  - An installer job that failed after it had started uploading cannot upload the same files again: GitHub refuses an asset name that is already there, and vpk refuses an update feed that is already there. Delete that platform's files from the draft first (`gh release delete-asset v0.6.0 <name>`, or edit the draft on the Releases page), then re-run.
+- **The code has to change**: give up the version. Delete the draft (`gh release delete v0.6.0`). Leave the tag: once the `v*` tag ruleset is applied ([CONTRIBUTING.md](../CONTRIBUTING.md#branch-and-tag-rulesets)) it cannot be deleted, and a version that was tagged is not reused either way. Merge the fix and cut the next patch version. Nothing was published, so nobody has the version you gave up. Delete the draft rather than leaving it: the installer jobs look for the previous version's update package (for the delta update) in the latest releases, drafts included.
+- **A publishing job failed** (`image`, `image-sign`, `nuget` or `publish`): what was already pushed stays public, and every installer is signed and attached. Re-run the failed jobs. Pushing and signing the image again is harmless, `nuget` skips packages that are already on nuget.org, and publishing a release that is already public changes nothing. If the version cannot be finished, unlist its packages on nuget.org, and move `:latest` back to the previous version with `docker buildx imagetools create -t ghcr.io/siebe41/semantic-router:latest ghcr.io/siebe41/semantic-router:<previous>`. Then delete the draft and release the next patch version.
+
 ### After a release
 
 `dotnet pack` validates each library package against the last release on nuget.org, the baseline, and fails when a public API was removed or changed ([CONTRIBUTING.md](../CONTRIBUTING.md#public-api-and-package-validation)). After each release, in one pull request:
@@ -163,7 +189,7 @@ Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag st
 
 Windows SmartScreen and macOS Gatekeeper check a publisher's code signature, not these attestations. Provenance shows where a file came from; it does not stop the warnings on first start.
 
-The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([Signing the desktop app](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true`; until the signing certificates exist, that variable is what lets a release through, and those installers are unsigned. The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before anything is uploaded.
+The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([Signing the desktop app](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true` and, when cutting the release, ticked **Allow unsigned installers** ("Cut a release" asks for both; a tag pushed by hand needs only the variable). Until the signing certificates exist, that is what lets a release through, and those installers are unsigned. A signature, notarization or check that fails stops the release while it is still a draft, before anything is published ([When a release fails](#when-a-release-fails)). The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before anything is uploaded.
 
 To check an installer you downloaded:
 
@@ -181,3 +207,4 @@ The Linux AppImage and the `.zip` and `.tar.gz` archives are not code-signed; ch
 
 - **Code signing until the certificates exist.** While `ALLOW_UNSIGNED_RELEASE` is set, the installers are unsigned and SmartScreen and Gatekeeper warn on first start ([Code signing](#code-signing)). The archives' contents are not signed in any case.
 - **NuGet author signatures.** Only nuget.org's repository signature, as above.
+- **A signing dry run.** The signing steps have not yet run with real certificates, so the first signed release will be their first run. A failure there now leaves only a draft ([The order of a release](#the-order-of-a-release)), but a workflow that signs and notarizes a throwaway build with the production credentials, and uploads nothing, is still to come ([#220](https://github.com/siebe41/SemanticRouter.NET/issues/220)).
