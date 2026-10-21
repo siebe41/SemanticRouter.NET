@@ -128,9 +128,11 @@ internal static partial class ConfigurationIssues
             return unnamed < 0 ? "Usage.Budgets" : $"Usage.Budgets.{unnamed}.{BudgetProperty(error, document.Usage.Budgets[unnamed])}";
         }
 
-        if (error.StartsWith("Profile names must not be empty", StringComparison.Ordinal) && Quoted().Match(error) is { Success: true } badProfile)
+        if (error.StartsWith("Profile names must not be empty", StringComparison.Ordinal) && Quoted().Matches(error) is { Count: > 0 } quoted)
         {
-            return $"Profiles.{badProfile.Groups["name"].Value}";
+            // "… or contain '@' ('work@home')": the name is the last quoted text, and an empty one has no field of its own.
+            string badProfile = quoted[^1].Groups["name"].Value;
+            return badProfile.Length > 0 ? $"Profiles.{badProfile}" : "Profiles";
         }
 
         if (error.StartsWith("Middleware:ProfileRules name profile", StringComparison.Ordinal) && Quoted().Match(error) is { Success: true } ruleProfile)
@@ -351,7 +353,9 @@ internal static partial class ConfigurationIssues
             return Type.GetType(open) ?? typeof(object).Assembly.GetType(open);
         }
 
+        // Type.GetType without an assembly name looks only in this assembly and CoreLib; Uri is in neither.
         return Type.GetType(name)
+               ?? typeof(Uri).Assembly.GetType(name)
                ?? typeof(RouterConfiguration).Assembly.GetType(name)
                ?? typeof(SemanticRouterOptions).Assembly.GetType(name);
     }
