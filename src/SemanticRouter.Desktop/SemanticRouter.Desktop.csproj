@@ -35,6 +35,8 @@
     <AvaloniaResource Include="Assets\icon.png" />
     <!-- The tray icons, drawn from deploy/icon.svg by deploy/make-tray-icons.py. -->
     <AvaloniaResource Include="Assets\tray-template@2x.png;Assets\tray.ico;Assets\tray.png" />
+    <!-- Sigstore's public-good trust root, which an update's attestation is checked against (UpdateAttestation). -->
+    <EmbeddedResource Include="Assets\sigstore-trusted-root.json" LogicalName="sigstore-trusted-root.json" />
     <!-- The icon a Linux autostart entry points at. -->
     <None Include="Assets\icon.png" Link="semantic-router.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

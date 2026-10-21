@@ -114,7 +114,9 @@ internal static class EgressList
             ? (feed.IsFile ? $"the folder {feed.LocalPath}" : Host(feed)!) + " (your organization's feed)"
             : UpdateHosts;
         string applied = updates.Apply == UpdateApply.Notify ? "; applied only when the person chooses to" : string.Empty;
-        string signed = updates.Publisher is { } publisher ? $"; applied only when signed by {publisher}" : string.Empty;
+        string signed = updates.Publisher is { } publisher ? $"; applied only when signed by {publisher}"
+            : updates.Mode == UpdateMode.Feed ? string.Empty
+            : "; applied only when the release workflow attested it, or GitHub cannot be asked";
         string custom = updates.AllowCustomFeed && updates.Mode != UpdateMode.Feed ? "; SEMANTICROUTER_UPDATE_SOURCE may name another feed" : string.Empty;
         return $"desktop app updates: {from} (only the installed desktop app{applied}{signed}{custom}; untick Check for updates automatically in its tray menu to turn this off).";
     }

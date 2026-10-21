@@ -129,6 +129,12 @@ jobs:
           dotnet run --file deploy/third-party-notices.cs -- notices/THIRD-PARTY-NOTICES.txt src/SemanticRouter.Host/bin/Release/net10.0
           deploy/third-party-notices-check.sh notices/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)"
 
+      # The release still attests every update package as the desktop app checks it, and the app carries Sigstore's
+      # current trust root: like the weekly advisory run, a new trust root fails CI until it is copied in.
+      - name: Update attestation
+        if: runner.os == 'Linux'
+        run: deploy/update-attestation-check.sh --online
+
       # Package validation (Directory.Build.targets) fails the pack when a library package's public API breaks the last
       # release on nuget.org; restore downloaded that release.
       - name: Pack

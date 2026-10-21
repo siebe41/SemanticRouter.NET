@@ -26,6 +26,12 @@ namespace SemanticRouter.Desktop;
 /// <see cref="UpdatePolicy.Publisher"/>, a downloaded update is applied only when the app in it is signed by that
 /// publisher (<see cref="UpdatePublisher"/>); one that is not is deleted and not offered again.
 /// </para>
+/// <para>
+/// Without a publisher, an update from GitHub Releases is applied only when this project's release workflow attested its
+/// package for that version (<see cref="UpdateAttestation"/>); one that is not is refused the same way. When the check
+/// cannot run (GitHub's API cannot be reached), the update is applied and the app says it was not checked
+/// (<see cref="Problem"/>). Updates from another feed are not checked this way.
+/// </para>
 /// </remarks>
 internal sealed class DesktopUpdater(
     IAppUpdates? updates,
@@ -35,7 +41,8 @@ internal sealed class DesktopUpdater(
     UpdateApply apply = UpdateApply.Default,
     UpdatePublisher? publisher = null,
     string? off = null,
-    string? executable = null)
+    string? executable = null,
+    UpdateAttestation? attestation = null)
 {
     /// <summary>The argument the updated app is started with to start the service again, then carry on as usual.</summary>
     public const string ResumeService = "--resume-service";
@@ -44,6 +51,7 @@ internal sealed class DesktopUpdater(
     private VelopackAsset? _ready;
     private VelopackAsset? _verified;
     private string? _refused;
+    private string? _unchecked;
 
     /// <summary>The updater for this app, or one that does nothing when the app was not installed.</summary>
     public static DesktopUpdater Create(HostSettings settings, Func<string, string?> environment, TextWriter log)
@@ -100,7 +108,8 @@ internal sealed class DesktopUpdater(
             policy.Apply,
             UpdatePublisher.ForThisMachine(policy.Publisher),
             broken,
-            Installation.Executable(environment));
+            Installation.Executable(environment),
+            feed is null ? UpdateAttestation.ForGitHub(ProjectLinks.Repository) : null);
     }
 
     /// <summary>The environment variable that points the updater at another feed, for testing.</summary>
@@ -255,7 +264,9 @@ internal sealed class DesktopUpdater(
         {
             if (asset is null && _available is { } update)
             {
-                await updates.DownloadAsync(update, cancellationToken).ConfigureAwait(false);
+                // Checked against its attestation, an update is downloaded whole: Velopack rebuilds one from deltas into
+                // a zip of its own, which is not the attested package byte for byte.
+                await updates.DownloadAsync(Attested ? new UpdateInfo(update.TargetFullRelease, update.IsDowngrade) : update, cancellationToken).ConfigureAwait(false);
                 asset = update.TargetFullRelease;
             }
         }
@@ -268,7 +279,7 @@ internal sealed class DesktopUpdater(
         }
 
         asset ??= updates.Pending;
-        if (asset is null || !await Task.Run(() => Verify(asset), cancellationToken).ConfigureAwait(false))
+        if (asset is null || !await Task.Run(() => VerifyAsync(asset), cancellationToken).ConfigureAwait(false))
         {
             return null;
         }
@@ -276,7 +287,7 @@ internal sealed class DesktopUpdater(
         if (_ready is null)
         {
             _ready = asset;
-            Problem = null;
+            Problem = _unchecked;
             log.WriteLine($"{Now} Update {asset.Version} downloaded; it is applied when {(NotifyOnly ? "you choose Restart to update" : "the app quits or restarts")}.");
         }
 
@@ -325,7 +336,7 @@ internal sealed class DesktopUpdater(
     private async Task<bool> ApplyAsync(bool restartApp)
     {
         VelopackAsset? update = _ready ?? updates?.Pending;
-        if (updates is null || update is null || !await Task.Run(() => Verify(update)).ConfigureAwait(false))
+        if (updates is null || update is null || !await Task.Run(() => VerifyAsync(update)).ConfigureAwait(false))
         {
             return false;
         }
@@ -350,27 +361,61 @@ internal sealed class DesktopUpdater(
     }
 
     /// <summary>
-    /// Whether <paramref name="update"/> may be applied: always without a publisher in the policy; otherwise when its
-    /// package is signed by the publisher. A refused package is deleted, so it is not applied later either.
+    /// Whether <paramref name="update"/> may be applied. With a publisher in the policy: when its package is signed by
+    /// the publisher. Otherwise, for an update from GitHub: when its package is attested by the release workflow, or the
+    /// attestation could not be checked (then <see cref="Problem"/> says so). A refused package is deleted, so it is not
+    /// applied later either.
     /// </summary>
-    private bool Verify(VelopackAsset update)
+    /// <summary>Whether updates are checked against their attestation: from GitHub, with no publisher in the policy.</summary>
+    private bool Attested => publisher is null && attestation is not null;
+
+    private async Task<bool> VerifyAsync(VelopackAsset update)
     {
-        if (publisher is null || update == _verified)
+        if ((publisher is null && attestation is null) || update == _verified)
         {
             return true;
         }
 
         string? package = updates?.PackageFile(update);
-        string? refused = package is null || !File.Exists(package) ? "its package is not where the updater keeps it" : publisher.Refuses(package);
-        if (refused is null)
+        bool found = package is not null && File.Exists(package);
+        if (publisher is not null)
         {
-            _verified = update;
-            log.WriteLine($"{Now} Update {update.Version} is signed by {publisher.Expected}, as your organization's policy requires.");
-            return true;
+            string? refused = found ? publisher.Refuses(package!) : "its package is not where the updater keeps it";
+            if (refused is null)
+            {
+                _verified = update;
+                log.WriteLine($"{Now} Update {update.Version} is signed by {publisher.Expected}, as your organization's policy requires.");
+                return true;
+            }
+
+            return Refuse(update, refused, $"Your organization's policy accepts only updates signed by {publisher.Expected}.");
         }
 
+        UpdateAttestation.Verdict verdict = found
+            ? await attestation!.CheckAsync(package!, Path.GetFileName(update.FileName), update.Version.ToString()).ConfigureAwait(false)
+            : new UpdateAttestation.Verdict(UpdateAttestation.Outcome.Unchecked, "its package is not where the updater keeps it");
+        switch (verdict.Outcome)
+        {
+            case UpdateAttestation.Outcome.Verified:
+                (_verified, _unchecked) = (update, null);
+                log.WriteLine($"{Now} Update {update.Version} was built by the project's release workflow: {verdict.Detail}.");
+                return true;
+            case UpdateAttestation.Outcome.Unchecked:
+                // The check could not run: the update is applied, as before there was one, and the app says so.
+                (_verified, _unchecked) = (update, $"Update {update.Version} could not be checked against its attestation: {verdict.Detail}");
+                Problem = _unchecked;
+                log.WriteLine($"{Now} {_unchecked}. It is applied anyway.");
+                return true;
+            default:
+                return Refuse(update, verdict.Detail, "Without a publisher in your organization's policy, only updates the project's release workflow attested are applied.");
+        }
+    }
+
+    /// <summary>Refuses <paramref name="update"/>: says why, deletes its package and does not offer that version again.</summary>
+    private bool Refuse(VelopackAsset update, string refused, string rule)
+    {
         Problem = $"Update {update.Version} was refused: {refused}";
-        log.WriteLine($"{Now} {Problem}. Your organization's policy accepts only updates signed by {publisher.Expected}.");
+        log.WriteLine($"{Now} {Problem}. {rule}");
         updates?.Discard(update);
         _refused = update.Version.ToString();
         (_available, _ready) = (null, null);

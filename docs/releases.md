@@ -105,6 +105,19 @@ No release contains an ONNX embedding model: the router downloads the one it is 
 | `all-MiniLM-L6-v2` (the default) | [`Xenova/all-MiniLM-L6-v2`](https://huggingface.co/Xenova/all-MiniLM-L6-v2), an ONNX export | [`sentence-transformers/all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) | Apache-2.0 |
 | `bge-small-en-v1.5` | [`Xenova/bge-small-en-v1.5`](https://huggingface.co/Xenova/bge-small-en-v1.5), an ONNX export | [`BAAI/bge-small-en-v1.5`](https://huggingface.co/BAAI/bge-small-en-v1.5) | MIT, upstream's; the export declares no licence of its own |
 
+## Update attestations
+
+The installed desktop app checks every update it downloads from GitHub against the attestation of its `*-full.nupkg` ([What an update is checked against](desktop.md#updates)), the way `gh attestation verify` would, with code of its own and the Sigstore trust root it carries (`src/SemanticRouter.Desktop/Assets/sigstore-trusted-root.json`, a copy of `targets/trusted_root.json` from [sigstore/root-signing](https://github.com/sigstore/root-signing)). It accepts an attestation when:
+
+- its statement names the package's file name and SHA-256;
+- its certificate was issued by Sigstore's certificate authority (Fulcio) to `https://github.com/siebe41/SemanticRouter.NET/.github/workflows/release.yml@refs/tags/v<version>`, for a GitHub Actions token, for code signing;
+- its signature verifies with that certificate;
+- its entry in Sigstore's transparency log (Rekor) is about that signature and certificate, carries the log's signed timestamp, and its inclusion proof leads to a checkpoint the log signed, at a time the certificate was valid.
+
+So the release workflow's `checksums` job has to keep attesting every asset of the release, the update packages included, from a run for the version's tag; `deploy/update-attestation-check.sh`, in CI and in the release's first job, fails when it no longer does. The same script, with `--online`, fails when Sigstore has published a new trust root (a new certificate authority or log) that the app does not carry yet: copy it in as the script says and commit it, so that the next release carries it. An app checks the release after it with the trust root of its own version, so the trust root must be current at each release.
+
+Releases from 0.5.0 on have these attestations. An app that cannot read an attestation's log entry (Sigstore's newer Rekor v2 uses Ed25519 keys, which this check does not read yet) applies the update and says it was not checked; a missing or failing attestation refuses it.
+
 ## Cutting a release
 
 For the maintainer. A release is published by one workflow run, which only the repository owner can start:
