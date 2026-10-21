@@ -364,7 +364,7 @@ builder.Services
         o.Routes.Add(new RouteDefinition { Name = "design", Tier = 4, Utterances = { "design a scalable architecture" } });
     })
     .AddConnector("lmstudio", c => c.BaseAddress = new Uri("http://localhost:1234"))
-    .AddConnector("claude-cli", c => { c.Type = ConnectorType.Cli; c.Preset = CliPreset.ClaudeCode; })
+    .AddConnector("claude-cli", c => { c.Type = ConnectorTypes.Cli; c.Preset = CliPreset.ClaudeCode; })
     .AddModel(new ModelDefinition { Name = "local", Connector = "lmstudio", Model = "qwen/qwen3-8b", Tier = 1, IsLocal = true })
     .AddModel(new ModelDefinition { Name = "claude", Connector = "claude-cli", Model = "sonnet", Tier = 4 })
     .UseOpenAICompatibleEmbeddings(e =>
@@ -464,7 +464,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `ToolCalling` | CLI | `None` | `None`: decline tool-bearing requests. `Prompted`: describe the tools in the prompt and parse `tool_call` blocks from the reply. |
 | `StreamPromptedReplies` | CLI | `true` | With `Prompted`: stream the reply's text and hold back only what may be a tool call. `false` buffers the reply, so a failed run can still fail over. |
 | `RepairToolCalls` | CLI | `true` | With `Prompted`: re-ask once, briefly, for a tool call that could not be read. See [Prompted tool calling in practice](docs/providers.md#prompted-tool-calling-in-practice). |
-| `PromptedToolParsing` | CLI | `Lenient` | With `Prompted`: `Strict` reads only the run's own randomly labelled fence, at the end of the reply, naming one of the request's tools, as a call; `Lenient` also takes near misses (bare JSON, other labels, calls followed by text). In both, tool results are defused and a call copied from one stays text. `Lenient` stays the default until `Strict` has been measured on smaller models. See [Forged tool calls](docs/providers.md#forged-tool-calls). |
+| `PromptedToolParsing` | CLI | `Lenient` | With `Prompted`: `Strict` reads only the run's own randomly labelled fence, at the end of the reply, naming one of the request's tools, as a call; `Lenient` also takes near misses (bare JSON, other labels, calls followed by text). In both, tool results are defused and a call copied from one stays text. `Lenient` stays the default until `Strict` has been measured on smaller models; meanwhile Activity notes the calls `Strict` would have kept as text. See [Forged tool calls](docs/providers.md#forged-tool-calls). |
 | `Preset` | CLI | `Custom` | `ClaudeCode`, `GitHubCopilot`, `Codex` or `Custom`. |
 | `Executable` | CLI | preset's command | Started directly, never through a shell, by its full path: a bare name is looked up on the absolute `PATH` entries only, never in the current directory. On Windows use the `.exe`. |
 | `Arguments[]` | CLI | | Custom: the full template (`{model}`, `{prompt}`). Presets: extra arguments appended. |
@@ -612,9 +612,9 @@ What the router itself adds, with no model behind it: the `semantic-router` tool
 
 | To… | Do this |
 |---|---|
-| Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. To make a new connector type selectable in configuration, register an `IChatConnectorFactory`; implement `IModelDiscovery` for the dashboard's Discover button. |
+| Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. To make a new connector type selectable in configuration (`"Type": "Bedrock"`), register an `IChatConnectorFactory` whose `Type` is that name; implement `IModelDiscovery` for the dashboard's Discover button and the doctor. Type names match case-insensitively. The router treats a connector of such a type like a CLI (offline mode turns it off) unless the factory sets `UsesBaseAddress`, which makes it an HTTP connector held to the policy's endpoint rules for its `BaseAddress`. |
 | Keep configuration somewhere other than a file | Implement `IRouterConfigurationStore` and call `.UseConfigurationStore<T>()`. |
-| Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. For an in-process model: `.UseOnnxEmbeddings()` from `SemanticRouter.Embeddings.Onnx`. To make a new kind selectable in configuration, register an `IEmbeddingProviderFactory`. |
+| Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. For an in-process model: `.UseOnnxEmbeddings()` from `SemanticRouter.Embeddings.Onnx`. To make a new provider selectable in configuration (`"Provider": "MyModel"`), register an `IEmbeddingProviderFactory` whose `Kind` is that name; set its `RunsInProcess` when the model runs in the router's process, so prompts that must stay local may use it. |
 | Change how requirements are derived | Implement `IRouteSelector` or `IComplexityAnalyzer`. |
 | Change how models are ranked (budgets, time of day) | Implement `IModelSelector`. |
 | Persist cooldowns, affinity, activity and history | `.UseSqliteState("semantic-router.db")` from `SemanticRouter.Storage.Sqlite`, or implement `ICooldownStore`, `IToolCallAffinity`, `IWarmCacheStore`, `IRoutingActivityStore`, `IRouterConfigurationHistory`. See [Durable state](docs/architecture.md#durable-state). |
@@ -668,4 +668,4 @@ What changed in each release, and what is merged but not released yet, is in the
 
 ## License
 
-[MIT](LICENSE). The connectors drive third-party services under *their* terms; see [Subscription CLI terms](docs/TERMS.md).
+[MIT](LICENSE). The dashboard's fonts (Inter and Fira Sans) are under the SIL Open Font License 1.1, and what the tool, the image and the desktop app ship from others under its own licence: each carries a `THIRD-PARTY-NOTICES.txt` ([SBOMs and third-party notices](docs/releases.md#sboms-and-third-party-notices)). The connectors drive third-party services under *their* terms; see [Subscription CLI terms](docs/TERMS.md).

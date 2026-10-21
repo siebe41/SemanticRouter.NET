@@ -241,7 +241,21 @@
   </Suppression>
   <Suppression>
     <DiagnosticId>CP0001</DiagnosticId>
+    <Target>T:SemanticRouter.AspNetCore.ConnectorType</Target>
+    <Left>lib/net10.0/SemanticRouter.AspNetCore.dll</Left>
+    <Right>lib/net10.0/SemanticRouter.AspNetCore.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0001</DiagnosticId>
     <Target>T:SemanticRouter.AspNetCore.DashboardTheme</Target>
+    <Left>lib/net10.0/SemanticRouter.AspNetCore.dll</Left>
+    <Right>lib/net10.0/SemanticRouter.AspNetCore.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0001</DiagnosticId>
+    <Target>T:SemanticRouter.AspNetCore.EmbeddingProviderKind</Target>
     <Left>lib/net10.0/SemanticRouter.AspNetCore.dll</Left>
     <Right>lib/net10.0/SemanticRouter.AspNetCore.dll</Right>
     <IsBaselineSuppression>true</IsBaselineSuppression>
@@ -382,6 +396,55 @@
   <Suppression>
     <DiagnosticId>CP0002</DiagnosticId>
     <Target>M:Microsoft.AspNetCore.Builder.RouterDashboardEndpoints.MapRouterDashboard(Microsoft.AspNetCore.Routing.IEndpointRouteBuilder,System.String,System.Action{Microsoft.AspNetCore.Builder.RouterDashboardOptions})</Target>
+    <Left>lib/net10.0/SemanticRouter.AspNetCore.dll</Left>
+    <Right>lib/net10.0/SemanticRouter.AspNetCore.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SemanticRouter.AspNetCore.ConnectorOptions.get_Type</Target>
+    <Left>lib/net10.0/SemanticRouter.AspNetCore.dll</Left>
+    <Right>lib/net10.0/SemanticRouter.AspNetCore.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SemanticRouter.AspNetCore.EmbeddingProviderOptions.get_Provider</Target>
+    <Left>lib/net10.0/SemanticRouter.AspNetCore.dll</Left>
+    <Right>lib/net10.0/SemanticRouter.AspNetCore.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SemanticRouter.AspNetCore.IChatConnectorFactory.get_Type</Target>
+    <Left>lib/net10.0/SemanticRouter.AspNetCore.dll</Left>
+    <Right>lib/net10.0/SemanticRouter.AspNetCore.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SemanticRouter.AspNetCore.IEmbeddingProviderFactory.get_Kind</Target>
+    <Left>lib/net10.0/SemanticRouter.AspNetCore.dll</Left>
+    <Right>lib/net10.0/SemanticRouter.AspNetCore.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0002</DiagnosticId>
+    <Target>M:SemanticRouter.AspNetCore.MachinePolicy.get_DisabledConnectorTypes</Target>
+    <Left>lib/net10.0/SemanticRouter.AspNetCore.dll</Left>
+    <Right>lib/net10.0/SemanticRouter.AspNetCore.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0006</DiagnosticId>
+    <Target>P:SemanticRouter.AspNetCore.IChatConnectorFactory.Type</Target>
+    <Left>lib/net10.0/SemanticRouter.AspNetCore.dll</Left>
+    <Right>lib/net10.0/SemanticRouter.AspNetCore.dll</Right>
+    <IsBaselineSuppression>true</IsBaselineSuppression>
+  </Suppression>
+  <Suppression>
+    <DiagnosticId>CP0006</DiagnosticId>
+    <Target>P:SemanticRouter.AspNetCore.IEmbeddingProviderFactory.Kind</Target>
     <Left>lib/net10.0/SemanticRouter.AspNetCore.dll</Left>
     <Right>lib/net10.0/SemanticRouter.AspNetCore.dll</Right>
     <IsBaselineSuppression>true</IsBaselineSuppression>

@@ -10,10 +10,10 @@ namespace SemanticRouter.Host;
 internal static class FirstRun
 {
     /// <summary>The API keys a container may be started with, and the connector each one gets.</summary>
-    private static readonly (string Variable, string Connector, ConnectorType Type, Uri Address)[] ApiKeys =
+    private static readonly (string Variable, string Connector, string Type, Uri Address)[] ApiKeys =
     [
-        ("OPENAI_API_KEY", "openai", ConnectorType.OpenAICompatible, new Uri("https://api.openai.com")),
-        ("ANTHROPIC_API_KEY", "anthropic", ConnectorType.Anthropic, new Uri("https://api.anthropic.com")),
+        ("OPENAI_API_KEY", "openai", ConnectorTypes.OpenAICompatible, new Uri("https://api.openai.com")),
+        ("ANTHROPIC_API_KEY", "anthropic", ConnectorTypes.Anthropic, new Uri("https://api.anthropic.com")),
     ];
 
     /// <summary>
@@ -60,7 +60,7 @@ internal static class FirstRun
         }
 
         var added = new List<string>();
-        foreach ((string variable, string connector, ConnectorType type, Uri address) in ApiKeys)
+        foreach ((string variable, string connector, string type, Uri address) in ApiKeys)
         {
             if (string.IsNullOrWhiteSpace(environment(variable)) || document.Connectors.ContainsKey(connector))
             {

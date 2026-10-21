@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Embeddings.Onnx;
 
 namespace SemanticRouter.Host;
 
@@ -18,7 +19,7 @@ internal sealed class SetupDetector(IServiceProvider services) : IRouterSetupDet
     {
         // The router's own client settings (Network:CaBundle, a proxy), as for a connector.
         HttpClient http = services.GetRequiredService<IHttpClientFactory>().CreateClient(OpenAICompatibleConnector.HttpClientNamePrefix + "setup");
-        string? onnx = services.GetServices<IEmbeddingProviderFactory>().FirstOrDefault(f => f.Kind == EmbeddingProviderKind.Onnx) is { } factory
+        string? onnx = services.GetServices<IEmbeddingProviderFactory>().FirstOrDefault(f => string.Equals(f.Kind, OnnxEmbeddings.Provider, StringComparison.OrdinalIgnoreCase)) is { } factory
             ? factory.Unavailable
             : "In-process (Onnx) embeddings are not installed in this router.";
         return DetectAsync(
@@ -49,7 +50,7 @@ internal sealed class SetupDetector(IServiceProvider services) : IRouterSetupDet
         foreach ((string name, ConnectorOptions connector) in found.Connectors.Where(c => !template.Connectors.ContainsKey(c.Key)))
         {
             ModelDefinition[] models = [.. found.Models.Where(m => string.Equals(m.Connector, name, StringComparison.OrdinalIgnoreCase))];
-            detections.Add(connector.Type == ConnectorType.Cli
+            detections.Add(connector.Type == ConnectorTypes.Cli
                 ? CliAsync(name, connector, models, template, probes, runner, cancellationToken)
                 : Task.FromResult(Local(name, connector, models, notes)));
         }
@@ -68,7 +69,7 @@ internal sealed class SetupDetector(IServiceProvider services) : IRouterSetupDet
                      ("claude", "claude-cli", CliPreset.ClaudeCode), ("codex", "codex-cli", CliPreset.Codex), ("copilot", "copilot-cli", CliPreset.GitHubCopilot),
                  })
         {
-            var options = new ConnectorOptions { Type = ConnectorType.Cli, Preset = preset };
+            var options = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = preset };
             if (found.Connectors.ContainsKey(connector) || probes.Policy?.Blocks(options) is not null
                 || CliExecutableLocator.Find(executable, probes.SearchPath, probes.Windows) is not { Found: false, ScriptPath: { } script } lookup)
             {

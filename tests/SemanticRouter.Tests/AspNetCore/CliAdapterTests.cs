@@ -12,7 +12,7 @@ public sealed class CliAdapterTests : IDisposable
     private CliRequest Request(string? model, params ChatMessage[] messages) => Request(CliPromptInput.Stdin, model, messages);
 
     private CliRequest Request(CliPromptInput input, string? model, params ChatMessage[] messages) =>
-        new(model, messages, _workingDirectory, new ConnectorOptions { Type = ConnectorType.Cli, MaxArgumentLength = 100, PromptInput = input });
+        new(model, messages, _workingDirectory, new ConnectorOptions { Type = ConnectorTypes.Cli, MaxArgumentLength = 100, PromptInput = input });
 
     [Fact]
     public void Claude_reads_the_prompt_from_stdin_and_disables_every_tool()
@@ -187,7 +187,7 @@ public sealed class CliAdapterTests : IDisposable
     {
         var options = new ConnectorOptions
         {
-            Type = ConnectorType.Cli,
+            Type = ConnectorTypes.Cli,
             PromptInput = CliPromptInput.Argument,
             Arguments = ["run", "{model}", "--prompt", "{prompt}"],
         };
@@ -210,7 +210,7 @@ public sealed class CliAdapterTests : IDisposable
     {
         var options = new ConnectorOptions
         {
-            Type = ConnectorType.Cli,
+            Type = ConnectorTypes.Cli,
             PromptInput = CliPromptInput.Argument,
             Arguments = ["run", "{prompt}", "--prompt={prompt}"],
         };
@@ -238,7 +238,7 @@ public sealed class CliAdapterTests : IDisposable
     [Fact]
     public void Claude_runs_without_background_traffic_unless_the_connector_says_otherwise()
     {
-        var options = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        var options = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode };
         options.EnvironmentVariables["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "0";
         options.EnvironmentVariables["HTTPS_PROXY"] = "http://proxy.example:3128";
 

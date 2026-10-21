@@ -1,38 +1,85 @@
+using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json.Serialization;
 
 namespace SemanticRouter.AspNetCore;
 
-/// <summary>Built-in connector implementations.</summary>
-[JsonConverter(typeof(JsonStringEnumConverter<ConnectorType>))]
-public enum ConnectorType
+/// <summary>
+/// The connector types the router builds itself, for <see cref="ConnectorOptions.Type"/>. A package adds another type by
+/// registering an <see cref="IChatConnectorFactory"/> for its name (for example <c>Copilot</c>, from
+/// <c>SemanticRouter.Connectors.Copilot</c>). Type names match case-insensitively.
+/// </summary>
+public static class ConnectorTypes
 {
     /// <summary>
     /// HTTP <c>POST /v1/chat/completions</c> pass-through: OpenAI, Azure OpenAI, Anthropic (OpenAI-compatible endpoint),
     /// GitHub Models, Gemini API, OpenRouter, Groq, Mistral, LM Studio, Ollama, vLLM, LiteLLM, …
     /// </summary>
-    OpenAICompatible = 0,
+    public const string OpenAICompatible = "OpenAICompatible";
 
     /// <summary>Runs a vendor CLI (Claude Code, GitHub Copilot CLI, Codex CLI, or any command) as a subprocess.</summary>
-    Cli = 1,
+    public const string Cli = "Cli";
 
     /// <summary>
     /// HTTP <c>POST /v1/messages</c> (the Anthropic Messages API) with an API key. Requests from Anthropic-protocol
     /// clients such as Claude Code pass through untouched; OpenAI-protocol requests are translated.
     /// </summary>
-    Anthropic = 2,
+    public const string Anthropic = "Anthropic";
 
     /// <summary>
     /// HTTP <c>POST /v1/responses</c> (the OpenAI Responses API) with an API key. Requests from Responses clients such
     /// as Codex CLI pass through untouched (hosted tools and reasoning items included); other clients are translated.
     /// </summary>
-    Responses = 3,
+    public const string Responses = "Responses";
+
+    /// <summary>The built-in types, in their canonical spelling.</summary>
+    public static IReadOnlyList<string> BuiltIn { get; } = [OpenAICompatible, Cli, Anthropic, Responses];
+
+    /// <summary>Whether <paramref name="type"/> names a built-in type (case-insensitive).</summary>
+    public static bool IsBuiltIn(string? type) => BuiltIn.Contains(type, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// GitHub Copilot through GitHub's official Copilot SDK, on your own Copilot sign-in: native streaming, tool calls
-    /// and model discovery. Needs the <c>SemanticRouter.Connectors.Copilot</c> package (<c>.AddCopilotConnector()</c>;
-    /// the <c>semantic-router</c> tool includes it) and the <c>copilot</c> CLI, which the SDK runs as its runtime.
+    /// The types of the factories a router has registered (<see cref="Register"/>), by name: their spelling and whether
+    /// they call their <see cref="ConnectorOptions.BaseAddress"/>. Shared by every router in the process, since a type
+    /// name means one package.
     /// </summary>
-    Copilot = 4,
+    private static readonly ConcurrentDictionary<string, (string Name, bool UsesBaseAddress)> Packaged = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// <paramref name="type"/> trimmed, with a built-in name or the name of a registered factory in its canonical spelling
+    /// (so <c>"cli"</c> becomes <see cref="Cli"/> and <c>"copilot"</c> becomes <c>Copilot</c>) and an empty value read as
+    /// <see cref="OpenAICompatible"/>. Other names are kept as written.
+    /// </summary>
+    internal static string Normalize(string? type)
+    {
+        if (string.IsNullOrWhiteSpace(type))
+        {
+            return OpenAICompatible;
+        }
+
+        string trimmed = type.Trim();
+        return BuiltIn.FirstOrDefault(b => string.Equals(b, trimmed, StringComparison.OrdinalIgnoreCase))
+            ?? (Packaged.TryGetValue(trimmed, out var packaged) ? packaged.Name : trimmed);
+    }
+
+    /// <summary>Records the types of <paramref name="factories"/>, for <see cref="Normalize"/> and <see cref="UsesBaseAddress"/>.</summary>
+    internal static void Register(IEnumerable<IChatConnectorFactory> factories)
+    {
+        foreach (IChatConnectorFactory factory in factories)
+        {
+            if (!string.IsNullOrWhiteSpace(factory.Type) && !IsBuiltIn(factory.Type))
+            {
+                Packaged[factory.Type.Trim()] = (factory.Type.Trim(), factory.UsesBaseAddress);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a registered factory says connectors of the packaged <paramref name="type"/> send every request to their
+    /// <see cref="ConnectorOptions.BaseAddress"/> (<see cref="IChatConnectorFactory.UsesBaseAddress"/>). <see langword="false"/>
+    /// for a type no factory has declared that for.
+    /// </summary>
+    internal static bool UsesBaseAddress(string type) => Packaged.TryGetValue(type, out var packaged) && packaged.UsesBaseAddress;
 }
 
 /// <summary>How a CLI connector handles requests that offer tools (agentic clients such as Claude Code).</summary>
@@ -119,8 +166,32 @@ public enum CliPromptInput
 /// </summary>
 public sealed class ConnectorOptions
 {
-    /// <summary>Which implementation to use. Default <see cref="ConnectorType.OpenAICompatible"/>.</summary>
-    public ConnectorType Type { get; set; } = ConnectorType.OpenAICompatible;
+    /// <summary>
+    /// Which implementation to use: one of <see cref="ConnectorTypes"/>, or a type an installed package provides through
+    /// an <see cref="IChatConnectorFactory"/>. Case-insensitive; built-in names, and those of the installed factories, are
+    /// stored in their canonical spelling.
+    /// Default <see cref="ConnectorTypes.OpenAICompatible"/>.
+    /// </summary>
+    [AllowNull]
+    public string Type
+    {
+        get => _type;
+        set => _type = ConnectorTypes.Normalize(value);
+    }
+
+    private string _type = ConnectorTypes.OpenAICompatible;
+
+    /// <summary>Whether <see cref="Type"/> is <paramref name="type"/> (case-insensitive).</summary>
+    public bool IsType(string type) => string.Equals(Type, type, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether the connector reaches its vendor by its own means rather than by calling <see cref="BaseAddress"/>: a
+    /// <see cref="ConnectorTypes.Cli"/>, or a type from another package whose factory does not declare
+    /// <see cref="IChatConnectorFactory.UsesBaseAddress"/> (such as Copilot, whose SDK runs the <c>copilot</c> CLI). Decided
+    /// by the factory, not by the settings, so a <see cref="BaseAddress"/> the connector ignores cannot pass it off as a
+    /// local server to the machine policy.
+    /// </summary>
+    internal bool RunsProgram => Type == ConnectorTypes.Cli || (!ConnectorTypes.IsBuiltIn(Type) && !ConnectorTypes.UsesBaseAddress(Type));
 
     // ---- OpenAICompatible -------------------------------------------------------------------------------------
 
@@ -273,7 +344,7 @@ public sealed class ConnectorOptions
     public TimeSpan Timeout { get; set; }
 
     internal TimeSpan EffectiveTimeout =>
-        Timeout > TimeSpan.Zero ? Timeout : Type is ConnectorType.Cli or ConnectorType.Copilot ? TimeSpan.FromMinutes(5) : TimeSpan.FromSeconds(100);
+        Timeout > TimeSpan.Zero ? Timeout : RunsProgram ? TimeSpan.FromMinutes(5) : TimeSpan.FromSeconds(100);
 
     /// <summary>
     /// Time allowed between two pieces of a reply once it has started (HTTP: reads of the response body; CLI: lines of
@@ -287,8 +358,8 @@ public sealed class ConnectorOptions
     /// <summary>The wire protocol an HTTP connector speaks.</summary>
     internal ChatProtocol Protocol => Type switch
     {
-        ConnectorType.Anthropic => ChatProtocol.Anthropic,
-        ConnectorType.Responses => ChatProtocol.Responses,
+        ConnectorTypes.Anthropic => ChatProtocol.Anthropic,
+        ConnectorTypes.Responses => ChatProtocol.Responses,
         _ => ChatProtocol.OpenAI,
     };
 
@@ -297,8 +368,8 @@ public sealed class ConnectorOptions
         ? RequestPath
         : Type switch
         {
-            ConnectorType.Anthropic => "/v1/messages",
-            ConnectorType.Responses => "/v1/responses",
+            ConnectorTypes.Anthropic => "/v1/messages",
+            ConnectorTypes.Responses => "/v1/responses",
             _ => RequestPath,
         };
 }

@@ -43,7 +43,7 @@ public sealed class MachinePolicyTests : RouterHostTest
             }
             """, "/etc/semantic-router/policy.json");
 
-        policy.DisabledConnectorTypes.Should().Equal(ConnectorType.Cli, ConnectorType.Copilot);
+        policy.DisabledConnectorTypes.Should().Equal(ConnectorTypes.Cli, "copilot");
         policy.DisabledPresets.Should().Equal(CliPreset.Codex);
         (policy.Features.Judge, policy.Features.Webhooks, policy.Features.Memory).Should().Be((false, false, true));
         (policy.Updates.Mode, policy.MaxRetentionDays, policy.Source).Should().Be((UpdateMode.Feed, 7, "/etc/semantic-router/policy.json"));
@@ -73,7 +73,7 @@ public sealed class MachinePolicyTests : RouterHostTest
 
         MachinePolicy policy = MachinePolicy.FromJson(root.ToJsonString(), @"HKLM\Software\Policies\SemanticRouter");
 
-        policy.DisabledConnectorTypes.Should().Equal(ConnectorType.Cli, ConnectorType.Copilot);
+        policy.DisabledConnectorTypes.Should().Equal(ConnectorTypes.Cli, "Copilot");
         (policy.RequireLocalOnly, policy.Dashboard, policy.Features.TuningApply).Should().Be((true, DashboardPolicy.ReadOnly, false));
         policy.LocalHosts.Should().Equal("gpu.corp.example");
     }
@@ -98,7 +98,7 @@ public sealed class MachinePolicyTests : RouterHostTest
     public void Enforcing_turns_off_what_breaks_it_and_says_so()
     {
         var configuration = new RouterConfiguration();
-        configuration.Connectors["claude"] = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        configuration.Connectors["claude"] = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode };
         configuration.Connectors["gateway"] = new ConnectorOptions { BaseAddress = new Uri("https://llm.corp.example:8443") };
         configuration.Connectors["elsewhere"] = new ConnectorOptions { BaseAddress = new Uri("https://api.example.com") };
         configuration.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
@@ -140,13 +140,13 @@ public sealed class MachinePolicyTests : RouterHostTest
         configuration.Connectors["cloud"] = new ConnectorOptions { BaseAddress = new Uri("https://api.example.com") };
         configuration.Models.Add(Model("local", 1, local: true, connector: "lmstudio"));
         configuration.Models.Add(Model("cloud", 4, connector: "cloud"));
-        configuration.Embeddings.Provider = EmbeddingProviderKind.OpenAICompatible;
+        configuration.Embeddings.Provider = EmbeddingProviderKinds.OpenAICompatible;
         configuration.Embeddings.Endpoint = new Uri("https://api.example.com");
 
         MachinePolicy.FromJson("""{"RequireLocalOnly": true}""").Enforce(configuration);
 
         configuration.Models.Where(m => m.Enabled).Select(m => m.Name).Should().Equal("local");
-        configuration.Embeddings.Provider.Should().Be(EmbeddingProviderKind.Hashing);
+        configuration.Embeddings.Provider.Should().Be(EmbeddingProviderKinds.Hashing);
     }
 
     [Fact]
@@ -226,7 +226,7 @@ public sealed class MachinePolicyTests : RouterHostTest
     private static RouterConfiguration Reachable()
     {
         var configuration = new RouterConfiguration();
-        configuration.Connectors["claude"] = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        configuration.Connectors["claude"] = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode };
         configuration.Connectors["gateway"] = new ConnectorOptions { BaseAddress = new Uri("https://llm.corp.example") };
         configuration.Connectors["cloud"] = new ConnectorOptions { BaseAddress = new Uri("https://api.example.com") };
         configuration.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
@@ -234,7 +234,7 @@ public sealed class MachinePolicyTests : RouterHostTest
         configuration.Models.Add(Model("corp", 3, connector: "gateway"));
         configuration.Models.Add(Model("cloud", 4, connector: "cloud"));
         configuration.Models.Add(Model("local", 1, local: true, connector: "lmstudio"));
-        configuration.Embeddings.Provider = EmbeddingProviderKind.OpenAICompatible;
+        configuration.Embeddings.Provider = EmbeddingProviderKinds.OpenAICompatible;
         configuration.Embeddings.Endpoint = new Uri("https://api.example.com");
         configuration.Notifications.Webhooks["slack"] = new WebhookOptions { Url = "https://hooks.example.com/T0/B0/x" };
         return configuration;
@@ -251,7 +251,7 @@ public sealed class MachinePolicyTests : RouterHostTest
         IReadOnlyList<string> changes = offline.Enforce(configuration);
 
         configuration.Models.Where(m => m.Enabled).Select(m => m.Name).Should().Equal("corp", "local");
-        configuration.Embeddings.Provider.Should().Be(EmbeddingProviderKind.Hashing);
+        configuration.Embeddings.Provider.Should().Be(EmbeddingProviderKinds.Hashing);
         configuration.Notifications.Webhooks.Should().BeEmpty();
         changes.Should().Contain(c => c.Contains("'claude-cli'", StringComparison.Ordinal) && c.Contains("reach their vendor, so they are off in offline mode (Network:Offline)", StringComparison.Ordinal))
             .And.Contain(c => c.Contains("'cloud'", StringComparison.Ordinal) && c.Contains("api.example.com is not reachable in offline mode", StringComparison.Ordinal))

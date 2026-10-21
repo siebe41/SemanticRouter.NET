@@ -9,7 +9,8 @@ internal static class ChatTranscript
 
     /// <summary>
     /// Splits system/developer messages out (for CLIs that accept a separate system prompt) and renders the rest. A
-    /// lone user message is passed through verbatim; a longer conversation is rendered as a labelled transcript.
+    /// lone user message is passed through verbatim; a longer conversation is rendered as a labelled transcript, in which
+    /// a line of a message that reads like a turn marker (<c>[user]</c>) is <see cref="PromptedToolCalls.EscapeMarkers">escaped</see>.
     /// </summary>
     public static (string? System, string Prompt) Render(IReadOnlyList<ChatMessage> messages)
     {
@@ -36,7 +37,7 @@ internal static class ChatTranscript
         var prompt = new StringBuilder(ContinueInstruction);
         foreach (ChatMessage turn in turns)
         {
-            prompt.Append("\n[").Append(turn.Role).Append("]\n").Append(turn.Content).Append('\n');
+            prompt.Append("\n[").Append(turn.Role).Append("]\n").Append(PromptedToolCalls.EscapeMarkers(turn.Content)).Append('\n');
         }
 
         return (systemPrompt, prompt.ToString());
@@ -44,7 +45,8 @@ internal static class ChatTranscript
 
     /// <summary>
     /// Renders structured turns, including tool calls and results in the <see cref="PromptedToolCalls"/> format, and
-    /// appends the tool instructions to the system prompt when the request offers tools.
+    /// appends the tool instructions to the system prompt when the request offers tools. Text blocks quote files and
+    /// pages too (a pasted page, an attached file), so their lines that read like a turn or result marker are escaped.
     /// </summary>
     /// <param name="request">The parsed request.</param>
     /// <param name="describeTools">Append the prompted tool-calling instructions (off for backends with native tools).</param>
@@ -71,7 +73,7 @@ internal static class ChatTranscript
             {
                 string part = block switch
                 {
-                    TextBlock t => t.Text,
+                    TextBlock t => PromptedToolCalls.EscapeMarkers(t.Text),
                     ToolUseBlock u => PromptedToolCalls.RenderToolUse(u, format),
                     ToolResultBlock r => PromptedToolCalls.RenderToolResult(r),
                     ImageBlock => "[image omitted]",

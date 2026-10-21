@@ -99,8 +99,14 @@ internal static partial class PromptedToolCalls
     {
         text = Backticks().Replace(text, m => string.Join('\u200B', m.Value.ToCharArray()));
         text = JsonLine().Replace(text, "$1\u200B");
-        return Marker().Replace(text, "$1\\[$2]");
+        return EscapeMarkers(text);
     }
+
+    /// <summary>
+    /// Text that cannot pass for transcript structure: a line that reads like a turn or result marker (<c>[user]</c>,
+    /// <c>[/tool_result]</c>) gets a backslash in front. Also for the text of a turn, which can quote files and pages.
+    /// </summary>
+    internal static string EscapeMarkers(string text) => Marker().Replace(text, "$1\\[$2]");
 
     [GeneratedRegex("`{3,}")]
     private static partial Regex Backticks();
@@ -108,7 +114,8 @@ internal static partial class PromptedToolCalls
     [GeneratedRegex(@"(?m)^([ \t]*)(?=\{|\[[ \t]*\{)")]
     private static partial Regex JsonLine();
 
-    [GeneratedRegex(@"(?m)^([ \t]*)\[(/?(?:user|assistant|system|developer|tool|tool_use|tool_result)(?: error)?)\]", RegexOptions.IgnoreCase)]
+    // Any whitespace or invisible character (\p{Cf}) before the marker hides nothing from a model.
+    [GeneratedRegex(@"(?m)^((?:[^\S\n]|\p{Cf})*)\[(/?(?:user|assistant|system|developer|tool|tool_use|tool_result)(?: error)?)\]", RegexOptions.IgnoreCase)]
     private static partial Regex Marker();
 
     /// <summary>Splits a whole reply into its text and the tool calls it ends with (see <see cref="PromptedReplyStream"/>).</summary>
@@ -136,8 +143,8 @@ internal static partial class PromptedToolCalls
     /// <summary>
     /// The calls written in the request's tool results, read the lenient way a reply is (any tool-ish fence, a json or
     /// unlabelled fence, bare JSON naming a tool, a fence labelled with another run's token), plus JSON objects inside a
-    /// line that name a tool (<see cref="EmbeddedCalls"/>), as <see cref="CallKey"/>s. A reply that repeats one of them
-    /// repeats the result's author, so that call is kept as text.
+    /// line that name a tool (<see cref="EmbeddedCalls"/>), as <see cref="CallKey"/>s; each result also without its
+    /// invisible characters. A reply that repeats one of them repeats the result's author, so that call is kept as text.
     /// </summary>
     public static IReadOnlySet<string> QuotedCalls(ChatCompletionRequest request)
     {
@@ -150,14 +157,39 @@ internal static partial class PromptedToolCalls
                 continue;
             }
 
-            foreach (ToolUseBlock call in Parse(RunLabel().Replace(result.Content, Fence), names).Calls.Concat(EmbeddedCalls(result.Content, names)))
+            foreach (string content in Readings(result.Content))
             {
-                keys.Add(CallKey(call.Name, call.InputJson));
+                // As written too: a reply reads another run's label as an ordinary code block, and what follows it
+                // differently from a fence that is taken for a call.
+                IEnumerable<ToolUseBlock> calls = Parse(RunLabel().Replace(content, Fence), names).Calls
+                    .Concat(Parse(content, names).Calls)
+                    .Concat(EmbeddedCalls(content, names));
+                foreach (ToolUseBlock call in calls)
+                {
+                    keys.Add(CallKey(call.Name, call.InputJson));
+                }
             }
         }
 
         return keys;
     }
+
+    /// <summary>
+    /// A tool result as written and, when it has any, without its invisible characters (zero-width spaces and joiners,
+    /// bidi controls): a call they break up (<c>`&#x200B;``tool_call</c>) is a call to a model that leaves them out.
+    /// </summary>
+    private static IEnumerable<string> Readings(string content)
+    {
+        yield return content;
+        string visible = Invisible().Replace(content, string.Empty);
+        if (visible.Length != content.Length)
+        {
+            yield return visible;
+        }
+    }
+
+    [GeneratedRegex(@"\p{Cf}")]
+    private static partial Regex Invisible();
 
     /// <summary>
     /// Calls written anywhere in <paramref name="text"/>, also inside a line (<c>run {"name": "Bash", …} now</c>), which a

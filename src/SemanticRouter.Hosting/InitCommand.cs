@@ -190,7 +190,7 @@ internal static class InitCommand
     internal static OnnxModelInfo UseInProcessEmbeddings(RouterConfiguration document)
     {
         OnnxModelInfo model = OnnxEmbeddingModels.Find(OnnxEmbeddingModels.DefaultModel)!;
-        document.Embeddings.Provider = EmbeddingProviderKind.Onnx;
+        document.Embeddings.Provider = OnnxEmbeddings.Provider;
         document.Embeddings.Model = model.Name;
         document.DefaultSimilarityThreshold = model.SuggestedThreshold;
         return model;
@@ -267,7 +267,7 @@ internal static class InitCommand
 
         if (embeddingModel is not null)
         {
-            document.Embeddings.Provider = EmbeddingProviderKind.OpenAICompatible;
+            document.Embeddings.Provider = EmbeddingProviderKinds.OpenAICompatible;
             document.Embeddings.Endpoint = embeddingEndpoint;
             document.Embeddings.Model = embeddingModel;
             document.DefaultSimilarityThreshold = embeddingModel.Contains("mxbai", StringComparison.OrdinalIgnoreCase) ? 0.68f : 0.62f;
@@ -304,7 +304,7 @@ internal static class InitCommand
         foreach ((string executable, string connector, CliPreset preset, int maxConcurrency, bool ask) in clis)
         {
             CliExecutableLookup lookup = CliExecutableLocator.Find(executable, probes.SearchPath, probes.Windows);
-            if (lookup.Found && probes.Policy?.Blocks(new ConnectorOptions { Type = ConnectorType.Cli, Preset = preset }) is { } blocked)
+            if (lookup.Found && probes.Policy?.Blocks(new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = preset }) is { } blocked)
             {
                 // Not added, not asked about: the router would turn it off at start-up anyway.
                 notes.Add($"{executable}: found at {lookup.Path}, but not added: {blocked}.");
@@ -361,7 +361,7 @@ internal static class InitCommand
         bool enabled = off is null;
         var options = new ConnectorOptions
         {
-            Type = ConnectorType.Cli,
+            Type = ConnectorTypes.Cli,
             Preset = preset,
             MaxConcurrency = maxConcurrency,
             Timeout = TimeSpan.FromMinutes(3),

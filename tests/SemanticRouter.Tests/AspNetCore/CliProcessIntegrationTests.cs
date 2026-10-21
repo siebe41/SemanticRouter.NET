@@ -23,7 +23,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
 
     private static ConnectorOptions Options(string mode, CliPreset preset = CliPreset.Custom, string? executable = null)
     {
-        var options = new ConnectorOptions { Type = ConnectorType.Cli, Preset = preset, Executable = executable ?? FakeCli };
+        var options = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = preset, Executable = executable ?? FakeCli };
         options.EnvironmentVariables["FAKE_CLI_MODE"] = mode;
         return options;
     }

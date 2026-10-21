@@ -372,6 +372,11 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             // Calls read out of the model's text rather than a native tool API: worth finding when auditing what ran.
             AttemptNotes.Report(context, "prompted tool calls: " + Truncate(string.Join(", ", calls.Select(c => c.Name)), 120));
             AttemptNotes.ReportPromptedToolCalls(context, calls.Count);
+            if (end.StrictWouldRefuse is { } refused && ReferenceEquals(calls, end.Calls))
+            {
+                // Lenient parsing took calls strict parsing would not: what switching a connector to Strict would cost.
+                AttemptNotes.Report(context, "strict parsing would keep these calls as text: " + refused);
+            }
         }
 
         // Text already sent ended where the held part begins; trailing whitespace before the calls is noise.

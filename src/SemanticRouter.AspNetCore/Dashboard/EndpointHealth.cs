@@ -56,7 +56,7 @@ internal static class EndpointHealth
 
             var status = new EndpointStatus(
                 name,
-                options.Type == ConnectorType.Cli ? $"Cli/{options.Preset}" : options.Type.ToString(),
+                options.Type == ConnectorTypes.Cli ? $"Cli/{options.Preset}" : options.Type.ToString(),
                 target.Host,
                 target.Scheme,
                 target.Program,
@@ -205,13 +205,14 @@ internal static class EndpointHealth
     /// <summary>Where requests go. Only the scheme, host and port of an address: its path or query may carry a key.</summary>
     private static EndpointTarget Target(ConnectorOptions options, ModelDefinition[] models)
     {
-        if (options.Type is ConnectorType.Cli or ConnectorType.Copilot)
+        if (options.RunsProgram)
         {
-            string program = options.Type == ConnectorType.Copilot
-                ? (string.IsNullOrWhiteSpace(options.Executable) ? "copilot" : options.Executable)
-                : (string.IsNullOrWhiteSpace(options.Executable) ? CliAdapter.For(options.Preset).DefaultExecutable : options.Executable);
+            bool cli = options.Type == ConnectorTypes.Cli;
+            string program = !string.IsNullOrWhiteSpace(options.Executable) ? options.Executable
+                : cli ? CliAdapter.For(options.Preset).DefaultExecutable
+                : options.Type;
             string name = Path.GetFileName(program);
-            string? via = options.Type == ConnectorType.Copilot ? "GitHub Copilot" : options.Preset switch
+            string? via = !cli ? options.Type : options.Preset switch
             {
                 CliPreset.ClaudeCode => "Anthropic",
                 CliPreset.Codex => "OpenAI",
@@ -219,7 +220,8 @@ internal static class EndpointHealth
                 _ => null,
             };
 
-            // A preset CLI talks to its vendor; what a custom command does is only known from its models' IsLocal.
+            // A preset CLI talks to its vendor, and a packaged type (Copilot) to its own; what a custom command does is
+            // only known from its models' IsLocal.
             bool local = via is null && models.Length > 0 && models.All(m => m.IsLocal);
             return new EndpointTarget(null, null, name, via, local, local || via is not null, $"{options.Type}|{options.Preset}|{program}");
         }

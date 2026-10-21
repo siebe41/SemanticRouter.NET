@@ -247,9 +247,9 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         var document = new RouterConfiguration();
         document.Tiers = [new TierDefinition { Level = 1, Name = "One" }, new TierDefinition { Level = 1, Name = "Dup" }];
         document.Models.Add(Model("m", 1, connector: "cli"));
-        document.Connectors["cli"] = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.Custom, ToolCalling = CliToolCalling.Prompted, Timeout = TimeSpan.FromSeconds(90) };
+        document.Connectors["cli"] = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.Custom, ToolCalling = CliToolCalling.Prompted, Timeout = TimeSpan.FromSeconds(90) };
         document.Connectors["cli"].EnvironmentVariables["A"] = "b";
-        document.Embeddings.Provider = EmbeddingProviderKind.OpenAICompatible;
+        document.Embeddings.Provider = EmbeddingProviderKinds.OpenAICompatible;
 
         RouterConfiguration copy = RouterConfiguration.FromJson(document.ToJson());
         IReadOnlyList<string> errors = copy.GetDocumentValidationErrors();

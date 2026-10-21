@@ -40,13 +40,24 @@ internal static class RouterDoctor
     public static async Task<IReadOnlyList<RouterCheck>> CheckAsync(IServiceProvider services, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(services);
-        RouterRuntime runtime = services.GetRequiredService<RouterRuntimeProvider>().Current;
+        RouterRuntimeProvider provider = services.GetRequiredService<RouterRuntimeProvider>();
+        RouterRuntime runtime = provider.Current;
         RouterConfiguration resolved = runtime.Resolved;
         var checks = new List<RouterCheck>();
 
-        foreach (string warning in runtime.Warnings)
+        // A policy entry that names no type turns nothing off, which is a failure here rather than the runtime's warning:
+        // a misspelt entry must not look like a working policy.
+        IReadOnlyList<string> unknownPolicyTypes = provider.UnknownDisabledConnectorTypes();
+        string[] reported = [.. unknownPolicyTypes.Select(RouterRuntimeProvider.UnknownDisabledConnectorTypeWarning)];
+        foreach (string warning in runtime.Warnings.Except(reported, StringComparer.Ordinal))
         {
             checks.Add(new RouterCheck("configuration", RouterCheckStatus.Warning, warning));
+        }
+
+        foreach (string type in unknownPolicyTypes)
+        {
+            checks.Add(new RouterCheck("machine policy", RouterCheckStatus.Failed,
+                $"DisabledConnectorTypes names '{type}', which is not a built-in connector type and no installed package provides, so it turns nothing off. Check its spelling."));
         }
 
         checks.Add(await CheckEmbeddingsAsync(runtime, services.GetServices<IEmbeddingProviderFactory>(), cancellationToken).ConfigureAwait(false));
@@ -85,7 +96,7 @@ internal static class RouterDoctor
             .ToArray();
         if (models.Length == 0)
         {
-            if (connector.Type is ConnectorType.Cli or ConnectorType.Copilot)
+            if (connector.RunsProgram)
             {
                 return [new RouterCheck($"connector {name}", RouterCheckStatus.Ok, "no enabled model uses it; not checked.")];
             }
@@ -98,66 +109,91 @@ internal static class RouterDoctor
             })];
         }
 
-        return connector.Type switch
+        if (connector.Type == ConnectorTypes.Cli)
         {
-            ConnectorType.Cli => [.. await CheckCliAsync(name, connector, services.GetRequiredService<ICliProcessRunner>(), cancellationToken).ConfigureAwait(false)],
-            ConnectorType.Copilot => [await CheckCopilotAsync(name, runtime, models, cancellationToken).ConfigureAwait(false)],
-            _ => [.. await CheckHttpAsync(name, connector, models, resolved, http, cancellationToken).ConfigureAwait(false)],
-        };
+            return [.. await CheckCliAsync(name, connector, services.GetRequiredService<ICliProcessRunner>(), cancellationToken).ConfigureAwait(false)];
+        }
+
+        if (!ConnectorTypes.IsBuiltIn(connector.Type))
+        {
+            bool installed = services.GetServices<IChatConnectorFactory>().Any(f => connector.IsType(f.Type));
+            runtime.Connectors.TryGet(name, out IChatConnector running);
+            if (!installed || running is IModelDiscovery || connector.RunsProgram)
+            {
+                return [await CheckPackagedAsync(name, connector.Type, installed ? running as IModelDiscovery : null, installed, runtime, models, cancellationToken)
+                    .ConfigureAwait(false)];
+            }
+        }
+
+        return [.. await CheckHttpAsync(name, connector, models, resolved, http, cancellationToken).ConfigureAwait(false)];
     }
 
-    /// <summary>Lists the account's models through the SDK: proves the runtime starts and the sign-in works.</summary>
-    private static async Task<RouterCheck> CheckCopilotAsync(string name, RouterRuntime runtime, ModelDefinition[] models, CancellationToken cancellationToken)
+    /// <summary>
+    /// A connector of a type from another package (Copilot): lists the models through it, which proves its runtime
+    /// starts and the sign-in works.
+    /// </summary>
+    private static async Task<RouterCheck> CheckPackagedAsync(
+        string name, string type, IModelDiscovery? discovery, bool installed, RouterRuntime runtime, ModelDefinition[] models, CancellationToken cancellationToken)
     {
         string subject = $"connector {name}";
-        if (!runtime.Connectors.TryGet(name, out IChatConnector connector) || connector is not IModelDiscovery discovery)
+        if (!installed)
         {
             return new RouterCheck(subject, RouterCheckStatus.Failed,
-                "the Copilot connector needs the SemanticRouter.Connectors.Copilot package (.AddCopilotConnector()); the semantic-router tool includes it.");
+                $"{ConnectorCatalog.NotInstalled(type)}. Add the package that provides it, or change SemanticRouter:Connectors:{name}:Type.");
+        }
+
+        if (discovery is null)
+        {
+            return new RouterCheck(subject, RouterCheckStatus.Ok, $"{type} connectors cannot list their models, so this one is not checked.");
         }
 
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(60)); // the first call starts the Copilot runtime
+            timeout.CancelAfter(TimeSpan.FromSeconds(60)); // the first call may start the connector's runtime (Copilot)
             IReadOnlyList<string> available = await discovery.ListModelsAsync(timeout.Token).ConfigureAwait(false);
             string[] missing = models.Where(m => m.Model is { Length: > 0 } id && !available.Contains(id, StringComparer.OrdinalIgnoreCase))
                 .Select(m => $"{m.Name} ({m.Model})").ToArray();
             return missing.Length == 0
-                ? new RouterCheck(subject, RouterCheckStatus.Ok, $"Copilot is signed in; {available.Count} models available.")
+                ? new RouterCheck(subject, RouterCheckStatus.Ok, $"{type} answers; {available.Count} models available.")
                 : new RouterCheck(subject, RouterCheckStatus.Warning,
-                    $"Copilot is signed in, but these models are not offered to this account: {string.Join(", ", missing)}. Available: {string.Join(", ", available)}.");
+                    $"{type} answers, but these models are not offered to this account: {string.Join(", ", missing)}. Available: {string.Join(", ", available)}.");
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or OperationCanceledException or System.ComponentModel.Win32Exception
                                    && !cancellationToken.IsCancellationRequested)
         {
             string reason = ex is OperationCanceledException ? "timed out" : runtime.Redactor.Redact(ex.Message);
-            string fix = reason.Contains("authenticat", StringComparison.OrdinalIgnoreCase)
-                ? "Sign in once with `copilot` (then /login), or `gh auth login`."
-                : $"Install the copilot CLI (npm install -g @github/copilot) or set SemanticRouter:Connectors:{name}:Executable to it, then sign in with `copilot` (/login).";
-            return new RouterCheck(subject, RouterCheckStatus.Failed, $"the Copilot runtime could not list models: {reason.TrimEnd('.')}. {fix}");
+            return new RouterCheck(subject, RouterCheckStatus.Failed, $"the {type} connector could not list models: {reason.TrimEnd('.')}.");
         }
     }
 
     private static async Task<RouterCheck> CheckEmbeddingsAsync(RouterRuntime runtime, IEnumerable<IEmbeddingProviderFactory> factories, CancellationToken cancellationToken)
     {
         EmbeddingProviderOptions embeddings = runtime.Resolved.Embeddings;
-        if (embeddings.Provider == EmbeddingProviderKind.Hashing)
+        if (embeddings.Provider == EmbeddingProviderKinds.Hashing)
         {
-            // Onnx is suggested only where it can run (ONNX Runtime has no build for some platforms, e.g. Intel Macs).
-            string? noOnnx = factories.FirstOrDefault(f => f.Kind == EmbeddingProviderKind.Onnx)?.Unavailable;
-            return new RouterCheck("embeddings", RouterCheckStatus.Warning, noOnnx is null
-                ? "the Hashing provider only matches shared words. For meaning-based routing set SemanticRouter:Embeddings:Provider to Onnx " +
-                  "(in-process, no server) or to an OpenAICompatible endpoint (LM Studio, Ollama, OpenAI) on the dashboard under Providers → Embeddings, " +
+            // A packaged provider (Onnx) is suggested only where it can run (ONNX Runtime has no build for some platforms, e.g. Intel Macs).
+            IEmbeddingProviderFactory[] installed = [.. factories];
+            string[] runnable = [.. installed.Where(f => f.Unavailable is null).Select(f => f.Kind).Distinct(StringComparer.OrdinalIgnoreCase)];
+            string notHere = string.Join(" ", installed.Select(f => f.Unavailable).OfType<string>().Distinct());
+            return new RouterCheck("embeddings", RouterCheckStatus.Warning, runnable.Length > 0
+                ? $"the Hashing provider only matches shared words. For meaning-based routing set SemanticRouter:Embeddings:Provider to {string.Join(" or ", runnable)} " +
+                  "(no server needed) or to an OpenAICompatible endpoint (LM Studio, Ollama, OpenAI) on the dashboard under Providers → Embeddings, " +
                   $"and raise DefaultSimilarityThreshold ({ThresholdsLink})."
                 : "the Hashing provider only matches shared words. For meaning-based routing set SemanticRouter:Embeddings:Provider to an OpenAICompatible " +
                   "endpoint (an embedding model in LM Studio or Ollama) on the dashboard under Providers → Embeddings, " +
-                  $"and raise DefaultSimilarityThreshold ({ThresholdsLink}). {noOnnx}");
+                  $"and raise DefaultSimilarityThreshold ({ThresholdsLink}). {notHere}".TrimEnd());
         }
 
-        bool onnx = embeddings.Provider == EmbeddingProviderKind.Onnx;
-        string what = onnx ? $"ONNX model {embeddings.ModelPath ?? embeddings.Model ?? "all-MiniLM-L6-v2"}" : $"{embeddings.Model} at {AddressDisplay.Show(embeddings.Endpoint)}";
-        if (onnx && factories.FirstOrDefault(f => f.Kind == EmbeddingProviderKind.Onnx)?.Unavailable is { } unavailable)
+        // A provider from another package (Onnx) runs a model it provides; the built-in OpenAICompatible one calls a server.
+        bool packaged = !EmbeddingProviderKinds.IsBuiltIn(embeddings.Provider);
+        IEmbeddingProviderFactory? factory = packaged
+            ? factories.FirstOrDefault(f => string.Equals(f.Kind, embeddings.Provider, StringComparison.OrdinalIgnoreCase))
+            : null;
+        string what = packaged
+            ? $"{embeddings.Provider} model {embeddings.ModelPath ?? embeddings.Model ?? (factory is { Models: [var first, ..] } ? first.Name : "(its default)")}"
+            : $"{embeddings.Model} at {AddressDisplay.Show(embeddings.Endpoint)}";
+        if (factory?.Unavailable is { } unavailable)
         {
             return new RouterCheck("embeddings", RouterCheckStatus.Failed,
                 $"{what} cannot run on this machine, so no prompt is classified. {unavailable} (SemanticRouter:Embeddings:Provider; dashboard: Providers → Embeddings)");
@@ -167,8 +203,8 @@ internal static class RouterDoctor
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-            // The first ONNX call may download the model.
-            timeout.CancelAfter(onnx ? TimeSpan.FromMinutes(5) : ProbeTimeout);
+            // The first call of a packaged provider may download its model.
+            timeout.CancelAfter(packaged ? TimeSpan.FromMinutes(5) : ProbeTimeout);
             ReadOnlyMemory<float> vector = await runtime.EmbeddingProvider.GenerateEmbeddingAsync("hello", timeout.Token).ConfigureAwait(false);
             return new RouterCheck("embeddings", RouterCheckStatus.Ok, $"{what}: {vector.Length} dimensions.");
         }
@@ -176,8 +212,8 @@ internal static class RouterDoctor
                                    && !cancellationToken.IsCancellationRequested)
         {
             string reason = ex is OperationCanceledException ? "timed out" : runtime.Redactor.Redact(ex.Message);
-            return new RouterCheck("embeddings", RouterCheckStatus.Failed, onnx
-                ? $"{what} failed: {reason} (SemanticRouter:Embeddings:Model / ModelPath; dashboard: Providers → Embeddings)."
+            return new RouterCheck("embeddings", RouterCheckStatus.Failed, packaged
+                ? $"{what} failed: {reason} (SemanticRouter:Embeddings:Provider / Model / ModelPath; dashboard: Providers → Embeddings)."
                 : $"{what} failed: {reason} (SemanticRouter:Embeddings:Endpoint / Model / ApiKey; dashboard: Providers → Embeddings).");
         }
     }

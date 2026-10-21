@@ -52,7 +52,7 @@ public sealed class ConnectorProbeTests
     public async Task Anthropic_connectors_use_x_api_key_and_unreachable_servers_are_reported()
     {
         var handler = StubHttpMessageHandler.Json("""{"data":[{"id":"claude-sonnet-5-5"}]}""");
-        var anthropic = new ConnectorOptions { Type = ConnectorType.Anthropic, BaseAddress = new Uri("https://api.anthropic.com"), ApiKey = "sk-ant-1" };
+        var anthropic = new ConnectorOptions { Type = ConnectorTypes.Anthropic, BaseAddress = new Uri("https://api.anthropic.com"), ApiKey = "sk-ant-1" };
 
         ConnectorProbeResult ok = await ConnectorProbe.ListModelsAsync("anthropic", anthropic, new HttpClient(handler), TimeSpan.FromSeconds(5));
         ConnectorProbeResult down = await ConnectorProbe.ListModelsAsync("lmstudio", LmStudio, new HttpClient(StubHttpMessageHandler.Throws()), TimeSpan.FromSeconds(5));
@@ -132,7 +132,7 @@ public sealed class ConnectorProbeTests
     public async Task Cloud_apis_get_one_request_and_their_context_lengths_are_read()
     {
         var handler = StubHttpMessageHandler.Json("""{"data":[{"id":"claude-opus-5-5","display_name":"Claude Opus 5.5","max_input_tokens":1000000},{"id":"vendor/model","context_length":131072}]}""");
-        var anthropic = new ConnectorOptions { Type = ConnectorType.OpenAICompatible, BaseAddress = new Uri("https://openrouter.ai"), ApiKey = "k" };
+        var anthropic = new ConnectorOptions { Type = ConnectorTypes.OpenAICompatible, BaseAddress = new Uri("https://openrouter.ai"), ApiKey = "k" };
 
         ConnectorProbeResult result = await ConnectorProbe.DiscoverAsync("openrouter", anthropic, new HttpClient(handler), TimeSpan.FromSeconds(5));
 
@@ -187,7 +187,7 @@ public sealed class ConnectorProbeTests
     {
         var handler = StubHttpMessageHandler.Json("{}", HttpStatusCode.Unauthorized);
         var provider = new OpenAICompatibleEmbeddingProvider(
-            new HttpClient(handler), new EmbeddingProviderOptions { Provider = EmbeddingProviderKind.OpenAICompatible, Endpoint = LmStudio.BaseAddress, Model = "nomic" });
+            new HttpClient(handler), new EmbeddingProviderOptions { Provider = EmbeddingProviderKinds.OpenAICompatible, Endpoint = LmStudio.BaseAddress, Model = "nomic" });
 
         Func<Task> act = async () => await provider.GenerateEmbeddingAsync("hello");
 

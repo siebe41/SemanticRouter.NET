@@ -49,7 +49,7 @@ public sealed class PromptCacheMarkerTests : RouterHostTest
             },
             services: s => s.Configure<SemanticRouterConnectorsOptions>(o =>
             {
-                var options = new ConnectorOptions { Type = ConnectorType.Anthropic, BaseAddress = new Uri("https://api.anthropic.example"), ApiKey = "sk-ant-test" };
+                var options = new ConnectorOptions { Type = ConnectorTypes.Anthropic, BaseAddress = new Uri("https://api.anthropic.example"), ApiKey = "sk-ant-test" };
                 connector?.Invoke(options);
                 o.Connectors["anthropic-native"] = options;
             }));

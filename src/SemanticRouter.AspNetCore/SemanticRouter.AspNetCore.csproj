@@ -9,6 +9,8 @@
     <!-- The desktop app references it: restored for the app's runtimes too, built once (Directory.Build.props). -->
     <RuntimeIdentifiers>$(DesktopRuntimeIdentifiers)</RuntimeIdentifiers>
     <IsRidAgnostic>true</IsRidAgnostic>
+    <!-- The code is MIT; the dashboard's fonts, embedded in the DLL, are under the SIL OFL 1.1 (their texts are packed). -->
+    <PackageLicenseExpression>MIT AND OFL-1.1</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>
@@ -26,6 +28,7 @@
     <EmbeddedResource Include="Dashboard\wwwroot\js\*.js" LogicalName="dashboard/js/%(Filename)%(Extension)" />
     <!-- Inter and Fira Sans (SIL OFL 1.1, licences beside them), so the dashboard asks no other host for fonts. -->
     <EmbeddedResource Include="Dashboard\wwwroot\fonts\*" LogicalName="dashboard/fonts/%(Filename)%(Extension)" />
+    <None Include="Dashboard\wwwroot\fonts\*-OFL.txt" Pack="true" PackagePath="licenses\" Visible="false" />
     <EmbeddedResource Include="Connectors\model-families.json" LogicalName="SemanticRouter.AspNetCore.model-families.json" />
     <EmbeddedResource Include="Middleware\client-turns.json" LogicalName="SemanticRouter.AspNetCore.client-turns.json" />
   </ItemGroup>

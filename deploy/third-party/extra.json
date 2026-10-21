@@ -1,0 +1,100 @@
+{
+  "$comment": [
+    "Read by deploy/third-party-notices.cs, which adds these to every THIRD-PARTY-NOTICES.txt it writes.",
+    "licences: the SPDX expression of each package whose .nuspec names a licence file instead of an expression.",
+    "components: what the deliverables ship that no *.deps.json names as a package. A component is listed when a",
+    "deps.json given to the generator names the library in 'with' (a package or one of this repository's projects) and,",
+    "if 'runtimes' is set, targets a runtime identifier starting with one of them (a deps.json without one matches all).",
+    "'{Id}' in a version is that package's version. 'texts' are paths from the repository root; a component without",
+    "texts of its own gets the standard text of each licence in its expression from deploy/third-party/licences."
+  ],
+  "licences": {
+    "Avalonia.Angle.Windows.Natives": "BSD-3-Clause",
+    "Microsoft.ML.OnnxRuntime": "MIT",
+    "Microsoft.ML.OnnxRuntime.Managed": "MIT"
+  },
+  "components": [
+    {
+      "name": "Inter (font)",
+      "description": "Latin, weights 400, 500 and 600, embedded in SemanticRouter.AspNetCore.dll for the dashboard",
+      "licence": "OFL-1.1",
+      "copyright": "Copyright 2016 The Inter Project Authors",
+      "project": "https://github.com/rsms/inter",
+      "with": "SemanticRouter.AspNetCore",
+      "texts": [ "src/SemanticRouter.AspNetCore/Dashboard/wwwroot/fonts/Inter-OFL.txt" ]
+    },
+    {
+      "name": "Fira Sans (font)",
+      "description": "Latin, weights 400, 500 and 600, embedded in SemanticRouter.AspNetCore.dll for the dashboard",
+      "licence": "OFL-1.1",
+      "copyright": "Digitized data copyright 2012-2016, The Mozilla Foundation and Telefonica S.A.",
+      "project": "https://github.com/mozilla/Fira",
+      "with": "SemanticRouter.AspNetCore",
+      "texts": [ "src/SemanticRouter.AspNetCore/Dashboard/wwwroot/fonts/FiraSans-OFL.txt" ]
+    },
+    {
+      "name": "Velopack native binaries",
+      "version": "{Velopack}",
+      "description": "the updater (Squirrel.exe on Windows, UpdateMac, UpdateNix), Setup.exe and the execution stub, which vpk adds to the installers and update packages",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2021 Caelan Sayler, Copyright (c) 2024 Velopack Ltd.",
+      "project": "https://github.com/velopack/velopack",
+      "with": "Velopack"
+    },
+    {
+      "name": "AppImage type2-runtime",
+      "version": "as vendored by Velopack {Velopack}",
+      "description": "the runtime at the start of the Linux AppImage, which vpk adds; it statically links musl libc, libfuse, squashfuse, zstd and zlib, listed below",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2004-23 probonopd",
+      "project": "https://github.com/AppImage/type2-runtime",
+      "with": "Velopack",
+      "runtimes": [ "linux-" ]
+    },
+    {
+      "name": "musl libc",
+      "description": "statically linked into the AppImage runtime",
+      "licence": "MIT",
+      "copyright": "Copyright (c) 2005-2020 Rich Felker, et al.",
+      "project": "https://musl.libc.org",
+      "with": "Velopack",
+      "runtimes": [ "linux-" ]
+    },
+    {
+      "name": "libfuse",
+      "description": "statically linked into the AppImage runtime; its source is at the project page, and the runtime's build at https://github.com/AppImage/type2-runtime",
+      "licence": "LGPL-2.1-only",
+      "copyright": "Copyright (C) 2001-2007 Miklos Szeredi, and the libfuse contributors",
+      "project": "https://github.com/libfuse/libfuse",
+      "with": "Velopack",
+      "runtimes": [ "linux-" ]
+    },
+    {
+      "name": "squashfuse",
+      "description": "statically linked into the AppImage runtime",
+      "licence": "BSD-2-Clause",
+      "copyright": "Copyright (c) 2012 Dave Vasilevsky, Phillip Lougher",
+      "project": "https://github.com/vasi/squashfuse",
+      "with": "Velopack",
+      "runtimes": [ "linux-" ]
+    },
+    {
+      "name": "zstd",
+      "description": "statically linked into the AppImage runtime",
+      "licence": "BSD-3-Clause OR GPL-2.0-only",
+      "copyright": "Copyright (c) Meta Platforms, Inc. and affiliates.",
+      "project": "https://github.com/facebook/zstd",
+      "with": "Velopack",
+      "runtimes": [ "linux-" ]
+    },
+    {
+      "name": "zlib",
+      "description": "statically linked into the AppImage runtime",
+      "licence": "Zlib",
+      "copyright": "Copyright (C) Jean-loup Gailly and Mark Adler",
+      "project": "https://zlib.net",
+      "with": "Velopack",
+      "runtimes": [ "linux-" ]
+    }
+  ]
+}

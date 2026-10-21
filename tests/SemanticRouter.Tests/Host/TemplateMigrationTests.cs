@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Embeddings.Onnx;
 using SemanticRouter.Host;
 using SemanticRouter.Tests.Support;
 
@@ -93,7 +94,7 @@ public sealed class TemplateMigrationTests : IDisposable
         RouterConfiguration document = AsReleased(1);
         document.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
         document.Models.Add(new ModelDefinition { Name = "small", Connector = "lmstudio", Model = "qwen3-8b", Tier = 1 });
-        document.Embeddings.Provider = EmbeddingProviderKind.Onnx;
+        document.Embeddings.Provider = OnnxEmbeddings.Provider;
 
         TemplateUpgrade upgrade = TemplateMigration.Upgrade(document)!;
 
@@ -113,7 +114,7 @@ public sealed class TemplateMigrationTests : IDisposable
             "smalltalk", "rewrite-summarize", "simple-code", "quick-answers", "deep-reasoning", "complex-code", "agentic-coding", "agent-housekeeping", "continuation");
         upgraded.Models.Should().ContainSingle(m => m.Name == "small");
         upgraded.Connectors.Keys.Should().Equal("lmstudio");
-        upgraded.Embeddings.Provider.Should().Be(EmbeddingProviderKind.Onnx, "settings the template did not change are not touched");
+        upgraded.Embeddings.Provider.Should().Be(OnnxEmbeddings.Provider, "settings the template did not change are not touched");
         upgrade.Describe().Should().StartWith("template 1 → 2: ")
             .And.Contain("Routes[quick-answers] added")
             .And.Contain("Routes[smalltalk].Utterances: 2 added")

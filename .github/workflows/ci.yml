@@ -122,10 +122,12 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release --logger "trx" --collect:"XPlat Code Coverage"
 
-      # As in a release, the tool package carries the licences and notices of the packages it ships.
+      # As in a release, the tool package carries the licences and notices of the packages it ships, and of the fonts.
       - name: Third-party notices
         if: runner.os == 'Linux'
-        run: dotnet run --file deploy/third-party-notices.cs -- notices/THIRD-PARTY-NOTICES.txt src/SemanticRouter.Host/bin/Release/net10.0
+        run: |
+          dotnet run --file deploy/third-party-notices.cs -- notices/THIRD-PARTY-NOTICES.txt src/SemanticRouter.Host/bin/Release/net10.0
+          deploy/third-party-notices-check.sh notices/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)"
 
       # Package validation (Directory.Build.targets) fails the pack when a library package's public API breaks the last
       # release on nuget.org; restore downloaded that release.

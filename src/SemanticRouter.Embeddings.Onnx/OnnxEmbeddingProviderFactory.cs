@@ -24,7 +24,7 @@ public sealed class OnnxEmbeddingOptions
 }
 
 /// <summary>
-/// Builds <see cref="EmbeddingProviderKind.Onnx"/> providers. A model is downloaded and loaded once, on first use, and
+/// Builds <see cref="OnnxEmbeddings.Provider"/> providers. A model is downloaded and loaded once, on first use, and
 /// shared by every configuration version that uses it, so applying a configuration does not reload it.
 /// </summary>
 internal sealed class OnnxEmbeddingProviderFactory : IEmbeddingProviderFactory, IDisposable
@@ -52,12 +52,15 @@ internal sealed class OnnxEmbeddingProviderFactory : IEmbeddingProviderFactory, 
         OnnxRuntimeEnvironment.DisableTelemetry();
     }
 
-    public EmbeddingProviderKind Kind => EmbeddingProviderKind.Onnx;
+    public string Kind => OnnxEmbeddings.Provider;
 
     public IReadOnlyList<EmbeddingModelChoice> Models { get; } =
         OnnxEmbeddingModels.Known.Select(m => new EmbeddingModelChoice(m.Name, m.Description, m.SuggestedThreshold, m.ModelBytes)).ToArray();
 
     public string? Unavailable => _unavailable();
+
+    /// <summary>The model runs in this process, so prompts that must stay local may be embedded with it.</summary>
+    public bool RunsInProcess => true;
 
     /// <summary>Where downloaded models go.</summary>
     public string ModelsDirectory =>
