@@ -666,12 +666,13 @@ jobs:
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish $VPK_PRE
 
       # For installer-sbom (with the previous release's full package, when one was downloaded for the delta).
+      # Kept 7 days, so a failed installer-sbom can be re-run after the day the release was cut.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-linux-x64
           path: installers/linux-x64/*-full.nupkg
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   installer-windows:
     needs: [ packages, desktop, installer-build ]
@@ -755,7 +756,7 @@ jobs:
           name: installer-win-x64
           path: installers/win-x64/*-full.nupkg
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   installer-macos:
     needs: [ packages, desktop, installer-build ]
@@ -865,7 +866,7 @@ jobs:
           name: installer-osx
           path: installers/osx-*/*-full.nupkg
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   # The installers' and update packages' SBOMs, one per platform, SemanticRouter-<version>-<rid>-installer.cdx.json,
   # read from the full update package each installer job built (deploy/installer-sbom.sh): the app as installed, plus
