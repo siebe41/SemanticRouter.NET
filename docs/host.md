@@ -71,7 +71,7 @@ It is a **per-user service on purpose**. The subscription CLI connectors run `cl
 | What is installed | systemd user unit `~/.config/systemd/user/semantic-router.service` | launchd agent `~/Library/LaunchAgents/io.github.siebe41.semantic-router.plist` | value `SemanticRouter` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (Task Manager → Startup apps), plus `semantic-router.service.json` in the configuration directory |
 | Runs | while you are signed in; `loginctl enable-linger` keeps it running without a session | while you are signed in | from sign-in, without a console window |
 | Restarts | on failure, every 5 s | on failure, at most every 30 s | not automatically |
-| Logs | `journalctl --user -u semantic-router -f` | `~/Library/Logs/semantic-router/semantic-router.log` | `logs\semantic-router.log` in the configuration directory (rolled to `.1` at start once it passes 10 MB) |
+| Logs | `journalctl --user -u semantic-router -f` | `~/Library/Logs/semantic-router/semantic-router.log` | `logs\semantic-router.log` in the [local data directory](#windows-and-roaming-profiles) (rolled to `.1` at start once it passes 10 MB) |
 | Stop | `systemctl --user stop` | `launchctl bootout` (a killed agent would be restarted) | a stop request the router listens for, then ending the process after 20 s |
 
 Things to know:
@@ -91,7 +91,7 @@ While it runs, the router records its process id and addresses in `semantic-rout
 
 | Found | Added |
 |---|---|
-| LM Studio or Ollama with chat models | A connector and **every chat model it serves**, each on the tier its family suggests ([model-family table](providers.md#the-model-family-table)) or else its size (≤ 9B: 1, ≤ 35B: 2, larger: 3), with `code`, `tools`, `vision` and `reasoning` from the server's report or the family table, and the context it is loaded with. Models that are not loaded get `Priority` 1, so loaded ones are preferred. The notes say whether the server loads models on demand. |
+| LM Studio or Ollama with chat models | A connector and **every chat model it serves**, each on the tier its family suggests ([model-family table](providers.md#the-model-family-table)) or else its size (≤ 9.5B: 1, ≤ 35B: 2, larger: 3), with `code`, `tools`, `vision` and `reasoning` from the server's report or the family table, and the context it is loaded with. Models that are not loaded get `Priority` 1, so loaded ones are preferred. The notes say whether the server loads models on demand. |
 | An embedding model on either server | `Embeddings` switched to it, with a starting similarity threshold for that model family (calibrate it later on the **Evaluate** page). |
 | No embedding server | `Embeddings` set to `Onnx` with `all-MiniLM-L6-v2`: a 23 MB model that runs inside the router. It is downloaded on first start and checksum-verified. Threshold 0.40. Where ONNX Runtime cannot run (an Intel Mac, or macOS before 14: on a Mac it needs Apple silicon and macOS 14 or later), `Embeddings` stays `Hashing` and the notes say to run an embedding model in LM Studio or Ollama instead. |
 | A server that answers `401` | The connector, plus a note to set its `ApiKey` (for example `"${env:LM_API_TOKEN}"`). |
