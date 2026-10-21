@@ -1,0 +1,3 @@
+#nullable enable
+const SemanticRouter.Connectors.Copilot.CopilotConnector.Type = "Copilot" -> string!
+SemanticRouter.Connectors.Copilot.CopilotConnector

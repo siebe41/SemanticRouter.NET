@@ -1,0 +1,930 @@
+#nullable enable
+const SemanticRouter.HashingEmbeddingProvider.DefaultDimensions = 512 -> int
+const SemanticRouter.RouterTelemetry.ActivitySourceName = "SemanticRouter" -> string!
+const SemanticRouter.SemanticRouterOptions.SectionName = "SemanticRouter" -> string!
+override SemanticRouter.CalibrationPoint.Equals(object? obj) -> bool
+override SemanticRouter.CalibrationPoint.GetHashCode() -> int
+override SemanticRouter.CalibrationPoint.ToString() -> string!
+override SemanticRouter.CalibrationReport.Equals(object? obj) -> bool
+override SemanticRouter.CalibrationReport.GetHashCode() -> int
+override SemanticRouter.CalibrationReport.ToString() -> string!
+override SemanticRouter.ClassificationCacheStatistics.Equals(object? obj) -> bool
+override SemanticRouter.ClassificationCacheStatistics.GetHashCode() -> int
+override SemanticRouter.ClassificationCacheStatistics.ToString() -> string!
+override SemanticRouter.ComplexityAnalysis.Equals(object? obj) -> bool
+override SemanticRouter.ComplexityAnalysis.GetHashCode() -> int
+override SemanticRouter.ComplexityAnalysis.ToString() -> string!
+override SemanticRouter.EvaluationCase.Equals(object? obj) -> bool
+override SemanticRouter.EvaluationCase.GetHashCode() -> int
+override SemanticRouter.EvaluationCase.ToString() -> string!
+override SemanticRouter.EvaluationReport.Equals(object? obj) -> bool
+override SemanticRouter.EvaluationReport.GetHashCode() -> int
+override SemanticRouter.EvaluationReport.ToString() -> string!
+override SemanticRouter.EvaluationResult.Equals(object? obj) -> bool
+override SemanticRouter.EvaluationResult.GetHashCode() -> int
+override SemanticRouter.EvaluationResult.ToString() -> string!
+override SemanticRouter.ModelCandidate.Equals(object? obj) -> bool
+override SemanticRouter.ModelCandidate.GetHashCode() -> int
+override SemanticRouter.ModelCandidate.ToString() -> string!
+override SemanticRouter.ModelDefinition.ToString() -> string!
+override SemanticRouter.ModelRequirements.Equals(object? obj) -> bool
+override SemanticRouter.ModelRequirements.GetHashCode() -> int
+override SemanticRouter.ModelRequirements.ToString() -> string!
+override SemanticRouter.PromptCacheShare.Equals(object? obj) -> bool
+override SemanticRouter.PromptCacheShare.GetHashCode() -> int
+override SemanticRouter.PromptCacheShare.ToString() -> string!
+override SemanticRouter.PromptClassificationResult.Equals(object? obj) -> bool
+override SemanticRouter.PromptClassificationResult.GetHashCode() -> int
+override SemanticRouter.PromptClassificationResult.ToString() -> string!
+override SemanticRouter.PromptRoutingRequest.Equals(object? obj) -> bool
+override SemanticRouter.PromptRoutingRequest.GetHashCode() -> int
+override SemanticRouter.PromptRoutingRequest.ToString() -> string!
+override SemanticRouter.RouteDecision.Equals(object? obj) -> bool
+override SemanticRouter.RouteDecision.GetHashCode() -> int
+override SemanticRouter.RouteDecision.ToString() -> string!
+override SemanticRouter.RouteDefinition.ToString() -> string!
+override SemanticRouter.RouteHealthFinding.Equals(object? obj) -> bool
+override SemanticRouter.RouteHealthFinding.GetHashCode() -> int
+override SemanticRouter.RouteHealthFinding.ToString() -> string!
+override SemanticRouter.RouteHealthReport.Equals(object? obj) -> bool
+override SemanticRouter.RouteHealthReport.GetHashCode() -> int
+override SemanticRouter.RouteHealthReport.ToString() -> string!
+override SemanticRouter.RouteIndexStatistics.Equals(object? obj) -> bool
+override SemanticRouter.RouteIndexStatistics.GetHashCode() -> int
+override SemanticRouter.RouteIndexStatistics.ToString() -> string!
+override SemanticRouter.RouteOverlap.Equals(object? obj) -> bool
+override SemanticRouter.RouteOverlap.GetHashCode() -> int
+override SemanticRouter.RouteOverlap.ToString() -> string!
+override SemanticRouter.RouteScore.GetHashCode() -> int
+override SemanticRouter.RouteThresholdRecommendation.Equals(object? obj) -> bool
+override SemanticRouter.RouteThresholdRecommendation.GetHashCode() -> int
+override SemanticRouter.RouteThresholdRecommendation.ToString() -> string!
+override SemanticRouter.RoutingPlan.Equals(object? obj) -> bool
+override SemanticRouter.RoutingPlan.GetHashCode() -> int
+override SemanticRouter.RoutingPlan.ToString() -> string!
+override SemanticRouter.ThresholdStep.Equals(object? obj) -> bool
+override SemanticRouter.ThresholdStep.GetHashCode() -> int
+override SemanticRouter.ThresholdStep.ToString() -> string!
+override SemanticRouter.ThresholdTuning.Equals(object? obj) -> bool
+override SemanticRouter.ThresholdTuning.GetHashCode() -> int
+override SemanticRouter.ThresholdTuning.ToString() -> string!
+override SemanticRouter.TierAccuracy.Equals(object? obj) -> bool
+override SemanticRouter.TierAccuracy.GetHashCode() -> int
+override SemanticRouter.TierAccuracy.ToString() -> string!
+override SemanticRouter.TierDefinition.ToString() -> string!
+override SemanticRouter.TimeWindow.GetHashCode() -> int
+override SemanticRouter.TuningScore.Equals(object? obj) -> bool
+override SemanticRouter.TuningScore.GetHashCode() -> int
+override SemanticRouter.TuningScore.ToString() -> string!
+override SemanticRouter.WarmCache.Equals(object? obj) -> bool
+override SemanticRouter.WarmCache.GetHashCode() -> int
+override SemanticRouter.WarmCache.ToString() -> string!
+SemanticRouter.CalibrationPoint
+SemanticRouter.CalibrationPoint.<Clone>$() -> SemanticRouter.CalibrationPoint!
+SemanticRouter.CalibrationPoint.Accuracy.get -> double
+SemanticRouter.CalibrationPoint.CalibrationPoint(float Threshold, int Correct, int TooLow, int TooHigh, int Total) -> void
+SemanticRouter.CalibrationPoint.Correct.get -> int
+SemanticRouter.CalibrationPoint.Correct.init -> void
+SemanticRouter.CalibrationPoint.Deconstruct(out float Threshold, out int Correct, out int TooLow, out int TooHigh, out int Total) -> void
+SemanticRouter.CalibrationPoint.Equals(SemanticRouter.CalibrationPoint? other) -> bool
+SemanticRouter.CalibrationPoint.Threshold.get -> float
+SemanticRouter.CalibrationPoint.Threshold.init -> void
+SemanticRouter.CalibrationPoint.TooHigh.get -> int
+SemanticRouter.CalibrationPoint.TooHigh.init -> void
+SemanticRouter.CalibrationPoint.TooLow.get -> int
+SemanticRouter.CalibrationPoint.TooLow.init -> void
+SemanticRouter.CalibrationPoint.Total.get -> int
+SemanticRouter.CalibrationPoint.Total.init -> void
+SemanticRouter.CalibrationReport
+SemanticRouter.CalibrationReport.<Clone>$() -> SemanticRouter.CalibrationReport!
+SemanticRouter.CalibrationReport.CalibrationReport(SemanticRouter.CalibrationPoint! Current, SemanticRouter.CalibrationPoint! Recommended, System.Collections.Generic.IReadOnlyList<SemanticRouter.CalibrationPoint!>! Sweep, System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteThresholdRecommendation!>! Routes, int CorrectWithRoutes) -> void
+SemanticRouter.CalibrationReport.CorrectWithRoutes.get -> int
+SemanticRouter.CalibrationReport.CorrectWithRoutes.init -> void
+SemanticRouter.CalibrationReport.Current.get -> SemanticRouter.CalibrationPoint!
+SemanticRouter.CalibrationReport.Current.init -> void
+SemanticRouter.CalibrationReport.Deconstruct(out SemanticRouter.CalibrationPoint! Current, out SemanticRouter.CalibrationPoint! Recommended, out System.Collections.Generic.IReadOnlyList<SemanticRouter.CalibrationPoint!>! Sweep, out System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteThresholdRecommendation!>! Routes, out int CorrectWithRoutes) -> void
+SemanticRouter.CalibrationReport.Equals(SemanticRouter.CalibrationReport? other) -> bool
+SemanticRouter.CalibrationReport.Recommended.get -> SemanticRouter.CalibrationPoint!
+SemanticRouter.CalibrationReport.Recommended.init -> void
+SemanticRouter.CalibrationReport.Routes.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteThresholdRecommendation!>!
+SemanticRouter.CalibrationReport.Routes.init -> void
+SemanticRouter.CalibrationReport.Sweep.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.CalibrationPoint!>!
+SemanticRouter.CalibrationReport.Sweep.init -> void
+SemanticRouter.ClassificationCacheOptions
+SemanticRouter.ClassificationCacheOptions.ClassificationCacheOptions() -> void
+SemanticRouter.ClassificationCacheOptions.Enabled.get -> bool
+SemanticRouter.ClassificationCacheOptions.Enabled.set -> void
+SemanticRouter.ClassificationCacheOptions.MaxAge.get -> System.TimeSpan
+SemanticRouter.ClassificationCacheOptions.MaxAge.set -> void
+SemanticRouter.ClassificationCacheOptions.MaxEntries.get -> int
+SemanticRouter.ClassificationCacheOptions.MaxEntries.set -> void
+SemanticRouter.ClassificationCacheStatistics
+SemanticRouter.ClassificationCacheStatistics.<Clone>$() -> SemanticRouter.ClassificationCacheStatistics!
+SemanticRouter.ClassificationCacheStatistics.Capacity.get -> int
+SemanticRouter.ClassificationCacheStatistics.Capacity.init -> void
+SemanticRouter.ClassificationCacheStatistics.ClassificationCacheStatistics(long Hits, long Misses, int Entries, int Capacity) -> void
+SemanticRouter.ClassificationCacheStatistics.Deconstruct(out long Hits, out long Misses, out int Entries, out int Capacity) -> void
+SemanticRouter.ClassificationCacheStatistics.Entries.get -> int
+SemanticRouter.ClassificationCacheStatistics.Entries.init -> void
+SemanticRouter.ClassificationCacheStatistics.Equals(SemanticRouter.ClassificationCacheStatistics? other) -> bool
+SemanticRouter.ClassificationCacheStatistics.HitRate.get -> double
+SemanticRouter.ClassificationCacheStatistics.Hits.get -> long
+SemanticRouter.ClassificationCacheStatistics.Hits.init -> void
+SemanticRouter.ClassificationCacheStatistics.Misses.get -> long
+SemanticRouter.ClassificationCacheStatistics.Misses.init -> void
+SemanticRouter.ComplexityAnalysis
+SemanticRouter.ComplexityAnalysis.<Clone>$() -> SemanticRouter.ComplexityAnalysis!
+SemanticRouter.ComplexityAnalysis.CodeBlockCount.get -> int
+SemanticRouter.ComplexityAnalysis.CodeBlockCount.init -> void
+SemanticRouter.ComplexityAnalysis.CodeLineCount.get -> int
+SemanticRouter.ComplexityAnalysis.CodeLineCount.init -> void
+SemanticRouter.ComplexityAnalysis.CodeSignal.get -> double
+SemanticRouter.ComplexityAnalysis.CodeSignal.init -> void
+SemanticRouter.ComplexityAnalysis.ComplexityAnalysis() -> void
+SemanticRouter.ComplexityAnalysis.ContainsCode.get -> bool
+SemanticRouter.ComplexityAnalysis.ContainsCode.init -> void
+SemanticRouter.ComplexityAnalysis.Equals(SemanticRouter.ComplexityAnalysis? other) -> bool
+SemanticRouter.ComplexityAnalysis.EstimatedTokens.get -> int
+SemanticRouter.ComplexityAnalysis.EstimatedTokens.init -> void
+SemanticRouter.ComplexityAnalysis.LengthSignal.get -> double
+SemanticRouter.ComplexityAnalysis.LengthSignal.init -> void
+SemanticRouter.ComplexityAnalysis.LineCount.get -> int
+SemanticRouter.ComplexityAnalysis.LineCount.init -> void
+SemanticRouter.ComplexityAnalysis.QuestionCount.get -> int
+SemanticRouter.ComplexityAnalysis.QuestionCount.init -> void
+SemanticRouter.ComplexityAnalysis.ReasoningKeywordCount.get -> int
+SemanticRouter.ComplexityAnalysis.ReasoningKeywordCount.init -> void
+SemanticRouter.ComplexityAnalysis.ReasoningSignal.get -> double
+SemanticRouter.ComplexityAnalysis.ReasoningSignal.init -> void
+SemanticRouter.ComplexityAnalysis.Score.get -> double
+SemanticRouter.ComplexityAnalysis.Score.init -> void
+SemanticRouter.ComplexityAnalysis.StructuralItemCount.get -> int
+SemanticRouter.ComplexityAnalysis.StructuralItemCount.init -> void
+SemanticRouter.ComplexityAnalysis.StructureSignal.get -> double
+SemanticRouter.ComplexityAnalysis.StructureSignal.init -> void
+SemanticRouter.ComplexityHeuristicsOptions
+SemanticRouter.ComplexityHeuristicsOptions.CodeWeight.get -> double
+SemanticRouter.ComplexityHeuristicsOptions.CodeWeight.set -> void
+SemanticRouter.ComplexityHeuristicsOptions.ComplexityHeuristicsOptions() -> void
+SemanticRouter.ComplexityHeuristicsOptions.LengthWeight.get -> double
+SemanticRouter.ComplexityHeuristicsOptions.LengthWeight.set -> void
+SemanticRouter.ComplexityHeuristicsOptions.ReasoningKeywords.get -> System.Collections.Generic.IList<string!>?
+SemanticRouter.ComplexityHeuristicsOptions.ReasoningKeywords.set -> void
+SemanticRouter.ComplexityHeuristicsOptions.ReasoningKeywordSaturation.get -> int
+SemanticRouter.ComplexityHeuristicsOptions.ReasoningKeywordSaturation.set -> void
+SemanticRouter.ComplexityHeuristicsOptions.ReasoningWeight.get -> double
+SemanticRouter.ComplexityHeuristicsOptions.ReasoningWeight.set -> void
+SemanticRouter.ComplexityHeuristicsOptions.StructureWeight.get -> double
+SemanticRouter.ComplexityHeuristicsOptions.StructureWeight.set -> void
+SemanticRouter.ComplexityHeuristicsOptions.TokenSaturation.get -> int
+SemanticRouter.ComplexityHeuristicsOptions.TokenSaturation.set -> void
+SemanticRouter.ComplexityTierRule
+SemanticRouter.ComplexityTierRule.ComplexityTierRule() -> void
+SemanticRouter.ComplexityTierRule.MinScore.get -> double
+SemanticRouter.ComplexityTierRule.MinScore.set -> void
+SemanticRouter.ComplexityTierRule.Tier.get -> int
+SemanticRouter.ComplexityTierRule.Tier.set -> void
+SemanticRouter.DefaultModelSelector
+SemanticRouter.DefaultModelSelector.DefaultModelSelector(SemanticRouter.ModelSelectionOptions? options = null, SemanticRouter.IModelLatency? latency = null, SemanticRouter.IModelCacheShare? cache = null, SemanticRouter.IModelResidency? residency = null) -> void
+SemanticRouter.DefaultModelSelector.RankCandidates(SemanticRouter.ModelRequirements! requirements, System.Collections.Generic.IReadOnlyCollection<SemanticRouter.ModelDefinition!>! models, System.Func<SemanticRouter.ModelDefinition!, bool>? isAvailable = null) -> System.Collections.Generic.IReadOnlyList<SemanticRouter.ModelCandidate!>!
+SemanticRouter.DefaultRouteSelector
+SemanticRouter.DefaultRouteSelector.DefaultRouteSelector(SemanticRouter.SemanticRouterOptions! options) -> void
+SemanticRouter.DefaultRouteSelector.SelectRoute(System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteScore>! rankedScores, SemanticRouter.ComplexityAnalysis! complexity) -> SemanticRouter.RouteDecision!
+SemanticRouter.EvaluationCase
+SemanticRouter.EvaluationCase.<Clone>$() -> SemanticRouter.EvaluationCase!
+SemanticRouter.EvaluationCase.Deconstruct(out string! Prompt, out int ExpectedTier) -> void
+SemanticRouter.EvaluationCase.Equals(SemanticRouter.EvaluationCase? other) -> bool
+SemanticRouter.EvaluationCase.EvaluationCase(string! Prompt, int ExpectedTier) -> void
+SemanticRouter.EvaluationCase.ExpectedRoute.get -> string?
+SemanticRouter.EvaluationCase.ExpectedRoute.init -> void
+SemanticRouter.EvaluationCase.ExpectedTier.get -> int
+SemanticRouter.EvaluationCase.ExpectedTier.init -> void
+SemanticRouter.EvaluationCase.LocalOnly.get -> bool
+SemanticRouter.EvaluationCase.LocalOnly.init -> void
+SemanticRouter.EvaluationCase.Note.get -> string?
+SemanticRouter.EvaluationCase.Note.init -> void
+SemanticRouter.EvaluationCase.Prompt.get -> string!
+SemanticRouter.EvaluationCase.Prompt.init -> void
+SemanticRouter.EvaluationReport
+SemanticRouter.EvaluationReport.<Clone>$() -> SemanticRouter.EvaluationReport!
+SemanticRouter.EvaluationReport.Accuracy.get -> double
+SemanticRouter.EvaluationReport.Confusion.get -> System.Collections.Generic.IReadOnlyList<System.Collections.Generic.IReadOnlyList<int>!>!
+SemanticRouter.EvaluationReport.Confusion.init -> void
+SemanticRouter.EvaluationReport.Correct.get -> int
+SemanticRouter.EvaluationReport.Correct.init -> void
+SemanticRouter.EvaluationReport.DefaultThreshold.get -> float
+SemanticRouter.EvaluationReport.DefaultThreshold.init -> void
+SemanticRouter.EvaluationReport.Equals(SemanticRouter.EvaluationReport? other) -> bool
+SemanticRouter.EvaluationReport.EvaluationReport() -> void
+SemanticRouter.EvaluationReport.LocalOnlyMissed.get -> int
+SemanticRouter.EvaluationReport.LocalOnlyMissed.init -> void
+SemanticRouter.EvaluationReport.Misroutes.get -> System.Collections.Generic.IEnumerable<SemanticRouter.EvaluationResult!>!
+SemanticRouter.EvaluationReport.PerTier.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.TierAccuracy!>!
+SemanticRouter.EvaluationReport.PerTier.init -> void
+SemanticRouter.EvaluationReport.Results.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationResult!>!
+SemanticRouter.EvaluationReport.Results.init -> void
+SemanticRouter.EvaluationReport.RouteCorrect.get -> int
+SemanticRouter.EvaluationReport.RouteCorrect.init -> void
+SemanticRouter.EvaluationReport.RouteLabelled.get -> int
+SemanticRouter.EvaluationReport.RouteLabelled.init -> void
+SemanticRouter.EvaluationReport.Tiers.get -> System.Collections.Generic.IReadOnlyList<int>!
+SemanticRouter.EvaluationReport.Tiers.init -> void
+SemanticRouter.EvaluationReport.TooHigh.get -> int
+SemanticRouter.EvaluationReport.TooHigh.init -> void
+SemanticRouter.EvaluationReport.TooLow.get -> int
+SemanticRouter.EvaluationReport.TooLow.init -> void
+SemanticRouter.EvaluationReport.Total.get -> int
+SemanticRouter.EvaluationReport.Total.init -> void
+SemanticRouter.EvaluationResult
+SemanticRouter.EvaluationResult.<Clone>$() -> SemanticRouter.EvaluationResult!
+SemanticRouter.EvaluationResult.ActualRoute.get -> string?
+SemanticRouter.EvaluationResult.ActualRoute.init -> void
+SemanticRouter.EvaluationResult.ActualTier.get -> int
+SemanticRouter.EvaluationResult.ActualTier.init -> void
+SemanticRouter.EvaluationResult.Case.get -> SemanticRouter.EvaluationCase!
+SemanticRouter.EvaluationResult.Case.init -> void
+SemanticRouter.EvaluationResult.Complexity.get -> double
+SemanticRouter.EvaluationResult.Complexity.init -> void
+SemanticRouter.EvaluationResult.Correct.get -> bool
+SemanticRouter.EvaluationResult.Deconstruct(out SemanticRouter.EvaluationCase! Case, out int ActualTier, out SemanticRouter.RoutingReason Reason, out string? ActualRoute, out float? Similarity, out double Complexity, out bool LocalOnly, out System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteScore>! TopScores) -> void
+SemanticRouter.EvaluationResult.Equals(SemanticRouter.EvaluationResult? other) -> bool
+SemanticRouter.EvaluationResult.EvaluationResult(SemanticRouter.EvaluationCase! Case, int ActualTier, SemanticRouter.RoutingReason Reason, string? ActualRoute, float? Similarity, double Complexity, bool LocalOnly, System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteScore>! TopScores) -> void
+SemanticRouter.EvaluationResult.LocalOnly.get -> bool
+SemanticRouter.EvaluationResult.LocalOnly.init -> void
+SemanticRouter.EvaluationResult.Reason.get -> SemanticRouter.RoutingReason
+SemanticRouter.EvaluationResult.Reason.init -> void
+SemanticRouter.EvaluationResult.RouteCorrect.get -> bool?
+SemanticRouter.EvaluationResult.Similarity.get -> float?
+SemanticRouter.EvaluationResult.Similarity.init -> void
+SemanticRouter.EvaluationResult.TopScores.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteScore>!
+SemanticRouter.EvaluationResult.TopScores.init -> void
+SemanticRouter.EvaluationSet
+SemanticRouter.Glob
+SemanticRouter.HashingEmbeddingProvider
+SemanticRouter.HashingEmbeddingProvider.Dimensions.get -> int
+SemanticRouter.HashingEmbeddingProvider.Embed(string! text) -> float[]!
+SemanticRouter.HashingEmbeddingProvider.GenerateEmbeddingAsync(string! text, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.ReadOnlyMemory<float>>
+SemanticRouter.HashingEmbeddingProvider.GenerateEmbeddingsAsync(System.Collections.Generic.IReadOnlyList<string!>! texts, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>>!>
+SemanticRouter.HashingEmbeddingProvider.HashingEmbeddingProvider(int dimensions = 512) -> void
+SemanticRouter.HeuristicComplexityAnalyzer
+SemanticRouter.HeuristicComplexityAnalyzer.Analyze(string! prompt) -> SemanticRouter.ComplexityAnalysis!
+SemanticRouter.HeuristicComplexityAnalyzer.HeuristicComplexityAnalyzer(SemanticRouter.ComplexityHeuristicsOptions? options = null) -> void
+SemanticRouter.IComplexityAnalyzer
+SemanticRouter.IComplexityAnalyzer.Analyze(string! prompt) -> SemanticRouter.ComplexityAnalysis!
+SemanticRouter.ICooldownStore
+SemanticRouter.ICooldownStore.ClearCooldowns() -> void
+SemanticRouter.ICooldownStore.LoadCooldowns() -> System.Collections.Generic.IReadOnlyDictionary<string!, System.DateTimeOffset>!
+SemanticRouter.ICooldownStore.RemoveCooldown(string! model) -> void
+SemanticRouter.ICooldownStore.SaveCooldown(string! model, System.DateTimeOffset until) -> void
+SemanticRouter.IEmbeddingProvider
+SemanticRouter.IEmbeddingProvider.GenerateEmbeddingAsync(string! text, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.ReadOnlyMemory<float>>
+SemanticRouter.IEmbeddingProvider.GenerateEmbeddingsAsync(System.Collections.Generic.IReadOnlyList<string!>! texts, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>>!>
+SemanticRouter.IModelCacheShare
+SemanticRouter.IModelCacheShare.Typical(SemanticRouter.ModelDefinition! model, string? route) -> SemanticRouter.PromptCacheShare?
+SemanticRouter.IModelHealth
+SemanticRouter.IModelHealth.GetCooldowns() -> System.Collections.Generic.IReadOnlyDictionary<string!, System.DateTimeOffset>!
+SemanticRouter.IModelHealth.IsAvailable(SemanticRouter.ModelDefinition! model) -> bool
+SemanticRouter.IModelHealth.ReportFailure(SemanticRouter.ModelDefinition! model, SemanticRouter.ModelFailureKind kind) -> void
+SemanticRouter.IModelHealth.ReportFailure(SemanticRouter.ModelDefinition! model, SemanticRouter.ModelFailureKind kind, System.DateTimeOffset? until) -> void
+SemanticRouter.IModelHealth.ReportSuccess(SemanticRouter.ModelDefinition! model) -> void
+SemanticRouter.IModelLatency
+SemanticRouter.IModelLatency.TypicalTimeToFirstByte(SemanticRouter.ModelDefinition! model) -> System.TimeSpan?
+SemanticRouter.IModelReliability
+SemanticRouter.IModelReliability.IsReliable(SemanticRouter.ModelDefinition! model, string? route, System.Collections.Generic.IReadOnlyList<string!>! capabilities) -> bool
+SemanticRouter.IModelResidency
+SemanticRouter.IModelResidency.IsLoaded(SemanticRouter.ModelDefinition! model) -> bool?
+SemanticRouter.IModelSelector
+SemanticRouter.IModelSelector.RankCandidates(SemanticRouter.ModelRequirements! requirements, System.Collections.Generic.IReadOnlyCollection<SemanticRouter.ModelDefinition!>! models, System.Func<SemanticRouter.ModelDefinition!, bool>? isAvailable = null) -> System.Collections.Generic.IReadOnlyList<SemanticRouter.ModelCandidate!>!
+SemanticRouter.IPromptClassifier
+SemanticRouter.IPromptClassifier.ClassifyAsync(string! prompt, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SemanticRouter.PromptClassificationResult!>
+SemanticRouter.IPromptClassifier.ClassifyWithoutEmbeddingAsync(string! prompt, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SemanticRouter.PromptClassificationResult!>
+SemanticRouter.IPromptClassifier.WarmUpAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SemanticRouter.IPromptRouter
+SemanticRouter.IPromptRouter.Models.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.ModelDefinition!>!
+SemanticRouter.IPromptRouter.Plan(SemanticRouter.PromptClassificationResult! classification, SemanticRouter.PromptRoutingRequest! request) -> SemanticRouter.RoutingPlan!
+SemanticRouter.IPromptRouter.Profiles.get -> System.Collections.Generic.IReadOnlyDictionary<string!, SemanticRouter.RoutingProfile!>!
+SemanticRouter.IPromptRouter.RouteAsync(SemanticRouter.PromptRoutingRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SemanticRouter.RoutingPlan!>
+SemanticRouter.IRouteSelector
+SemanticRouter.IRouteSelector.SelectRoute(System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteScore>! rankedScores, SemanticRouter.ComplexityAnalysis! complexity) -> SemanticRouter.RouteDecision!
+SemanticRouter.ModelCandidate
+SemanticRouter.ModelCandidate.<Clone>$() -> SemanticRouter.ModelCandidate!
+SemanticRouter.ModelCandidate.Deconstruct(out SemanticRouter.ModelDefinition! Model, out decimal EstimatedCost, out bool MeetsRequiredTier) -> void
+SemanticRouter.ModelCandidate.Equals(SemanticRouter.ModelCandidate? other) -> bool
+SemanticRouter.ModelCandidate.EstimatedCost.get -> decimal
+SemanticRouter.ModelCandidate.EstimatedCost.init -> void
+SemanticRouter.ModelCandidate.MeetsRequiredTier.get -> bool
+SemanticRouter.ModelCandidate.MeetsRequiredTier.init -> void
+SemanticRouter.ModelCandidate.Model.get -> SemanticRouter.ModelDefinition!
+SemanticRouter.ModelCandidate.Model.init -> void
+SemanticRouter.ModelCandidate.ModelCandidate(SemanticRouter.ModelDefinition! Model, decimal EstimatedCost, bool MeetsRequiredTier) -> void
+SemanticRouter.ModelDefinition
+SemanticRouter.ModelDefinition.ActiveHours.get -> string?
+SemanticRouter.ModelDefinition.ActiveHours.set -> void
+SemanticRouter.ModelDefinition.ApiCacheReadCostPerMillionTokens.get -> decimal?
+SemanticRouter.ModelDefinition.ApiCacheReadCostPerMillionTokens.set -> void
+SemanticRouter.ModelDefinition.ApiCacheWriteCostPerMillionTokens.get -> decimal?
+SemanticRouter.ModelDefinition.ApiCacheWriteCostPerMillionTokens.set -> void
+SemanticRouter.ModelDefinition.ApiInputCostPerMillionTokens.get -> decimal?
+SemanticRouter.ModelDefinition.ApiInputCostPerMillionTokens.set -> void
+SemanticRouter.ModelDefinition.ApiOutputCostPerMillionTokens.get -> decimal?
+SemanticRouter.ModelDefinition.ApiOutputCostPerMillionTokens.set -> void
+SemanticRouter.ModelDefinition.ApiValue(long inputTokens, long outputTokens, long cacheReadTokens = 0, long cacheWriteTokens = 0) -> decimal
+SemanticRouter.ModelDefinition.CacheReadCostPerMillionTokens.get -> decimal?
+SemanticRouter.ModelDefinition.CacheReadCostPerMillionTokens.set -> void
+SemanticRouter.ModelDefinition.CacheWriteCostPerMillionTokens.get -> decimal?
+SemanticRouter.ModelDefinition.CacheWriteCostPerMillionTokens.set -> void
+SemanticRouter.ModelDefinition.Capabilities.get -> System.Collections.Generic.IList<string!>!
+SemanticRouter.ModelDefinition.Connector.get -> string!
+SemanticRouter.ModelDefinition.Connector.set -> void
+SemanticRouter.ModelDefinition.ContextWindow.get -> int
+SemanticRouter.ModelDefinition.ContextWindow.set -> void
+SemanticRouter.ModelDefinition.Cost(long inputTokens, long outputTokens, long cacheReadTokens = 0, long cacheWriteTokens = 0) -> decimal
+SemanticRouter.ModelDefinition.Description.get -> string?
+SemanticRouter.ModelDefinition.Description.set -> void
+SemanticRouter.ModelDefinition.Enabled.get -> bool
+SemanticRouter.ModelDefinition.Enabled.set -> void
+SemanticRouter.ModelDefinition.EstimateCost(int inputTokens, int outputTokens) -> decimal
+SemanticRouter.ModelDefinition.EstimateCost(int inputTokens, int outputTokens, SemanticRouter.PromptCacheShare? cache) -> decimal
+SemanticRouter.ModelDefinition.HasCapabilities(System.Collections.Generic.IEnumerable<string!>! required) -> bool
+SemanticRouter.ModelDefinition.InputCostPerMillionTokens.get -> decimal
+SemanticRouter.ModelDefinition.InputCostPerMillionTokens.set -> void
+SemanticRouter.ModelDefinition.IsActiveAt(System.DateTimeOffset now, System.TimeZoneInfo! zone) -> bool
+SemanticRouter.ModelDefinition.IsLocal.get -> bool
+SemanticRouter.ModelDefinition.IsLocal.set -> void
+SemanticRouter.ModelDefinition.Model.get -> string?
+SemanticRouter.ModelDefinition.Model.set -> void
+SemanticRouter.ModelDefinition.ModelDefinition() -> void
+SemanticRouter.ModelDefinition.Name.get -> string!
+SemanticRouter.ModelDefinition.Name.set -> void
+SemanticRouter.ModelDefinition.OutputCostPerMillionTokens.get -> decimal
+SemanticRouter.ModelDefinition.OutputCostPerMillionTokens.set -> void
+SemanticRouter.ModelDefinition.Priority.get -> int
+SemanticRouter.ModelDefinition.Priority.set -> void
+SemanticRouter.ModelDefinition.Tier.get -> int
+SemanticRouter.ModelDefinition.Tier.set -> void
+SemanticRouter.ModelFailureKind
+SemanticRouter.ModelFailureKind.QuotaExceeded = 1 -> SemanticRouter.ModelFailureKind
+SemanticRouter.ModelFailureKind.Unavailable = 0 -> SemanticRouter.ModelFailureKind
+SemanticRouter.ModelHealthTracker
+SemanticRouter.ModelHealthTracker.Clear() -> void
+SemanticRouter.ModelHealthTracker.Configure(SemanticRouter.ModelSelectionOptions! options) -> void
+SemanticRouter.ModelHealthTracker.GetCooldowns() -> System.Collections.Generic.IReadOnlyDictionary<string!, System.DateTimeOffset>!
+SemanticRouter.ModelHealthTracker.IsAvailable(SemanticRouter.ModelDefinition! model) -> bool
+SemanticRouter.ModelHealthTracker.ModelHealthTracker(SemanticRouter.ModelSelectionOptions? options = null, System.TimeProvider? timeProvider = null, SemanticRouter.ICooldownStore? store = null) -> void
+SemanticRouter.ModelHealthTracker.RefreshInterval.get -> System.TimeSpan
+SemanticRouter.ModelHealthTracker.RefreshInterval.set -> void
+SemanticRouter.ModelHealthTracker.ReportFailure(SemanticRouter.ModelDefinition! model, SemanticRouter.ModelFailureKind kind) -> void
+SemanticRouter.ModelHealthTracker.ReportFailure(SemanticRouter.ModelDefinition! model, SemanticRouter.ModelFailureKind kind, System.DateTimeOffset? until) -> void
+SemanticRouter.ModelHealthTracker.ReportSuccess(SemanticRouter.ModelDefinition! model) -> void
+SemanticRouter.ModelRequirements
+SemanticRouter.ModelRequirements.<Clone>$() -> SemanticRouter.ModelRequirements!
+SemanticRouter.ModelRequirements.Equals(SemanticRouter.ModelRequirements? other) -> bool
+SemanticRouter.ModelRequirements.EstimatedInputTokens.get -> int
+SemanticRouter.ModelRequirements.EstimatedInputTokens.init -> void
+SemanticRouter.ModelRequirements.LocalOnly.get -> bool
+SemanticRouter.ModelRequirements.LocalOnly.init -> void
+SemanticRouter.ModelRequirements.ModelRequirements() -> void
+SemanticRouter.ModelRequirements.Profile.get -> string?
+SemanticRouter.ModelRequirements.Profile.init -> void
+SemanticRouter.ModelRequirements.RequiredCapabilities.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SemanticRouter.ModelRequirements.RequiredCapabilities.init -> void
+SemanticRouter.ModelRequirements.RequiredTier.get -> int
+SemanticRouter.ModelRequirements.RequiredTier.init -> void
+SemanticRouter.ModelRequirements.Route.get -> string?
+SemanticRouter.ModelRequirements.Route.init -> void
+SemanticRouter.ModelRequirements.Strategy.get -> SemanticRouter.SelectionStrategy?
+SemanticRouter.ModelRequirements.Strategy.init -> void
+SemanticRouter.ModelSelectionOptions
+SemanticRouter.ModelSelectionOptions.AllowBelowRequiredTier.get -> bool
+SemanticRouter.ModelSelectionOptions.AllowBelowRequiredTier.set -> void
+SemanticRouter.ModelSelectionOptions.BalancedLatencyFactor.get -> double
+SemanticRouter.ModelSelectionOptions.BalancedLatencyFactor.set -> void
+SemanticRouter.ModelSelectionOptions.CacheShareSamples.get -> int
+SemanticRouter.ModelSelectionOptions.CacheShareSamples.set -> void
+SemanticRouter.ModelSelectionOptions.CacheShareWindow.get -> System.TimeSpan
+SemanticRouter.ModelSelectionOptions.CacheShareWindow.set -> void
+SemanticRouter.ModelSelectionOptions.EffectiveTimeZone.get -> System.TimeZoneInfo!
+SemanticRouter.ModelSelectionOptions.EstimatedOutputTokens.get -> int
+SemanticRouter.ModelSelectionOptions.EstimatedOutputTokens.set -> void
+SemanticRouter.ModelSelectionOptions.FailureCooldown.get -> System.TimeSpan
+SemanticRouter.ModelSelectionOptions.FailureCooldown.set -> void
+SemanticRouter.ModelSelectionOptions.LatencySamples.get -> int
+SemanticRouter.ModelSelectionOptions.LatencySamples.set -> void
+SemanticRouter.ModelSelectionOptions.LatencyWindow.get -> System.TimeSpan
+SemanticRouter.ModelSelectionOptions.LatencyWindow.set -> void
+SemanticRouter.ModelSelectionOptions.MaxAttempts.get -> int
+SemanticRouter.ModelSelectionOptions.MaxAttempts.set -> void
+SemanticRouter.ModelSelectionOptions.ModelSelectionOptions() -> void
+SemanticRouter.ModelSelectionOptions.QuotaCooldown.get -> System.TimeSpan
+SemanticRouter.ModelSelectionOptions.QuotaCooldown.set -> void
+SemanticRouter.ModelSelectionOptions.Strategy.get -> SemanticRouter.SelectionStrategy
+SemanticRouter.ModelSelectionOptions.Strategy.set -> void
+SemanticRouter.ModelSelectionOptions.TimeZone.get -> string?
+SemanticRouter.ModelSelectionOptions.TimeZone.set -> void
+SemanticRouter.PreparedEvaluation
+SemanticRouter.PreparedEvaluation.Cases.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>!
+SemanticRouter.PreparedEvaluation.EmbeddingTime.get -> System.TimeSpan
+SemanticRouter.PromptCacheShare
+SemanticRouter.PromptCacheShare.<Clone>$() -> SemanticRouter.PromptCacheShare!
+SemanticRouter.PromptCacheShare.Deconstruct(out double Read, out double Write) -> void
+SemanticRouter.PromptCacheShare.Equals(SemanticRouter.PromptCacheShare? other) -> bool
+SemanticRouter.PromptCacheShare.PromptCacheShare(double Read, double Write) -> void
+SemanticRouter.PromptCacheShare.Read.get -> double
+SemanticRouter.PromptCacheShare.Read.init -> void
+SemanticRouter.PromptCacheShare.Write.get -> double
+SemanticRouter.PromptCacheShare.Write.init -> void
+SemanticRouter.PromptClassificationResult
+SemanticRouter.PromptClassificationResult.<Clone>$() -> SemanticRouter.PromptClassificationResult!
+SemanticRouter.PromptClassificationResult.Cached.get -> bool
+SemanticRouter.PromptClassificationResult.Cached.init -> void
+SemanticRouter.PromptClassificationResult.Complexity.get -> SemanticRouter.ComplexityAnalysis!
+SemanticRouter.PromptClassificationResult.Complexity.init -> void
+SemanticRouter.PromptClassificationResult.Elapsed.get -> System.TimeSpan
+SemanticRouter.PromptClassificationResult.Elapsed.init -> void
+SemanticRouter.PromptClassificationResult.Equals(SemanticRouter.PromptClassificationResult? other) -> bool
+SemanticRouter.PromptClassificationResult.IsRouteMatch.get -> bool
+SemanticRouter.PromptClassificationResult.LocalOnly.get -> bool
+SemanticRouter.PromptClassificationResult.LocalOnly.init -> void
+SemanticRouter.PromptClassificationResult.PromptClassificationResult() -> void
+SemanticRouter.PromptClassificationResult.Reason.get -> SemanticRouter.RoutingReason
+SemanticRouter.PromptClassificationResult.Reason.init -> void
+SemanticRouter.PromptClassificationResult.RequiredCapabilities.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SemanticRouter.PromptClassificationResult.RequiredCapabilities.init -> void
+SemanticRouter.PromptClassificationResult.RequiredTier.get -> int
+SemanticRouter.PromptClassificationResult.RequiredTier.init -> void
+SemanticRouter.PromptClassificationResult.RouteName.get -> string?
+SemanticRouter.PromptClassificationResult.RouteName.init -> void
+SemanticRouter.PromptClassificationResult.Similarity.get -> float?
+SemanticRouter.PromptClassificationResult.Similarity.init -> void
+SemanticRouter.PromptClassificationResult.TopScores.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteScore>!
+SemanticRouter.PromptClassificationResult.TopScores.init -> void
+SemanticRouter.PromptRouter
+SemanticRouter.PromptRouter.Models.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.ModelDefinition!>!
+SemanticRouter.PromptRouter.Plan(SemanticRouter.PromptClassificationResult! classification, SemanticRouter.PromptRoutingRequest! request) -> SemanticRouter.RoutingPlan!
+SemanticRouter.PromptRouter.Profiles.get -> System.Collections.Generic.IReadOnlyDictionary<string!, SemanticRouter.RoutingProfile!>!
+SemanticRouter.PromptRouter.PromptRouter(SemanticRouter.IPromptClassifier! classifier, SemanticRouter.SemanticRouterOptions! options, SemanticRouter.IModelSelector? selector = null, SemanticRouter.IModelHealth? health = null, System.TimeProvider? time = null, SemanticRouter.IModelReliability? reliability = null, SemanticRouter.IModelLatency? latency = null) -> void
+SemanticRouter.PromptRouter.RouteAsync(SemanticRouter.PromptRoutingRequest! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SemanticRouter.RoutingPlan!>
+SemanticRouter.PromptRoutingRequest
+SemanticRouter.PromptRoutingRequest.<Clone>$() -> SemanticRouter.PromptRoutingRequest!
+SemanticRouter.PromptRoutingRequest.AdditionalCapabilities.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SemanticRouter.PromptRoutingRequest.AdditionalCapabilities.init -> void
+SemanticRouter.PromptRoutingRequest.AffinityModel.get -> string?
+SemanticRouter.PromptRoutingRequest.AffinityModel.init -> void
+SemanticRouter.PromptRoutingRequest.Classification.get -> SemanticRouter.PromptClassificationResult?
+SemanticRouter.PromptRoutingRequest.Classification.init -> void
+SemanticRouter.PromptRoutingRequest.ConversationFloor.get -> int?
+SemanticRouter.PromptRoutingRequest.ConversationFloor.init -> void
+SemanticRouter.PromptRoutingRequest.EmbeddingsAllowed.get -> bool
+SemanticRouter.PromptRoutingRequest.EmbeddingsAllowed.init -> void
+SemanticRouter.PromptRoutingRequest.Equals(SemanticRouter.PromptRoutingRequest? other) -> bool
+SemanticRouter.PromptRoutingRequest.EstimatedInputTokens.get -> int?
+SemanticRouter.PromptRoutingRequest.EstimatedInputTokens.init -> void
+SemanticRouter.PromptRoutingRequest.ExplicitTier.get -> int?
+SemanticRouter.PromptRoutingRequest.ExplicitTier.init -> void
+SemanticRouter.PromptRoutingRequest.LocalOnly.get -> bool
+SemanticRouter.PromptRoutingRequest.LocalOnly.init -> void
+SemanticRouter.PromptRoutingRequest.MinimumTier.get -> int?
+SemanticRouter.PromptRoutingRequest.MinimumTier.init -> void
+SemanticRouter.PromptRoutingRequest.PreferredModel.get -> string?
+SemanticRouter.PromptRoutingRequest.PreferredModel.init -> void
+SemanticRouter.PromptRoutingRequest.Profile.get -> string?
+SemanticRouter.PromptRoutingRequest.Profile.init -> void
+SemanticRouter.PromptRoutingRequest.Prompt.get -> string!
+SemanticRouter.PromptRoutingRequest.Prompt.init -> void
+SemanticRouter.PromptRoutingRequest.PromptRoutingRequest() -> void
+SemanticRouter.PromptRoutingRequest.RequestedModel.get -> string?
+SemanticRouter.PromptRoutingRequest.RequestedModel.init -> void
+SemanticRouter.PromptRoutingRequest.Strategy.get -> SemanticRouter.SelectionStrategy?
+SemanticRouter.PromptRoutingRequest.Strategy.init -> void
+SemanticRouter.PromptRoutingRequest.TrialModel.get -> string?
+SemanticRouter.PromptRoutingRequest.TrialModel.init -> void
+SemanticRouter.PromptRoutingRequest.WarmCaches.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.WarmCache!>!
+SemanticRouter.PromptRoutingRequest.WarmCaches.init -> void
+SemanticRouter.QuotaResetParser
+SemanticRouter.RouteDecision
+SemanticRouter.RouteDecision.<Clone>$() -> SemanticRouter.RouteDecision!
+SemanticRouter.RouteDecision.Deconstruct(out int RequiredTier, out SemanticRouter.RoutingReason Reason, out SemanticRouter.RouteDefinition? Route, out float? Similarity) -> void
+SemanticRouter.RouteDecision.Equals(SemanticRouter.RouteDecision? other) -> bool
+SemanticRouter.RouteDecision.LocalOnly.get -> bool
+SemanticRouter.RouteDecision.LocalOnly.init -> void
+SemanticRouter.RouteDecision.Reason.get -> SemanticRouter.RoutingReason
+SemanticRouter.RouteDecision.Reason.init -> void
+SemanticRouter.RouteDecision.RequiredCapabilities.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SemanticRouter.RouteDecision.RequiredCapabilities.init -> void
+SemanticRouter.RouteDecision.RequiredTier.get -> int
+SemanticRouter.RouteDecision.RequiredTier.init -> void
+SemanticRouter.RouteDecision.Route.get -> SemanticRouter.RouteDefinition?
+SemanticRouter.RouteDecision.Route.init -> void
+SemanticRouter.RouteDecision.RouteDecision(int RequiredTier, SemanticRouter.RoutingReason Reason, SemanticRouter.RouteDefinition? Route = null, float? Similarity = null) -> void
+SemanticRouter.RouteDecision.Similarity.get -> float?
+SemanticRouter.RouteDecision.Similarity.init -> void
+SemanticRouter.RouteDefinition
+SemanticRouter.RouteDefinition.Description.get -> string?
+SemanticRouter.RouteDefinition.Description.set -> void
+SemanticRouter.RouteDefinition.FollowsConversation.get -> bool
+SemanticRouter.RouteDefinition.FollowsConversation.set -> void
+SemanticRouter.RouteDefinition.LocalOnly.get -> bool
+SemanticRouter.RouteDefinition.LocalOnly.set -> void
+SemanticRouter.RouteDefinition.Name.get -> string!
+SemanticRouter.RouteDefinition.Name.set -> void
+SemanticRouter.RouteDefinition.PreferredModel.get -> string?
+SemanticRouter.RouteDefinition.PreferredModel.set -> void
+SemanticRouter.RouteDefinition.RequiredCapabilities.get -> System.Collections.Generic.IList<string!>!
+SemanticRouter.RouteDefinition.RouteDefinition() -> void
+SemanticRouter.RouteDefinition.SimilarityThreshold.get -> float?
+SemanticRouter.RouteDefinition.SimilarityThreshold.set -> void
+SemanticRouter.RouteDefinition.Tier.get -> int
+SemanticRouter.RouteDefinition.Tier.set -> void
+SemanticRouter.RouteDefinition.Utterances.get -> System.Collections.Generic.IList<string!>!
+SemanticRouter.RouteHealthAnalyzer
+SemanticRouter.RouteHealthAnalyzer.AnalyzeAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SemanticRouter.RouteHealthReport!>!
+SemanticRouter.RouteHealthAnalyzer.DuplicateSimilarity.get -> float
+SemanticRouter.RouteHealthAnalyzer.DuplicateSimilarity.init -> void
+SemanticRouter.RouteHealthAnalyzer.MinUtterances.get -> int
+SemanticRouter.RouteHealthAnalyzer.MinUtterances.init -> void
+SemanticRouter.RouteHealthAnalyzer.OverlapFraction.get -> float
+SemanticRouter.RouteHealthAnalyzer.OverlapFraction.init -> void
+SemanticRouter.RouteHealthAnalyzer.RouteHealthAnalyzer(SemanticRouter.IEmbeddingProvider! embeddings, SemanticRouter.SemanticRouterOptions! options) -> void
+SemanticRouter.RouteHealthFinding
+SemanticRouter.RouteHealthFinding.<Clone>$() -> SemanticRouter.RouteHealthFinding!
+SemanticRouter.RouteHealthFinding.Deconstruct(out SemanticRouter.RouteHealthKind Kind, out string! Route, out string? OtherRoute, out string! Message, out System.Collections.Generic.IReadOnlyList<string!>! Utterances, out float? Similarity) -> void
+SemanticRouter.RouteHealthFinding.Equals(SemanticRouter.RouteHealthFinding? other) -> bool
+SemanticRouter.RouteHealthFinding.Kind.get -> SemanticRouter.RouteHealthKind
+SemanticRouter.RouteHealthFinding.Kind.init -> void
+SemanticRouter.RouteHealthFinding.Message.get -> string!
+SemanticRouter.RouteHealthFinding.Message.init -> void
+SemanticRouter.RouteHealthFinding.OtherRoute.get -> string?
+SemanticRouter.RouteHealthFinding.OtherRoute.init -> void
+SemanticRouter.RouteHealthFinding.Route.get -> string!
+SemanticRouter.RouteHealthFinding.Route.init -> void
+SemanticRouter.RouteHealthFinding.RouteHealthFinding(SemanticRouter.RouteHealthKind Kind, string! Route, string? OtherRoute, string! Message, System.Collections.Generic.IReadOnlyList<string!>! Utterances, float? Similarity) -> void
+SemanticRouter.RouteHealthFinding.Similarity.get -> float?
+SemanticRouter.RouteHealthFinding.Similarity.init -> void
+SemanticRouter.RouteHealthFinding.Utterances.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SemanticRouter.RouteHealthFinding.Utterances.init -> void
+SemanticRouter.RouteHealthKind
+SemanticRouter.RouteHealthKind.ConflictingUtterances = 2 -> SemanticRouter.RouteHealthKind
+SemanticRouter.RouteHealthKind.DuplicateUtterances = 1 -> SemanticRouter.RouteHealthKind
+SemanticRouter.RouteHealthKind.FewUtterances = 0 -> SemanticRouter.RouteHealthKind
+SemanticRouter.RouteHealthKind.Overlap = 3 -> SemanticRouter.RouteHealthKind
+SemanticRouter.RouteHealthReport
+SemanticRouter.RouteHealthReport.<Clone>$() -> SemanticRouter.RouteHealthReport!
+SemanticRouter.RouteHealthReport.Deconstruct(out System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteHealthFinding!>! Findings, out System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteOverlap!>! Overlaps, out int UtteranceCount) -> void
+SemanticRouter.RouteHealthReport.Equals(SemanticRouter.RouteHealthReport? other) -> bool
+SemanticRouter.RouteHealthReport.Findings.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteHealthFinding!>!
+SemanticRouter.RouteHealthReport.Findings.init -> void
+SemanticRouter.RouteHealthReport.Overlaps.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteOverlap!>!
+SemanticRouter.RouteHealthReport.Overlaps.init -> void
+SemanticRouter.RouteHealthReport.RouteHealthReport(System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteHealthFinding!>! Findings, System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteOverlap!>! Overlaps, int UtteranceCount) -> void
+SemanticRouter.RouteHealthReport.UtteranceCount.get -> int
+SemanticRouter.RouteHealthReport.UtteranceCount.init -> void
+SemanticRouter.RouteIndexStatistics
+SemanticRouter.RouteIndexStatistics.<Clone>$() -> SemanticRouter.RouteIndexStatistics!
+SemanticRouter.RouteIndexStatistics.BuildTime.get -> System.TimeSpan
+SemanticRouter.RouteIndexStatistics.BuildTime.init -> void
+SemanticRouter.RouteIndexStatistics.Deconstruct(out int Utterances, out int Dimensions, out System.TimeSpan BuildTime) -> void
+SemanticRouter.RouteIndexStatistics.Dimensions.get -> int
+SemanticRouter.RouteIndexStatistics.Dimensions.init -> void
+SemanticRouter.RouteIndexStatistics.Equals(SemanticRouter.RouteIndexStatistics? other) -> bool
+SemanticRouter.RouteIndexStatistics.RouteIndexStatistics(int Utterances, int Dimensions, System.TimeSpan BuildTime) -> void
+SemanticRouter.RouteIndexStatistics.Utterances.get -> int
+SemanticRouter.RouteIndexStatistics.Utterances.init -> void
+SemanticRouter.RouteOverlap
+SemanticRouter.RouteOverlap.<Clone>$() -> SemanticRouter.RouteOverlap!
+SemanticRouter.RouteOverlap.AmbiguousFraction.get -> float
+SemanticRouter.RouteOverlap.AmbiguousFraction.init -> void
+SemanticRouter.RouteOverlap.CentroidSimilarity.get -> float
+SemanticRouter.RouteOverlap.CentroidSimilarity.init -> void
+SemanticRouter.RouteOverlap.Deconstruct(out string! Route, out string! OtherRoute, out float CentroidSimilarity, out float AmbiguousFraction) -> void
+SemanticRouter.RouteOverlap.Equals(SemanticRouter.RouteOverlap? other) -> bool
+SemanticRouter.RouteOverlap.OtherRoute.get -> string!
+SemanticRouter.RouteOverlap.OtherRoute.init -> void
+SemanticRouter.RouteOverlap.Route.get -> string!
+SemanticRouter.RouteOverlap.Route.init -> void
+SemanticRouter.RouteOverlap.RouteOverlap(string! Route, string! OtherRoute, float CentroidSimilarity, float AmbiguousFraction) -> void
+SemanticRouter.RouterTelemetry
+SemanticRouter.RouteScore
+SemanticRouter.RouteScore.Deconstruct(out SemanticRouter.RouteDefinition! Route, out float Similarity) -> void
+SemanticRouter.RouteScore.Equals(SemanticRouter.RouteScore other) -> bool
+SemanticRouter.RouteScore.Route.get -> SemanticRouter.RouteDefinition!
+SemanticRouter.RouteScore.Route.init -> void
+SemanticRouter.RouteScore.RouteScore() -> void
+SemanticRouter.RouteScore.RouteScore(SemanticRouter.RouteDefinition! Route, float Similarity) -> void
+SemanticRouter.RouteScore.Similarity.get -> float
+SemanticRouter.RouteScore.Similarity.init -> void
+SemanticRouter.RouteScoringStrategy
+SemanticRouter.RouteScoringStrategy.Centroid = 1 -> SemanticRouter.RouteScoringStrategy
+SemanticRouter.RouteScoringStrategy.MaxSimilarity = 0 -> SemanticRouter.RouteScoringStrategy
+SemanticRouter.RouteThresholdRecommendation
+SemanticRouter.RouteThresholdRecommendation.<Clone>$() -> SemanticRouter.RouteThresholdRecommendation!
+SemanticRouter.RouteThresholdRecommendation.CorrectAfter.get -> int
+SemanticRouter.RouteThresholdRecommendation.CorrectAfter.init -> void
+SemanticRouter.RouteThresholdRecommendation.CorrectBefore.get -> int
+SemanticRouter.RouteThresholdRecommendation.CorrectBefore.init -> void
+SemanticRouter.RouteThresholdRecommendation.Current.get -> float?
+SemanticRouter.RouteThresholdRecommendation.Current.init -> void
+SemanticRouter.RouteThresholdRecommendation.Deconstruct(out string! Route, out float? Current, out float? Recommended, out int CorrectBefore, out int CorrectAfter) -> void
+SemanticRouter.RouteThresholdRecommendation.Equals(SemanticRouter.RouteThresholdRecommendation? other) -> bool
+SemanticRouter.RouteThresholdRecommendation.Recommended.get -> float?
+SemanticRouter.RouteThresholdRecommendation.Recommended.init -> void
+SemanticRouter.RouteThresholdRecommendation.Route.get -> string!
+SemanticRouter.RouteThresholdRecommendation.Route.init -> void
+SemanticRouter.RouteThresholdRecommendation.RouteThresholdRecommendation(string! Route, float? Current, float? Recommended, int CorrectBefore, int CorrectAfter) -> void
+SemanticRouter.RoutingEvaluator
+SemanticRouter.RoutingEvaluator.Calibrate(SemanticRouter.PreparedEvaluation! prepared) -> SemanticRouter.CalibrationReport!
+SemanticRouter.RoutingEvaluator.Evaluate(SemanticRouter.PreparedEvaluation! prepared, float? defaultThreshold = null, System.Collections.Generic.IReadOnlyDictionary<string!, float?>? routeThresholds = null) -> SemanticRouter.EvaluationReport!
+SemanticRouter.RoutingEvaluator.EvaluateAsync(System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>! cases, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SemanticRouter.EvaluationReport!>!
+SemanticRouter.RoutingEvaluator.PrepareAsync(System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>! cases, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SemanticRouter.PreparedEvaluation!>!
+SemanticRouter.RoutingEvaluator.RoutingEvaluator(SemanticRouter.IEmbeddingProvider! embeddings, SemanticRouter.SemanticRouterOptions! options, SemanticRouter.IComplexityAnalyzer? complexity = null) -> void
+SemanticRouter.RoutingPlan
+SemanticRouter.RoutingPlan.<Clone>$() -> SemanticRouter.RoutingPlan!
+SemanticRouter.RoutingPlan.Candidates.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.ModelCandidate!>!
+SemanticRouter.RoutingPlan.Candidates.init -> void
+SemanticRouter.RoutingPlan.Classification.get -> SemanticRouter.PromptClassificationResult!
+SemanticRouter.RoutingPlan.Classification.init -> void
+SemanticRouter.RoutingPlan.Deconstruct(out SemanticRouter.PromptClassificationResult! Classification, out SemanticRouter.ModelRequirements! Requirements, out System.Collections.Generic.IReadOnlyList<SemanticRouter.ModelCandidate!>! Candidates) -> void
+SemanticRouter.RoutingPlan.Equals(SemanticRouter.RoutingPlan? other) -> bool
+SemanticRouter.RoutingPlan.OutsideActiveHours.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SemanticRouter.RoutingPlan.OutsideActiveHours.init -> void
+SemanticRouter.RoutingPlan.Requirements.get -> SemanticRouter.ModelRequirements!
+SemanticRouter.RoutingPlan.Requirements.init -> void
+SemanticRouter.RoutingPlan.RouteModel.get -> string?
+SemanticRouter.RoutingPlan.RouteModel.init -> void
+SemanticRouter.RoutingPlan.RoutingPlan(SemanticRouter.PromptClassificationResult! Classification, SemanticRouter.ModelRequirements! Requirements, System.Collections.Generic.IReadOnlyList<SemanticRouter.ModelCandidate!>! Candidates) -> void
+SemanticRouter.RoutingPlan.SelectionNote.get -> string?
+SemanticRouter.RoutingPlan.SelectionNote.init -> void
+SemanticRouter.RoutingPlan.Sticky.get -> bool
+SemanticRouter.RoutingPlan.Sticky.init -> void
+SemanticRouter.RoutingPlan.Trial.get -> string?
+SemanticRouter.RoutingPlan.Trial.init -> void
+SemanticRouter.RoutingPlan.Unreliable.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SemanticRouter.RoutingPlan.Unreliable.init -> void
+SemanticRouter.RoutingProfile
+SemanticRouter.RoutingProfile.AllowedConnectors.get -> System.Collections.Generic.IList<string!>!
+SemanticRouter.RoutingProfile.AllowedModels.get -> System.Collections.Generic.IList<string!>!
+SemanticRouter.RoutingProfile.Allows(SemanticRouter.ModelDefinition! model) -> bool
+SemanticRouter.RoutingProfile.ClampTier(int tier) -> int
+SemanticRouter.RoutingProfile.DeniedConnectors.get -> System.Collections.Generic.IList<string!>!
+SemanticRouter.RoutingProfile.DeniedModels.get -> System.Collections.Generic.IList<string!>!
+SemanticRouter.RoutingProfile.Description.get -> string?
+SemanticRouter.RoutingProfile.Description.set -> void
+SemanticRouter.RoutingProfile.LocalOnly.get -> bool
+SemanticRouter.RoutingProfile.LocalOnly.set -> void
+SemanticRouter.RoutingProfile.MaxTier.get -> int?
+SemanticRouter.RoutingProfile.MaxTier.set -> void
+SemanticRouter.RoutingProfile.MinTier.get -> int?
+SemanticRouter.RoutingProfile.MinTier.set -> void
+SemanticRouter.RoutingProfile.RoutingProfile() -> void
+SemanticRouter.RoutingProfile.Strategy.get -> SemanticRouter.SelectionStrategy?
+SemanticRouter.RoutingProfile.Strategy.set -> void
+SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.AmbiguousMatchEscalation = 3 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.ClassifierFailure = 6 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.ClientHousekeeping = 12 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.ComplexityEscalation = 2 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.ComplexityShortCircuit = 4 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.ConversationAffinity = 8 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.ConversationFloor = 10 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.EmptyPrompt = 5 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.ExplicitCallout = 11 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.ModelOverride = 7 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.NoMatchFallback = 1 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.RateLimited = 14 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.ResumedSession = 13 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.RetryEscalation = 9 -> SemanticRouter.RoutingReason
+SemanticRouter.RoutingReason.SemanticMatch = 0 -> SemanticRouter.RoutingReason
+SemanticRouter.SelectionStrategy
+SemanticRouter.SelectionStrategy.Balanced = 4 -> SemanticRouter.SelectionStrategy
+SemanticRouter.SelectionStrategy.CheapestCapable = 0 -> SemanticRouter.SelectionStrategy
+SemanticRouter.SelectionStrategy.Fastest = 3 -> SemanticRouter.SelectionStrategy
+SemanticRouter.SelectionStrategy.MostCapable = 1 -> SemanticRouter.SelectionStrategy
+SemanticRouter.SelectionStrategy.Priority = 2 -> SemanticRouter.SelectionStrategy
+SemanticRouter.SemanticPromptClassifier
+SemanticRouter.SemanticPromptClassifier.CacheStatistics.get -> SemanticRouter.ClassificationCacheStatistics?
+SemanticRouter.SemanticPromptClassifier.ClassifyAsync(string! prompt, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SemanticRouter.PromptClassificationResult!>
+SemanticRouter.SemanticPromptClassifier.ClassifyWithoutEmbeddingAsync(string! prompt, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<SemanticRouter.PromptClassificationResult!>
+SemanticRouter.SemanticPromptClassifier.IndexStatistics.get -> SemanticRouter.RouteIndexStatistics?
+SemanticRouter.SemanticPromptClassifier.SemanticPromptClassifier(SemanticRouter.IEmbeddingProvider! embeddingProvider, SemanticRouter.SemanticRouterOptions! options, SemanticRouter.IComplexityAnalyzer? complexityAnalyzer = null, SemanticRouter.IRouteSelector? routeSelector = null, System.TimeProvider? time = null) -> void
+SemanticRouter.SemanticPromptClassifier.WarmUpAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+SemanticRouter.SemanticRouteIndex
+SemanticRouter.SemanticRouteIndex.Dimensions.get -> int
+SemanticRouter.SemanticRouteIndex.Routes.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.RouteDefinition!>!
+SemanticRouter.SemanticRouteIndex.Score(System.ReadOnlySpan<float> embedding) -> SemanticRouter.RouteScore[]!
+SemanticRouter.SemanticRouteIndex.VectorCount.get -> int
+SemanticRouter.SemanticRouterOptions
+SemanticRouter.SemanticRouterOptions.AmbiguityMargin.get -> float
+SemanticRouter.SemanticRouterOptions.AmbiguityMargin.set -> void
+SemanticRouter.SemanticRouterOptions.ClassificationCache.get -> SemanticRouter.ClassificationCacheOptions!
+SemanticRouter.SemanticRouterOptions.ClassificationCache.set -> void
+SemanticRouter.SemanticRouterOptions.Complexity.get -> SemanticRouter.ComplexityHeuristicsOptions!
+SemanticRouter.SemanticRouterOptions.Complexity.set -> void
+SemanticRouter.SemanticRouterOptions.ComplexityShortCircuitThreshold.get -> double
+SemanticRouter.SemanticRouterOptions.ComplexityShortCircuitThreshold.set -> void
+SemanticRouter.SemanticRouterOptions.ComplexityTiers.get -> System.Collections.Generic.IList<SemanticRouter.ComplexityTierRule!>?
+SemanticRouter.SemanticRouterOptions.ComplexityTiers.set -> void
+SemanticRouter.SemanticRouterOptions.DefaultSimilarityThreshold.get -> float
+SemanticRouter.SemanticRouterOptions.DefaultSimilarityThreshold.set -> void
+SemanticRouter.SemanticRouterOptions.EffectiveTiers.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.TierDefinition!>!
+SemanticRouter.SemanticRouterOptions.EmbedProseOnly.get -> bool
+SemanticRouter.SemanticRouterOptions.EmbedProseOnly.set -> void
+SemanticRouter.SemanticRouterOptions.FallbackTier.get -> int
+SemanticRouter.SemanticRouterOptions.FallbackTier.set -> void
+SemanticRouter.SemanticRouterOptions.GetValidationErrors() -> System.Collections.Generic.IReadOnlyList<string!>!
+SemanticRouter.SemanticRouterOptions.MaxReportedScores.get -> int
+SemanticRouter.SemanticRouterOptions.MaxReportedScores.set -> void
+SemanticRouter.SemanticRouterOptions.Models.get -> System.Collections.Generic.IList<SemanticRouter.ModelDefinition!>!
+SemanticRouter.SemanticRouterOptions.Profiles.get -> System.Collections.Generic.IDictionary<string!, SemanticRouter.RoutingProfile!>!
+SemanticRouter.SemanticRouterOptions.Routes.get -> System.Collections.Generic.IList<SemanticRouter.RouteDefinition!>!
+SemanticRouter.SemanticRouterOptions.ScoringStrategy.get -> SemanticRouter.RouteScoringStrategy
+SemanticRouter.SemanticRouterOptions.ScoringStrategy.set -> void
+SemanticRouter.SemanticRouterOptions.Selection.get -> SemanticRouter.ModelSelectionOptions!
+SemanticRouter.SemanticRouterOptions.Selection.set -> void
+SemanticRouter.SemanticRouterOptions.SemanticRouterOptions() -> void
+SemanticRouter.SemanticRouterOptions.TierForComplexity(double score) -> int
+SemanticRouter.SemanticRouterOptions.Tiers.get -> System.Collections.Generic.IList<SemanticRouter.TierDefinition!>?
+SemanticRouter.SemanticRouterOptions.Tiers.set -> void
+SemanticRouter.SemanticRouterOptions.Validate() -> void
+SemanticRouter.ThresholdStep
+SemanticRouter.ThresholdStep.<Clone>$() -> SemanticRouter.ThresholdStep!
+SemanticRouter.ThresholdStep.Broken.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>!
+SemanticRouter.ThresholdStep.Broken.init -> void
+SemanticRouter.ThresholdStep.Current.get -> float?
+SemanticRouter.ThresholdStep.Current.init -> void
+SemanticRouter.ThresholdStep.Deconstruct(out string? Route, out float? Current, out float? Proposed, out float? Target, out System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>! Fixed, out System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>! Broken, out double Gain) -> void
+SemanticRouter.ThresholdStep.Equals(SemanticRouter.ThresholdStep? other) -> bool
+SemanticRouter.ThresholdStep.Fixed.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>!
+SemanticRouter.ThresholdStep.Fixed.init -> void
+SemanticRouter.ThresholdStep.Gain.get -> double
+SemanticRouter.ThresholdStep.Gain.init -> void
+SemanticRouter.ThresholdStep.Proposed.get -> float?
+SemanticRouter.ThresholdStep.Proposed.init -> void
+SemanticRouter.ThresholdStep.Route.get -> string?
+SemanticRouter.ThresholdStep.Route.init -> void
+SemanticRouter.ThresholdStep.Target.get -> float?
+SemanticRouter.ThresholdStep.Target.init -> void
+SemanticRouter.ThresholdStep.ThresholdStep(string? Route, float? Current, float? Proposed, float? Target, System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>! Fixed, System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>! Broken, double Gain) -> void
+SemanticRouter.ThresholdTuner
+SemanticRouter.ThresholdTuner.ThresholdTuner(SemanticRouter.RoutingEvaluator! evaluator) -> void
+SemanticRouter.ThresholdTuner.Tune(SemanticRouter.PreparedEvaluation! prepared, int confirmedCount, SemanticRouter.ThresholdTuningOptions! options) -> SemanticRouter.ThresholdTuning!
+SemanticRouter.ThresholdTuner.TuneAsync(System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>! confirmed, System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>! automatic, SemanticRouter.ThresholdTuningOptions! options, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SemanticRouter.ThresholdTuning!>!
+SemanticRouter.ThresholdTuning
+SemanticRouter.ThresholdTuning.<Clone>$() -> SemanticRouter.ThresholdTuning!
+SemanticRouter.ThresholdTuning.AutomaticAfter.get -> SemanticRouter.TuningScore!
+SemanticRouter.ThresholdTuning.AutomaticAfter.init -> void
+SemanticRouter.ThresholdTuning.AutomaticBefore.get -> SemanticRouter.TuningScore!
+SemanticRouter.ThresholdTuning.AutomaticBefore.init -> void
+SemanticRouter.ThresholdTuning.ConfirmedAfter.get -> SemanticRouter.TuningScore!
+SemanticRouter.ThresholdTuning.ConfirmedAfter.init -> void
+SemanticRouter.ThresholdTuning.ConfirmedBefore.get -> SemanticRouter.TuningScore!
+SemanticRouter.ThresholdTuning.ConfirmedBefore.init -> void
+SemanticRouter.ThresholdTuning.Deconstruct(out System.Collections.Generic.IReadOnlyList<SemanticRouter.ThresholdStep!>! Steps, out SemanticRouter.TuningScore! ConfirmedBefore, out SemanticRouter.TuningScore! ConfirmedAfter, out SemanticRouter.TuningScore! AutomaticBefore, out SemanticRouter.TuningScore! AutomaticAfter) -> void
+SemanticRouter.ThresholdTuning.Equals(SemanticRouter.ThresholdTuning? other) -> bool
+SemanticRouter.ThresholdTuning.Steps.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.ThresholdStep!>!
+SemanticRouter.ThresholdTuning.Steps.init -> void
+SemanticRouter.ThresholdTuning.ThresholdTuning(System.Collections.Generic.IReadOnlyList<SemanticRouter.ThresholdStep!>! Steps, SemanticRouter.TuningScore! ConfirmedBefore, SemanticRouter.TuningScore! ConfirmedAfter, SemanticRouter.TuningScore! AutomaticBefore, SemanticRouter.TuningScore! AutomaticAfter) -> void
+SemanticRouter.ThresholdTuningOptions
+SemanticRouter.ThresholdTuningOptions.AutomaticWeight.get -> double
+SemanticRouter.ThresholdTuningOptions.AutomaticWeight.set -> void
+SemanticRouter.ThresholdTuningOptions.AutomaticWeights.get -> System.Collections.Generic.IReadOnlyList<double>?
+SemanticRouter.ThresholdTuningOptions.AutomaticWeights.set -> void
+SemanticRouter.ThresholdTuningOptions.CanChange.get -> System.Func<string?, bool>?
+SemanticRouter.ThresholdTuningOptions.CanChange.set -> void
+SemanticRouter.ThresholdTuningOptions.MaxStep.get -> float
+SemanticRouter.ThresholdTuningOptions.MaxStep.set -> void
+SemanticRouter.ThresholdTuningOptions.MinimumGain.get -> double
+SemanticRouter.ThresholdTuningOptions.MinimumGain.set -> void
+SemanticRouter.ThresholdTuningOptions.ThresholdTuningOptions() -> void
+SemanticRouter.TierAccuracy
+SemanticRouter.TierAccuracy.<Clone>$() -> SemanticRouter.TierAccuracy!
+SemanticRouter.TierAccuracy.Accuracy.get -> double
+SemanticRouter.TierAccuracy.Correct.get -> int
+SemanticRouter.TierAccuracy.Correct.init -> void
+SemanticRouter.TierAccuracy.Deconstruct(out int Tier, out int Total, out int Correct) -> void
+SemanticRouter.TierAccuracy.Equals(SemanticRouter.TierAccuracy? other) -> bool
+SemanticRouter.TierAccuracy.Tier.get -> int
+SemanticRouter.TierAccuracy.Tier.init -> void
+SemanticRouter.TierAccuracy.TierAccuracy(int Tier, int Total, int Correct) -> void
+SemanticRouter.TierAccuracy.Total.get -> int
+SemanticRouter.TierAccuracy.Total.init -> void
+SemanticRouter.TierDefinition
+SemanticRouter.TierDefinition.Description.get -> string?
+SemanticRouter.TierDefinition.Description.set -> void
+SemanticRouter.TierDefinition.Level.get -> int
+SemanticRouter.TierDefinition.Level.set -> void
+SemanticRouter.TierDefinition.Name.get -> string!
+SemanticRouter.TierDefinition.Name.set -> void
+SemanticRouter.TierDefinition.TierDefinition() -> void
+SemanticRouter.TimeWindow
+SemanticRouter.TimeWindow.Contains(System.TimeOnly time) -> bool
+SemanticRouter.TimeWindow.Deconstruct(out System.TimeOnly Start, out System.TimeOnly End) -> void
+SemanticRouter.TimeWindow.End.get -> System.TimeOnly
+SemanticRouter.TimeWindow.End.init -> void
+SemanticRouter.TimeWindow.Equals(SemanticRouter.TimeWindow other) -> bool
+SemanticRouter.TimeWindow.Start.get -> System.TimeOnly
+SemanticRouter.TimeWindow.Start.init -> void
+SemanticRouter.TimeWindow.TimeWindow() -> void
+SemanticRouter.TimeWindow.TimeWindow(System.TimeOnly Start, System.TimeOnly End) -> void
+SemanticRouter.TokenEstimator
+SemanticRouter.TuningScore
+SemanticRouter.TuningScore.<Clone>$() -> SemanticRouter.TuningScore!
+SemanticRouter.TuningScore.Correct.get -> int
+SemanticRouter.TuningScore.Correct.init -> void
+SemanticRouter.TuningScore.Deconstruct(out int Total, out int Correct, out int TooLow, out int TooHigh, out int LocalOnlyMissed) -> void
+SemanticRouter.TuningScore.Equals(SemanticRouter.TuningScore? other) -> bool
+SemanticRouter.TuningScore.LocalOnlyMissed.get -> int
+SemanticRouter.TuningScore.LocalOnlyMissed.init -> void
+SemanticRouter.TuningScore.TooHigh.get -> int
+SemanticRouter.TuningScore.TooHigh.init -> void
+SemanticRouter.TuningScore.TooLow.get -> int
+SemanticRouter.TuningScore.TooLow.init -> void
+SemanticRouter.TuningScore.Total.get -> int
+SemanticRouter.TuningScore.Total.init -> void
+SemanticRouter.TuningScore.TuningScore(int Total, int Correct, int TooLow, int TooHigh, int LocalOnlyMissed) -> void
+SemanticRouter.VectorMath
+SemanticRouter.WarmCache
+SemanticRouter.WarmCache.<Clone>$() -> SemanticRouter.WarmCache!
+SemanticRouter.WarmCache.CachedTokens.get -> int
+SemanticRouter.WarmCache.CachedTokens.init -> void
+SemanticRouter.WarmCache.Deconstruct(out string! Model, out int CachedTokens, out System.DateTimeOffset ExpiresAt) -> void
+SemanticRouter.WarmCache.Equals(SemanticRouter.WarmCache? other) -> bool
+SemanticRouter.WarmCache.ExpiresAt.get -> System.DateTimeOffset
+SemanticRouter.WarmCache.ExpiresAt.init -> void
+SemanticRouter.WarmCache.Model.get -> string!
+SemanticRouter.WarmCache.Model.init -> void
+SemanticRouter.WarmCache.WarmCache(string! Model, int CachedTokens, System.DateTimeOffset ExpiresAt) -> void
+static readonly SemanticRouter.ModelHealthTracker.MaximumResetCooldown -> System.TimeSpan
+static SemanticRouter.CalibrationPoint.operator !=(SemanticRouter.CalibrationPoint? left, SemanticRouter.CalibrationPoint? right) -> bool
+static SemanticRouter.CalibrationPoint.operator ==(SemanticRouter.CalibrationPoint? left, SemanticRouter.CalibrationPoint? right) -> bool
+static SemanticRouter.CalibrationReport.operator !=(SemanticRouter.CalibrationReport? left, SemanticRouter.CalibrationReport? right) -> bool
+static SemanticRouter.CalibrationReport.operator ==(SemanticRouter.CalibrationReport? left, SemanticRouter.CalibrationReport? right) -> bool
+static SemanticRouter.ClassificationCacheStatistics.operator !=(SemanticRouter.ClassificationCacheStatistics? left, SemanticRouter.ClassificationCacheStatistics? right) -> bool
+static SemanticRouter.ClassificationCacheStatistics.operator ==(SemanticRouter.ClassificationCacheStatistics? left, SemanticRouter.ClassificationCacheStatistics? right) -> bool
+static SemanticRouter.ComplexityAnalysis.Empty.get -> SemanticRouter.ComplexityAnalysis!
+static SemanticRouter.ComplexityAnalysis.operator !=(SemanticRouter.ComplexityAnalysis? left, SemanticRouter.ComplexityAnalysis? right) -> bool
+static SemanticRouter.ComplexityAnalysis.operator ==(SemanticRouter.ComplexityAnalysis? left, SemanticRouter.ComplexityAnalysis? right) -> bool
+static SemanticRouter.ComplexityHeuristicsOptions.DefaultReasoningKeywords.get -> System.Collections.Generic.IReadOnlyList<string!>!
+static SemanticRouter.EvaluationCase.operator !=(SemanticRouter.EvaluationCase? left, SemanticRouter.EvaluationCase? right) -> bool
+static SemanticRouter.EvaluationCase.operator ==(SemanticRouter.EvaluationCase? left, SemanticRouter.EvaluationCase? right) -> bool
+static SemanticRouter.EvaluationReport.operator !=(SemanticRouter.EvaluationReport? left, SemanticRouter.EvaluationReport? right) -> bool
+static SemanticRouter.EvaluationReport.operator ==(SemanticRouter.EvaluationReport? left, SemanticRouter.EvaluationReport? right) -> bool
+static SemanticRouter.EvaluationResult.operator !=(SemanticRouter.EvaluationResult? left, SemanticRouter.EvaluationResult? right) -> bool
+static SemanticRouter.EvaluationResult.operator ==(SemanticRouter.EvaluationResult? left, SemanticRouter.EvaluationResult? right) -> bool
+static SemanticRouter.EvaluationSet.Parse(string! text) -> System.Collections.Generic.IReadOnlyList<SemanticRouter.EvaluationCase!>!
+static SemanticRouter.EvaluationSet.ToJsonLines(System.Collections.Generic.IEnumerable<SemanticRouter.EvaluationCase!>! cases) -> string!
+static SemanticRouter.Glob.IsMatch(string! pattern, string! value) -> bool
+static SemanticRouter.ModelCandidate.operator !=(SemanticRouter.ModelCandidate? left, SemanticRouter.ModelCandidate? right) -> bool
+static SemanticRouter.ModelCandidate.operator ==(SemanticRouter.ModelCandidate? left, SemanticRouter.ModelCandidate? right) -> bool
+static SemanticRouter.ModelRequirements.operator !=(SemanticRouter.ModelRequirements? left, SemanticRouter.ModelRequirements? right) -> bool
+static SemanticRouter.ModelRequirements.operator ==(SemanticRouter.ModelRequirements? left, SemanticRouter.ModelRequirements? right) -> bool
+static SemanticRouter.PromptCacheShare.operator !=(SemanticRouter.PromptCacheShare? left, SemanticRouter.PromptCacheShare? right) -> bool
+static SemanticRouter.PromptCacheShare.operator ==(SemanticRouter.PromptCacheShare? left, SemanticRouter.PromptCacheShare? right) -> bool
+static SemanticRouter.PromptClassificationResult.Bypass(int requiredTier, SemanticRouter.RoutingReason reason, SemanticRouter.ComplexityAnalysis? complexity = null, System.TimeSpan elapsed = default(System.TimeSpan)) -> SemanticRouter.PromptClassificationResult!
+static SemanticRouter.PromptClassificationResult.operator !=(SemanticRouter.PromptClassificationResult? left, SemanticRouter.PromptClassificationResult? right) -> bool
+static SemanticRouter.PromptClassificationResult.operator ==(SemanticRouter.PromptClassificationResult? left, SemanticRouter.PromptClassificationResult? right) -> bool
+static SemanticRouter.PromptRoutingRequest.operator !=(SemanticRouter.PromptRoutingRequest? left, SemanticRouter.PromptRoutingRequest? right) -> bool
+static SemanticRouter.PromptRoutingRequest.operator ==(SemanticRouter.PromptRoutingRequest? left, SemanticRouter.PromptRoutingRequest? right) -> bool
+static SemanticRouter.QuotaResetParser.TryParse(string? message, System.DateTimeOffset now, System.TimeZoneInfo? localZone, out System.DateTimeOffset resetAt) -> bool
+static SemanticRouter.QuotaResetParser.TryParseRetryAfter(string? value, System.DateTimeOffset now, out System.DateTimeOffset resetAt) -> bool
+static SemanticRouter.RouteDecision.operator !=(SemanticRouter.RouteDecision? left, SemanticRouter.RouteDecision? right) -> bool
+static SemanticRouter.RouteDecision.operator ==(SemanticRouter.RouteDecision? left, SemanticRouter.RouteDecision? right) -> bool
+static SemanticRouter.RouteHealthFinding.operator !=(SemanticRouter.RouteHealthFinding? left, SemanticRouter.RouteHealthFinding? right) -> bool
+static SemanticRouter.RouteHealthFinding.operator ==(SemanticRouter.RouteHealthFinding? left, SemanticRouter.RouteHealthFinding? right) -> bool
+static SemanticRouter.RouteHealthReport.operator !=(SemanticRouter.RouteHealthReport? left, SemanticRouter.RouteHealthReport? right) -> bool
+static SemanticRouter.RouteHealthReport.operator ==(SemanticRouter.RouteHealthReport? left, SemanticRouter.RouteHealthReport? right) -> bool
+static SemanticRouter.RouteIndexStatistics.operator !=(SemanticRouter.RouteIndexStatistics? left, SemanticRouter.RouteIndexStatistics? right) -> bool
+static SemanticRouter.RouteIndexStatistics.operator ==(SemanticRouter.RouteIndexStatistics? left, SemanticRouter.RouteIndexStatistics? right) -> bool
+static SemanticRouter.RouteOverlap.operator !=(SemanticRouter.RouteOverlap? left, SemanticRouter.RouteOverlap? right) -> bool
+static SemanticRouter.RouteOverlap.operator ==(SemanticRouter.RouteOverlap? left, SemanticRouter.RouteOverlap? right) -> bool
+static SemanticRouter.RouterTelemetry.Source.get -> System.Diagnostics.ActivitySource!
+static SemanticRouter.RouteScore.operator !=(SemanticRouter.RouteScore left, SemanticRouter.RouteScore right) -> bool
+static SemanticRouter.RouteScore.operator ==(SemanticRouter.RouteScore left, SemanticRouter.RouteScore right) -> bool
+static SemanticRouter.RouteThresholdRecommendation.operator !=(SemanticRouter.RouteThresholdRecommendation? left, SemanticRouter.RouteThresholdRecommendation? right) -> bool
+static SemanticRouter.RouteThresholdRecommendation.operator ==(SemanticRouter.RouteThresholdRecommendation? left, SemanticRouter.RouteThresholdRecommendation? right) -> bool
+static SemanticRouter.RoutingPlan.operator !=(SemanticRouter.RoutingPlan? left, SemanticRouter.RoutingPlan? right) -> bool
+static SemanticRouter.RoutingPlan.operator ==(SemanticRouter.RoutingPlan? left, SemanticRouter.RoutingPlan? right) -> bool
+static SemanticRouter.SemanticRouteIndex.BuildAsync(System.Collections.Generic.IEnumerable<SemanticRouter.RouteDefinition!>! routes, SemanticRouter.IEmbeddingProvider! embeddingProvider, SemanticRouter.RouteScoringStrategy strategy = SemanticRouter.RouteScoringStrategy.MaxSimilarity, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<SemanticRouter.SemanticRouteIndex!>!
+static SemanticRouter.SemanticRouterOptions.DefaultComplexityTiers.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.ComplexityTierRule!>!
+static SemanticRouter.SemanticRouterOptions.DefaultTiers.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.TierDefinition!>!
+static SemanticRouter.ThresholdStep.operator !=(SemanticRouter.ThresholdStep? left, SemanticRouter.ThresholdStep? right) -> bool
+static SemanticRouter.ThresholdStep.operator ==(SemanticRouter.ThresholdStep? left, SemanticRouter.ThresholdStep? right) -> bool
+static SemanticRouter.ThresholdTuning.operator !=(SemanticRouter.ThresholdTuning? left, SemanticRouter.ThresholdTuning? right) -> bool
+static SemanticRouter.ThresholdTuning.operator ==(SemanticRouter.ThresholdTuning? left, SemanticRouter.ThresholdTuning? right) -> bool
+static SemanticRouter.TierAccuracy.operator !=(SemanticRouter.TierAccuracy? left, SemanticRouter.TierAccuracy? right) -> bool
+static SemanticRouter.TierAccuracy.operator ==(SemanticRouter.TierAccuracy? left, SemanticRouter.TierAccuracy? right) -> bool
+static SemanticRouter.TimeWindow.operator !=(SemanticRouter.TimeWindow left, SemanticRouter.TimeWindow right) -> bool
+static SemanticRouter.TimeWindow.operator ==(SemanticRouter.TimeWindow left, SemanticRouter.TimeWindow right) -> bool
+static SemanticRouter.TimeWindow.TryParse(string? text, out SemanticRouter.TimeWindow window) -> bool
+static SemanticRouter.TokenEstimator.Estimate(System.ReadOnlySpan<char> text) -> int
+static SemanticRouter.TuningScore.operator !=(SemanticRouter.TuningScore? left, SemanticRouter.TuningScore? right) -> bool
+static SemanticRouter.TuningScore.operator ==(SemanticRouter.TuningScore? left, SemanticRouter.TuningScore? right) -> bool
+static SemanticRouter.VectorMath.CosineSimilarity(System.ReadOnlySpan<float> x, System.ReadOnlySpan<float> y) -> float
+static SemanticRouter.VectorMath.Dot(System.ReadOnlySpan<float> x, System.ReadOnlySpan<float> y) -> float
+static SemanticRouter.VectorMath.Norm(System.ReadOnlySpan<float> x) -> float
+static SemanticRouter.VectorMath.Normalize(System.Span<float> x) -> void
+static SemanticRouter.VectorMath.ToNormalized(System.ReadOnlySpan<float> x) -> float[]!
+static SemanticRouter.WarmCache.operator !=(SemanticRouter.WarmCache? left, SemanticRouter.WarmCache? right) -> bool
+static SemanticRouter.WarmCache.operator ==(SemanticRouter.WarmCache? left, SemanticRouter.WarmCache? right) -> bool
+~override SemanticRouter.RouteScore.Equals(object obj) -> bool
+~override SemanticRouter.RouteScore.ToString() -> string
+~override SemanticRouter.TimeWindow.Equals(object obj) -> bool
+~override SemanticRouter.TimeWindow.ToString() -> string
