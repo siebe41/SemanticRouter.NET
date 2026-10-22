@@ -156,7 +156,7 @@ public static partial class ConnectorProbe
     {
         var request = new HttpRequestMessage(method, uri);
         bool hasKey = !string.IsNullOrEmpty(connector.ApiKey);
-        if (connector.Type == ConnectorType.Anthropic)
+        if (connector.Type == ConnectorTypes.Anthropic)
         {
             request.Headers.TryAddWithoutValidation("anthropic-version", connector.AnthropicVersion);
             if (hasKey)

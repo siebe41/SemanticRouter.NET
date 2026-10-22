@@ -29,7 +29,7 @@ internal sealed class ConnectorCatalog : IDisposable
                 // Its models are turned off already; this keeps the connector itself from ever starting.
                 _connectors[name] = new UnavailableConnector(name, blocked);
             }
-            else if (extra.FirstOrDefault(f => f.Type == connector.Type) is { } factory)
+            else if (extra.FirstOrDefault(f => connector.IsType(f.Type)) is { } factory)
             {
                 IChatConnector created = factory.Create(name, connector);
                 if (created is IDisposable disposable)
@@ -39,12 +39,11 @@ internal sealed class ConnectorCatalog : IDisposable
 
                 _connectors[name] = created;
             }
-            else if (connector.Type == ConnectorType.Copilot)
+            else if (!ConnectorTypes.IsBuiltIn(connector.Type))
             {
-                _connectors[name] = new UnavailableConnector(
-                    name, "the Copilot connector needs the SemanticRouter.Connectors.Copilot package (.AddCopilotConnector())");
+                _connectors[name] = new UnavailableConnector(name, NotInstalled(connector.Type));
             }
-            else if (connector.Type == ConnectorType.Cli)
+            else if (connector.Type == ConnectorTypes.Cli)
             {
                 var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity, redactor, metrics, storePrompts);
                 _owned.Add(cli);
@@ -64,6 +63,10 @@ internal sealed class ConnectorCatalog : IDisposable
     }
 
     public IReadOnlyCollection<string> Names => _connectors.Keys;
+
+    /// <summary>Why a connector of <paramref name="type"/>, which no factory provides, cannot run.</summary>
+    internal static string NotInstalled(string type) =>
+        $"no installed connector package provides connector type '{type}' (built in: {string.Join(", ", ConnectorTypes.BuiltIn)})";
 
     public bool TryGet(string name, out IChatConnector connector) => _connectors.TryGetValue(name, out connector!);
 

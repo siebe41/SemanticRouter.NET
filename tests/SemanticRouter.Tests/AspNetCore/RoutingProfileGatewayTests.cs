@@ -318,7 +318,7 @@ public sealed class RoutingProfileGatewayTests : RouterHostTest
             o => o.Profiles["private"] = new RoutingProfile { LocalOnly = true },
             services: s => s.Configure<EmbeddingProviderOptions>(e =>
             {
-                e.Provider = EmbeddingProviderKind.OpenAICompatible;
+                e.Provider = EmbeddingProviderKinds.OpenAICompatible;
                 e.Endpoint = new Uri("https://api.openai.com");
                 e.Model = "text-embedding-3-small";
             }));

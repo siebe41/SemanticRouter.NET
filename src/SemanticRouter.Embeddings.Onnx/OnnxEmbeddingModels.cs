@@ -34,7 +34,7 @@ public sealed record OnnxModelInfo(
     public Uri VocabUrl => new($"https://huggingface.co/{Repository}/resolve/{Revision}/vocab.txt");
 }
 
-/// <summary>The models <see cref="EmbeddingProviderKind.Onnx"/> can download by name.</summary>
+/// <summary>The models <see cref="OnnxEmbeddings.Provider"/> can download by name.</summary>
 public static class OnnxEmbeddingModels
 {
     /// <summary>The model used when <c>Embeddings:Model</c> is not set.</summary>

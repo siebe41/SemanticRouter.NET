@@ -154,7 +154,7 @@ public sealed class EndpointHealthTests
         var config = new RouterConfiguration();
         config.Connectors["lmstudio"] = new ConnectorOptions { BaseAddress = new Uri("http://localhost:1234") };
         config.Connectors["cloud"] = new ConnectorOptions { BaseAddress = new Uri("https://api.openai.com") };
-        config.Connectors["claude"] = new ConnectorOptions { Type = ConnectorType.Cli, Preset = CliPreset.ClaudeCode };
+        config.Connectors["claude"] = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode };
         config.Models.Add(new ModelDefinition { Name = "local-small", Connector = "lmstudio", Model = "qwen3-8b", IsLocal = true });
         config.Models.Add(new ModelDefinition { Name = "gpt", Connector = "cloud", Model = "gpt-5" });
         config.Models.Add(new ModelDefinition { Name = "claude-cli", Connector = "claude", Model = "sonnet" });

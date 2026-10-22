@@ -8,7 +8,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class OnnxEmbeddingsBuilderExtensions
 {
     /// <summary>
-    /// Makes <see cref="EmbeddingProviderKind.Onnx"/> available, so configuration (or the dashboard) can select it, without
+    /// Makes <see cref="OnnxEmbeddings.Provider"/> available, so configuration (or the dashboard) can select it, without
     /// selecting it. Models are downloaded on first use; see <see cref="OnnxEmbeddingOptions"/>. Turns ONNX Runtime's
     /// telemetry off for the process (<see cref="OnnxRuntimeEnvironment.DisableTelemetry"/>).
     /// </summary>
@@ -40,7 +40,7 @@ public static class OnnxEmbeddingsBuilderExtensions
         builder.AddOnnxEmbeddings(configure);
         builder.Services.Configure<EmbeddingProviderOptions>(o =>
         {
-            o.Provider = EmbeddingProviderKind.Onnx;
+            o.Provider = OnnxEmbeddings.Provider;
             o.Model = model;
         });
         return builder;

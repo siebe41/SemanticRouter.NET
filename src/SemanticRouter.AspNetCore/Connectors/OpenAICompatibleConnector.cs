@@ -11,7 +11,7 @@ namespace SemanticRouter.AspNetCore;
 
 /// <summary>
 /// Reaches an HTTP chat API: any OpenAI-compatible <c>/v1/chat/completions</c> endpoint, or the Anthropic Messages API
-/// (<see cref="ConnectorType.Anthropic"/>). When the client speaks the backend's protocol the body is forwarded with
+/// (<see cref="ConnectorTypes.Anthropic"/>). When the client speaks the backend's protocol the body is forwarded with
 /// only <c>model</c> rewritten and the response is streamed back verbatim, so tool calls, images and SSE pass through
 /// untouched. Otherwise the request is re-expressed in the backend's protocol and the reply is translated back,
 /// including streaming and tool calls.

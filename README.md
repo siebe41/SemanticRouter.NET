@@ -364,7 +364,7 @@ builder.Services
         o.Routes.Add(new RouteDefinition { Name = "design", Tier = 4, Utterances = { "design a scalable architecture" } });
     })
     .AddConnector("lmstudio", c => c.BaseAddress = new Uri("http://localhost:1234"))
-    .AddConnector("claude-cli", c => { c.Type = ConnectorType.Cli; c.Preset = CliPreset.ClaudeCode; })
+    .AddConnector("claude-cli", c => { c.Type = ConnectorTypes.Cli; c.Preset = CliPreset.ClaudeCode; })
     .AddModel(new ModelDefinition { Name = "local", Connector = "lmstudio", Model = "qwen/qwen3-8b", Tier = 1, IsLocal = true })
     .AddModel(new ModelDefinition { Name = "claude", Connector = "claude-cli", Model = "sonnet", Tier = 4 })
     .UseOpenAICompatibleEmbeddings(e =>
@@ -464,7 +464,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `ToolCalling` | CLI | `None` | `None`: decline tool-bearing requests. `Prompted`: describe the tools in the prompt and parse `tool_call` blocks from the reply. |
 | `StreamPromptedReplies` | CLI | `true` | With `Prompted`: stream the reply's text and hold back only what may be a tool call. `false` buffers the reply, so a failed run can still fail over. |
 | `RepairToolCalls` | CLI | `true` | With `Prompted`: re-ask once, briefly, for a tool call that could not be read. See [Prompted tool calling in practice](docs/providers.md#prompted-tool-calling-in-practice). |
-| `PromptedToolParsing` | CLI | `Lenient` | With `Prompted`: `Strict` reads only the run's own randomly labelled fence, at the end of the reply, naming one of the request's tools, as a call; `Lenient` also takes near misses (bare JSON, other labels, calls followed by text). In both, tool results are defused and a call copied from one stays text. `Lenient` stays the default until `Strict` has been measured on smaller models. See [Forged tool calls](docs/providers.md#forged-tool-calls). |
+| `PromptedToolParsing` | CLI | `Lenient` | With `Prompted`: `Strict` reads only the run's own randomly labelled fence, at the end of the reply, naming one of the request's tools, as a call; `Lenient` also takes near misses (bare JSON, other labels, calls followed by text). In both, tool results are defused and a call copied from one stays text. `Lenient` stays the default until `Strict` has been measured on smaller models; meanwhile Activity notes the calls `Strict` would have kept as text. See [Forged tool calls](docs/providers.md#forged-tool-calls). |
 | `Preset` | CLI | `Custom` | `ClaudeCode`, `GitHubCopilot`, `Codex` or `Custom`. |
 | `Executable` | CLI | preset's command | Started directly, never through a shell, by its full path: a bare name is looked up on the absolute `PATH` entries only, never in the current directory. On Windows use the `.exe`. |
 | `Arguments[]` | CLI | | Custom: the full template (`{model}`, `{prompt}`). Presets: extra arguments appended. |
@@ -568,7 +568,7 @@ Similarity scales differ between embedding models. These are starting points. Ca
 
 ### Classification latency
 
-Classifying a prompt is one embedding plus a dot product per utterance. Measured on the starting routes (119 utterances) and the 116-prompt sample set that `init` writes, with the classification cache off so every prompt is embedded. The machine had 4 logical CPUs and ran Linux. Reproduce with `dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks`; add `-- --remote http://localhost:11434 nomic-embed-text` to measure an embedding server.
+Classifying a prompt is one embedding plus a dot product per utterance. The table measures the classifier on its own: the benchmark calls it directly, one prompt at a time, with no HTTP request, state or other load around it. Measured on the starting routes (119 utterances) and the 116-prompt sample set that `init` writes, with the classification cache off so every prompt is embedded. The machine had 4 logical CPUs and ran Linux. Reproduce with `dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks`; add `-- --remote http://localhost:11434 nomic-embed-text` to measure an embedding server.
 
 | Embeddings | Index warm-up | Classify p50 | Classify p95 | Right on the sample set |
 |---|---|---|---|---|
@@ -576,7 +576,7 @@ Classifying a prompt is one embedding plus a dot product per utterance. Measured
 | ONNX `all-MiniLM-L6-v2` | 226 ms | 1.9 ms | 2.5 ms | 111/116 at 0.40 |
 | ONNX `bge-small-en-v1.5` | 389 ms | 3.2 ms | 3.9 ms | 112/116 at 0.60 |
 
-An embedding server adds a network round trip and its own inference time to every prompt. A prompt the cache has seen recently costs no embedding at all.
+Inside a running router, with requests and state sharing the cores, the same classification costs more: the reliability audit ([#225](https://github.com/siebe41/SemanticRouter.NET/issues/225)) measured a classification that missed the cache at 0.14 ms with Hashing and 3.7 ms with ONNX `all-MiniLM-L6-v2`, in the `semantic-router` tool at one client, on 4 vCPUs shared with the load generator and a stub backend. An embedding server adds a network round trip and its own inference time to every prompt. A prompt the cache has seen recently costs no embedding at all.
 
 ### Gateway overhead
 
@@ -587,6 +587,8 @@ What the router itself adds, with no model behind it: the `semantic-router` tool
 | 1 | 1,037 | 0.8 / 1.7 / 2.9 ms | 1,224, 2.3 ms |
 | 8 | 6,124 | 1.1 / 2.3 / 5.7 ms | 8,256, 4.5 ms |
 | 32 | 7,847 | 3.5 / 7.5 / 12.7 ms | 10,583, 11.4 ms |
+
+The benchmark always runs with Hashing embeddings, so these rows include no embedding model's cost. With an embedding model, add its classification time inside the router to every request that misses the cache: 3.7 ms for ONNX `all-MiniLM-L6-v2` in the measurement above.
 
 ## Production guidance
 
@@ -612,9 +614,9 @@ What the router itself adds, with no model behind it: the `semantic-router` tool
 
 | To… | Do this |
 |---|---|
-| Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. To make a new connector type selectable in configuration, register an `IChatConnectorFactory`; implement `IModelDiscovery` for the dashboard's Discover button. |
+| Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. To make a new connector type selectable in configuration (`"Type": "Bedrock"`), register an `IChatConnectorFactory` whose `Type` is that name; implement `IModelDiscovery` for the dashboard's Discover button and the doctor. Type names match case-insensitively. The router treats a connector of such a type like a CLI (offline mode turns it off) unless the factory sets `UsesBaseAddress`, which makes it an HTTP connector held to the policy's endpoint rules for its `BaseAddress`. |
 | Keep configuration somewhere other than a file | Implement `IRouterConfigurationStore` and call `.UseConfigurationStore<T>()`. |
-| Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. For an in-process model: `.UseOnnxEmbeddings()` from `SemanticRouter.Embeddings.Onnx`. To make a new kind selectable in configuration, register an `IEmbeddingProviderFactory`. |
+| Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. For an in-process model: `.UseOnnxEmbeddings()` from `SemanticRouter.Embeddings.Onnx`. To make a new provider selectable in configuration (`"Provider": "MyModel"`), register an `IEmbeddingProviderFactory` whose `Kind` is that name; set its `RunsInProcess` when the model runs in the router's process, so prompts that must stay local may use it. |
 | Change how requirements are derived | Implement `IRouteSelector` or `IComplexityAnalyzer`. |
 | Change how models are ranked (budgets, time of day) | Implement `IModelSelector`. |
 | Persist cooldowns, affinity, activity and history | `.UseSqliteState("semantic-router.db")` from `SemanticRouter.Storage.Sqlite`, or implement `ICooldownStore`, `IToolCallAffinity`, `IWarmCacheStore`, `IRoutingActivityStore`, `IRouterConfigurationHistory`. See [Durable state](docs/architecture.md#durable-state). |

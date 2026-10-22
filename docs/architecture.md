@@ -151,8 +151,9 @@ Do not put the file on a network share: SQLite's locking is unreliable there. Fo
 | To… | Implement or call |
 |---|---|
 | Reach a provider with its own protocol | `IChatConnector`, then `.AddConnector<T>()` |
-| Add a connector type that configuration can select | `IChatConnectorFactory` (and `IModelDiscovery` for the Discover button), as `SemanticRouter.Connectors.Copilot` does |
+| Add a connector type that configuration can select | `IChatConnectorFactory`, whose `Type` is the name configuration uses (and `IModelDiscovery` for the Discover button and the doctor), as `SemanticRouter.Connectors.Copilot` does for `Copilot` |
 | Use another embedding backend | `IEmbeddingProvider`, then `.UseEmbeddingProvider<T>()` |
+| Add an embedding provider that configuration can select | `IEmbeddingProviderFactory`, whose `Kind` is the name `Embeddings:Provider` uses, as `SemanticRouter.Embeddings.Onnx` does for `Onnx` |
 | Change how requirements are derived | `IRouteSelector`, `IComplexityAnalyzer`, or `IPromptClassifier` |
 | Change how models are ranked | `IModelSelector` |
 | Persist or share cooldowns | `ICooldownStore` (Core; `ModelHealthTracker` writes through to it), or replace `IModelHealth` |
@@ -164,6 +165,29 @@ Do not put the file on a network share: SQLite's locking is unreliable there. Fo
 | Support another payload shape | `IPromptExtractor` |
 | Keep configuration somewhere other than a file | `IRouterConfigurationStore`, then `.UseConfigurationStore<T>()` |
 | Keep secrets in a vault or the OS keychain | `IRouterSecretStore`, then `.UseSecretStore<T>()` |
+
+### Connector types and embedding providers
+
+`ConnectorOptions.Type` and `EmbeddingProviderOptions.Provider` are names. The built-in ones are the constants in `ConnectorTypes` (`OpenAICompatible`, `Anthropic`, `Responses`, `Cli`) and `EmbeddingProviderKinds` (`Hashing`, `OpenAICompatible`). A package adds another by registering a factory for its name, so `SemanticRouter.AspNetCore` needs no release for it:
+
+```csharp
+public sealed class BedrockConnectorFactory : IChatConnectorFactory
+{
+    public string Type => "Bedrock";
+    public bool UsesBaseAddress => true; // every request goes to ConnectorOptions.BaseAddress
+    public IChatConnector Create(string name, ConnectorOptions options) => new BedrockConnector(name, options);
+}
+
+builder.Services.AddSingleton<IChatConnectorFactory, BedrockConnectorFactory>();
+// configuration: "Connectors": { "aws": { "Type": "Bedrock", "BaseAddress": "https://bedrock-runtime.us-east-1.amazonaws.com" } }
+```
+
+- Names match case-insensitively. The built-in names, and those of the installed factories, are kept in their canonical spelling (`"cli"` reads as `Cli`, `"copilot"` as `Copilot`), so configuration files written for the old enums keep working and the dashboard sees the names it expects.
+- The factory, not the configuration, says how a packaged type reaches its vendor, because machine policy must hold against the user's own settings. By default a packaged connector runs a program, like a CLI: offline mode turns it off, it never counts as local under a policy's `LocalHosts`, it counts as a subscription for prices, and the default timeout is 5 minutes. A factory whose connectors send every request to their `BaseAddress` says so with `UsesBaseAddress`; the router then treats them as HTTP connectors to that address: the configuration must give one, the machine policy's endpoint rules, offline mode and local hosts check it, and the default timeout is 100 seconds. (A `BaseAddress` alone proves nothing: Copilot's SDK ignores it.)
+- The same goes for embeddings: a packaged provider keeps prompts local only when its factory says `RunsInProcess` (as Onnx does) or the configuration declares it `IsLocal`. Otherwise offline mode, a policy that requires local models, and allowed endpoints that do not include its `Endpoint` replace it with `Hashing`.
+- A connector whose type no installed package provides is skipped with that reason. The router warns about it on every apply, and `doctor` fails it. The dashboard refuses a change that introduces one, but keeps one the running configuration already has, so a file shared with a router that has the package stays editable.
+- `MachinePolicy.DisabledConnectorTypes` takes any name, read without surrounding spaces. One that no installed package provides is warned about at start-up and fails `doctor`, because a misspelling turns nothing off.
+- A connector that implements `IModelDiscovery` gets the dashboard's **Discover** button and a `doctor` check that its models are offered. An embedding factory's `Models` and `Unavailable` feed the dashboard's model list and `doctor`.
 
 ## Safety rules that shape the design
 

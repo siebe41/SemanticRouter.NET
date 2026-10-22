@@ -548,17 +548,18 @@ public static partial class RouterDashboardEndpoints
             RouterConfiguration resolved = alone.ResolveSecrets(provider.Secrets, unresolved);
             ConnectorOptions connector = resolved.Connectors[name];
 
-            // Copilot lists models through its runtime: the running connector when it is this one, else a new one for this call.
+            // A packaged type (Copilot) lists models through its own connector: the running one when it is this one, else a
+            // new one from its package's factory for this call.
             IModelDiscovery? live = null;
             IDisposable? created = null;
-            if (connector.Type == ConnectorType.Copilot)
+            if (!ConnectorTypes.IsBuiltIn(connector.Type))
             {
                 if (current.Connectors.TryGetValue(name, out ConnectorOptions? existing) && RouterConfiguration.SameDestination(existing, settings)
                     && runtime.Connectors.TryGet(name, out IChatConnector? running))
                 {
                     live = running as IModelDiscovery;
                 }
-                else if (services.GetServices<IChatConnectorFactory>().FirstOrDefault(f => f.Type == ConnectorType.Copilot) is { } factory)
+                else if (services.GetServices<IChatConnectorFactory>().FirstOrDefault(f => connector.IsType(f.Type)) is { } factory)
                 {
                     IChatConnector made = factory.Create(name, connector);
                     (live, created) = (made as IModelDiscovery, made as IDisposable);
@@ -725,15 +726,16 @@ public static partial class RouterDashboardEndpoints
 
     /// <summary>
     /// Where a connector sends requests, for the audit log: <c>scheme://host:port</c> (never a path, query or credentials
-    /// in the address), or for a CLI or Copilot the program's name.
+    /// in the address), or for a connector that runs a program the program's name (for a packaged type such as Copilot
+    /// with no <see cref="ConnectorOptions.Executable"/>, the type, whose package picks the program).
     /// </summary>
     internal static string Destination(ConnectorOptions connector)
     {
-        if (connector.Type is ConnectorType.Cli or ConnectorType.Copilot)
+        if (connector.RunsProgram)
         {
             string? program = connector.Executable is { Length: > 0 } executable ? Path.GetFileName(executable)
-                : connector.Type == ConnectorType.Copilot ? "copilot"
-                : CliAdapter.For(connector.Preset).DefaultExecutable;
+                : connector.Type == ConnectorTypes.Cli ? CliAdapter.For(connector.Preset).DefaultExecutable
+                : connector.Type;
             return string.IsNullOrEmpty(program) ? "no program" : program;
         }
 
@@ -1050,9 +1052,9 @@ public static partial class RouterDashboardEndpoints
             runtime.Warnings,
             (typeof(RouterDashboardEndpoints).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "dev").Split('+')[0],
             new EmbeddingsStatus(
-                config.Embeddings.Provider.ToString(), config.Embeddings.Model, AddressDisplay.Show(config.Embeddings.Endpoint), config.Embeddings.Dimensions,
-                [nameof(EmbeddingProviderKind.Hashing), nameof(EmbeddingProviderKind.OpenAICompatible), .. factories.Select(f => f.Kind.ToString()).Distinct()],
-                factories.SelectMany(f => f.Models.Select(m => new EmbeddingModelStatus(f.Kind.ToString(), m.Name, m.Description, m.SuggestedThreshold, m.DownloadBytes))).ToArray(),
+                config.Embeddings.Provider, config.Embeddings.Model, AddressDisplay.Show(config.Embeddings.Endpoint), config.Embeddings.Dimensions,
+                [.. EmbeddingProviderKinds.BuiltIn, .. factories.Select(f => f.Kind).Distinct(StringComparer.OrdinalIgnoreCase)],
+                factories.SelectMany(f => f.Models.Select(m => new EmbeddingModelStatus(f.Kind, m.Name, m.Description, m.SuggestedThreshold, m.DownloadBytes))).ToArray(),
                 (runtime.Classifier as SemanticPromptClassifier)?.IndexStatistics is { } index
                     ? new IndexStatus(index.Utterances, index.Dimensions, Math.Round(index.BuildTime.TotalMilliseconds, 1))
                     : null,
@@ -1069,15 +1071,15 @@ public static partial class RouterDashboardEndpoints
                 m.Name, m.Connector, m.Model, m.Tier, m.Capabilities.ToArray(), m.IsLocal, m.Enabled, m.Priority, m.ContextWindow,
                 m.InputCostPerMillionTokens, m.OutputCostPerMillionTokens,
                 cooldowns.TryGetValue(m.Name, out DateTimeOffset until) ? until : null,
-                config.Connectors.TryGetValue(m.Connector, out ConnectorOptions? c) ? c.Type.ToString() : null)
+                config.Connectors.TryGetValue(m.Connector, out ConnectorOptions? c) ? c.Type : null)
             {
                 CacheShare = cache?.Typical(m, route: null),
                 EffectiveInputCostPerMillionTokens = cache?.Typical(m, route: null) is { } share ? m.EstimateCost(1_000_000, 0, share) : null,
             }).ToArray(),
             config.Connectors.Select(kv => new ConnectorStatus(
-                kv.Key, kv.Value.Type.ToString(), kv.Value.Type == ConnectorType.Cli ? kv.Value.Preset.ToString() : null,
-                kv.Value.Type is ConnectorType.Cli or ConnectorType.Copilot ? kv.Value.Executable : AddressDisplay.Show(kv.Value.BaseAddress),
-                kv.Value.Type == ConnectorType.Cli ? kv.Value.ToolCalling.ToString() : "Native",
+                kv.Key, kv.Value.Type, kv.Value.Type == ConnectorTypes.Cli ? kv.Value.Preset.ToString() : null,
+                kv.Value.RunsProgram ? kv.Value.Executable : AddressDisplay.Show(kv.Value.BaseAddress),
+                kv.Value.Type == ConnectorTypes.Cli ? kv.Value.ToolCalling.ToString() : "Native",
                 !string.IsNullOrEmpty(runtime.Resolved.Connectors.TryGetValue(kv.Key, out ConnectorOptions? resolved) ? resolved.ApiKey : null),
                 config.Models.Count(m => string.Equals(m.Connector, kv.Key, StringComparison.OrdinalIgnoreCase)))).ToArray(),
             config.Routes.Select(r => new RouteStatus(r.Name, r.Tier, r.Utterances.Count, r.LocalOnly, r.RequiredCapabilities.ToArray(), r.SimilarityThreshold ?? config.DefaultSimilarityThreshold)).ToArray(),
@@ -1101,7 +1103,7 @@ public static partial class RouterDashboardEndpoints
                     .GroupBy(e => e.Connector!, StringComparer.OrdinalIgnoreCase)
                     .Select(g => new ConnectorLatency(
                         g.Key,
-                        config.Connectors.TryGetValue(g.Key, out ConnectorOptions? kind) ? (kind.Type == ConnectorType.Cli ? $"Cli/{kind.Preset}" : kind.Type.ToString()) : null,
+                        config.Connectors.TryGetValue(g.Key, out ConnectorOptions? kind) ? (kind.Type == ConnectorTypes.Cli ? $"Cli/{kind.Preset}" : kind.Type) : null,
                         g.Count(),
                         g.Count(e => e.HasTools),
                         Percentile(g.Select(e => e.ServingTimes().FirstByte), 0.5),
@@ -1209,7 +1211,7 @@ public static partial class RouterDashboardEndpoints
     /// <param name="Type">The connector type.</param>
     /// <param name="Preset">A CLI connector's preset.</param>
     /// <param name="BaseAddress">An HTTP connector's address (only its host is used).</param>
-    internal sealed record PriceLookupModel(string? Model, ConnectorType Type = ConnectorType.OpenAICompatible, CliPreset Preset = CliPreset.Custom, Uri? BaseAddress = null);
+    internal sealed record PriceLookupModel(string? Model, string? Type = ConnectorTypes.OpenAICompatible, CliPreset Preset = CliPreset.Custom, Uri? BaseAddress = null);
 
     /// <summary>The prices found.</summary>
     /// <param name="Source">The price list's host.</param>

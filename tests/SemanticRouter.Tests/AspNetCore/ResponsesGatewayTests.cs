@@ -36,7 +36,7 @@ public sealed class ResponsesGatewayTests : RouterHostTest
             },
             withCli: withCli);
 
-    private static void AddNative(IServiceCollection services, string name, ConnectorType type) =>
+    private static void AddNative(IServiceCollection services, string name, string type) =>
         services.Configure<SemanticRouterConnectorsOptions>(o => o.Connectors[name] = new ConnectorOptions
         {
             Type = type,
@@ -134,7 +134,7 @@ public sealed class ResponsesGatewayTests : RouterHostTest
         ClassifyAs(tier: 5);
         HttpClient client = await StartDispatchAsync(
             routing: o => o.Models.Add(Model("opus-api", 5, costPerMillion: 15m, connector: "anthropic-native", capabilities: ["tools", "reasoning"])),
-            services: s => AddNative(s, "anthropic-native", ConnectorType.Anthropic));
+            services: s => AddNative(s, "anthropic-native", ConnectorTypes.Anthropic));
 
         HttpResponseMessage response = await client.PostAsync("/v1/responses", Json(ResponsesProtocolTests.CodexBody));
 
@@ -187,7 +187,7 @@ public sealed class ResponsesGatewayTests : RouterHostTest
         ClassifyAs(tier: 3);
         HttpClient client = await StartDispatchAsync(
             routing: o => o.Models.Add(Model("gpt-api", 3, costPerMillion: 2m, connector: "responses")),
-            services: s => AddNative(s, "responses", ConnectorType.Responses));
+            services: s => AddNative(s, "responses", ConnectorTypes.Responses));
         const string request = """{"model":"auto","input":"news today?","tools":[{"type":"web_search"}],"store":true}""";
 
         HttpResponseMessage response = await client.PostAsync("/v1/responses", Json(request));
@@ -224,7 +224,7 @@ public sealed class ResponsesGatewayTests : RouterHostTest
         ClassifyAs(tier: 3);
         HttpClient client = await StartDispatchAsync(
             routing: o => o.Models.Add(Model("gpt-api", 3, costPerMillion: 2m, connector: "responses")),
-            services: s => AddNative(s, "responses", ConnectorType.Responses));
+            services: s => AddNative(s, "responses", ConnectorTypes.Responses));
 
         HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
 
@@ -275,7 +275,7 @@ public sealed class ResponsesGatewayTests : RouterHostTest
         ClassifyAs(tier: 5);
         HttpClient client = await StartDispatchAsync(
             routing: o => o.Models.Add(Model("opus-api", 5, costPerMillion: 15m, connector: "anthropic-native")),
-            services: s => AddNative(s, "anthropic-native", ConnectorType.Anthropic));
+            services: s => AddNative(s, "anthropic-native", ConnectorTypes.Anthropic));
 
         await client.PostAsync("/v1/messages", Json($$"""
             {"model":"claude-sonnet-9","max_tokens":100,"messages":[
@@ -300,7 +300,7 @@ public sealed class ResponsesGatewayTests : RouterHostTest
         ClassifyAs(tier: 5);
         HttpClient client = await StartDispatchAsync(
             routing: o => o.Models.Add(Model("opus-api", 5, costPerMillion: 15m, connector: "anthropic-native", capabilities: ["reasoning"])),
-            services: s => AddNative(s, "anthropic-native", ConnectorType.Anthropic));
+            services: s => AddNative(s, "anthropic-native", ConnectorTypes.Anthropic));
 
         HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json("""
             {"model":"auto","reasoning_effort":"high","messages":[{"role":"user","content":"6*7?"}],
@@ -328,7 +328,7 @@ public sealed class ResponsesGatewayTests : RouterHostTest
         ClassifyAs(tier: 5);
         HttpClient client = await StartDispatchAsync(
             routing: o => o.Models.Add(Model("opus-api", 5, costPerMillion: 15m, connector: "anthropic-native", capabilities: ["tools"])),
-            services: s => AddNative(s, "anthropic-native", ConnectorType.Anthropic));
+            services: s => AddNative(s, "anthropic-native", ConnectorTypes.Anthropic));
 
         HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json("""
             {"model":"auto","parallel_tool_calls":false,"messages":[{"role":"user","content":"hi"}],
@@ -353,7 +353,7 @@ public sealed class ResponsesGatewayTests : RouterHostTest
         ClassifyAs(tier: 5);
         HttpClient client = await StartDispatchAsync(
             routing: o => o.Models.Add(Model("opus-api", 5, costPerMillion: 15m, connector: "anthropic-native", capabilities: ["reasoning"])),
-            services: s => AddNative(s, "anthropic-native", ConnectorType.Anthropic));
+            services: s => AddNative(s, "anthropic-native", ConnectorTypes.Anthropic));
 
         HttpResponseMessage response = await client.PostAsync("/v1/messages", Json(ClaudeCodeThinkingBody));
 

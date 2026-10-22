@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Connectors.Copilot;
 using SemanticRouter.Embeddings.Onnx;
 
 namespace SemanticRouter.Host;
@@ -34,8 +35,8 @@ internal static class EgressList
             bool used = resolved.Models.Any(m => m.Enabled && string.Equals(m.Connector, name, StringComparison.OrdinalIgnoreCase));
             string where = connector.Type switch
             {
-                ConnectorType.Cli => $"CLI: {(string.IsNullOrWhiteSpace(connector.Executable) ? CliAdapter.For(connector.Preset).DefaultExecutable : connector.Executable)}, which contacts {Vendor(connector.Preset)}",
-                ConnectorType.Copilot => $"CLI: {(string.IsNullOrWhiteSpace(connector.Executable) ? "copilot" : connector.Executable)} (the Copilot SDK's runtime), which contacts GitHub",
+                ConnectorTypes.Cli => $"CLI: {(string.IsNullOrWhiteSpace(connector.Executable) ? CliAdapter.For(connector.Preset).DefaultExecutable : connector.Executable)}, which contacts {Vendor(connector.Preset)}",
+                _ when connector.IsType(CopilotConnector.Type) => $"CLI: {(string.IsNullOrWhiteSpace(connector.Executable) ? "copilot" : connector.Executable)} (the Copilot SDK's runtime), which contacts GitHub",
                 _ => Host(connector.BaseAddress) ?? "no BaseAddress",
             };
             string state = policy.Blocks(connector) is { } blocked ? $" (never contacted: {blocked})" : used ? string.Empty : " (no enabled model uses it yet)";
@@ -47,7 +48,7 @@ internal static class EgressList
             lines.Add(new RouterCheck(Subject, problem ? RouterCheckStatus.Warning : RouterCheckStatus.Ok, $"embeddings: {embeddings}."));
         }
 
-        if (resolved.Embeddings.Provider == EmbeddingProviderKind.Onnx)
+        if (IsOnnx(resolved.Embeddings))
         {
             OnnxRuntimeEnvironment.DisableTelemetry();
             lines.Add(OnnxTelemetry(OnnxRuntimeEnvironment.TelemetrySetting));
@@ -131,20 +132,24 @@ internal static class EgressList
         ? address.Authority + (address.IsLoopback ? " (this machine)" : string.Empty)
         : null;
 
+    private static bool IsOnnx(EmbeddingProviderOptions embeddings) =>
+        string.Equals(embeddings.Provider, OnnxEmbeddings.Provider, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Where embedding requests go, and whether that needs attention (a model that is missing and may not be downloaded).</summary>
     private static (string Text, bool Problem)? Embeddings(IServiceProvider services, EmbeddingProviderOptions embeddings, string configurationDirectory, MachinePolicy policy)
     {
-        bool onnxRuns = services.GetServices<IEmbeddingProviderFactory>().FirstOrDefault(f => f.Kind == EmbeddingProviderKind.Onnx)?.Unavailable is null;
-        switch (embeddings.Provider)
+        bool onnxRuns = services.GetServices<IEmbeddingProviderFactory>()
+            .FirstOrDefault(f => string.Equals(f.Kind, OnnxEmbeddings.Provider, StringComparison.OrdinalIgnoreCase))?.Unavailable is null;
+        switch (IsOnnx(embeddings) ? OnnxEmbeddings.Provider : embeddings.Provider)
         {
-            case EmbeddingProviderKind.OpenAICompatible:
+            case EmbeddingProviderKinds.OpenAICompatible:
                 return (Host(embeddings.Endpoint) ?? "no Endpoint", false);
-            case EmbeddingProviderKind.Onnx when !onnxRuns:
+            case OnnxEmbeddings.Provider when !onnxRuns:
                 // The embeddings check says why and what to use instead.
                 return ("none: ONNX Runtime cannot run on this machine, so no ONNX model is downloaded or used", true);
-            case EmbeddingProviderKind.Onnx when !string.IsNullOrWhiteSpace(embeddings.ModelPath):
+            case OnnxEmbeddings.Provider when !string.IsNullOrWhiteSpace(embeddings.ModelPath):
                 return ($"ONNX model at {embeddings.ModelPath}, on this machine; nothing is downloaded", false);
-            case EmbeddingProviderKind.Onnx when OnnxEmbeddingModels.Find(embeddings.Model ?? OnnxEmbeddingModels.DefaultModel) is { } model:
+            case OnnxEmbeddings.Provider when OnnxEmbeddingModels.Find(embeddings.Model ?? OnnxEmbeddingModels.DefaultModel) is { } model:
                 // OnnxEmbeddingProviderFactory's default: a models directory next to the configuration file.
                 string models = services.GetService<IOptions<OnnxEmbeddingOptions>>()?.Value.ModelsDirectory ?? Path.Combine(configurationDirectory, "models");
                 string directory = Path.Combine(Path.GetFullPath(models), model.Name);
@@ -156,7 +161,7 @@ internal static class EgressList
                 return policy.Refuses(model.ModelUrl) is { } refused
                     ? ($"ONNX model {model.Name} is not in {directory} and is not downloaded ({refused}): place model.onnx and vocab.txt there", true)
                     : ($"{OnnxEmbeddingModels.DownloadHosts}, once, to download ONNX model {model.Name} into {directory} (copy it there to skip the download)", false);
-            case EmbeddingProviderKind.Hashing:
+            case EmbeddingProviderKinds.Hashing:
                 return ("Hashing, on this machine; nothing is sent", false);
             default:
                 return null;
