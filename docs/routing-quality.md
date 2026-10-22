@@ -174,7 +174,7 @@ A route's tier picks its model, but the work some routes see is easier than thei
 
 - **Router learned** (its own dashboard page, and a card on the Overview) lists each change with:
   - what changed: the setting, the route, and the old and new value or the utterance;
-  - why: for example "At 0.48, 9 labelled prompts route to the tier they need that do not now (3 from the evaluation set, 6 from feedback: retried, corrected)";
+  - why: for example "At 0.48, 9 labelled prompts route to the tier they need that do not now (3 from the evaluation set, 6 from feedback: retried, corrected)", with up to three of those prompts as examples. A prompt labelled local-only is counted but never quoted ("2 local-only prompts not quoted"), here or in the configuration history's note;
   - when, and the configuration version that applied it;
   - its effect since: the share of decisions on what it touches that received feedback, before and after, and how many decisions it routed differently.
 - **On a decision:** an Activity entry that a learned threshold routed differently (it matched only because the threshold was lowered, or the reverse) carries a **learned** badge, with "learned 3 Oct: threshold of complex-code 0.52 → 0.48" in its tooltip. The API has it as `learned` and `learnedNote`.

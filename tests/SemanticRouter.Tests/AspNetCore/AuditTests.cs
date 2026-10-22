@@ -276,7 +276,7 @@ public sealed class AuditTests : RouterHostTest
 
         IReadOnlyList<AuditEntry> entries = Audit();
         entries.Select(e => e.Summary).Should().Equal(
-            "exported activity: 1 entry, with prompt previews",
+            "exported activity: 1 entry, with prompt text",
             $"added an utterance to a route: route smalltalk, version {Services.GetRequiredService<RouterRuntimeProvider>().Current.Version}",
             "classified a prompt",
             "deleted activity: 0 entries, everything");

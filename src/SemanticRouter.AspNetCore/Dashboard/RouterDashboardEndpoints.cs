@@ -409,7 +409,7 @@ public static partial class RouterDashboardEndpoints
             DateTimeOffset end = until ?? DateTimeOffset.UtcNow.AddMinutes(1);
             IReadOnlyList<RoutingActivityEntry> entries = activity.Between(since ?? end.AddDays(-7), end);
             bool includePrompts = prompts ?? false;
-            DashboardAudit.Detail(context, $"{entries.Count} {(entries.Count == 1 ? "entry" : "entries")}, {(includePrompts ? "with" : "without")} prompt previews");
+            DashboardAudit.Detail(context, $"{entries.Count} {(entries.Count == 1 ? "entry" : "entries")}, {(includePrompts ? "with" : "without")} prompt text");
             string stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
             return string.Equals(format, "jsonl", StringComparison.OrdinalIgnoreCase)
                 ? Results.File(System.Text.Encoding.UTF8.GetBytes(ActivityReports.ToJsonLines(entries, includePrompts)), "application/jsonl", $"semantic-router-activity-{stamp}.jsonl")
