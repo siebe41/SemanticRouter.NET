@@ -16,7 +16,7 @@ export function noticesCard() {
   if (!d || !d.notices.length) return '';
   return `<div class="card section notices" role="region" aria-label="Needs a decision">
     <div class="card-head"><h2>Needs a decision</h2><span class="badge warn">${d.notices.length}</span><span class="spacer"></span>${d.notify ? '' : '<span class="small muted">notifications are off (<span class="mono">Notifications:Enabled</span>)</span>'}</div>
-    ${d.notices.map((n) => `<div class="notice" data-kind="${h(n.kind)}"><div class="inline"><b>${h(n.title)}</b><span class="spacer"></span><a href="${h(n.link)}" class="small">decide →</a></div><div class="small muted">${h(n.detail)}</div></div>`).join('')}
+    ${d.notices.map((n) => `<div class="notice" data-kind="${h(n.kind)}"><div class="inline"><b>${h(n.title)}</b><span class="spacer"></span><a href="${h(/^#\//.test(n.link || '') ? n.link : '#/overview')}" class="small">decide →</a></div><div class="small muted">${h(n.detail)}</div></div>`).join('')}
   </div>`;
 }
 
@@ -24,7 +24,7 @@ export function noticesCard() {
 export function digestCard() {
   const d = state.digest;
   if (!d) return '';
-  const signals = Object.entries(d.signalsByKind || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${int(v)} ${SIGNALS[k] || k}`).join(', ');
+  const signals = Object.entries(d.signalsByKind || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${int(v)} ${SIGNALS[k] || h(k)}`).join(', ');
   const plan = d.subscriptionValueUsd ? ` · <span title="Not spent: subscription use at the provider's API prices">${usd(d.subscriptionValueUsd)} of subscription use at API prices</span>` : '';
   const reference = metricsOnly() ? 'a reference model on Usage' : '<a href="#/usage" data-action="goto-field" data-view="usage" data-field="Usage.ReferenceModel">set a reference model</a>';
   const saved = d.referenceModel ? `<div class="card stat"><span class="value">${usd(d.savedUsd)}</span><span class="label">saved vs ${h(d.referenceModel)} · spent ${usd(d.costUsd)}${plan}</span></div>`

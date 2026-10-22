@@ -233,7 +233,7 @@ export function memoryBadge(e) {
 function judgeNote() {
   const j = state.config && state.config.Middleware && state.config.Middleware.Judge;
   if (!j || !j.Enabled || !j.Model) return '';
-  return ` The judge (<span class="mono">${h(j.Model)}</span>) grades ${+(j.SampleRate * 100).toFixed(1)}% of the answers from tier ${j.MaxTier} and below, at most ${count(j.DailyLimit)} a day.`;
+  return ` The judge (<span class="mono">${h(j.Model)}</span>) grades ${+(j.SampleRate * 100).toFixed(1)}% of the answers from tier ${h(j.MaxTier)} and below, at most ${count(j.DailyLimit)} a day.`;
 }
 
 const FILTERS = [['all', 'Everything'], ['failed', 'Failed'], ['degraded', 'Degraded'], ['tools', 'With tools'], ['prompted calls', 'Prompted tool calls']];
@@ -265,7 +265,7 @@ function decisionDetail(e) {
   const row = (label, value) => (value === '' || value == null ? '' : `<tr><th>${label}</th><td>${value}</td></tr>`);
   const tokens = [e.inputTokens != null ? `${count(e.inputTokens)} in` : `~${count(e.estimatedInputTokens)} in (estimated)`, e.outputTokens != null ? `${count(e.outputTokens)} out` : '', e.cacheReadTokens ? `${count(e.cacheReadTokens)} read from cache` : '', e.cacheCreationTokens ? `${count(e.cacheCreationTokens)} written to cache` : ''].filter(Boolean).join(' · ');
   const timing = [e.classificationMilliseconds != null ? `classified in ${num(e.classificationMilliseconds, 1)} ms` : '', e.timeToFirstByteMilliseconds != null ? `first byte after ${count(Math.round(e.timeToFirstByteMilliseconds))} ms` : '', e.totalMilliseconds != null ? `done after ${count(Math.round(e.totalMilliseconds))} ms` : ''].filter(Boolean).join(' · ');
-  const feedback = ((state.feedback || {})[e.id] || []).map((k) => (FEEDBACK[k] || [k])[0]).join(', ');
+  const feedback = ((state.feedback || {})[e.id] || []).map((k) => h((FEEDBACK[k] || [k])[0])).join(', ');
   return `<div class="card section decision" id="activity-detail" role="region" aria-label="${h(`Request ${e.id}`)}" tabindex="-1">
     <div class="card-head"><h2>Request #${e.id}</h2><span class="muted small">${h(fullStamp(e.timestamp))}</span><span class="spacer"></span>${e.toolContinuation ? '' : entryButtons(e)}<button class="btn ghost small" data-action="activity-detail-close">Close</button></div>
     <div class="grid cols-2">
@@ -305,7 +305,7 @@ function decisionDetail(e) {
 export function labelForm() {
   const l = state.label;
   const routes = state.config.Routes || [];
-  const routeOptions = (value, blank) => (blank ? `<option value="">${blank}</option>` : '') + routes.map((r) => `<option value="${h(r.Name)}" ${r.Name === value ? 'selected' : ''}>${h(r.Name)} (T${r.Tier})</option>`).join('');
+  const routeOptions = (value, blank) => (blank ? `<option value="">${blank}</option>` : '') + routes.map((r) => `<option value="${h(r.Name)}" ${r.Name === value ? 'selected' : ''}>${h(r.Name)} (T${h(r.Tier)})</option>`).join('');
   const same = l.tier != null && l.tier === l.routedTier;
   return `<div class="card section" id="label-form"><div class="card-head"><h2>Label this prompt</h2><span class="muted small">Routed to ${tierChip(l.routedTier)}${l.routedRoute ? ' via ' + h(l.routedRoute) : ''}.${l.truncated ? ' The activity log keeps the first 160 characters of a prompt: complete or shorten it below.' : ''}</span></div>
     <div class="form-grid">
