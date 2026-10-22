@@ -37,6 +37,12 @@ internal sealed class RecordingProxy : IDisposable
     /// <summary>Where each request was going: the URL of a plain request, or <c>https://host:port/</c> for a <c>CONNECT</c>.</summary>
     public ConcurrentQueue<Uri> Destinations { get; } = new();
 
+    /// <summary>
+    /// The connections that are not in <see cref="Destinations"/>: their first line (TLS sent straight away, say), or
+    /// <c>(connected without a request line)</c> when nothing came within 5 seconds.
+    /// </summary>
+    public ConcurrentQueue<string> WithoutDestination { get; } = new();
+
     public void Dispose()
     {
         _stop.Cancel();
@@ -80,6 +86,7 @@ internal sealed class RecordingProxy : IDisposable
         using (client)
         {
             string? line = null;
+            bool addressed = false;
             try
             {
                 NetworkStream stream = client.GetStream();
@@ -90,6 +97,7 @@ internal sealed class RecordingProxy : IDisposable
                 if (line is not null && DestinationOf(line) is { } destination)
                 {
                     Destinations.Enqueue(destination);
+                    addressed = true;
                 }
 
                 if (_reply is not null && line is not null)
@@ -102,7 +110,13 @@ internal sealed class RecordingProxy : IDisposable
                 // The connection is what counts.
             }
 
-            Requests.Enqueue($"{at} {line ?? "(connected without a request line)"}");
+            line ??= "(connected without a request line)";
+            if (!addressed)
+            {
+                WithoutDestination.Enqueue(line);
+            }
+
+            Requests.Enqueue($"{at} {line}");
         }
     }
 
