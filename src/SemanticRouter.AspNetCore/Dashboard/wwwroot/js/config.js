@@ -6,7 +6,7 @@ import { fullStamp, plural, tierChip } from './labels.js';
 import { reliabilityBadges, reliabilityCard } from './reliability.js';
 import { addConnectorMenu, presetList } from './setup.js';
 import { addresses } from './service.js';
-import { CAPABILITY_HINTS, MESSAGE_SELECTION, PRESETS, STRATEGIES, adminOnly, connectorNames, connectorTypes, h, isBuiltInConnectorType, isInstalledConnectorType, isReference, kv, lineupFor, lines, readOnly, runsProgram, state, tiers, views } from './core.js';
+import { CAPABILITY_HINTS, MESSAGE_SELECTION, PRESETS, STRATEGIES, adminOnly, connectorNames, connectorTypes, h, isBuiltInConnectorType, isInstalledConnectorType, isReference, kv, lineupFor, lines, readOnly, runsProgram, sameType, state, tiers, typeName, views } from './core.js';
 
 views.tiers = () => {
   const c = state.config;
@@ -91,7 +91,7 @@ const modelItem = (m, i) => {
   return `<div class="item ${state.open.has(key) ? 'open' : ''} ${m.Enabled === false ? 'disabled' : ''}" data-key="${key}">
     <div class="item-bar"><div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
       <span class="chev">▶</span><span class="title">${h(m.Name || '(unnamed)')}</span>
-      <span class="meta">${tierChip(m.Tier)}<span class="mono">${h(m.Model || '')}</span><span>via ${h(m.Connector)}${conn ? ` <span class="faint">(${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? '/' + h(conn.Preset || 'Custom') : ''})</span>` : ' <span class="badge danger">unknown connector</span>'}</span>
+      <span class="meta">${tierChip(m.Tier)}<span class="mono">${h(m.Model || '')}</span><span>via ${h(m.Connector)}${conn ? ` <span class="faint">(${h(typeName(conn.Type))}${sameType(conn.Type, 'Cli') ? '/' + h(conn.Preset || 'Custom') : ''})</span>` : ' <span class="badge danger">unknown connector</span>'}</span>
       ${m.IsLocal ? '<span class="badge info">local</span>' : ''}${reliabilityBadges(m.Name)}${!free ? `<span class="badge">$${m.InputCostPerMillionTokens}/$${m.OutputCostPerMillionTokens} per M</span>${effectiveCostBadge(m)}` : m.IsLocal ? '<span class="badge ok">free</span>'
         : !conn || runsProgram(conn) ? `<span class="badge" title="Free per request, but it uses up the plan's quota${m.ApiInputCostPerMillionTokens != null ? '; its use is valued at the API price on Usage' : ''}">subscription${m.ApiInputCostPerMillionTokens != null ? ` · API $${m.ApiInputCostPerMillionTokens}/$${m.ApiOutputCostPerMillionTokens ?? 0}` : ''}</span>`
         : '<span class="badge warn" title="Costs nothing as far as the router knows, so it ranks like a subscription: set its prices">no price set</span>'}${(m.Capabilities || []).map((c) => `<span class="badge">${h(c)}</span>`).join('')}</span>
@@ -178,7 +178,7 @@ views.models = () => {
       const own = models.map((m, i) => ({ m, i })).filter((x) => (x.m.Connector || '').toLowerCase() === (connector || '').toLowerCase()).sort(byTier);
       const tierCounts = [...new Set(own.map((x) => x.m.Tier))].sort((a, b) => a - b).map((t) => `<span class="tier" title="${own.filter((x) => x.m.Tier === t).map((x) => h(x.m.Name)).join(', ')}">T${t}${own.filter((x) => x.m.Tier === t).length > 1 ? ' ×' + own.filter((x) => x.m.Tier === t).length : ''}</span>`).join('');
       return `<section class="model-group" aria-label="Models via ${h(connector)}">
-        <div class="section-head group-head"><h2>${h(connector || '(no connector)')}</h2>${conn ? `<span class="badge accent">${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? ' / ' + h(conn.Preset || 'Custom') : ''}</span>` : '<span class="badge danger">unknown connector</span>'}<span class="muted small">${own.length} model${own.length === 1 ? '' : 's'}</span>${tierCounts}<span class="spacer"></span>${conn && !readOnly() && own.some((x) => !x.m.IsLocal) ? `<button class="btn small" data-action="prices-lookup" data-connector="${h(connector)}" title="Fills in the list prices of its cloud models (a subscription's API prices) from OpenRouter's public price list">Look up prices</button>` : ''}${conn && !readOnly() ? `<button class="btn small" data-action="lineup-discover" data-connector="${h(connector)}">Discover models</button>` : ''}</div>
+        <div class="section-head group-head"><h2>${h(connector || '(no connector)')}</h2>${conn ? `<span class="badge accent">${h(typeName(conn.Type))}${sameType(conn.Type, 'Cli') ? ' / ' + h(conn.Preset || 'Custom') : ''}</span>` : '<span class="badge danger">unknown connector</span>'}<span class="muted small">${own.length} model${own.length === 1 ? '' : 's'}</span>${tierCounts}<span class="spacer"></span>${conn && !readOnly() && own.some((x) => !x.m.IsLocal) ? `<button class="btn small" data-action="prices-lookup" data-connector="${h(connector)}" title="Fills in the list prices of its cloud models (a subscription's API prices) from OpenRouter's public price list">Look up prices</button>` : ''}${conn && !readOnly() ? `<button class="btn small" data-action="lineup-discover" data-connector="${h(connector)}">Discover models</button>` : ''}</div>
         ${lineupPanel(connector)}
         ${own.map((x) => modelItem(x.m, x.i)).join('')}
       </section>`;
@@ -207,9 +207,9 @@ const TYPE_HINTS = {
 /** The connector type picker: the router's types, installed packages' types, and the current one if no package provides it. */
 const typeField = (p, type) => {
   const types = connectorTypes();
-  const known = types.some((t) => t.toLowerCase() === type.toLowerCase());
+  const known = types.some((t) => sameType(t, type));
   const installed = types.filter((t) => !isBuiltInConnectorType(t));
-  const options = types.map((t) => `<option value="${h(t)}" ${t.toLowerCase() === type.toLowerCase() ? 'selected' : ''}>${h(t)}</option>`).join('')
+  const options = types.map((t) => `<option value="${h(t)}" ${sameType(t, type) ? 'selected' : ''}>${h(t)}</option>`).join('')
     + (known ? '' : `<option value="${h(type)}" selected>${h(type)} (not installed)</option>`);
   const hints = types.filter((t) => TYPE_HINTS[t]).map((t) => `${t}: ${TYPE_HINTS[t]}`);
   if (installed.length) hints.push(`${installed.map(h).join(', ')}: from installed packages`);
@@ -222,7 +222,7 @@ views.connectors = () => {
     <div class="section-head"><h1>Connectors</h1><span class="muted">How the router reaches each provider.</span><span class="spacer"></span>${readOnly() || !Object.keys(conns).length ? '' : addConnectorMenu()}</div>
     ${Object.entries(conns).map(([name, c]) => {
       const key = 'conn:' + name;
-      const type = c.Type || 'OpenAICompatible';
+      const type = typeName(c.Type);
       // A type from an installed package (or one no package provides) is shown as the router runs it: calling its base
       // address when the package says so, otherwise as a program.
       const packaged = !isBuiltInConnectorType(type);
@@ -232,12 +232,12 @@ views.connectors = () => {
       return `<div class="item ${state.open.has(key) ? 'open' : ''}" data-key="${key}">
         <div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
           <span class="chev">▶</span><span class="title">${h(name)}</span>
-          <span class="meta"><span class="badge accent">${h(type)}${type === 'Cli' ? ' / ' + h(c.Preset || 'Custom') : ''}</span><span class="mono">${h(type === 'Cli' ? (c.Executable || '(preset default)') : program ? (c.Executable || '(package default)') : (c.BaseAddress || ''))}</span><span>${plural(models.length, 'model')}</span>${packaged && !isInstalledConnectorType(type) ? '<span class="badge danger" title="No installed package provides this connector type, so the router skips it">not installed</span>' : ''}${connectorStateBadge(name)}${c.ApiKey === '***' ? '<span class="badge ok">key set</span>' : (isReference(c.ApiKey) ? '<span class="badge ok" title="' + h(c.ApiKey) + '">key: reference</span>' : '')}${type === 'Cli' && c.ToolCalling === 'Prompted' ? '<span class="badge info">prompted tools</span>' : ''}</span>
+          <span class="meta"><span class="badge accent">${h(type)}${sameType(type, 'Cli') ? ' / ' + h(c.Preset || 'Custom') : ''}</span><span class="mono">${h(sameType(type, 'Cli') ? (c.Executable || '(preset default)') : program ? (c.Executable || '(package default)') : (c.BaseAddress || ''))}</span><span>${plural(models.length, 'model')}</span>${packaged && !isInstalledConnectorType(type) ? '<span class="badge danger" title="No installed package provides this connector type, so the router skips it">not installed</span>' : ''}${connectorStateBadge(name)}${c.ApiKey === '***' ? '<span class="badge ok">key set</span>' : (isReference(c.ApiKey) ? '<span class="badge ok" title="' + h(c.ApiKey) + '">key: reference</span>' : '')}${sameType(type, 'Cli') && c.ToolCalling === 'Prompted' ? '<span class="badge info">prompted tools</span>' : ''}</span>
         </div>
         <div class="item-body"><div class="form-grid">
           <label class="field"><span class="name">Name</span><input type="text" data-action-input="connector-rename" data-name="${h(name)}" value="${h(name)}"><span class="hint">Models refer to it by this name; renaming updates them.</span></label>
           ${typeField(p, type)}
-          ${type === 'Cli' ? `
+          ${sameType(type, 'Cli') ? `
             <label class="field"><span class="name">Preset</span><select data-bind="${p}.Preset">${PRESETS.map((x) => `<option ${x === (c.Preset || 'Custom') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
             <label class="field"><span class="name">Executable</span><input type="text" data-bind="${p}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="preset default (claude / copilot / codex)"><span class="hint">Started directly, never through a shell. On Windows use the .exe.</span></label>
             <label class="field"><span class="name">Tool calling</span><select data-bind="${p}.ToolCalling">${['None', 'Prompted'].map((x) => `<option ${x === (c.ToolCalling || 'None') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Prompted lets agentic clients (Claude Code) use this CLI: tools are described in the prompt and tool calls parsed from the reply.</span></label>
@@ -256,19 +256,20 @@ views.connectors = () => {
             <label class="field"><span class="name">Remove environment variables</span><textarea data-bind="${p}.RemoveEnvironmentVariables" data-kind="lines" data-nullable="1" rows="3">${h(lines(c.RemoveEnvironmentVariables))}</textarea><span class="hint">Empty = preset defaults (API keys that would switch billing away from your subscription).</span></label>
             <label class="check wide"><input type="checkbox" data-bind="${p}.AllowRemoteClients" data-kind="bool" ${c.AllowRemoteClients ? 'checked' : ''}> Allow remote clients <span class="muted">— read docs/TERMS.md first; a personal subscription must not serve other people</span></label>`
           : program ? `
-            <label class="field"><span class="name">Program</span><input type="text" data-bind="${p}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="the package's default"><span class="hint">Started directly, never through a shell. The package's documentation says what to install and how to sign in; <b>Discover models</b> reports what is missing.</span></label>
+            <p class="field wide muted small">The package's connector applies these settings, not the router: its documentation says which it supports, what to install and how to sign in. <b>Discover models</b> reports what is missing.</p>
+            <label class="field"><span class="name">Program</span><input type="text" data-bind="${p}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="the package's default"><span class="hint">For packages that start a program.</span></label>
             <label class="field"><span class="name">Home directory</span><input type="text" data-bind="${p}.HomeDirectory" data-kind="nulltext" value="${h(c.HomeDirectory || '')}" placeholder="the package's default"><span class="hint">Where the program keeps its sign-in and state, for packages that use one.</span></label>
-            ${numField({ bind: `${p}.MaxConcurrency`, value: c.MaxConcurrency, def: 2, label: 'Max concurrency', min: 1, step: 1 })}
-            ${numField({ bind: `${p}.MaxQueue`, value: c.MaxQueue, label: 'Max queue', min: 0, step: 1, nullable: true, placeholder: '16 (default)' })}
-            ${durationField({ bind: `${p}.Timeout`, value: c.Timeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:05:00', label: 'Timeout', hint: 'Time to first output.' })}
-            <label class="check wide"><input type="checkbox" data-bind="${p}.AllowRemoteClients" data-kind="bool" ${c.AllowRemoteClients ? 'checked' : ''}> Allow remote clients <span class="muted">— read docs/TERMS.md first; a personal subscription must not serve other people</span></label>`
+            ${numField({ bind: `${p}.MaxConcurrency`, value: c.MaxConcurrency, def: 2, label: 'Max concurrency', min: 1, step: 1, hint: 'If the package limits concurrent runs.' })}
+            ${numField({ bind: `${p}.MaxQueue`, value: c.MaxQueue, label: 'Max queue', min: 0, step: 1, nullable: true, placeholder: '16 (default)', hint: 'If the package limits its queue.' })}
+            ${durationField({ bind: `${p}.Timeout`, value: c.Timeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:05:00', label: 'Timeout', hint: 'Time to first output, if the package applies one.' })}
+            <label class="check wide"><input type="checkbox" data-bind="${p}.AllowRemoteClients" data-kind="bool" ${c.AllowRemoteClients ? 'checked' : ''}> Allow remote clients <span class="muted">— left off, only a package that checks it keeps other machines out (see its documentation); read docs/TERMS.md first, a personal subscription must not serve other people</span></label>`
           : `
-            <label class="field"><span class="name">Base address</span><input type="url" data-bind="${p}.BaseAddress" data-kind="nulltext" value="${h(c.BaseAddress || '')}" placeholder="${type === 'Anthropic' ? 'https://api.anthropic.com' : 'http://localhost:1234'}"></label>
-            <label class="field"><span class="name">Request path</span><input type="text" data-bind="${p}.RequestPath" data-empty="drop" value="${h(c.RequestPath && c.RequestPath !== '/v1/chat/completions' ? c.RequestPath : '')}" placeholder="/v1/chat/completions (default)"><span class="hint">${type === 'Anthropic' ? 'Leave the default; /v1/messages is used.' : 'Gemini: /v1beta/openai/chat/completions · OpenRouter: /api/v1/chat/completions'}</span></label>
+            <label class="field"><span class="name">Base address</span><input type="url" data-bind="${p}.BaseAddress" data-kind="nulltext" value="${h(c.BaseAddress || '')}" placeholder="${sameType(type, 'Anthropic') ? 'https://api.anthropic.com' : 'http://localhost:1234'}"></label>
+            <label class="field"><span class="name">Request path</span><input type="text" data-bind="${p}.RequestPath" data-empty="drop" value="${h(c.RequestPath && c.RequestPath !== '/v1/chat/completions' ? c.RequestPath : '')}" placeholder="/v1/chat/completions (default)"><span class="hint">${sameType(type, 'Anthropic') ? 'Leave the default; /v1/messages is used.' : 'Gemini: /v1beta/openai/chat/completions · OpenRouter: /api/v1/chat/completions'}</span></label>
             ${secretField(p + '.ApiKey', c.ApiKey, 'API key')}
             ${durationField({ bind: `${p}.Timeout`, value: c.Timeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:01:40', label: 'Timeout', hint: 'Time to response headers.' })}
             ${durationField({ bind: `${p}.StallTimeout`, value: c.StallTimeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:01:40', label: 'Stall timeout', hint: 'Time allowed between pieces of the reply once it has started. Default: the Timeout.' })}
-            ${type === 'Anthropic' ? `<label class="field"><span class="name">anthropic-version</span><input type="text" data-bind="${p}.AnthropicVersion" data-empty="drop" value="${h(c.AnthropicVersion && c.AnthropicVersion !== '2023-06-01' ? c.AnthropicVersion : '')}" placeholder="2023-06-01 (default)"></label>
+            ${sameType(type, 'Anthropic') ? `<label class="field"><span class="name">anthropic-version</span><input type="text" data-bind="${p}.AnthropicVersion" data-empty="drop" value="${h(c.AnthropicVersion && c.AnthropicVersion !== '2023-06-01' ? c.AnthropicVersion : '')}" placeholder="2023-06-01 (default)"></label>
             <label class="field"><span class="name">Prompt caching</span><select data-bind="${p}.PromptCaching">${['Auto', 'Off'].map((x) => `<option ${x === (c.PromptCaching || 'Auto') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Auto: cache markers on requests translated from OpenAI and Codex clients, once the prompt is long enough to cache. Off: for servers that reject them.</span></label>
             <label class="field"><span class="name">Cache lifetime</span><select data-bind="${p}.CacheTtl">${['5m', '1h'].map((x) => `<option ${x === (c.CacheTtl || '5m') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">1h costs 2× the input price to write instead of 1.25×; worth it when turns are often more than 5 minutes apart.</span></label>` : ''}
             <label class="field"><span class="name">Extra headers (Name=value)</span><textarea data-bind="${p}.Headers" data-kind="kv" rows="3">${h(kv(c.Headers))}</textarea><span class="hint">Azure: <code>api-key=…</code> · OpenAI org: <code>OpenAI-Organization=org_…</code></span></label>
@@ -336,9 +337,11 @@ views.embeddings = () => {
   // A provider that cannot run here is offered only while it is the one configured, so the page can say why.
   const same = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
   const available = (st.available || ['Hashing', 'OpenAICompatible']).filter((x) => !unavailable[x] || same(x, provider));
-  // Providers other than the two built-in ones come from installed packages and run a model in this process: the
-  // models a package offers (the first is its default), or one on disk.
+  // Providers other than the two built-in ones come from installed packages. One whose factory runs the model in this
+  // process (RunsInProcess) gets the models it offers (the first is its default) or one on disk; any other sends text to
+  // a server, as the router and the machine policy assume, so it gets the endpoint fields.
   const packaged = available.filter((x) => !same(x, 'Hashing') && !same(x, 'OpenAICompatible'));
+  const runsHere = (x) => (st.runsInProcess || []).some((k) => same(k, x));
   const providerModels = (st.models || []).filter((m) => same(m.provider, provider));
   const chosen = e.Model ? providerModels.find((m) => same(m.name, e.Model)) : providerModels[0];
   const mb = (b) => Math.round(b / 1e6) + ' MB';
@@ -352,10 +355,10 @@ views.embeddings = () => {
   return `
     <div class="section-head"><h1>Embeddings</h1><span class="muted">How prompts and utterances are turned into vectors.</span></div>
     <div class="card section"><div class="form-grid">
-      <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${available.map((x) => `<option value="${h(x)}" ${same(x, provider) ? 'selected' : ''}>${h(x)}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only). OpenAICompatible calls a server (LM Studio, Ollama, OpenAI).${packaged.length ? ` ${packaged.map(h).join(', ')}: from installed packages.` : ''}</span></label>
+      <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${available.map((x) => `<option value="${h(x)}" ${same(x, provider) ? 'selected' : ''}>${h(x)}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only). OpenAICompatible calls a server (LM Studio, Ollama, OpenAI).${packaged.length ? ` ${packaged.map((x) => h(x) + (runsHere(x) ? ' (in this process)' : '')).join(', ')}: from installed packages.` : ''}</span></label>
       ${unavailable[provider] ? `<div class="field wide"><span class="name">Not available here</span><span class="small">${h(unavailable[provider])}</span></div>` : ''}
       ${Object.entries(unavailable).filter(([kind]) => !same(kind, provider)).map(([, why]) => `<p class="field wide muted small">${h(why)}</p>`).join('')}
-      ${!same(provider, 'Hashing') && !same(provider, 'OpenAICompatible') ? modelFields() : same(provider, 'Hashing') ? numField({ bind: 'Embeddings.Dimensions', value: e.Dimensions, def: 512, label: 'Dimensions', min: 16, step: 1, hint: 'More dimensions, fewer accidental matches between unrelated words.' }) : `
+      ${runsHere(provider) ? modelFields() : same(provider, 'Hashing') ? numField({ bind: 'Embeddings.Dimensions', value: e.Dimensions, def: 512, label: 'Dimensions', min: 16, step: 1, hint: 'More dimensions, fewer accidental matches between unrelated words.' }) : `
         <label class="field"><span class="name">Endpoint</span><input type="url" data-bind="Embeddings.Endpoint" data-kind="nulltext" value="${h(e.Endpoint || '')}" placeholder="http://localhost:1234"></label>
         <label class="field"><span class="name">Model</span><input type="text" data-bind="Embeddings.Model" data-kind="nulltext" value="${h(e.Model || '')}" placeholder="text-embedding-nomic-embed-text-v1.5"></label>
         <label class="field"><span class="name">Request path</span><input type="text" data-bind="Embeddings.RequestPath" data-empty="drop" value="${h(e.RequestPath && e.RequestPath !== '/v1/embeddings' ? e.RequestPath : '')}" placeholder="/v1/embeddings (default)"></label>

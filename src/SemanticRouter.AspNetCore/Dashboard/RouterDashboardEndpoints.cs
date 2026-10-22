@@ -1070,6 +1070,7 @@ public static partial class RouterDashboardEndpoints
                     .Where(f => f.Reason is not null)
                     .DistinctBy(f => f.Kind)
                     .ToDictionary(f => f.Kind, f => f.Reason!, StringComparer.Ordinal),
+                RunsInProcess = [.. factories.Where(f => f.RunsInProcess).Select(f => f.Kind.Trim()).Distinct(StringComparer.OrdinalIgnoreCase)],
             },
             config.EffectiveTiers.Select(t => new TierStatus(t.Level, t.Name, t.Description)).ToArray(),
             config.Models.Select(m => new ModelStatus(
@@ -1367,6 +1368,13 @@ public static partial class RouterDashboardEndpoints
     {
         /// <summary>Provider kinds in <see cref="Available"/> that cannot run on this machine, with why (<see cref="IEmbeddingProviderFactory.Unavailable"/>).</summary>
         public IReadOnlyDictionary<string, string> Unavailable { get; init; } = new Dictionary<string, string>();
+
+        /// <summary>
+        /// Provider kinds in <see cref="Available"/> whose factory runs the model in this process
+        /// (<see cref="IEmbeddingProviderFactory.RunsInProcess"/>). The dashboard offers their models, and the endpoint
+        /// fields for any other packaged kind.
+        /// </summary>
+        public IReadOnlyList<string> RunsInProcess { get; init; } = [];
     }
 
     /// <summary>The route index of the running configuration: utterances embedded and how long the warm-up took.</summary>

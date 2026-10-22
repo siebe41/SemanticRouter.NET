@@ -218,6 +218,21 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
     }
 
     [Fact]
+    public async Task The_dashboard_learns_which_packaged_embedding_providers_run_in_process()
+    {
+        HttpClient client = await StartAsync(services: s =>
+        {
+            s.AddSingleton<IEmbeddingProviderFactory>(new NamedEmbeddingFactory("InHouseModel", runsInProcess: true));
+            s.AddSingleton<IEmbeddingProviderFactory>(new NamedEmbeddingFactory("RemoteEmbed"));
+        });
+
+        JsonElement embeddings = JsonDocument.Parse(await client.GetStringAsync(new Uri("/router/api/status", UriKind.Relative))).RootElement.GetProperty("embeddings");
+
+        embeddings.GetProperty("available").EnumerateArray().Select(k => k.GetString()).Should().Contain(["InHouseModel", "RemoteEmbed"]);
+        embeddings.GetProperty("runsInProcess").EnumerateArray().Select(k => k.GetString()).Should().Equal("InHouseModel");
+    }
+
+    [Fact]
     public void A_packaged_embedding_provider_keeps_prompts_local_only_in_process_or_when_declared_local()
     {
         EmbeddingProviderKinds.Register([new NamedEmbeddingFactory("InHouseModel", runsInProcess: true)]);
