@@ -490,6 +490,53 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void A_capped_version_does_not_wait_for_a_reader_and_leaves_the_files_once_it_has_finished()
+    {
+        // The default busy timeout (5 s): a checkpoint that waited for the reader would take it, or twice it.
+        var history = new SqliteConfigurationHistory(Open(o => o.HistoryMaxEntries = 2));
+        history.Record(new RouterConfiguration { FallbackTier = 1 }, "admin API", "read-held-actor 7c4a");
+        history.Record(new RouterConfiguration { FallbackTier = 2 }, "admin API");
+        using (var reader = new SqliteConnection($"Data Source={DbPath};Pooling=False"))
+        {
+            reader.Open();
+            using SqliteTransaction read = reader.BeginTransaction(deferred: true);
+            using (SqliteCommand count = reader.CreateCommand())
+            {
+                count.Transaction = read;
+                count.CommandText = "SELECT count(*) FROM config_history;";
+                count.ExecuteScalar();
+            }
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            long id = history.Record(new RouterConfiguration { FallbackTier = 3 }, "admin API");
+            history.List().Should().HaveCount(2);
+            stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2.5), "the configuration is applied under the runtime's lock");
+            history.GetVersion(id).Should().NotBeNull("the version is saved even though the log could not be emptied");
+            read.Commit();
+        }
+
+        history.List().Should().HaveCount(2);
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("7c4a", "the checkpoint owed is made after the next operation");
+    }
+
+    [Fact]
+    public void An_audit_entry_past_retention_leaves_the_files_when_the_next_one_is_written()
+    {
+        SqliteRouterDatabase database = Open(o => o.AuditRetention = TimeSpan.FromDays(30));
+        var audit = new SqliteAuditLog(database);
+        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "aged-auditor 9d1f", null, "PUT", "/router/api/config", null, 200, "changed"));
+        database.Run("emptying the log", connection => SqliteRouterDatabase.TruncateLog(connection));
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().Contain("aged-auditor 9d1f", "the entry is in state.db now");
+
+        // Past retention, then another entry: its insert deletes the aged one, so a later prune finds nothing to delete.
+        _time.Advance(TimeSpan.FromDays(40));
+        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "fresh-auditor", null, "PUT", "/router/api/config", null, 200, "changed"));
+
+        audit.Query(null, null, 10).Should().ContainSingle(e => e.Actor == "fresh-auditor");
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("aged-auditor 9d1f", "the write-ahead log is emptied after the age cap deletes an entry");
+    }
+
+    [Fact]
     public async Task Concurrent_writers_on_one_file_lose_nothing()
     {
         var a = new SqliteToolCallAffinity(Open());
