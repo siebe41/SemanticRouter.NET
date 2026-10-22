@@ -109,6 +109,7 @@ case "$rid" in
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>SemanticRouter quits itself to install an update.</string>
 </dict>
 </plist>
 PLIST
