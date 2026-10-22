@@ -350,12 +350,11 @@ public static partial class RouterDashboardEndpoints
         api.MapDelete("/activity", (HttpContext context, ActivityPurge purge, DateTimeOffset? since, DateTimeOffset? until) =>
             {
                 ActivityPurgeResult result = purge.Run(since ?? DateTimeOffset.MinValue, until ?? DateTimeOffset.MaxValue);
-                (int removed, bool complete) = (result.Removed, result.Complete);
                 DashboardAudit.Detail(
                     context,
-                    $"{removed} {(removed == 1 ? "entry" : "entries")}" + (since is null && until is null ? ", everything" : $" from {since?.ToString("u") ?? "the start"} to {until?.ToString("u") ?? "now"}")
-                    + (complete ? string.Empty : "; not yet gone from the state file's write-ahead log"));
-                return Results.Json(new { removed, complete }, ApiJson);
+                    $"{result.Removed} {(result.Removed == 1 ? "entry" : "entries")}" + (since is null && until is null ? ", everything" : $" from {since?.ToString("u") ?? "the start"} to {until?.ToString("u") ?? "now"}")
+                    + (result.Complete ? string.Empty : "; not yet gone from the state file's write-ahead log"));
+                return Results.Json(new { removed = result.Removed, complete = result.Complete }, ApiJson);
             })
             .WithMetadata(DashboardWriteMetadata.Instance)
             .Audited("deleted activity");

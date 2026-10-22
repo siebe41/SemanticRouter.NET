@@ -99,10 +99,10 @@ public sealed class PublicApiShapeTests
     [Fact]
     public void Converted_records_keep_the_defaults_their_parameters_had()
     {
+        // The one converted member whose default is neither zero nor null, so dropping it fails here. A struct's
+        // initializers run only through a constructor: default(ActivityPurgeResult) skips them and is not Complete.
         new ActivityPurgeResult { Removed = 1 }.Complete.Should().BeTrue();
-        new ToolDefinition { Name = "Read", InputSchemaJson = "{}" }.Kind.Should().Be(ToolKind.Function);
-        new UsageTotals { Requests = 0, InputTokens = 0, OutputTokens = 0, CacheReadTokens = 0, CacheWriteTokens = 0, CostUsd = 0, ReferenceCostUsd = 0 }
-            .Should().Be(UsageTotals.Zero);
+        default(ActivityPurgeResult).Complete.Should().BeFalse();
     }
 
     // The compiler generates Deconstruct only for a positional record's primary constructor.
