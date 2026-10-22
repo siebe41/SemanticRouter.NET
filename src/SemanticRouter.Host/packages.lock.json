@@ -63,14 +63,14 @@
       "semanticrouter.aspnetcore": {
         "type": "Project",
         "dependencies": {
-          "SemanticRouter.Core": "[0.1.0, )"
+          "SemanticRouter.Core": "[0.6.0, )"
         }
       },
       "semanticrouter.connectors.copilot": {
         "type": "Project",
         "dependencies": {
-          "GitHub.Copilot.SDK": "[1.0.22, 1.1.0)",
-          "SemanticRouter.AspNetCore": "[0.1.0, )"
+          "GitHub.Copilot.SDK": "[1.0.23, 1.1.0)",
+          "SemanticRouter.AspNetCore": "[0.6.0, )"
         }
       },
       "semanticrouter.core": {
@@ -81,30 +81,30 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.31.0, )",
           "Microsoft.ML.Tokenizers": "[2.0.1, )",
-          "SemanticRouter.AspNetCore": "[0.1.0, )"
+          "SemanticRouter.AspNetCore": "[0.6.0, )"
         }
       },
       "semanticrouter.hosting": {
         "type": "Project",
         "dependencies": {
-          "SemanticRouter.AspNetCore": "[0.1.0, )",
-          "SemanticRouter.Connectors.Copilot": "[0.1.0, )",
-          "SemanticRouter.Embeddings.Onnx": "[0.1.0, )",
-          "SemanticRouter.Storage.Sqlite": "[0.1.0, )"
+          "SemanticRouter.AspNetCore": "[0.6.0, )",
+          "SemanticRouter.Connectors.Copilot": "[0.6.0, )",
+          "SemanticRouter.Embeddings.Onnx": "[0.6.0, )",
+          "SemanticRouter.Storage.Sqlite": "[0.6.0, )"
         }
       },
       "semanticrouter.storage.sqlite": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.13, )",
-          "SemanticRouter.AspNetCore": "[0.1.0, )"
+          "SemanticRouter.AspNetCore": "[0.6.0, )"
         }
       },
       "GitHub.Copilot.SDK": {
         "type": "CentralTransitive",
-        "requested": "[1.0.22, 1.1.0)",
-        "resolved": "1.0.22",
-        "contentHash": "SDsgUS1YnxPgE3xVxs+eq+wTEY9K61CVpgWifCqdPVcGFPQs2mM/EIJ5UOwzVHMXYF5POvQBJo7ptqG4aqQ7lg==",
+        "requested": "[1.0.23, 1.1.0)",
+        "resolved": "1.0.23",
+        "contentHash": "2pt/q3VezCOVDFTMavsCjsU6bvj5obDgQQNxEqs5nMsnI9WmzFev1VSra+6Z9Ys/kGItuH3DxbtZIp7AG1Y8OA==",
         "dependencies": {
           "Microsoft.Extensions.AI.Abstractions": "10.2.0"
         }
