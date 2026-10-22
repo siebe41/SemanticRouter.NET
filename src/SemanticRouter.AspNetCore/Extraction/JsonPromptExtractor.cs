@@ -49,6 +49,11 @@ public sealed class JsonPromptExtractor : IPromptExtractor
     /// person asked.
     /// </param>
     /// <param name="injectedTags">More tags whose blocks are removed, besides the built-in ones.</param>
+    /// <remarks>
+    /// In 0.5.0 these parameters were optional. A call that named only <paramref name="injectedTags"/> or
+    /// <paramref name="stripSystemReminders"/> now passes every argument before it too:
+    /// <c>new JsonPromptExtractor(PromptMessageSelection.LastUserMessage, true, tags)</c> keeps the other defaults.
+    /// </remarks>
     public JsonPromptExtractor(PromptMessageSelection selection, bool stripSystemReminders, IEnumerable<string>? injectedTags)
     {
         _selection = selection;
