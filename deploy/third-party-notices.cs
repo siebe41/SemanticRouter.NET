@@ -251,9 +251,23 @@ if (packageVersions.TryGetValue("Velopack", out var velopackVersion))
             continue;
         }
 
+        // MIT, BSD, ISC and Unicode-3.0 ask for the holder's copyright notice in binary copies too. A crate without one
+        // is listed under another licence of its OR when one doesn't ask for it, and otherwise needs its own licence
+        // file read: "copyrightFrom" names the file the script read, and says the file names nobody when "copyright"
+        // is missing.
+        var (copyright, copyrightFrom) = (Value("copyright"), Value("copyrightFrom"));
         var numbers = new SortedSet<int>();
-        AddStandardTexts(expression, false, $"{name} {version}", numbers);
-        crates.Add(new Entry($"{name} {version}", expression, Value("copyright"), $"https://crates.io/crates/{name}/{version}", null, [.. numbers]));
+        var ids = AddStandardTexts(expression, false, $"{name} {version}", numbers, hasCopyright: copyright is not null);
+        if (copyright is null && copyrightFrom is null && ids?.FirstOrDefault(NamesHolder) is { } holderLicence)
+        {
+            problems.Add($"{name} {version} (in deploy/third-party/velopack-crates.json) has no copyright line, which {holderLicence} requires: add the crate's repository to COPYRIGHTS in deploy/third-party/velopack-crates.py and rerun that");
+        }
+
+        var licence = ids is not null && !ids.SequenceEqual(RequiredLicences(expression, hasCopyright: true)!)
+            ? $"{expression}, used here under {string.Join(" AND ", ids)}"
+            : expression;
+        crates.Add(new Entry($"{name} {version}", licence, copyright ?? (copyrightFrom is null ? null : $"none named in its licence file ({copyrightFrom})"),
+            $"https://crates.io/crates/{name}/{version}", null, [.. numbers]));
     }
 }
 
@@ -297,7 +311,7 @@ if (components.Count > 0)
 if (crates.Count > 0)
 {
     text.Append('\n').Append(rule).Append('\n');
-    text.Append("\nRust crates in Velopack's native binaries (sources on crates.io; copyright lines as ClearlyDefined found them)\n");
+    text.Append("\nRust crates in Velopack's native binaries (sources on crates.io; copyright lines as ClearlyDefined or the crate's licence file give them)\n");
     AppendEntries(crates);
 }
 
@@ -372,24 +386,24 @@ int? AddText(string raw, string carrier, string heading = "")
 
 // The standard text of each licence the expression requires, unless the entry carries the text of its only licence
 // itself (a package's own LICENSE file, which also holds its copyright line). The standard texts leave the copyright
-// line out: the entry's Copyright says who holds it.
-void AddStandardTexts(string? expression, bool hasLicenceText, string carrier, SortedSet<int> numbers)
+// line out: the entry's Copyright says who holds it. Returns the licences required, or null.
+List<string>? AddStandardTexts(string? expression, bool hasLicenceText, string carrier, SortedSet<int> numbers, bool hasCopyright = true)
 {
     if (expression is null)
     {
-        return;
+        return null;
     }
 
-    var ids = RequiredLicences(expression);
+    var ids = RequiredLicences(expression, hasCopyright);
     if (ids is null)
     {
         problems.Add($"{carrier}: \"{expression}\" is not an SPDX expression this generator reads");
-        return;
+        return null;
     }
 
     if (hasLicenceText && ids.Count == 1)
     {
-        return;
+        return ids;
     }
 
     foreach (var id in ids)
@@ -404,6 +418,8 @@ void AddStandardTexts(string? expression, bool hasLicenceText, string carrier, S
             numbers.Add(number);
         }
     }
+
+    return ids;
 }
 
 // "{Velopack}" in a component's version is the version of the Velopack package.
@@ -443,8 +459,9 @@ static string Stem(string name) =>
     Path.GetFileNameWithoutExtension(name).Replace("-", "", StringComparison.Ordinal).Replace("_", "", StringComparison.Ordinal);
 
 // The licence ids whose terms the recipient takes: all of an AND, the first of an OR (the one this distribution is
-// under), and a WITH's licence and exception. Null when the expression does not parse.
-static List<string>? RequiredLicences(string expression)
+// under), and a WITH's licence and exception. Without a copyright line, an OR's first choice that requires one gives way
+// to the first that doesn't (MIT OR Apache-2.0 is used under Apache-2.0). Null when the expression does not parse.
+static List<string>? RequiredLicences(string expression, bool hasCopyright)
 {
     var tokens = expression.Replace("(", " ( ", StringComparison.Ordinal).Replace(")", " ) ", StringComparison.Ordinal)
         .Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -465,16 +482,23 @@ static List<string>? RequiredLicences(string expression)
 
     List<string>? Or()
     {
-        var first = And();
-        while (first is not null && Next("OR"))
+        if (And() is not { } first)
         {
-            if (And() is null)
+            return null;
+        }
+
+        var choices = new List<List<string>> { first };
+        while (Next("OR"))
+        {
+            if (And() is not { } choice)
             {
                 return null;
             }
+
+            choices.Add(choice);
         }
 
-        return first;
+        return hasCopyright || !first.Any(NamesHolder) ? first : choices.FirstOrDefault(c => !c.Any(NamesHolder)) ?? first;
     }
 
     List<string>? And()
@@ -515,6 +539,11 @@ static List<string>? RequiredLicences(string expression)
         && !token.Equals("OR", StringComparison.OrdinalIgnoreCase)
         && !token.Equals("WITH", StringComparison.OrdinalIgnoreCase);
 }
+
+// Licences whose terms ask binary copies to carry the holder's copyright notice. Apache-2.0 asks for the licence and
+// any NOTICE file, zlib for an unaltered notice in source copies only, and 0BSD, CC0, the Unlicense and
+// CDLA-Permissive-2.0 for no notice at all.
+static bool NamesHolder(string id) => id is "MIT" or "BSD-2-Clause" or "BSD-3-Clause" or "ISC" or "Unicode-3.0" or "Unicode-DFS-2016";
 
 // Line endings, a byte-order mark and trailing whitespace differ between packages and say nothing.
 static string Normalize(string content) =>

@@ -48,7 +48,8 @@
       "licence": "MIT OR Apache-2.0",
       "copyright": "Copyright (c) The Rust Project Contributors",
       "project": "https://github.com/rust-lang/rust",
-      "with": "Velopack"
+      "with": "Velopack",
+      "addedBy": "vpk"
     },
     {
       "name": "AppImage type2-runtime",

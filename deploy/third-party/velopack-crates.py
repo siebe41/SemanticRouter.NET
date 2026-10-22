@@ -17,7 +17,10 @@ It needs Python 3.11 or later and a logged-in `gh`, and no Rust toolchain: every
 - each crate's licence and copyright from GitHub's dependency graph SBOM of velopack/velopack (ClearlyDefined's data
   about the crate's published sources). That SBOM describes Velopack's default branch, not the tag: a crate version it
   does not have takes the entry of the nearest version of the same crate it has, and says so in "metadataFrom". A
-  crate ClearlyDefined has no licence for takes it from the LICENCES table below, read by hand ("licenceFrom").
+  crate ClearlyDefined has no licence for takes it from the LICENCES table below, read by hand ("licenceFrom");
+- the copyright lines of a crate ClearlyDefined has none for, from the licence files in its repository (the COPYRIGHTS
+  table below, at the default branch's current commit, "copyrightFrom"). deploy/third-party-notices.cs needs them for a
+  crate whose licence asks for the holder's notice (MIT, BSD, ISC, Unicode-3.0) and has no alternative that doesn't.
 
 Cargo.lock lists every optional dependency some workspace member enables, so the graph is a superset of what
 `cargo build -p velopack_bins` links (the Windows build is `--workspace`, which unifies features the same way).
@@ -29,6 +32,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from urllib.parse import unquote
 
 REPOSITORY = "velopack/velopack"
 OUTPUT = Path(__file__).resolve().parent / "velopack-crates.json"
@@ -74,6 +78,68 @@ LICENCES = {
     "widestring": ("MIT OR Apache-2.0", "https://github.com/VoidStarKat/widestring-rs/blob/main/Cargo.toml"),
 }
 
+# Where the licence files of a crate ClearlyDefined found no copyright line for are: "owner/repository/directory", the
+# crate's directory in its repository (the repository's root when the directory has no licence file of its own). Only
+# crates that need it are here: deploy/third-party-notices.cs names any other.
+COPYRIGHTS = {
+    "av-scenechange": "rust-av/av-scenechange",
+    "av1-grain": "rust-av/av1-grain",
+    "block2": "madsmtm/objc2/crates/block2",
+    "drm": "Smithay/drm-rs",
+    "drm-ffi": "Smithay/drm-rs/drm-ffi",
+    "drm-fourcc": "danielzfranklin/drm-fourcc-rs",
+    "drm-sys": "Smithay/drm-rs/drm-ffi/drm-sys",
+    "endi": "zeenix/endi",
+    "exr": "johannesvollmer/exrs",
+    "fontconfig-parser": "Riey/fontconfig-parser",
+    "harfrust": "harfbuzz/harfrust",
+    "mina": "focustense/mina",
+    "mina_core": "focustense/mina/core",
+    "mina_macros": "focustense/mina/macros",
+    "objc2": "madsmtm/objc2/crates/objc2",
+    "objc2-encode": "madsmtm/objc2/crates/objc2-encode",
+    "objc2-foundation": "madsmtm/objc2/framework-crates/objc2-foundation",
+    "progress-streams": "pop-os/progress-streams",
+    "pulp-wasm-simd-flag": "sarah-quinones/pulp",
+    "rav1e": "xiph/rav1e",
+    "rustls-webpki": "rustls/webpki",
+    "simd_helpers": "lu-zero/simd_helpers",
+    "simple-stopwatch": "huwb/rust-simple-stopwatch",
+    "synstructure": "mystor/synstructure",
+    "unicode-ident": "dtolnay/unicode-ident",
+    "v_frame": "rust-av/v_frame",
+    "wayland-backend": "Smithay/wayland-rs/wayland-backend",
+    "wayland-protocols": "Smithay/wayland-rs/wayland-protocols",
+    "wayland-protocols-wlr": "Smithay/wayland-rs/wayland-protocols-wlr",
+    "webview2-com-sys": "wravery/webview2-rs/crates/bindings",
+    "winnow": "winnow-rs/winnow",
+    "x11-dl": "AltF02/x11-rs/x11-dl",
+    "xcursor": "esposm03/xcursor-rs",
+    "xdialog": "velopack/xdialog-rs",
+    "xml": "kornelski/xml-rs",
+    "y4m": "image-rs/y4m",
+    "yoke-derive": "unicode-org/icu4x/utils/yoke/derive",
+    "zbus_macros": "z-galaxy/zbus/zbus_macros",
+    # zbus_names and the zvariant crates below have left the zbus repository since: the root licence is theirs.
+    "zbus_names": "z-galaxy/zbus",
+    "zcheapstr": "z-galaxy/zcheapstr",
+    "zerofrom-derive": "unicode-org/icu4x/utils/zerofrom/derive",
+    "zerovec-derive": "unicode-org/icu4x/utils/zerovec/derive",
+    "zip": "zip-rs/zip2",
+    "zmij": "dtolnay/zmij",
+    "zstd": "gyscos/zstd-rs",
+    "zstd-safe": "gyscos/zstd-rs/zstd-safe",
+    "zstd-sys": "gyscos/zstd-rs/zstd-safe/zstd-sys",
+    "zvariant": "z-galaxy/zbus",
+    "zvariant_derive": "z-galaxy/zbus",
+    "zvariant_utils": "z-galaxy/zbus",
+}
+
+# A copyright line in a licence file: "Copyright", then a year, "(c)" or "©". Template lines ("Copyright [yyyy] [name of
+# copyright owner]") are skipped, and the licence's own words ("copyright notice", "COPYRIGHT AND PERMISSION NOTICE")
+# don't match.
+COPYRIGHT_LINE = re.compile(r"Copyright\s*(?:\([cC]\)|©|\d{4}).*")
+
 
 def gh(path, raw=True):
     command = ["gh", "api", path] + (["-H", "Accept: application/vnd.github.raw"] if raw else [])
@@ -83,6 +149,43 @@ def gh(path, raw=True):
         if result.returncode == 0:
             return result.stdout.decode()
     raise RuntimeError(f"gh api {path}: {result.stderr.decode(errors='replace').strip()}")
+
+
+def text(path):
+    """A raw file through gh api, as UTF-8 or else Windows-1252 (a few licence files have a Latin-1 ©)."""
+    for _ in range(3):
+        result = subprocess.run(["gh", "api", path, "-H", "Accept: application/vnd.github.raw"], capture_output=True, check=False)
+        if result.returncode == 0:
+            try:
+                return result.stdout.decode("utf-8")
+            except UnicodeDecodeError:
+                return result.stdout.decode("cp1252")
+    raise RuntimeError(f"gh api {path}: {result.stderr.decode(errors='replace').strip()}")
+
+
+def licence_copyright(where):
+    """(the copyright lines or None, the licence files' URLs) from a crate's licence files in its repository."""
+    owner, name, *directory = where.split("/")
+    repository = f"{owner}/{name}"
+    commit = json.loads(gh(f"repos/{repository}/commits/HEAD", raw=False))["sha"]
+    files = []
+    for path in ["/".join(directory), ""] if directory else [""]:
+        listing = json.loads(gh(f"repos/{repository}/contents/{path}?ref={commit}", raw=False))
+        files = [e["path"] for e in listing if e["type"] == "file" and re.match(r"(?i)(LICEN[CS]E|COPYING)", e["name"])]
+        if files:
+            break
+    if not files:
+        raise RuntimeError(f"{where}: no licence file")
+    lines = []
+    for path in files:
+        for line in text(f"repos/{repository}/contents/{path}?ref={commit}").splitlines():
+            match = COPYRIGHT_LINE.search(line)
+            if match and not re.search(r"[\[<{](yyyy|year|name|owner)", line, re.IGNORECASE):
+                copyright = match[0].rstrip(" */#").strip()
+                if copyright not in lines:
+                    lines.append(copyright)
+    urls = ", ".join(f"https://github.com/{repository}/blob/{commit}/{path}" for path in files)
+    return ", ".join(lines) or None, urls
 
 
 def target_values(runtime, target):
@@ -215,7 +318,8 @@ def main():
         for reference in package.get("externalRefs", []):
             match = re.fullmatch(r"pkg:cargo/([^@]+)@(.+)", reference.get("referenceLocator", ""))
             if match:
-                metadata[(match[1], match[2])] = package
+                # A purl percent-encodes its parts: zstd-sys 2.1.0+zstd.1.5.7 is "2.1.0%2Bzstd.1.5.7".
+                metadata[(unquote(match[1]), unquote(match[2]))] = package
 
     crates = []
     for (name, version), runtimes in sorted(runtimes_of.items(), key=lambda item: (item[0][0].lower(), item[0][1])):
@@ -234,6 +338,10 @@ def main():
             crate["metadataFrom"] = f"{source[0]} {source[1]}"
         if not crate["licence"] and name in LICENCES:
             crate["licence"], crate["licenceFrom"] = LICENCES[name]
+        if "copyright" not in crate and name in COPYRIGHTS:
+            copyright, crate["copyrightFrom"] = licence_copyright(COPYRIGHTS[name])
+            if copyright:
+                crate["copyright"] = copyright
         crate["runtimes"] = sorted(runtimes)
         crates.append(crate)
 
@@ -243,7 +351,9 @@ def main():
             "into Velopack's native binaries at the tag below, with the runtime identifier prefixes they ship under.",
             "deploy/third-party-notices.cs lists them with the Velopack package of the same version. Licence and",
             "copyright are ClearlyDefined's, through GitHub's dependency graph ('metadataFrom' when that had another",
-            "version of the crate), or the licence was read by hand ('licenceFrom', the LICENCES table in the script).",
+            "version of the crate), or the licence was read by hand ('licenceFrom', the LICENCES table in the script),",
+            "or the copyright lines are from the crate's licence files ('copyrightFrom', the COPYRIGHTS table; without",
+            "'copyright', those files name no holder).",
             "A null licence is unknown: add the crate to that table, or the generator refuses the file.",
         ],
         "velopack": tag,
