@@ -570,7 +570,7 @@ Similarity scales differ between embedding models. These are starting points. Ca
 
 ### Classification latency
 
-Classifying a prompt is one embedding plus a dot product per utterance. Measured on the starting routes (119 utterances) and the 116-prompt sample set that `init` writes, with the classification cache off so every prompt is embedded. The machine had 4 logical CPUs and ran Linux. Reproduce with `dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks`; add `-- --remote http://localhost:11434 nomic-embed-text` to measure an embedding server.
+Classifying a prompt is one embedding plus a dot product per utterance. The table measures the classifier on its own: the benchmark calls it directly, one prompt at a time, with no HTTP request, state or other load around it. Measured on the starting routes (119 utterances) and the 116-prompt sample set that `init` writes, with the classification cache off so every prompt is embedded. The machine had 4 logical CPUs and ran Linux. Reproduce with `dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks`; add `-- --remote http://localhost:11434 nomic-embed-text` to measure an embedding server.
 
 | Embeddings | Index warm-up | Classify p50 | Classify p95 | Right on the sample set |
 |---|---|---|---|---|
@@ -578,7 +578,7 @@ Classifying a prompt is one embedding plus a dot product per utterance. Measured
 | ONNX `all-MiniLM-L6-v2` | 226 ms | 1.9 ms | 2.5 ms | 111/116 at 0.40 |
 | ONNX `bge-small-en-v1.5` | 389 ms | 3.2 ms | 3.9 ms | 112/116 at 0.60 |
 
-An embedding server adds a network round trip and its own inference time to every prompt. A prompt the cache has seen recently costs no embedding at all.
+Inside a running router, with requests and state sharing the cores, the same classification costs more: the reliability audit ([#225](https://github.com/siebe41/SemanticRouter.NET/issues/225)) measured a classification that missed the cache at 0.14 ms with Hashing and 3.7 ms with ONNX `all-MiniLM-L6-v2`, in the `semantic-router` tool at one client, on 4 vCPUs shared with the load generator and a stub backend. An embedding server adds a network round trip and its own inference time to every prompt. A prompt the cache has seen recently costs no embedding at all.
 
 ### Gateway overhead
 
@@ -589,6 +589,8 @@ What the router itself adds, with no model behind it: the `semantic-router` tool
 | 1 | 1,037 | 0.8 / 1.7 / 2.9 ms | 1,224, 2.3 ms |
 | 8 | 6,124 | 1.1 / 2.3 / 5.7 ms | 8,256, 4.5 ms |
 | 32 | 7,847 | 3.5 / 7.5 / 12.7 ms | 10,583, 11.4 ms |
+
+The benchmark always runs with Hashing embeddings, so these rows include no embedding model's cost. With an embedding model, add its classification time inside the router to every request that misses the cache: 3.7 ms for ONNX `all-MiniLM-L6-v2` in the measurement above.
 
 ## Production guidance
 

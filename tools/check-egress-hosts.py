@@ -39,11 +39,16 @@ def model_urls():
     urls = []
     # Matches the object initializers (Repository = "...", Revision = "...", ModelFile = "...") in that order.
     pinned = r'Repository = "([\w.-]+/[\w.-]+)",\s*Revision = "([0-9a-f]{40})",\s*ModelFile = "([\w./-]+\.onnx)"'
-    for repository, revision, model_file in re.findall(pinned, source):
+    models = re.findall(pinned, source)
+    for repository, revision, model_file in models:
         base = f"https://huggingface.co/{repository}/resolve/{revision}/"
         urls += [base + model_file, base + "vocab.txt"]
     if not urls:
         sys.exit(f"No pinned models found in {MODELS}")
+    # A model written in another shape would be skipped silently, so every one has to match.
+    declared = source.count("new OnnxModelInfo")
+    if len(models) != declared:
+        sys.exit(f"{MODELS} declares {declared} models but the pattern matched {len(models)}; update the pattern in {__file__}")
     return urls
 
 
