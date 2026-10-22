@@ -11,9 +11,9 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'sem
 
 const PAGES = ['overview', 'live', 'activity', 'usage', 'memory', 'tiers', 'routes', 'routing', 'profiles', 'evaluate', 'learned', 'models', 'connectors', 'embeddings', 'gateway', 'clients', 'service', 'json', 'audit', 'feedback'];
 
-// Closes a double- or single-quoted attribute and opens an <img> whose handler sets a flag. No "." in it, so a name that
-// carries it is still one segment of a data-bind path.
-const X = `"'><img src=x onerror=__xss=1>`;
+// Closes a double- or single-quoted attribute or a <textarea> and opens an <img> whose handler sets a flag. No "." in it,
+// so a name that carries it is still one segment of a data-bind path.
+const X = `"'></textarea><img src=x onerror=__xss=1>`;
 const marked = (s) => s + X;
 
 // As in the other specs: a test fails if the page throws, logs an error (a refused inline handler is one) or asks
@@ -22,10 +22,16 @@ const test = base.extend({
   page: async ({ page, baseURL }, use) => {
     const errors = [];
     const own = new URL(baseURL).origin;
+    // The dashboard's API calls still waiting for an answer, without the Live page's event stream, which never ends.
+    page.inflight = new Set();
+    const settled = (r) => page.inflight.delete(r);
     page.on('request', (r) => {
       const url = r.url();
       if (!url.startsWith('data:') && !url.startsWith('blob:') && new URL(url).origin !== own) errors.push(`request to another host: ${url}`);
+      else if (url.includes('/router/api/') && !url.includes('/router/api/events')) page.inflight.add(r);
     });
+    page.on('requestfinished', settled);
+    page.on('requestfailed', settled);
     page.on('pageerror', (e) => errors.push(`pageerror: ${e.message}`));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
     await page.addInitScript(() => {
@@ -56,9 +62,36 @@ function markedConfig() {
   return c;
 }
 
-test.beforeEach(async ({ request }) => {
+// A connector of each other type, so the Connectors page draws every branch of its form: the Cli and Copilot fields, the
+// Anthropic ones, and the Change / Clear buttons of a key that is set or a reference. Only the page sees them (the router
+// never builds them, so no vendor CLI or Copilot runtime can start); the rest of the configuration is the router's own.
+const EXTRA_CONNECTORS = {
+  [marked('cli')]: { Type: 'Cli', Preset: 'Custom', Executable: X, ToolCalling: 'Prompted', Arguments: [X], QuotaErrorPatterns: [X], EnvironmentVariables: { SR_E2E: X }, RemoveEnvironmentVariables: [X] },
+  [marked('copilot')]: { Type: 'Copilot', Executable: X, HomeDirectory: X },
+  [marked('anthropic')]: { Type: 'Anthropic', BaseAddress: stub, ApiKey: '***', AnthropicVersion: X, Headers: { 'X-E2E': X }, ForwardHeaders: [X] },
+  [marked('reference')]: { Type: 'OpenAICompatible', BaseAddress: stub, ApiKey: '${env:SR_E2E_KEY}' },
+};
+/** Fields of those connectors and the value each must show: a sample of every branch, inputs and textareas. */
+const EXTRA_FIELDS = [
+  [`Connectors.${marked('cli')}.Executable`, X],
+  [`Connectors.${marked('cli')}.Arguments`, X],
+  [`Connectors.${marked('cli')}.EnvironmentVariables`, `SR_E2E=${X}`],
+  [`Connectors.${marked('copilot')}.HomeDirectory`, X],
+  [`Connectors.${marked('anthropic')}.AnthropicVersion`, X],
+  [`Connectors.${marked('anthropic')}.ForwardHeaders`, X],
+];
+
+test.beforeEach(async ({ request, page }) => {
   const reset = await request.put('/router/api/config?persist=false', { data: markedConfig() });
   expect(reset.ok(), await reset.text()).toBeTruthy();
+  await page.route('**/router/api/config', async (r) => {
+    if (r.request().method() !== 'GET') return r.fallback();
+    const json = await (await r.fetch()).json();
+    json.config.Connectors = { ...json.config.Connectors, ...EXTRA_CONNECTORS };
+    await r.fulfill({ json });
+  });
+  // The Add connector menu's look for providers on this machine: slow, and nothing in it comes from this test.
+  await page.route('**/router/api/setup', (r) => r.fulfill({ json: { needed: false, detected: [], presets: [] } }));
   // Activity, Live and Usage: a prompt, a profile and a model name as a gateway client sends them.
   const res = await request.post('/v1/chat/completions', {
     headers: { 'X-Router-Profile': marked('profile') },
@@ -75,6 +108,10 @@ test.afterEach(async ({ request }) => {
 async function open(page, view) {
   await page.goto(`/router#/${view}`);
   await expect(page.locator('#view h1').first()).toBeVisible();
+  // A view that fetches its data draws a placeholder first, and after the first page a hash change keeps the document,
+  // so the load state says nothing: wait for the placeholder to go and for the API calls to be answered.
+  await expect(page.locator('#view'), `#/${view} is still loading`).not.toContainText(/Loading…|Scanning memory sources…/);
+  await expect.poll(() => [...page.inflight].map((r) => r.url()), { message: `#/${view} is still fetching` }).toEqual([]);
 }
 
 async function expandAll(page) {
@@ -101,8 +138,15 @@ test('names and text from the configuration and from gateway clients stay text o
     await expectInert(page, `#/${view}`);
   }
   // The marker is on the pages as text, so the pages above did render it.
+  await open(page, 'usage');
+  await expect(page.locator('#view td b', { hasText: marked('budget') })).toHaveText(marked('budget'));
   await open(page, 'connectors');
   await expect(page.locator('#view .item-head .title').first()).toHaveText(marked('local'));
+  await expandAll(page);
+  const values = await page.locator('#view [data-bind]').evaluateAll((els) => els.map((e) => [e.dataset.bind, e.value]));
+  for (const field of EXTRA_FIELDS) expect(values).toContainEqual(field);
+  const paths = await page.locator('#view [data-action^="secret-"]').evaluateAll((els) => els.map((e) => e.dataset.path));
+  for (const name of [marked('anthropic'), marked('reference')]) expect(paths.filter((p) => p === `Connectors.${name}.ApiKey`)).toHaveLength(2);
   await open(page, 'profiles');
   await expandAll(page);
   const descriptions = await page.locator('#view [data-bind$=".Description"]').evaluateAll((els) => els.map((e) => [e.dataset.bind, e.value]));
@@ -119,12 +163,18 @@ test('an edited field still binds to a connector and a profile whose name needs 
   await open(page, 'connectors');
   await expandAll(page);
   await field(`Connectors.${marked('local')}.RequestPath`).fill('/v2/chat');
+  await field(`Connectors.${marked('cli')}.Executable`).fill('cli-edited');
+  await field(`Connectors.${marked('copilot')}.HomeDirectory`).fill('home-edited');
+  await field(`Connectors.${marked('anthropic')}.AnthropicVersion`).fill('2024-01-01');
   await open(page, 'profiles');
   await expandAll(page);
   await field(`Profiles.${marked('profile')}.Description`).fill('edited');
   // The draft holds both edits under the right names, and the Review dialog shows them as text.
   const draft = await page.evaluate(async () => (await import('/router/js/core.js')).state.config);
   expect(draft.Connectors[marked('local')].RequestPath).toBe('/v2/chat');
+  expect(draft.Connectors[marked('cli')].Executable).toBe('cli-edited');
+  expect(draft.Connectors[marked('copilot')].HomeDirectory).toBe('home-edited');
+  expect(draft.Connectors[marked('anthropic')].AnthropicVersion).toBe('2024-01-01');
   expect(draft.Profiles[marked('profile')].Description).toBe('edited');
   await page.locator('[data-action="draft-review"]').first().click();
   await expect(page.locator('#ask')).toContainText(JSON.stringify(marked('local')));
