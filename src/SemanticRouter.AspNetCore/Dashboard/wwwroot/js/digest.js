@@ -24,7 +24,7 @@ export function noticesCard() {
 export function digestCard() {
   const d = state.digest;
   if (!d) return '';
-  const signals = Object.entries(d.signalsByKind || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${int(v)} ${SIGNALS[k] || h(k)}`).join(', ');
+  const signals = Object.entries(d.signalsByKind || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${int(v)} ${SIGNALS[k] || k}`).join(', ');
   const plan = d.subscriptionValueUsd ? ` · <span title="Not spent: subscription use at the provider's API prices">${usd(d.subscriptionValueUsd)} of subscription use at API prices</span>` : '';
   const reference = metricsOnly() ? 'a reference model on Usage' : '<a href="#/usage" data-action="goto-field" data-view="usage" data-field="Usage.ReferenceModel">set a reference model</a>';
   const saved = d.referenceModel ? `<div class="card stat"><span class="value">${usd(d.savedUsd)}</span><span class="label">saved vs ${h(d.referenceModel)} · spent ${usd(d.costUsd)}${plan}</span></div>`
