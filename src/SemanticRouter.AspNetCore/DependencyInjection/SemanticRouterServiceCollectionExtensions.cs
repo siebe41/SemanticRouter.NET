@@ -39,14 +39,10 @@ public static class SemanticRouterServiceCollectionExtensions
         return AddCore(services);
     }
 
-    /// <summary>Registers prompt routing with the default options, to be configured in code.</summary>
-    public static SemanticRouterBuilder AddSemanticPromptRouting(this IServiceCollection services) =>
-        AddSemanticPromptRouting(services, configure: null);
-
     /// <summary>Registers prompt routing configured in code.</summary>
     public static SemanticRouterBuilder AddSemanticPromptRouting(
         this IServiceCollection services,
-        Action<SemanticRouterOptions>? configure)
+        Action<SemanticRouterOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         if (configure is not null)

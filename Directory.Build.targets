@@ -36,10 +36,11 @@
     listed (RS0016) or a listed one that is gone (RS0017). So every change to the surface is a line in the diff of the
     pull request that makes it, additions included, which package validation does not see. The release moves
     Unshipped into Shipped (docs/releases.md#after-a-release). CONTRIBUTING.md, Public API and package validation.
+    The package's own build targets add both files as AdditionalFiles; adding them here as well gives each project
+    two copies, which the compiler tolerates but makes `dotnet format` skip the RS0016 code fix.
   -->
   <ItemGroup Label="Public API files" Condition="'$(IsPackable)' == 'true' and '$(PackAsTool)' != 'true'">
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
-    <AdditionalFiles Include="PublicAPI.Shipped.txt;PublicAPI.Unshipped.txt" />
   </ItemGroup>
 
   <!--

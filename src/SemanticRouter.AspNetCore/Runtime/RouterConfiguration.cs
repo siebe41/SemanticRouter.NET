@@ -77,14 +77,6 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         EmbeddingProviderOptions embeddings,
         PromptRouterMiddlewareOptions middleware) => Compose(routing, connectors, embeddings, middleware, new UsageOptions());
 
-    /// <summary>Builds a document from separately bound option objects, including the usage section.</summary>
-    public static RouterConfiguration Compose(
-        SemanticRouterOptions routing,
-        IReadOnlyDictionary<string, ConnectorOptions> connectors,
-        EmbeddingProviderOptions embeddings,
-        PromptRouterMiddlewareOptions middleware,
-        UsageOptions usage) => Compose(routing, connectors, embeddings, middleware, usage, memory: null);
-
     /// <summary>Builds a document from separately bound option objects, including the usage and memory sections.</summary>
     public static RouterConfiguration Compose(
         SemanticRouterOptions routing,
@@ -92,7 +84,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         EmbeddingProviderOptions embeddings,
         PromptRouterMiddlewareOptions middleware,
         UsageOptions usage,
-        MemoryOptions? memory) => Compose(routing, connectors, embeddings, middleware, usage, memory, tuning: null);
+        MemoryOptions? memory = null) => Compose(routing, connectors, embeddings, middleware, usage, memory, tuning: null);
 
     /// <summary>Builds a document from separately bound option objects, including the usage, memory and tuning sections.</summary>
     public static RouterConfiguration Compose(

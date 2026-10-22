@@ -15,7 +15,6 @@ public static class OnnxModelDownloader
     /// <returns>The paths of <c>model.onnx</c> and <c>vocab.txt</c>.</returns>
     /// <exception cref="InvalidOperationException">A download did not match its checksum.</exception>
     /// <exception cref="HttpRequestException">A download failed.</exception>
-#pragma warning disable RS0026 // The optional parameter of both overloads is the trailing CancellationToken, as is usual for async methods.
     public static Task<(string ModelFile, string VocabFile)> EnsureAsync(
         OnnxModelInfo model, string modelsDirectory, HttpClient http, CancellationToken cancellationToken = default) =>
         EnsureAsync(model, modelsDirectory, http, downloadRefused: null, cancellationToken);
@@ -28,7 +27,6 @@ public static class OnnxModelDownloader
     /// <exception cref="InvalidOperationException">A download did not match its checksum, or was refused.</exception>
     public static async Task<(string ModelFile, string VocabFile)> EnsureAsync(
         OnnxModelInfo model, string modelsDirectory, HttpClient http, string? downloadRefused, CancellationToken cancellationToken = default)
-#pragma warning restore RS0026
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentException.ThrowIfNullOrWhiteSpace(modelsDirectory);
