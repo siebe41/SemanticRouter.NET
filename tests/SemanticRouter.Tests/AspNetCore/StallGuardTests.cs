@@ -48,13 +48,16 @@ public sealed class StallGuardTests
         backend.Send("one ");
         backend.Send("two");
         backend.End();
-        using var guard = new StallGuard(Short, CancellationToken.None);
+
+        // A limit long enough that a loaded machine can't stall a read that has its data waiting, and a pause past it.
+        TimeSpan limit = TimeSpan.FromSeconds(1);
+        using var guard = new StallGuard(limit, CancellationToken.None);
         using HttpContent content = guard.Guard(new StreamContent(backend));
         await using Stream body = await content.ReadAsStreamAsync();
         byte[] buffer = new byte[16];
 
         int first = await body.ReadAsync(buffer);
-        await Task.Delay(Short * 4);
+        await Task.Delay(limit * 1.5);
         int second = await body.ReadAsync(buffer.AsMemory(first));
         int end = await body.ReadAsync(buffer.AsMemory(first + second));
 

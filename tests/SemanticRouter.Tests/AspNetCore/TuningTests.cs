@@ -248,9 +248,8 @@ public sealed class TuningTests : RouterHostTest
     [Fact]
     public async Task A_change_an_hour_old_lists_its_effect_on_the_decisions_it_touches_before_and_after()
     {
-        // The changes are made three hours ago; the decisions around them are written with their own times.
+        // The changes are made, then the clock moves on three hours; the decisions around them are written with their own times.
         var time = new ManualTimeProvider();
-        time.Advance(DateTimeOffset.UtcNow.AddHours(-3) - time.GetUtcNow());
         HttpClient client = await StartTunedAsync(time: time);
         await RunAsync(client);
         DateTimeOffset changed = time.GetUtcNow();
@@ -274,10 +273,12 @@ public sealed class TuningTests : RouterHostTest
         Judged(Decision(TimeSpan.FromHours(-1), "smalltalk"));
         Decision(TimeSpan.FromHours(-1), "reasoning");
         Judged(Decision(TimeSpan.FromHours(1), "smalltalk", learned: 1));
-        Judged(Decision(TimeSpan.FromHours(1), "reasoning", learned: 2));
+        Judged(Decision(TimeSpan.FromHours(1), "smalltalk", learned: 2)); // rerouted away from reasoning by its raised threshold
+        Decision(TimeSpan.FromHours(2), "reasoning");
         Decision(TimeSpan.FromHours(1), null);
         Decision(TimeSpan.FromHours(1), "smalltalk", continuation: true);  // not a routing decision
         Decision(TimeSpan.FromHours(1), null, reason: RoutingReason.ModelOverride);
+        time.Advance(TimeSpan.FromHours(3));
 
         JsonElement[] changes = Changes(await JsonOf(await client.GetAsync("/router/api/tuning")));
 
@@ -285,8 +286,8 @@ public sealed class TuningTests : RouterHostTest
         JsonElement route = changes.Single(c => c.GetProperty("id").GetInt64() == 2);
         threshold.GetProperty("kind").GetString().Should().Be("DefaultThreshold");
         route.GetProperty("route").GetString().Should().Be("reasoning");
-        Effect(threshold).Should().Be((3, 2, 1, 3, 2, 1), "the default threshold touches every decision");
-        Effect(route).Should().Be((3, 1, 0, 1, 1, 1), "a route's threshold touches that route's decisions and those it rerouted");
+        Effect(threshold).Should().Be((3, 2, 1, 4, 2, 1), "the default threshold touches every decision");
+        Effect(route).Should().Be((3, 1, 0, 2, 1, 1), "a route's threshold touches that route's decisions and those it rerouted");
 
         static (int, int, int, int, int, int) Effect(JsonElement change)
         {

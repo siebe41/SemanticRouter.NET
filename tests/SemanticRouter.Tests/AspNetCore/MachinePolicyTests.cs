@@ -110,7 +110,7 @@ public sealed class MachinePolicyTests : RouterHostTest
         });
 
         root["Qword"]!.GetValue<long>().Should().Be(5_000_000_000L);
-        root["Binary"].Should().BeNull("a binary value is not a setting");
+        root["Binary"].Should().BeNull("a binary value is not a setting: null and absent both leave it unset");
         root["Missing"].Should().BeNull();
         root["Switch"]!.GetValue<bool>().Should().BeTrue();
         root["Object"]!["Mode"]!.GetValue<string>().Should().Be("Off");

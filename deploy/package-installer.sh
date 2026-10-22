@@ -72,8 +72,11 @@ case "$rid" in
     fi
     ;;
   osx-*)
+    # Our entitlements, not vpk's default set, which also allows DYLD_* variables and unsigned libraries
+    # (docs/desktop.md#signing, checked by macos-entitlements-check.sh).
     if [ -n "${APPLE_SIGN_APP_IDENTITY:-}" ]; then
       signing=(--signAppIdentity "$APPLE_SIGN_APP_IDENTITY" --signInstallIdentity "$APPLE_SIGN_INSTALL_IDENTITY"
+        --signEntitlements "$root/deploy/macos/SemanticRouter.entitlements"
         --notaryProfile "$APPLE_NOTARY_PROFILE" --keychain "$APPLE_KEYCHAIN")
     fi
     ;;
@@ -106,6 +109,7 @@ case "$rid" in
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>SemanticRouter quits itself to install an update.</string>
 </dict>
 </plist>
 PLIST
