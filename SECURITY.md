@@ -33,7 +33,7 @@ Report it privately through GitHub's private vulnerability reporting: on the rep
 - how to reproduce it, with the configuration involved (replace real keys with placeholders);
 - what an attacker gains, and from where (another process on the same machine, a web page in a browser, another machine on the network).
 
-Replies come in the advisory. Once a fix is released, the advisory is published, with credit to the reporter unless you ask otherwise.
+Replies come in the advisory, or by email if you reported by email. Once a fix is released, the advisory is published, with credit to the reporter unless you ask otherwise; an email reporter is credited by name in the advisory text.
 
 ## Response targets
 
