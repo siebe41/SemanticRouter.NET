@@ -38,7 +38,9 @@ on:
 # and no job that builds holds one (deploy/workflow-secrets-check.sh, which CI runs). Every publishing job runs in the
 # `release` environment, so the repository owner can require an approval under Settings > Environments (and restrict it
 # to `main` and v* tags: cut-release.yml runs there from main). Publishing to nuget.org needs the `NUGET_USER` variable
-# there (see the nuget job).
+# there (see the nuget job). installer-windows runs in an environment of its own, `windows-signing`, because the OIDC
+# token of a job there is what Azure accepts for signing: the other id-token jobs, in `release`, cannot sign
+# (docs/desktop.md#signing-in-to-azure).
 permissions:
   contents: read
 
@@ -650,7 +652,10 @@ jobs:
   # the update feeds are public only when the publish job publishes the release. Each secret goes to the steps that use
   # it, not to the job (deploy/workflow-secrets-check.sh): the token to the steps that fetch the previous release and
   # upload, the signing credentials to the signing setup. vpk is installed before either, so its restore never runs
-  # next to them; Windows signs with an Azure login by OIDC, which leaves no secret to steal.
+  # next to them. Windows signs with an Azure login by OIDC, so no Azure secret is stored; but id-token: write is
+  # job-wide, so every step of installer-windows, the vpk install included, could ask for the token that signs. That
+  # job therefore runs only vpk, pinned actions and this repository's scripts, in the windows-signing environment that
+  # no other job uses, and logs out of Azure as soon as it has signed.
   installers:
     needs: [ desktop, installer-build ]
     runs-on: ubuntu-latest
@@ -702,12 +707,13 @@ jobs:
 
   installer-windows:
     needs: [ packages, desktop, installer-build ]
-    environment: release
+    # Not `release`: the federated credential trusts this environment's OIDC token only (docs/desktop.md#signing-in-to-azure).
+    environment: windows-signing
     runs-on: windows-latest
     permissions:
       contents: write
       # For the Azure login: the job's GitHub OIDC token, which Azure exchanges for a short-lived access token under the
-      # app registration's federated credential (docs/desktop.md#signing).
+      # app registration's federated credential (docs/desktop.md#signing). Every step of the job can ask for it.
       id-token: write
     env:
       DOTNET_NOLOGO: true
@@ -767,6 +773,12 @@ jobs:
         run: |
           mkdir -p published && tar -C published -xzf publish-win-x64.tar.gz
           PUBLISH_DIR=published deploy/package-installer.sh win-x64 "${GITHUB_REF_NAME#v}" installers/win-x64
+
+      # Signed: nothing after this needs the Azure login, so it ends here, not at the end of the job.
+      - name: Azure logout
+        if: always() && env.SIGNING == 'signed'
+        shell: bash
+        run: az logout || az account clear
 
       # A release meant to be signed uploads nothing whose signature does not check out.
       - name: Check the signature

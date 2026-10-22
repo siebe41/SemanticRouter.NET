@@ -14,6 +14,8 @@
 # Needs `vpk` (dotnet tool install -g vpk). With VPK_PREVIOUS_FROM=<repository url> (and GITHUB_TOKEN), the previous
 # release's package is downloaded first so a delta update is built. With PUBLISH_DIR=<dir>, the app already published
 # there (deploy/publish-desktop.sh) is packaged and nothing is built: the release signs in a job that builds nothing.
+# On GitHub Actions, it refuses to build while a token or a signing setting is in its environment (GITHUB_TOKEN,
+# AZURE_SIGN_METADATA, AZURE_CLIENT_SECRET, APPLE_*): there, build in a job without them and pass PUBLISH_DIR.
 #
 # Signing, when configured (unsigned otherwise):
 #   Windows (on Windows): AZURE_SIGN_METADATA=<metadata.json> for Azure Trusted Signing; vpk finds the Azure
@@ -33,6 +35,14 @@ trap 'rm -rf "$work"' EXIT
 if [ -n "${PUBLISH_DIR:-}" ]; then
   publish="$(cd "$PUBLISH_DIR" && pwd)"
 else
+  if [ "${GITHUB_ACTIONS:-}" = true ]; then
+    for name in GITHUB_TOKEN AZURE_SIGN_METADATA AZURE_CLIENT_SECRET APPLE_SIGN_APP_IDENTITY APPLE_SIGN_INSTALL_IDENTITY       APPLE_NOTARY_PROFILE APPLE_KEYCHAIN; do
+      if [ -n "${!name:-}" ]; then
+        echo "::error::deploy/package-installer.sh would build the app (no PUBLISH_DIR) with $name in its environment. Publish in a job without secrets and pass PUBLISH_DIR (docs/desktop.md#signing)." >&2
+        exit 1
+      fi
+    done
+  fi
   publish="$work/publish"
   "$root/deploy/publish-desktop.sh" "$rid" "$version" "$publish"
 fi

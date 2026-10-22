@@ -22,11 +22,11 @@ The first start is the same as from the archives: the [welcome window](#using-it
 
 ### Signing
 
-The release workflow signs the Windows and macOS installers with these credentials, set as repository secrets and variables (or as secrets and variables of the `release` environment):
+The release workflow signs the Windows and macOS installers with these credentials, set as repository secrets and variables (the macOS ones may instead be secrets and variables of the `release` environment; the Windows ones are read both in `release`, which checks that they are set, and in `windows-signing`, which signs, so keep them at repository level):
 
 | Platform | What it takes | Repository secrets | Repository variables |
 |---|---|---|---|
-| Windows | An [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) account and certificate profile, and an app registration allowed to sign with it (the *Certificate Profile Signer* role on the profile), with a federated credential for this repository's `release` environment instead of a client secret ([below](#signing-in-to-azure)) | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` | `AZURE_SIGNING_ENDPOINT` (e.g. `https://weu.codesigning.azure.net`), `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` |
+| Windows | An [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) account and certificate profile, and an app registration allowed to sign with it (the *Certificate Profile Signer* role on the profile), with a federated credential for this repository's `windows-signing` environment instead of a client secret ([below](#signing-in-to-azure)) | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` | `AZURE_SIGNING_ENDPOINT` (e.g. `https://weu.codesigning.azure.net`), `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` |
 | macOS | An Apple Developer account: the *Developer ID Application* and *Developer ID Installer* certificates (exported as `.p12`, base64) and an app-specific password for notarization | `APPLE_BUILD_CERTIFICATE_BASE64`, `APPLE_INSTALLER_CERTIFICATE_BASE64`, `APPLE_P12_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` | `APPLE_SIGN_APP_IDENTITY`, `APPLE_SIGN_INSTALL_IDENTITY` (the certificates' names, e.g. `Developer ID Application: Ada Lovelace`) |
 
 Signing is required. The release's first job checks, for each platform, whether every secret and variable in its row is set; it sees only whether each one is set, never its value. Then:
@@ -58,12 +58,15 @@ Independently of code signing, every installer, archive and update package has a
 
 #### Signing in to Azure
 
-The Windows job logs in to Azure with [OpenID Connect](https://learn.microsoft.com/entra/workload-id/workload-identity-federation-create-trust): GitHub gives the job a token that names the repository and the `release` environment, Azure exchanges it for an access token that lasts about an hour, and vpk's signing uses that login. No Azure secret is stored, and there is none to rotate or leak. To set it up, on the app registration (**Microsoft Entra ID > App registrations >** the app **> Certificates & secrets > Federated credentials > Add credential**):
+The Windows job logs in to Azure with [OpenID Connect](https://learn.microsoft.com/entra/workload-id/workload-identity-federation-create-trust): GitHub gives the job a token that names the repository and the job's environment, Azure exchanges it for an access token that lasts about an hour, and vpk's signing uses that login. No Azure secret is stored, and there is none to rotate or leak. The job logs out of Azure as soon as it has signed, before it checks the signature and uploads.
 
-- scenario **GitHub Actions deploying Azure resources**, organization `siebe41`, repository `SemanticRouter.NET`, entity type **Environment**, environment `release` (the subject is `repo:siebe41/SemanticRouter.NET:environment:release`; the audience stays `api://AzureADTokenExchange`);
-- `AZURE_TENANT_ID` and `AZURE_CLIENT_ID` stay as they are; delete any `AZURE_CLIENT_SECRET` secret and the app registration's client secret, which nothing uses any more.
+Azure trusts the token by its environment, so the jobs that sign Windows binaries run in an environment of their own, `windows-signing`: release.yml's `installer-windows` and the [signing dry run](releases.md#the-signing-dry-run)'s `windows` job, and no other (`deploy/workflow-secrets-check.sh`, which CI runs, fails a workflow that puts another job there). The other jobs that ask for an OIDC token (`nuget`, `image-sign`, `checksums`) run in `release`, whose token Azure does not accept. Inside `installer-windows` any step could ask for the token, so that job runs only vpk, pinned actions and this repository's scripts. To set it up:
 
-The release and the [signing dry run](releases.md#the-signing-dry-run) both run in the `release` environment, so the one credential covers both. No Azure subscription is needed for the login (`allow-no-subscriptions`); the role on the certificate profile is what allows signing.
+- **Settings > Environments > New environment** `windows-signing`. Under **Deployment branches and tags**, allow only `main` (the dry run) and `v*` tags (the release), as for `release`. A required reviewer there would ask for a second approval in each release; the deployment rule is what keeps a branch's copy of a workflow out.
+- On the app registration (**Microsoft Entra ID > App registrations >** the app **> Certificates & secrets > Federated credentials > Add credential**): scenario **GitHub Actions deploying Azure resources**, organization `siebe41`, repository `SemanticRouter.NET`, entity type **Environment**, environment `windows-signing` (the subject is `repo:siebe41/SemanticRouter.NET:environment:windows-signing`; the audience stays `api://AzureADTokenExchange`). Create none for `release`.
+- `AZURE_TENANT_ID` and `AZURE_CLIENT_ID` stay repository secrets; delete any `AZURE_CLIENT_SECRET` secret and the app registration's client secret, which nothing uses any more.
+
+No Azure subscription is needed for the login (`allow-no-subscriptions`); the role on the certificate profile is what allows signing.
 
 ### Updates
 
