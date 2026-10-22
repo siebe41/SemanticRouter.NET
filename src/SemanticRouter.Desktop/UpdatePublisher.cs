@@ -16,7 +16,7 @@ namespace SemanticRouter.Desktop;
 /// <list type="bullet">
 /// <item>Windows: every executable image in the package (whatever its extension) must have a valid Authenticode
 /// signature (<c>WinVerifyTrust</c>); the main executable and the app's own assemblies (<c>SemanticRouter.*</c>) must be
-/// signed by the publisher, and the rest by the publisher or Microsoft. Every other file must be exactly as the
+/// signed by the publisher, and the rest by the publisher or Microsoft. Every other file of the app must be as the
 /// publisher's signed list of files says (<see cref="UpdateFileList"/>), and the .NET host's files
 /// (<c>*.runtimeconfig.json</c>, <c>*.deps.json</c>) may not point it at code outside the package
 /// (<see cref="HostFileRefuses"/>).</item>

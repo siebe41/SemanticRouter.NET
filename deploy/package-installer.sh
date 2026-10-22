@@ -87,7 +87,7 @@ case "$rid" in
     # A tray app: a Start menu entry, no desktop icon. No portable zip: the zip downloads (package-desktop.sh) stay.
     vpk ${directive[@]+"${directive[@]}"} pack "${common[@]}" --mainExe SemanticRouter.exe --icon "$assets/icon.ico" --shortcuts StartMenuRoot --noPortable \
       ${signing[@]+"${signing[@]}"}
-    # Every file in the package that is not a program or library must be in its signed list (publish-desktop.sh), or
+    # Every file of the app that is not a program or library must be in its signed list (publish-desktop.sh), or
     # an updater with a publisher policy refuses the update (docs/enterprise.md#update-publisher).
     dotnet run --file "$root/deploy/update-file-list.cs" -- check "$out/SemanticRouter-$version-$rid-full.nupkg"
     ;;

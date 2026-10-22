@@ -665,6 +665,30 @@ jobs:
             $line = if ($status -eq 'Valid') { 'signed, signature checked' } else { "**unsigned** ($status)" }
             Add-Content $env:GITHUB_STEP_SUMMARY "Windows installer ``$($file.Name)``: $line"
           }
+          # The list of files (deploy/update-file-list.cs) must be signed with the same certificate as the installer,
+          # or every updater with a publisher policy refuses this release (docs/enterprise.md#update-publisher).
+          # This release's package: the folder also holds the previous release's, downloaded for the delta.
+          $name = "SemanticRouter-$($env:GITHUB_REF_NAME.TrimStart('v'))-win-x64-full.nupkg"
+          $package = @(Get-ChildItem installers/win-x64 -Filter $name)
+          if ($package.Count -ne 1) { Write-Output "::error::No $name in installers/win-x64."; exit 1 }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $list = Join-Path $env:RUNNER_TEMP 'SemanticRouter.Files.dll'
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($package[0].FullName)
+          try {
+            $entry = $zip.GetEntry('lib/app/SemanticRouter.Files.dll')
+            if ($null -eq $entry) { Write-Output "::error::$($package[0].Name) has no lib/app/SemanticRouter.Files.dll."; exit 1 }
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $list, $true)
+          } finally { $zip.Dispose() }
+          $signature = Get-AuthenticodeSignature $list
+          if ($env:SIGNING -eq 'signed') {
+            $installer = (Get-AuthenticodeSignature $setup[0].FullName).SignerCertificate.Subject
+            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -ne $installer) {
+              Write-Output "::error::SemanticRouter.Files.dll in $($package[0].Name) should be signed by $installer, but its signature is $($signature.Status) ($($signature.SignerCertificate.Subject))."
+              exit 1
+            }
+          }
+          $line = if ($signature.Status -eq 'Valid') { 'signed, signature checked' } else { "**unsigned** ($($signature.Status))" }
+          Add-Content $env:GITHUB_STEP_SUMMARY "Windows update's list of files ``SemanticRouter.Files.dll``: $line"
 
       - name: Attach
         shell: bash
