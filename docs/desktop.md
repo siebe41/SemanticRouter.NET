@@ -42,6 +42,16 @@ Until the certificates exist, set the variable `ALLOW_UNSIGNED_RELEASE` to `true
 
 The app is built in jobs that hold no secret and can only read the repository (`installer-build`, `desktop-build`): `deploy/publish-desktop.sh` publishes it on each installer's own OS. The signing jobs download that build and run no `dotnet build` or `publish`, so no package's build code runs next to a signing credential; they only install vpk, which packs, signs and uploads. The macOS job imports the certificates into a temporary keychain and stores a `notarytool` profile, and vpk signs, notarizes and staples the app and the `.pkg`.
 
+On macOS, vpk signs the app with the hardened runtime and the entitlements in `deploy/macos/SemanticRouter.entitlements`. Because it signs with `--deep`, every executable and library in the bundle gets the same entitlements:
+
+| Entitlement | Why the app has it |
+|---|---|
+| `com.apple.security.cs.allow-jit` | The .NET runtime compiles code at run time ([.NET on macOS and notarization](https://learn.microsoft.com/dotnet/core/install/macos-notarization-issues)). |
+| `com.apple.security.cs.allow-unsigned-executable-memory` | Kept from [Microsoft's documented set](https://learn.microsoft.com/dotnet/core/install/macos-notarization-issues) for .NET under the hardened runtime until a signed build shows that `allow-jit` alone is enough. |
+| `com.apple.security.automation.apple-events` | Velopack's updater quits the app with `osascript` before it applies an update. macOS asks the user to allow that the first time, with the `NSAppleEventsUsageDescription` text in the app's `Info.plist` ("SemanticRouter quits itself to install an update."); without that text it denies the event and shows no prompt, so the Info.plist `deploy/package-installer.sh` writes always has it. |
+
+The app does not get vpk's other defaults. `allow-dyld-environment-variables` would let `DYLD_INSERT_LIBRARIES` load code into it. `disable-library-validation` would let it load libraries signed by anyone, and it needs neither: vpk re-signs every native library in the bundle (ONNX Runtime, SkiaSharp, SQLite, Avalonia's) with the same Developer ID, and the app loads nothing from outside it except Apple's system libraries. CI fails when the file grants anything else (`deploy/macos-entitlements-check.sh`), so a new entitlement comes with a line in this table. CI packs unsigned, so that check reads the source: the entitlements file, and that `deploy/package-installer.sh` passes it to vpk and writes the usage string. It does not inspect a signed app.
+
 Locally, `deploy/package-installer.sh` builds and signs in one go with the same settings as environment variables (see the script's header); with `PUBLISH_DIR` it packages an app already published there instead.
 
 Independently of code signing, every installer, archive and update package has a build provenance attestation and a line in the release's `SHA256SUMS`, made after signing, so you can check a download came from this repository's release workflow: see [Verifying a release](releases.md). The release's SBOM and `THIRD-PARTY-NOTICES.txt` cover the app too; the notices also ship next to the executable.
