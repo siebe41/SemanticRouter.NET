@@ -12,7 +12,7 @@
 #   desktop app checks an update with Updates:Publisher (src/SemanticRouter.Desktop/UpdatePublisher.cs).
 #
 # Who signed counts too, by the same rule as UpdatePublisher: the publisher is the certificate that signed the first
-# Setup.exe. The three programs above and the app's own files (SemanticRouter.*) must be signed by it; every other
+# Setup.exe, or any certificate with the same subject (the same names in any order). The three programs above and the app's own files (SemanticRouter.*) must be signed by it; every other
 # executable file by it or by Microsoft (UpdatePublisher.Microsoft), so a valid signature from anyone else fails.
 # The .NET host's unsigned files (*.runtimeconfig.json, *.deps.json), which UpdatePublisher also checks, are not.
 #
@@ -69,7 +69,10 @@ function Get-Problem([string] $path, [bool] $allowMicrosoft) {
         return "$($signature.Status)"
     }
     $signer = $signature.SignerCertificate
-    if ($script:publisher -and $signer.Thumbprint -eq $script:publisher.Thumbprint) {
+    # The same certificate, or one with the same subject: Azure Trusted Signing renews its short-lived certificate
+    # often, so one release can be signed by two, and an administrator's Updates:Publisher names the subject.
+    if ($script:publisher -and ($signer.Thumbprint -eq $script:publisher.Thumbprint -or
+            (Get-Names $signer.SubjectName) -ceq $script:publisherNames)) {
         return $null
     }
     if ($allowMicrosoft -and (Test-Microsoft $signer)) {
@@ -109,6 +112,7 @@ if ($setup.Count -eq 0) {
 # The publisher: whoever signed the (first) installer, which vpk signs with the same certificate as everything else.
 $first = Get-AuthenticodeSignature -LiteralPath $setup[0].FullName
 $script:publisher = if ($first.Status -eq 'Valid') { $first.SignerCertificate } else { $null }
+$script:publisherNames = if ($script:publisher) { Get-Names $script:publisher.SubjectName } else { $null }
 foreach ($file in $setup) {
     Check $file.FullName "Windows installer ``$($file.Name)``"
 }
@@ -136,9 +140,10 @@ try {
     }
 
     # The rest in one line: a self-contained app has a few hundred of them, most signed by Microsoft already. The
-    # app's own (SemanticRouter.*) must be the publisher's; the others may be Microsoft's instead.
+    # app's own (SemanticRouter.*) must be the publisher's; the others may be Microsoft's instead. Only the three
+    # files checked above are left out, by their path: a file with one of their names in a subfolder is checked here.
     $others = @(Get-ChildItem -LiteralPath $app -Recurse -File |
-        Where-Object { $named -notcontains $_.Name -and (Test-ExecutableImage $_.FullName) })
+        Where-Object { $named -notcontains [IO.Path]::GetRelativePath($app, $_.FullName) -and (Test-ExecutableImage $_.FullName) })
     $refused = @(foreach ($file in $others) {
             $own = $file.Name.StartsWith('SemanticRouter.', [StringComparison]::OrdinalIgnoreCase)
             $problem = Get-Problem $file.FullName (-not $own)
