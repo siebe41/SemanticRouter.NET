@@ -107,16 +107,18 @@ No release contains an ONNX embedding model: the router downloads the one it is 
 
 ## Update attestations
 
-The installed desktop app checks every update it downloads from GitHub against the attestation of its `*-full.nupkg` ([What an update is checked against](desktop.md#updates)), the way `gh attestation verify` would, with code of its own and the Sigstore trust root it carries (`src/SemanticRouter.Desktop/Assets/sigstore-trusted-root.json`, a copy of `targets/trusted_root.json` from [sigstore/root-signing](https://github.com/sigstore/root-signing)). It accepts an attestation when:
+The installed desktop app checks every update it downloads from GitHub against the attestation of its `*-full.nupkg` ([What an update is checked against](desktop.md#updates)), much as `gh attestation verify` would, with code of its own and the Sigstore trust root it carries (`src/SemanticRouter.Desktop/Assets/sigstore-trusted-root.json`, a copy of `targets/trusted_root.json` from [sigstore/root-signing](https://github.com/sigstore/root-signing)). It accepts an attestation when:
 
-- its statement names the package's file name and SHA-256;
-- its certificate was issued by Sigstore's certificate authority (Fulcio) to `https://github.com/siebe41/SemanticRouter.NET/.github/workflows/release.yml@refs/tags/v<version>`, for a GitHub Actions token, for code signing;
+- its statement is SLSA build provenance (`https://slsa.dev/provenance/v1`) and names the package's file name and SHA-256;
+- its certificate was issued by Sigstore's certificate authority (Fulcio) to exactly `https://github.com/siebe41/SemanticRouter.NET/.github/workflows/release.yml@refs/tags/v<version>`, in the repository with GitHub's id 1409353960 (so a repository registered again under this name does not pass), for a GitHub Actions token, for code signing;
 - its signature verifies with that certificate;
-- its entry in Sigstore's transparency log (Rekor) is about that signature and certificate, carries the log's signed timestamp, and its inclusion proof leads to a checkpoint the log signed, at a time the certificate was valid.
+- its entry in Sigstore's transparency log (Rekor) is about that signature and certificate, carries the log's signed timestamp, and its inclusion proof leads to a checkpoint the log signed, at a time the certificate was valid. An entry in a log that is not in the trust root, or of another kind than `dsse` 0.0.1, is refused: neither the log id nor the kind is signed.
+
+Unlike `gh`, it does not check the certificate's signed certificate timestamp (the certificate transparency log's promise).
 
 So the release workflow's `checksums` job has to keep attesting every asset of the release, the update packages included, from a run for the version's tag; `deploy/update-attestation-check.sh`, in CI and in the release's first job, fails when it no longer does. The same script, with `--online`, fails when Sigstore has published a new trust root (a new certificate authority or log) that the app does not carry yet: copy it in as the script says and commit it, so that the next release carries it. An app checks the release after it with the trust root of its own version, so the trust root must be current at each release.
 
-Releases from 0.5.0 on have these attestations. An app that cannot read an attestation's log entry (Sigstore's newer Rekor v2 uses Ed25519 keys, which this check does not read yet) applies the update and says it was not checked; a missing or failing attestation refuses it.
+Releases from 0.5.0 on have these attestations. A missing or failing attestation refuses the update. When the check cannot run (GitHub's API does not answer, or the attestation's only log entry is in Sigstore's newer Rekor v2, whose Ed25519 key this check does not read yet), the app does not apply the update and tries again later; so if GitHub moves attestations to Rekor v2, installed apps stop updating until a release that reads it is installed by hand. An app whose trust root does not have the certificate authority that issued the attestation's certificate (one Sigstore added after that app was released) says it can no longer check updates.
 
 ## Cutting a release
 
