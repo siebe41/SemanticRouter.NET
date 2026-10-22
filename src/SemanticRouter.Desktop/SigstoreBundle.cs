@@ -9,21 +9,27 @@ namespace SemanticRouter.Desktop;
 
 /// <summary>
 /// Checks a Sigstore bundle (<c>application/vnd.dev.sigstore.bundle.v0.3+json</c>), as GitHub's attestations API
-/// returns it, the way <c>gh attestation verify</c> does for a public repository:
+/// returns it, much as <c>gh attestation verify</c> does for a public repository (it does not check the certificate's
+/// signed certificate timestamp):
 /// <list type="number">
-/// <item>The DSSE envelope holds an in-toto statement that names the file with its SHA-256.</item>
-/// <item>The signing certificate was issued to the expected workflow (its URI subject alternative name, e.g.
-/// <c>https://github.com/owner/repo/.github/workflows/release.yml@refs/tags/v1.0.0</c>) for a token from the expected
-/// OIDC issuer (Fulcio's extension 1.3.6.1.4.1.57264.1.8), for code signing.</item>
+/// <item>The DSSE envelope holds an in-toto SLSA provenance statement that names the file with its SHA-256.</item>
+/// <item>The signing certificate was issued to the expected workflow (its URI subject alternative name, exactly, e.g.
+/// <c>https://github.com/owner/repo/.github/workflows/release.yml@refs/tags/v1.0.0</c>) of the repository with the
+/// expected id (Fulcio's extension 1.3.6.1.4.1.57264.1.15, so a repository registered again under the same name does
+/// not pass), for a token from the expected OIDC issuer (extension 1.3.6.1.4.1.57264.1.8), for code signing.</item>
 /// <item>The envelope's signature verifies with that certificate's key.</item>
 /// <item>A Rekor transparency log entry records that signature and certificate: its signed entry timestamp verifies
 /// with the log's key, its inclusion proof leads to the root hash of a checkpoint the log signed, and the time it was
 /// logged is within the certificate's validity (about ten minutes).</item>
 /// <item>The certificate chains to a Fulcio authority of the trust root that issued certificates at that time.</item>
 /// </list>
-/// A bundle whose certificate, signature and statement check out, but whose log entry is in a form this app cannot read
-/// (a log it does not know, such as Rekor v2 with its Ed25519 key), is reported as such
-/// (<see cref="Outcome.VerifiedWithoutLog"/>); its certificate is then checked at the time it was issued.
+/// A bundle whose certificate, signature and statement check out, but whose log entry is in a log of the trust root
+/// whose key this app cannot check (Rekor v2, with its Ed25519 key), is reported as such
+/// (<see cref="Outcome.VerifiedWithoutLog"/>); its certificate is then checked at the time it was issued. An entry in a
+/// log that is not in the trust root, or of a kind other than <c>dsse</c> 0.0.1 in a log this app checks, fails: neither
+/// the log id nor the kind is signed, so either could be made up. A certificate from an authority the trust root does not
+/// have at all (its authority key identifier names none of the trust root's certificates, as after Sigstore adds a
+/// certificate authority) is reported apart from a chain that does not verify (<see cref="Outcome.UnknownAuthority"/>).
 /// </summary>
 internal static class SigstoreBundle
 {
@@ -35,6 +41,9 @@ internal static class SigstoreBundle
         /// <summary>The certificate, signature and statement passed; the transparency log entry could not be checked.</summary>
         VerifiedWithoutLog,
 
+        /// <summary>Every other check passed, but the certificate is from an authority the trust root does not have.</summary>
+        UnknownAuthority,
+
         /// <summary>A check failed.</summary>
         Failed,
     }
@@ -45,19 +54,22 @@ internal static class SigstoreBundle
     public const string GitHubActions = "https://token.actions.githubusercontent.com";
 
     private const string InToto = "application/vnd.in-toto+json";
+    private const string Provenance = "https://slsa.dev/provenance/v1";
     private const string CodeSigning = "1.3.6.1.5.5.7.3.3";
     private const string IssuerV2 = "1.3.6.1.4.1.57264.1.8";
     private const string IssuerV1 = "1.3.6.1.4.1.57264.1.1";
+    private const string SourceRepositoryId = "1.3.6.1.4.1.57264.1.15";
 
     /// <summary>
-    /// Whether <paramref name="bundle"/> shows that <paramref name="identity"/>, with a token from
-    /// <paramref name="issuer"/>, attested the file <paramref name="name"/> with SHA-256 <paramref name="sha256"/> (hex).
+    /// Whether <paramref name="bundle"/> shows that <paramref name="identity"/>, in the repository with the id
+    /// <paramref name="repositoryId"/> and with a token from <paramref name="issuer"/>, attested the file
+    /// <paramref name="name"/> with SHA-256 <paramref name="sha256"/> (hex).
     /// </summary>
-    public static Result Verify(JsonElement bundle, SigstoreTrustRoot trust, string identity, string issuer, string name, string sha256)
+    public static Result Verify(JsonElement bundle, SigstoreTrustRoot trust, string identity, string repositoryId, string issuer, string name, string sha256)
     {
         try
         {
-            return Check(bundle, trust, identity, issuer, name, sha256);
+            return Check(bundle, trust, identity, repositoryId, issuer, name, sha256);
         }
         catch (Exception ex) when (ex is KeyNotFoundException or InvalidOperationException or FormatException or OverflowException
             or IndexOutOfRangeException or CryptographicException or AsnContentException or JsonException or ArgumentException)
@@ -66,7 +78,7 @@ internal static class SigstoreBundle
         }
     }
 
-    private static Result Check(JsonElement bundle, SigstoreTrustRoot trust, string identity, string issuer, string name, string sha256)
+    private static Result Check(JsonElement bundle, SigstoreTrustRoot trust, string identity, string repositoryId, string issuer, string name, string sha256)
     {
         JsonElement material = bundle.GetProperty("verificationMaterial");
         byte[] certificateBytes = material.TryGetProperty("certificate", out JsonElement single)
@@ -98,9 +110,15 @@ internal static class SigstoreBundle
 
         // Who attested it: the workflow the certificate was issued to, and the issuer of the token it showed.
         string[] uris = SubjectUris(certificate);
-        if (!uris.Contains(identity, StringComparer.OrdinalIgnoreCase))
+        if (!uris.Contains(identity, StringComparer.Ordinal))
         {
             return Failed($"it was signed by {(uris.Length > 0 ? string.Join(", ", uris) : "a certificate that names no workflow")}, not by {identity}");
+        }
+
+        string? repository = Extension(certificate, SourceRepositoryId);
+        if (!string.Equals(repository, repositoryId, StringComparison.Ordinal))
+        {
+            return Failed($"its certificate was issued to the repository with id {repository ?? "(none)"}, not {repositoryId}");
         }
 
         string? tokenIssuer = Issuer(certificate);
@@ -144,6 +162,11 @@ internal static class SigstoreBundle
         // The certificate, from a Fulcio authority that issued certificates at that time. Without a log entry only the
         // chain itself can be checked, at the time the certificate was issued.
         DateTimeOffset at = logged ?? new DateTimeOffset(certificate.NotBefore.ToUniversalTime(), TimeSpan.Zero);
+        if (!IssuedByTrustRoot(certificate, trust))
+        {
+            return new Result(Outcome.UnknownAuthority, $"signed by {identity}, but its certificate is from a certificate authority this version of the app does not know");
+        }
+
         if (ChainRefuses(certificate, trust, at) is { } chain)
         {
             return Failed(chain);
@@ -161,6 +184,12 @@ internal static class SigstoreBundle
         if (type is not ("https://in-toto.io/Statement/v1" or "https://in-toto.io/Statement/v0.1"))
         {
             return $"it attests a {type}, not an in-toto statement";
+        }
+
+        string? predicate = statement.RootElement.GetProperty("predicateType").GetString();
+        if (predicate != Provenance)
+        {
+            return $"it is a {predicate} statement, not build provenance ({Provenance})";
         }
 
         string? named = null;
@@ -186,8 +215,9 @@ internal static class SigstoreBundle
 
     /// <summary>
     /// When the bundle's Rekor entry says the signature was logged, once the entry checks out; or why no entry could be
-    /// checked (<c>Unlogged</c>: none is in a form this app reads), or why the entry is refused (<c>Refused</c>: it is
-    /// in a log this app knows, and does not check out).
+    /// checked (<c>Unlogged</c>: each is in a log of the trust root whose key this app cannot check), or why the bundle is
+    /// refused (<c>Refused</c>: an entry is in no log of the trust root, or is in a log this app checks and does not
+    /// check out). The log id and the entry's kind are not signed, so neither can be what makes an entry unreadable.
     /// </summary>
     private static (DateTimeOffset? Logged, string? Unlogged, string? Refused) Logged(
         JsonElement material, SigstoreTrustRoot trust, X509Certificate2 certificate, byte[] payload, byte[] signature)
@@ -200,7 +230,12 @@ internal static class SigstoreBundle
             SigstoreTrustRoot.Log? log = trust.Logs.FirstOrDefault(l => l.KeyId.AsSpan().SequenceEqual(keyId));
             if (log is null)
             {
-                unlogged ??= "its transparency log entry is in a log this app does not know";
+                if (!trust.Unreadable.Any(id => id.AsSpan().SequenceEqual(keyId)))
+                {
+                    return (null, null, "its transparency log entry is in a log that is not in Sigstore's trust root");
+                }
+
+                unlogged ??= "its transparency log entry is in a log whose key this version of the app cannot check";
                 continue;
             }
 
@@ -208,8 +243,7 @@ internal static class SigstoreBundle
             (string? kindName, string? kindVersion) = (kind.GetProperty("kind").GetString(), kind.GetProperty("version").GetString());
             if (kindName != "dsse" || kindVersion != "0.0.1")
             {
-                unlogged ??= $"its transparency log entry is a {kindName} {kindVersion} entry, which this app does not read";
-                continue;
+                return (null, null, $"its transparency log entry is a {kindName} {kindVersion} entry, not the dsse 0.0.1 entry an attestation is logged as");
             }
 
             if (!entry.TryGetProperty("inclusionPromise", out JsonElement promise) || !entry.TryGetProperty("inclusionProof", out JsonElement proof))
@@ -382,6 +416,22 @@ internal static class SigstoreBundle
         return false;
     }
 
+    /// <summary>
+    /// Whether <paramref name="certificate"/>'s issuer key (its authority key identifier) is that of a certificate in the
+    /// trust root, at any time. One that is not was issued by an authority the trust root does not have; one without the
+    /// extension is left to the chain.
+    /// </summary>
+    private static bool IssuedByTrustRoot(X509Certificate2 certificate, SigstoreTrustRoot trust)
+    {
+        if (certificate.Extensions.OfType<X509AuthorityKeyIdentifierExtension>().FirstOrDefault()?.KeyIdentifier is not { } issuer)
+        {
+            return true;
+        }
+
+        return trust.Authorities.SelectMany(a => a.Chain).Any(c =>
+            c.Extensions.OfType<X509SubjectKeyIdentifierExtension>().FirstOrDefault() is { } subject && subject.SubjectKeyIdentifierBytes.Span.SequenceEqual(issuer.Span));
+    }
+
     /// <summary>Why <paramref name="certificate"/> does not chain, at <paramref name="at"/>, to an authority that issued certificates then.</summary>
     private static string? ChainRefuses(X509Certificate2 certificate, SigstoreTrustRoot trust, DateTimeOffset at)
     {
@@ -435,9 +485,11 @@ internal static class SigstoreBundle
 
     /// <summary>The OIDC issuer Fulcio recorded in the certificate: its DER extension, else the older raw one.</summary>
     internal static string? Issuer(X509Certificate2 certificate) =>
-        certificate.Extensions[IssuerV2] is { } v2 ? new AsnReader(v2.RawData, AsnEncodingRules.DER).ReadCharacterString(UniversalTagNumber.UTF8String)
-        : certificate.Extensions[IssuerV1] is { } v1 ? Encoding.UTF8.GetString(v1.RawData)
-        : null;
+        Extension(certificate, IssuerV2) ?? (certificate.Extensions[IssuerV1] is { } v1 ? Encoding.UTF8.GetString(v1.RawData) : null);
+
+    /// <summary>One of Fulcio's DER extensions (a UTF-8 string), or <see langword="null"/> when the certificate does not have it.</summary>
+    private static string? Extension(X509Certificate2 certificate, string oid) =>
+        certificate.Extensions[oid] is { } extension ? new AsnReader(extension.RawData, AsnEncodingRules.DER).ReadCharacterString(UniversalTagNumber.UTF8String) : null;
 
     /// <summary>DSSE's pre-authentication encoding, what the envelope's signature is over.</summary>
     internal static byte[] Pae(string payloadType, byte[] payload)

@@ -562,7 +562,7 @@ public sealed class UpdateControlTests : IDisposable
     public void Doctor_says_what_the_policy_does_to_desktop_updates()
     {
         EgressList.Updates(MachinePolicy.None).Should().Be(
-            "desktop app updates: api.github.com, github.com, release-assets.githubusercontent.com and objects.githubusercontent.com (only the installed desktop app; applied only when the release workflow attested it, or GitHub cannot be asked; untick Check for updates automatically in its tray menu to turn this off).");
+            "desktop app updates: api.github.com, github.com, release-assets.githubusercontent.com and objects.githubusercontent.com (only the installed desktop app; applied only when the release workflow attested it; untick Check for updates automatically in its tray menu to turn this off).");
         EgressList.Updates(MachinePolicy.FromJson("""{"Updates":{"Mode":"Off","Apply":"Notify"}}""")).Should().Be("desktop app updates: off (your organization's policy).");
         EgressList.Updates(MachinePolicy.FromJson("""{"Updates":{"Mode":"Feed","Feed":"https://updates.corp.example/router"}}""")).Should().Be(
             "desktop app updates: updates.corp.example (your organization's feed) (only the installed desktop app; untick Check for updates automatically in its tray menu to turn this off).");

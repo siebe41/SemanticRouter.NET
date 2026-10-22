@@ -29,8 +29,10 @@ namespace SemanticRouter.Desktop;
 /// <para>
 /// Without a publisher, an update from GitHub Releases is applied only when this project's release workflow attested its
 /// package for that version (<see cref="UpdateAttestation"/>); one that is not is refused the same way. When the check
-/// cannot run (GitHub's API cannot be reached), the update is applied and the app says it was not checked
-/// (<see cref="Problem"/>). Updates from another feed are not checked this way.
+/// cannot run (GitHub's API cannot be reached), the update is kept but not applied, the app says it is waiting to be
+/// checked (<see cref="Problem"/>), and the next check tries again. When this version's trust root is too old to check it
+/// (Sigstore added a certificate authority), the update is kept, not applied and not offered again in this run, and the
+/// app says to install the new version by hand. Updates from another feed are not checked this way.
 /// </para>
 /// </remarks>
 internal sealed class DesktopUpdater(
@@ -51,7 +53,7 @@ internal sealed class DesktopUpdater(
     private VelopackAsset? _ready;
     private VelopackAsset? _verified;
     private string? _refused;
-    private string? _unchecked;
+    private string? _held;
 
     /// <summary>The updater for this app, or one that does nothing when the app was not installed.</summary>
     public static DesktopUpdater Create(HostSettings settings, Func<string, string?> environment, TextWriter log)
@@ -109,7 +111,7 @@ internal sealed class DesktopUpdater(
             UpdatePublisher.ForThisMachine(policy.Publisher),
             broken,
             Installation.Executable(environment),
-            feed is null ? UpdateAttestation.ForGitHub(ProjectLinks.Repository) : null);
+            feed is null ? UpdateAttestation.ForGitHub(ProjectLinks.Repository, ProjectLinks.RepositoryId) : null);
     }
 
     /// <summary>The environment variable that points the updater at another feed, for testing.</summary>
@@ -195,8 +197,8 @@ internal sealed class DesktopUpdater(
     /// <summary>Whether an update is only announced, and applied only when the person chooses to.</summary>
     public bool NotifyOnly => NotifyLocked || !ApplyOnQuit;
 
-    /// <summary>The version downloaded and waiting to be applied, if any.</summary>
-    public string? Ready => (_ready ?? updates?.Pending)?.Version.ToString();
+    /// <summary>The version downloaded and waiting to be applied, if any; not one kept because its check could not run.</summary>
+    public string? Ready => (_ready ?? (updates?.Pending is { } pending && pending.Version.ToString() != _held ? pending : null))?.Version.ToString();
 
     /// <summary>The newest version found, downloaded or not.</summary>
     public string? Available => Ready ?? _available?.TargetFullRelease.Version.ToString();
@@ -204,7 +206,7 @@ internal sealed class DesktopUpdater(
     /// <summary>The version "Restart to update" offers: the one found when notifying only, else the one downloaded.</summary>
     public string? Offer => NotifyOnly ? Available : Ready;
 
-    /// <summary>Why the last update could not be downloaded or was refused, for the tray; <see langword="null"/> when nothing went wrong.</summary>
+    /// <summary>Why the last update could not be downloaded, was refused or is held back, for the tray; <see langword="null"/> when nothing went wrong.</summary>
     public string? Problem { get; private set; }
 
     /// <summary>
@@ -287,7 +289,7 @@ internal sealed class DesktopUpdater(
         if (_ready is null)
         {
             _ready = asset;
-            Problem = _unchecked;
+            Problem = null;
             log.WriteLine($"{Now} Update {asset.Version} downloaded; it is applied when {(NotifyOnly ? "you choose Restart to update" : "the app quits or restarts")}.");
         }
 
@@ -360,15 +362,15 @@ internal sealed class DesktopUpdater(
         return true;
     }
 
-    /// <summary>
-    /// Whether <paramref name="update"/> may be applied. With a publisher in the policy: when its package is signed by
-    /// the publisher. Otherwise, for an update from GitHub: when its package is attested by the release workflow, or the
-    /// attestation could not be checked (then <see cref="Problem"/> says so). A refused package is deleted, so it is not
-    /// applied later either.
-    /// </summary>
     /// <summary>Whether updates are checked against their attestation: from GitHub, with no publisher in the policy.</summary>
     private bool Attested => publisher is null && attestation is not null;
 
+    /// <summary>
+    /// Whether <paramref name="update"/> may be applied. With a publisher in the policy: when its package is signed by
+    /// the publisher. Otherwise, for an update from GitHub: when its package is attested by the release workflow. A
+    /// refused package is deleted, so it is not applied later either; one whose attestation could not be checked is kept
+    /// for the next try (<see cref="Hold"/>), and <see cref="Problem"/> says why.
+    /// </summary>
     private async Task<bool> VerifyAsync(VelopackAsset update)
     {
         if ((publisher is null && attestation is null) || update == _verified)
@@ -397,18 +399,32 @@ internal sealed class DesktopUpdater(
         switch (verdict.Outcome)
         {
             case UpdateAttestation.Outcome.Verified:
-                (_verified, _unchecked) = (update, null);
+                (_verified, _held) = (update, null);
                 log.WriteLine($"{Now} Update {update.Version} was built by the project's release workflow: {verdict.Detail}.");
                 return true;
             case UpdateAttestation.Outcome.Unchecked:
-                // The check could not run: the update is applied, as before there was one, and the app says so.
-                (_verified, _unchecked) = (update, $"Update {update.Version} could not be checked against its attestation: {verdict.Detail}");
-                Problem = _unchecked;
-                log.WriteLine($"{Now} {_unchecked}. It is applied anyway.");
-                return true;
+                // The check could not run, which whoever can reset a connection can bring about: not applied, tried again.
+                return Hold(update, $"Update {update.Version} is waiting to be checked against its attestation: {verdict.Detail}", "It is not applied until the check passes; the app tries again at the next check.");
+            case UpdateAttestation.Outcome.Outdated:
+                // Not offered again in this run; the package is kept, so a later start checks it without downloading it again.
+                _refused = update.Version.ToString();
+                _available = null;
+                return Hold(
+                    update,
+                    $"Update {update.Version} cannot be checked by this version of the app: {verdict.Detail}. Install the new version yourself from {ProjectLinks.Releases}",
+                    "Sigstore changed its certificate authorities after this version was released, so it can no longer check its updates.");
             default:
                 return Refuse(update, verdict.Detail, "Without a publisher in your organization's policy, only updates the project's release workflow attested are applied.");
         }
+    }
+
+    /// <summary>Does not apply <paramref name="update"/> for now: says why, and keeps its package, which is no longer <see cref="Ready"/>.</summary>
+    private bool Hold(VelopackAsset update, string problem, string rule)
+    {
+        Problem = problem;
+        log.WriteLine($"{Now} {Problem}. {rule}");
+        (_held, _ready) = (update.Version.ToString(), null);
+        return false;
     }
 
     /// <summary>Refuses <paramref name="update"/>: says why, deletes its package and does not offer that version again.</summary>

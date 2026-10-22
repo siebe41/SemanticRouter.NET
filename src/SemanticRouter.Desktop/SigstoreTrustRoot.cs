@@ -26,12 +26,19 @@ internal sealed class SigstoreTrustRoot
         public bool ValidAt(DateTimeOffset time) => time >= Start && (End is null || time <= End);
     }
 
-    private SigstoreTrustRoot(IReadOnlyList<Authority> authorities, IReadOnlyList<Log> logs) => (Authorities, Logs) = (authorities, logs);
+    private SigstoreTrustRoot(IReadOnlyList<Authority> authorities, IReadOnlyList<Log> logs, IReadOnlyList<byte[]> unreadable) =>
+        (Authorities, Logs, Unreadable) = (authorities, logs, unreadable);
 
     public IReadOnlyList<Authority> Authorities { get; }
 
-    /// <summary>The logs this app can check: those with an ECDSA P-256 key (Rekor v1). Logs with other keys are left out.</summary>
+    /// <summary>The logs this app can check: those with an ECDSA P-256 key (Rekor v1).</summary>
     public IReadOnlyList<Log> Logs { get; }
+
+    /// <summary>
+    /// The ids of the trust root's other logs, whose keys this app cannot check (Rekor v2's Ed25519 key). An entry in one
+    /// of them is a log entry this app cannot read; an entry in a log that is in neither list is not in a Sigstore log.
+    /// </summary>
+    public IReadOnlyList<byte[]> Unreadable { get; }
 
     private static readonly Lazy<SigstoreTrustRoot> s_publicGood = new(() =>
     {
@@ -59,11 +66,13 @@ internal sealed class SigstoreTrustRoot
         }
 
         List<Log> logs = [];
+        List<byte[]> unreadable = [];
         foreach (JsonElement log in root.GetProperty("tlogs").EnumerateArray())
         {
             JsonElement key = log.GetProperty("publicKey");
             if (key.GetProperty("keyDetails").GetString() is not "PKIX_ECDSA_P256_SHA_256")
             {
+                unreadable.Add(Convert.FromBase64String(log.GetProperty("logId").GetProperty("keyId").GetString()!));
                 continue;
             }
 
@@ -74,7 +83,7 @@ internal sealed class SigstoreTrustRoot
             logs.Add(new Log(SHA256.HashData(spki), ecdsa, start, end));
         }
 
-        return new SigstoreTrustRoot(authorities, logs);
+        return new SigstoreTrustRoot(authorities, logs, unreadable);
 
         static (DateTimeOffset Start, DateTimeOffset? End) ValidFor(JsonElement element)
         {
@@ -87,5 +96,6 @@ internal sealed class SigstoreTrustRoot
     }
 
     /// <summary>A trust root of the given authorities and logs, for tests.</summary>
-    internal static SigstoreTrustRoot Of(IReadOnlyList<Authority> authorities, IReadOnlyList<Log> logs) => new(authorities, logs);
+    internal static SigstoreTrustRoot Of(IReadOnlyList<Authority> authorities, IReadOnlyList<Log> logs, IReadOnlyList<byte[]>? unreadable = null) =>
+        new(authorities, logs, unreadable ?? []);
 }

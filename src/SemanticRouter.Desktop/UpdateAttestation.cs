@@ -20,16 +20,21 @@ namespace SemanticRouter.Desktop;
 /// <item><see cref="Outcome.Refused"/>: the check ran and failed. GitHub has no attestation for the package, or none
 /// that checks out (another workflow or tag, a signature or log entry that does not verify).</item>
 /// <item><see cref="Outcome.Unchecked"/>: the check could not run. GitHub's API could not be asked (offline,
-/// rate-limited, an error), or the only attestation that names the right workflow has a transparency log entry in a
-/// form this app cannot read. The update is applied, and the app says it was not checked.</item>
+/// rate-limited, an error, an answer without a bundle), or the only attestation that otherwise checks out has a
+/// transparency log entry in a log of the trust root whose key this app cannot check. The update is not applied; it is
+/// kept and checked again later.</item>
+/// <item><see cref="Outcome.Outdated"/>: the only attestation that otherwise checks out has a certificate from an
+/// authority the trust root this version carries does not have (Sigstore added one since). This version cannot check
+/// that update, or later ones: it is not applied, and the person has to install the new version themselves.</item>
 /// </list>
 /// </remarks>
-internal sealed class UpdateAttestation(string repository, Func<string, CancellationToken, Task<string?>> lookup, SigstoreTrustRoot trust)
+internal sealed class UpdateAttestation(string repository, string repositoryId, Func<string, CancellationToken, Task<string?>> lookup, SigstoreTrustRoot trust)
 {
     internal enum Outcome
     {
         Verified,
         Unchecked,
+        Outdated,
         Refused,
     }
 
@@ -40,11 +45,11 @@ internal sealed class UpdateAttestation(string repository, Func<string, Cancella
 
     private static readonly HttpClient s_http = new() { Timeout = TimeSpan.FromSeconds(30) };
 
-    /// <summary>The check for updates from the releases of <paramref name="repositoryUrl"/>, through GitHub's API.</summary>
-    public static UpdateAttestation ForGitHub(string repositoryUrl)
+    /// <summary>The check for updates from the releases of <paramref name="repositoryUrl"/> (GitHub id <paramref name="repositoryId"/>), through GitHub's API.</summary>
+    public static UpdateAttestation ForGitHub(string repositoryUrl, string repositoryId)
     {
         string repository = new Uri(repositoryUrl).AbsolutePath.Trim('/');
-        return new UpdateAttestation(repository, (sha256, cancellationToken) => AskGitHubAsync(s_http, repository, sha256, cancellationToken), SigstoreTrustRoot.PublicGood);
+        return new UpdateAttestation(repository, repositoryId, (sha256, cancellationToken) => AskGitHubAsync(s_http, repository, sha256, cancellationToken), SigstoreTrustRoot.PublicGood);
     }
 
     /// <summary>The identity a release's attestations are made with: the release workflow, run for the version's tag.</summary>
@@ -110,7 +115,7 @@ internal sealed class UpdateAttestation(string repository, Func<string, Cancella
             }
 
             string identity = Identity(version);
-            (string? failed, string? unlogged, bool unread) = (null, null, false);
+            (string? failed, string? unlogged, string? outdated, bool unread) = (null, null, null, false);
             foreach (JsonElement attestation in attestations.EnumerateArray())
             {
                 if (attestation.ValueKind != JsonValueKind.Object || !attestation.TryGetProperty("bundle", out JsonElement bundle) || bundle.ValueKind != JsonValueKind.Object)
@@ -120,7 +125,7 @@ internal sealed class UpdateAttestation(string repository, Func<string, Cancella
                     continue;
                 }
 
-                SigstoreBundle.Result result = SigstoreBundle.Verify(bundle, trust, identity, SigstoreBundle.GitHubActions, name, sha256);
+                SigstoreBundle.Result result = SigstoreBundle.Verify(bundle, trust, identity, repositoryId, SigstoreBundle.GitHubActions, name, sha256);
                 switch (result.Outcome)
                 {
                     case SigstoreBundle.Outcome.Verified:
@@ -128,13 +133,17 @@ internal sealed class UpdateAttestation(string repository, Func<string, Cancella
                     case SigstoreBundle.Outcome.VerifiedWithoutLog:
                         unlogged ??= result.Detail;
                         break;
+                    case SigstoreBundle.Outcome.UnknownAuthority:
+                        outdated ??= result.Detail;
+                        break;
                     default:
                         failed ??= result.Detail;
                         break;
                 }
             }
 
-            return unlogged is not null ? new Verdict(Outcome.Unchecked, $"its attestation is {unlogged}")
+            return outdated is not null ? new Verdict(Outcome.Outdated, $"its attestation is {outdated}")
+                : unlogged is not null ? new Verdict(Outcome.Unchecked, $"its attestation is {unlogged}")
                 : failed is not null ? new Verdict(Outcome.Refused, $"its attestation does not hold: {failed}")
                 : unread ? new Verdict(Outcome.Unchecked, "GitHub's attestations API gave no attestation the app can read")
                 : new Verdict(Outcome.Refused, missing);

@@ -18,6 +18,7 @@ namespace SemanticRouter.Tests.Desktop;
 public sealed class UpdateAttestationTests : IDisposable
 {
     private const string Repository = "siebe41/SemanticRouter.NET";
+    private const string RepositoryId = ProjectLinks.RepositoryId;
     private const string Package = "SemanticRouter-0.5.0-win-x64-full.nupkg";
 
     private readonly string _directory = Directory.CreateTempSubdirectory("attestation").FullName;
@@ -42,7 +43,7 @@ public sealed class UpdateAttestationTests : IDisposable
     }
 
     private static UpdateAttestation GitHub(string? response, SigstoreTrustRoot? trust = null) =>
-        new(Repository, (_, _) => Task.FromResult(response), trust ?? SigstoreTrustRoot.PublicGood);
+        new(Repository, RepositoryId, (_, _) => Task.FromResult(response), trust ?? SigstoreTrustRoot.PublicGood);
 
     [Fact]
     public async Task The_050_release_attestation_verifies_against_sigstores_trust_root()
@@ -80,8 +81,17 @@ public sealed class UpdateAttestationTests : IDisposable
         UpdateAttestation.Verdict changed = await GitHub(Release050).CheckDigestAsync(other, Package, "0.5.0");
         changed.Detail.Should().Be($"its attestation does not hold: it does not attest {Package} with SHA-256 {other}");
 
-        var fork = new UpdateAttestation("mallory/SemanticRouter.NET", (_, _) => Task.FromResult<string?>(Release050), SigstoreTrustRoot.PublicGood);
+        var fork = new UpdateAttestation("mallory/SemanticRouter.NET", RepositoryId, (_, _) => Task.FromResult<string?>(Release050), SigstoreTrustRoot.PublicGood);
         (await fork.CheckDigestAsync(sha256, Package, "0.5.0")).Detail.Should().Contain("not by https://github.com/mallory/SemanticRouter.NET/");
+
+        // The identity is compared exactly, as gh does: another spelling of the owner is another identity.
+        var spelled = new UpdateAttestation("Siebe41/SemanticRouter.NET", RepositoryId, (_, _) => Task.FromResult<string?>(Release050), SigstoreTrustRoot.PublicGood);
+        (await spelled.CheckDigestAsync(sha256, Package, "0.5.0")).Outcome.Should().Be(UpdateAttestation.Outcome.Refused);
+
+        // A repository registered again under the same name has another id.
+        var again = new UpdateAttestation(Repository, "42", (_, _) => Task.FromResult<string?>(Release050), SigstoreTrustRoot.PublicGood);
+        (await again.CheckDigestAsync(sha256, Package, "0.5.0")).Should().Be(new UpdateAttestation.Verdict(UpdateAttestation.Outcome.Refused,
+            $"its attestation does not hold: its certificate was issued to the repository with id {RepositoryId}, not 42"));
     }
 
     [Fact]
@@ -89,16 +99,24 @@ public sealed class UpdateAttestationTests : IDisposable
     {
         string sha256 = Subjects050()[Package];
         SigstoreTrustRoot publicGood = SigstoreTrustRoot.PublicGood;
-        (publicGood.Authorities.Count, publicGood.Logs.Count).Should().Be((2, 1), "two Fulcio authorities; only Rekor v1 has an ECDSA key");
+        (publicGood.Authorities.Count, publicGood.Logs.Count, publicGood.Unreadable.Count).Should().Be((2, 1, 1), "two Fulcio authorities; Rekor v1 has an ECDSA key, Rekor v2 an Ed25519 one");
 
-        UpdateAttestation.Verdict noAuthority = await GitHub(Release050, SigstoreTrustRoot.Of([], publicGood.Logs)).CheckDigestAsync(sha256, Package, "0.5.0");
-        noAuthority.Outcome.Should().Be(UpdateAttestation.Outcome.Refused);
-        noAuthority.Detail.Should().StartWith("its attestation does not hold: its certificate was not issued by Sigstore's certificate authority");
+        // An authority the trust root does not have, as after Sigstore adds one: this version cannot check it, which is
+        // not the same as a certificate that does not verify.
+        UpdateAttestation.Verdict noAuthority = await GitHub(Release050, SigstoreTrustRoot.Of([], publicGood.Logs, publicGood.Unreadable)).CheckDigestAsync(sha256, Package, "0.5.0");
+        noAuthority.Should().Be(new UpdateAttestation.Verdict(UpdateAttestation.Outcome.Outdated,
+            "its attestation is signed by https://github.com/siebe41/SemanticRouter.NET/.github/workflows/release.yml@refs/tags/v0.5.0, but its certificate is from a certificate authority this version of the app does not know"));
 
-        // A log the app does not know (as Rekor v2 would be): the check could not run, so the update is let through.
-        UpdateAttestation.Verdict noLog = await GitHub(Release050, SigstoreTrustRoot.Of(publicGood.Authorities, [])).CheckDigestAsync(sha256, Package, "0.5.0");
-        noLog.Outcome.Should().Be(UpdateAttestation.Outcome.Unchecked);
-        noLog.Detail.Should().EndWith("but its transparency log entry is in a log this app does not know");
+        // A log of the trust root whose key the app cannot check (as Rekor v2's): the check could not run.
+        byte[] rekor = publicGood.Logs[0].KeyId;
+        UpdateAttestation.Verdict unreadable = await GitHub(Release050, SigstoreTrustRoot.Of(publicGood.Authorities, [], [rekor])).CheckDigestAsync(sha256, Package, "0.5.0");
+        unreadable.Outcome.Should().Be(UpdateAttestation.Outcome.Unchecked);
+        unreadable.Detail.Should().EndWith("but its transparency log entry is in a log whose key this version of the app cannot check");
+
+        // A log that is not in the trust root at all: the log id is not signed, so that is refused.
+        UpdateAttestation.Verdict noLog = await GitHub(Release050, SigstoreTrustRoot.Of(publicGood.Authorities, [], publicGood.Unreadable)).CheckDigestAsync(sha256, Package, "0.5.0");
+        noLog.Should().Be(new UpdateAttestation.Verdict(UpdateAttestation.Outcome.Refused,
+            "its attestation does not hold: its transparency log entry is in a log that is not in Sigstore's trust root"));
     }
 
     [Fact]
@@ -117,10 +135,10 @@ public sealed class UpdateAttestationTests : IDisposable
         (await GitHub("""{"attestations":[{"bundle":{"dsseEnvelope":{}}}]}""").CheckDigestAsync(sha256, Package, "0.5.0")).Detail.Should()
             .StartWith("its attestation does not hold: its bundle cannot be read");
 
-        var offline = new UpdateAttestation(Repository, (_, _) => throw new HttpRequestException("No such host is known."), SigstoreTrustRoot.PublicGood);
+        var offline = new UpdateAttestation(Repository, RepositoryId, (_, _) => throw new HttpRequestException("No such host is known."), SigstoreTrustRoot.PublicGood);
         (await offline.CheckDigestAsync(sha256, Package, "0.5.0")).Should().Be(new UpdateAttestation.Verdict(UpdateAttestation.Outcome.Unchecked,
             "GitHub's attestations API could not be asked (No such host is known.)"));
-        var slow = new UpdateAttestation(Repository, (_, _) => throw new TaskCanceledException(), SigstoreTrustRoot.PublicGood);
+        var slow = new UpdateAttestation(Repository, RepositoryId, (_, _) => throw new TaskCanceledException(), SigstoreTrustRoot.PublicGood);
         (await slow.CheckDigestAsync(sha256, Package, "0.5.0")).Detail.Should().Be("GitHub's attestations API did not answer in time");
     }
 
@@ -132,9 +150,9 @@ public sealed class UpdateAttestationTests : IDisposable
         JsonObject Good() => _sigstore.Bundle(identity, [(Package, sha256)]);
         Task<UpdateAttestation.Verdict> Check(JsonNode bundle, SigstoreTrustRoot? trust = null) =>
             GitHub(TestSigstore.Response(bundle), trust ?? _sigstore.Trust).CheckDigestAsync(sha256, Package, "0.5.0");
-        async Task<string> Refused(JsonNode bundle)
+        async Task<string> Refused(JsonNode bundle, SigstoreTrustRoot? trust = null)
         {
-            UpdateAttestation.Verdict verdict = await Check(bundle);
+            UpdateAttestation.Verdict verdict = await Check(bundle, trust);
             verdict.Outcome.Should().Be(UpdateAttestation.Outcome.Refused, verdict.Detail);
             return verdict.Detail;
         }
@@ -144,9 +162,18 @@ public sealed class UpdateAttestationTests : IDisposable
         (await Refused(_sigstore.Bundle(identity.Replace("release.yml", "ci.yml", StringComparison.Ordinal), [(Package, sha256)]))).Should().Contain("ci.yml@refs/tags/v0.5.0, not by");
         (await Refused(_sigstore.Bundle(identity, [(Package, sha256)], issuer: "https://token.example.com"))).Should().Contain("issued for a token from https://token.example.com");
         (await Refused(_sigstore.Bundle(identity, [(Package, sha256)], codeSigning: false))).Should().Contain("not for code signing");
+        (await Refused(_sigstore.Bundle(identity, [(Package, sha256)], repositoryId: null))).Should().Contain("issued to the repository with id (none)");
+        (await Refused(_sigstore.Bundle(identity, [(Package, sha256)], predicateType: "https://example.com/anything"))).Should()
+            .Contain("it is a https://example.com/anything statement, not build provenance (https://slsa.dev/provenance/v1)");
         using (var mallory = new TestSigstore())
         {
-            (await Refused(_sigstore.Bundle(identity, [(Package, sha256)], authority: mallory))).Should().Contain("not issued by Sigstore's certificate authority");
+            // Naming the trust root's authority as its issuer, the certificate must chain to it.
+            (await Refused(_sigstore.Bundle(identity, [(Package, sha256)], authority: mallory, named: _sigstore))).Should().Contain("not issued by Sigstore's certificate authority");
+
+            // Naming an authority the trust root does not have: as after Sigstore adds one, not applied but not refused either.
+            UpdateAttestation.Verdict unknown = await Check(_sigstore.Bundle(identity, [(Package, sha256)], authority: mallory));
+            unknown.Outcome.Should().Be(UpdateAttestation.Outcome.Outdated);
+            unknown.Detail.Should().EndWith("but its certificate is from a certificate authority this version of the app does not know");
         }
 
         (await Refused(_sigstore.Bundle(identity, [(Package, sha256)], logged: TestSigstore.Issued.AddMinutes(20)))).Should().Contain("when its certificate or the log's key was not valid");
@@ -189,11 +216,18 @@ public sealed class UpdateAttestationTests : IDisposable
         twice["dsseEnvelope"]!["signatures"]!.AsArray().Add(twice["dsseEnvelope"]!["signatures"]![0]!.DeepClone());
         (await Refused(twice)).Should().Contain("2 signatures, not one");
 
-        // An entry kind or a log this app cannot read: neither refused nor verified.
+        // Neither the entry's kind nor its log id is signed, so neither can turn the log check off.
         JsonObject kind = Good();
         Entry(kind)["kindVersion"]!["version"] = "0.0.2";
-        (await Check(kind)).Outcome.Should().Be(UpdateAttestation.Outcome.Unchecked);
-        (await Check(Good(), SigstoreTrustRoot.Of(_sigstore.Trust.Authorities, []))).Outcome.Should().Be(UpdateAttestation.Outcome.Unchecked);
+        (await Refused(kind)).Should().Contain("is a dsse 0.0.2 entry, not the dsse 0.0.1 entry an attestation is logged as");
+        JsonObject log = Good();
+        Entry(log)["logId"]!["keyId"] = Convert.ToBase64String(new byte[32]);
+        (await Refused(log)).Should().Contain("in a log that is not in Sigstore's trust root");
+        (await Refused(Good(), SigstoreTrustRoot.Of(_sigstore.Trust.Authorities, []))).Should().Contain("in a log that is not in Sigstore's trust root");
+
+        // An entry in a log of the trust root whose key this app cannot check: neither refused nor verified.
+        UpdateAttestation.Verdict unreadable = await Check(Good(), SigstoreTrustRoot.Of(_sigstore.Trust.Authorities, [], [_sigstore.Trust.Logs[0].KeyId]));
+        unreadable.Outcome.Should().Be(UpdateAttestation.Outcome.Unchecked);
 
         // One good attestation among others is enough.
         (await GitHub(TestSigstore.Response(signature, Good()), _sigstore.Trust).CheckDigestAsync(sha256, Package, "0.5.0")).Outcome.Should().Be(UpdateAttestation.Outcome.Verified);
@@ -279,19 +313,66 @@ public sealed class UpdateAttestationTests : IDisposable
     }
 
     [Fact]
-    public async Task An_update_that_cannot_be_checked_is_applied_and_the_app_says_so()
+    public async Task An_update_that_cannot_be_checked_is_kept_not_applied_and_checked_again_at_the_next_check()
     {
+        // Whoever can reset the app's connection to GitHub's API can make the check fail, so that must not let the update in.
         var updates = new FakeUpdates { Package = PackageFile() };
         var log = new StringWriter();
-        var offline = new UpdateAttestation(Repository, (_, _) => throw new HttpRequestException("rate limited"), _sigstore.Trust);
-        var updater = new DesktopUpdater(updates, null, log, attestation: offline);
+        (string sha256, string response) = Attestation(updates.Package);
+        bool offline = true;
+        var flaky = new UpdateAttestation(Repository, RepositoryId, (asked, _) =>
+            offline ? throw new HttpRequestException("rate limited") : Task.FromResult(asked == sha256 ? response : null), _sigstore.Trust);
+        var updater = new DesktopUpdater(updates, null, log, attestation: flaky);
 
+        await updater.CheckAsync();
+
+        updater.Problem.Should().Be("Update 1.0.1 is waiting to be checked against its attestation: GitHub's attestations API could not be asked (rate limited)");
+        updater.Ready.Should().BeNull("the package is kept, but not ready");
+        (await updater.ApplyOnQuitAsync()).Should().BeFalse();
+        log.ToString().Should().Contain("It is not applied until the check passes; the app tries again at the next check.");
+        updates.Calls.Should().NotContain("discard").And.NotContain(c => c.StartsWith("apply", StringComparison.Ordinal));
+
+        offline = false;
         (await updater.CheckAsync()).Should().Be("1.0.1");
-
-        updater.Problem.Should().Be("Update 1.0.1 could not be checked against its attestation: GitHub's attestations API could not be asked (rate limited)");
+        updater.Ready.Should().Be("1.0.1");
+        updater.Problem.Should().BeNull();
         (await updater.ApplyOnQuitAsync()).Should().BeTrue();
-        updates.Calls.Should().Equal("check", "download", "package", "apply 1.0.1 restart=False");
-        log.ToString().Should().Contain("It is applied anyway.");
+        updates.Calls.Should().EndWith("apply 1.0.1 restart=False");
+    }
+
+    [Fact]
+    public async Task An_update_whose_package_is_missing_is_not_applied_without_the_check()
+    {
+        var updates = new FakeUpdates { Package = Path.Combine(_directory, "gone.nupkg") };
+        var updater = new DesktopUpdater(updates, null, TextWriter.Null, attestation: GitHub(null, _sigstore.Trust));
+
+        await updater.CheckAsync();
+
+        updater.Problem.Should().Be("Update 1.0.1 is waiting to be checked against its attestation: its package is not where the updater keeps it");
+        (await updater.ApplyOnQuitAsync()).Should().BeFalse();
+        updates.Calls.Should().NotContain(c => c.StartsWith("apply", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task An_update_this_version_is_too_old_to_check_is_kept_not_applied_and_not_offered_again()
+    {
+        // Sigstore added a certificate authority after this version was released: say so, and do not delete the package.
+        var updates = new FakeUpdates { Package = PackageFile() };
+        var log = new StringWriter();
+        using var newer = new TestSigstore();
+        string sha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(updates.Package)));
+        string response = TestSigstore.Response(newer.Bundle(GitHub(null).Identity("1.0.1"), [(Path.GetFileName(updates.Package), sha256)]));
+        var updater = new DesktopUpdater(updates, null, log, attestation: new UpdateAttestation(Repository, RepositoryId, (_, _) => Task.FromResult<string?>(response), SigstoreTrustRoot.Of(_sigstore.Trust.Authorities, newer.Trust.Logs)));
+
+        (await updater.CheckAsync()).Should().BeNull();
+
+        updater.Problem.Should().StartWith("Update 1.0.1 cannot be checked by this version of the app: its attestation is signed by")
+            .And.EndWith($"Install the new version yourself from {ProjectLinks.Releases}");
+        log.ToString().Should().Contain("Sigstore changed its certificate authorities after this version was released");
+        (await updater.ApplyOnQuitAsync()).Should().BeFalse();
+        await updater.CheckAsync();
+        updates.Calls.Should().Equal("check", "download", "package", "package", "check");
+        updates.Downloaded.Should().BeTrue("the package is kept, so a later start does not download it again");
     }
 
     [Fact]
@@ -299,7 +380,7 @@ public sealed class UpdateAttestationTests : IDisposable
     {
         var updates = new FakeUpdates { Package = PackageFile() };
         int asked = 0;
-        var attestation = new UpdateAttestation(Repository, (_, _) =>
+        var attestation = new UpdateAttestation(Repository, RepositoryId, (_, _) =>
         {
             asked++;
             return Task.FromResult<string?>(null);
@@ -323,9 +404,15 @@ public sealed class UpdateAttestationTests : IDisposable
     /// <summary>A check that finds <paramref name="package"/> attested by the release workflow at v1.0.1.</summary>
     private UpdateAttestation Attesting(string package)
     {
+        (string sha256, string response) = Attestation(package);
+        return new UpdateAttestation(Repository, RepositoryId, (asked, _) => Task.FromResult(asked == sha256 ? response : null), _sigstore.Trust);
+    }
+
+    /// <summary><paramref name="package"/>'s SHA-256, and the API's answer for it with an attestation by the release workflow at v1.0.1.</summary>
+    private (string Sha256, string Response) Attestation(string package)
+    {
         string sha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(package)));
-        string response = TestSigstore.Response(_sigstore.Bundle($"https://github.com/{Repository}/{UpdateAttestation.Workflow}@refs/tags/v1.0.1", [(Path.GetFileName(package), sha256)]));
-        return new UpdateAttestation(Repository, (asked, _) => Task.FromResult(asked == sha256 ? response : null), _sigstore.Trust);
+        return (sha256, TestSigstore.Response(_sigstore.Bundle($"https://github.com/{Repository}/{UpdateAttestation.Workflow}@refs/tags/v1.0.1", [(Path.GetFileName(package), sha256)])));
     }
 
     /// <summary>
@@ -376,16 +463,20 @@ public sealed class UpdateAttestationTests : IDisposable
             bool codeSigning = true,
             TestSigstore? authority = null,
             DateTimeOffset? logged = null,
-            ECDsa? checkpointKey = null)
+            ECDsa? checkpointKey = null,
+            string? repositoryId = RepositoryId,
+            string predicateType = "https://slsa.dev/provenance/v1",
+            TestSigstore? named = null)
         {
             using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            using X509Certificate2 certificate = (authority ?? this).Issue(key, identity, issuer, codeSigning);
+            TestSigstore issuing = authority ?? this;
+            using X509Certificate2 certificate = issuing.Issue(key, identity, issuer, codeSigning, repositoryId, named ?? issuing);
 
             var statement = new JsonObject
             {
                 ["_type"] = "https://in-toto.io/Statement/v1",
                 ["subject"] = new JsonArray([.. subjects.Select(s => (JsonNode)new JsonObject { ["name"] = s.Name, ["digest"] = new JsonObject { ["sha256"] = s.Sha256 } })]),
-                ["predicateType"] = "https://slsa.dev/provenance/v1",
+                ["predicateType"] = predicateType,
                 ["predicate"] = new JsonObject(),
             };
             byte[] payload = Encoding.UTF8.GetBytes(statement.ToJsonString());
@@ -481,8 +572,11 @@ public sealed class UpdateAttestationTests : IDisposable
         /// <summary>The largest power of two smaller than <paramref name="n"/>.</summary>
         private static int Split(int n) => 1 << (int)Math.Floor(Math.Log2(n - 1));
 
-        /// <summary>A certificate as Fulcio issues one to a workflow: no subject, the workflow as a URI, the token's issuer.</summary>
-        private X509Certificate2 Issue(ECDsa key, string identity, string issuer, bool codeSigning)
+        /// <summary>
+        /// A certificate as Fulcio issues one to a workflow: no subject, the workflow as a URI, the token's issuer, the
+        /// repository's id, and <paramref name="named"/>'s key as its issuer's (the authority key identifier).
+        /// </summary>
+        private X509Certificate2 Issue(ECDsa key, string identity, string issuer, bool codeSigning, string? repositoryId, TestSigstore named)
         {
             var request = new CertificateRequest(new X500DistinguishedName(string.Empty), key, HashAlgorithmName.SHA256);
             var names = new SubjectAlternativeNameBuilder();
@@ -490,10 +584,21 @@ public sealed class UpdateAttestationTests : IDisposable
             request.CertificateExtensions.Add(names.Build(critical: true));
             request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
             request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid(codeSigning ? "1.3.6.1.5.5.7.3.3" : "1.3.6.1.5.5.7.3.1")], false));
-            var writer = new AsnWriter(AsnEncodingRules.DER);
-            writer.WriteCharacterString(UniversalTagNumber.UTF8String, issuer);
-            request.CertificateExtensions.Add(new X509Extension("1.3.6.1.4.1.57264.1.8", writer.Encode(), false));
+            request.CertificateExtensions.Add(new X509Extension("1.3.6.1.4.1.57264.1.8", Utf8(issuer), false));
+            if (repositoryId is not null)
+            {
+                request.CertificateExtensions.Add(new X509Extension("1.3.6.1.4.1.57264.1.15", Utf8(repositoryId), false));
+            }
+
+            request.CertificateExtensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromCertificate(named._authority, includeKeyIdentifier: true, includeIssuerAndSerial: false));
             return request.Create(_authority, Issued, Issued.AddMinutes(10), RandomNumberGenerator.GetBytes(16));
+
+            static byte[] Utf8(string value)
+            {
+                var writer = new AsnWriter(AsnEncodingRules.DER);
+                writer.WriteCharacterString(UniversalTagNumber.UTF8String, value);
+                return writer.Encode();
+            }
         }
     }
 }
