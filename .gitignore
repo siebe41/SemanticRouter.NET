@@ -76,3 +76,7 @@ appsettings.*.local.json
 # Visual Studio user files
 *.user
 .vs/
+
+# Python bytecode left by running the scripts in tools/ and deploy/
+__pycache__/
+*.pyc
