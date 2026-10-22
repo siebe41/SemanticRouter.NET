@@ -72,8 +72,11 @@ case "$rid" in
     fi
     ;;
   osx-*)
+    # Our entitlements, not vpk's default set, which also allows DYLD_* variables and unsigned libraries
+    # (docs/desktop.md#signing, checked by macos-entitlements-check.sh).
     if [ -n "${APPLE_SIGN_APP_IDENTITY:-}" ]; then
       signing=(--signAppIdentity "$APPLE_SIGN_APP_IDENTITY" --signInstallIdentity "$APPLE_SIGN_INSTALL_IDENTITY"
+        --signEntitlements "$root/deploy/macos/SemanticRouter.entitlements"
         --notaryProfile "$APPLE_NOTARY_PROFILE" --keychain "$APPLE_KEYCHAIN")
     fi
     ;;
@@ -84,7 +87,7 @@ case "$rid" in
     # A tray app: a Start menu entry, no desktop icon. No portable zip: the zip downloads (package-desktop.sh) stay.
     vpk ${directive[@]+"${directive[@]}"} pack "${common[@]}" --mainExe SemanticRouter.exe --icon "$assets/icon.ico" --shortcuts StartMenuRoot --noPortable \
       ${signing[@]+"${signing[@]}"}
-    # Every file in the package that is not a program or library must be in its signed list (publish-desktop.sh), or
+    # Every file of the app that is not a program or library must be in its signed list (publish-desktop.sh), or
     # an updater with a publisher policy refuses the update (docs/enterprise.md#update-publisher).
     dotnet run --file "$root/deploy/update-file-list.cs" -- check "$out/SemanticRouter-$version-$rid-full.nupkg"
     ;;
@@ -109,6 +112,7 @@ case "$rid" in
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>SemanticRouter quits itself to install an update.</string>
 </dict>
 </plist>
 PLIST

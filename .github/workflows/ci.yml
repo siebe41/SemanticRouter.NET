@@ -268,6 +268,10 @@ jobs:
           dotnet tool install -g vpk --version 1.2.161
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
+      # The entitlements the release signs the app with: only the documented ones (docs/desktop.md#signing).
+      - name: Check the entitlements
+        run: deploy/macos-entitlements-check.sh
+
       - name: Package 1.0.0 and 1.0.1
         run: |
           deploy/package-installer.sh osx-arm64 1.0.0 installers
