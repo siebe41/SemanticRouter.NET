@@ -50,7 +50,7 @@
     {
       "name": "AppImage type2-runtime",
       "version": "as vendored by Velopack {Velopack}",
-      "description": "the runtime at the start of the Linux AppImage, which vpk adds; it statically links musl libc, libfuse, squashfuse, zstd and zlib, listed below",
+      "description": "the runtime at the start of the Linux AppImage, which vpk adds; it statically links musl libc, libfuse, squashfuse, zstd and zlib, which have entries of their own",
       "licence": "MIT",
       "copyright": "Copyright (c) 2004-23 probonopd",
       "project": "https://github.com/AppImage/type2-runtime",

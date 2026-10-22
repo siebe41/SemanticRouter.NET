@@ -7,7 +7,8 @@
 #   (`--publish`);
 # - every job that publishes (`dotnet nuget push`, `docker push`, `docker buildx imagetools create`, a `push: true`,
 #   `cosign sign`, `gh release edit ... --draft=false` or `gh api ... draft=false`)
-#   waits, through its `needs`, for every job that writes to the draft release (`gh release create`,
+#   waits, through its `needs`, for every job that doesn't publish, so a job that can still fail (a build, a check, an
+#   SBOM) runs before anything is public, and for every job that writes to the draft release (`gh release create`,
 #   `gh release upload`, `vpk upload`);
 # - one job publishes the release, and it waits for every other job;
 # - no step continues on error, and no job that publishes runs when a job it needs failed (always(), failure()).
@@ -118,6 +119,11 @@ for job in "${!publishing[@]}"; do
       error "$job publishes, but does not wait for $writer, which writes to the draft release. Add it to $job's needs, directly or through another job."
     fi
   done
+  for other in "${jobs[@]}"; do
+    if [ -z "${publishing[$other]:-}" ] && [ -z "${staging[$other]:-}" ] && [[ "$before" != *" $other "* ]]; then
+      error "$job publishes, but does not wait for $other, which can still fail. Add it to $job's needs, directly or through another job."
+    fi
+  done
 done
 for job in "${!releasing[@]}"; do
   before=" $(ancestors "$job") "
@@ -133,4 +139,4 @@ if [ "$failed" = true ]; then
 fi
 sorted() { tr ' ' '\n' <<<"$*" | sort | tr '\n' ' ' | sed 's/ $//'; }
 echo "$workflow publishes last. Jobs that write to the draft release: $(sorted "${!staging[@]}")."
-echo "Jobs that publish, after all of those: $(sorted "${!publishing[@]}"); $(sorted "${!releasing[@]}") waits for all $(( ${#jobs[@]} - 1 )) other jobs."
+echo "Jobs that publish, after all of those and every job that does not: $(sorted "${!publishing[@]}"); $(sorted "${!releasing[@]}") waits for all $(( ${#jobs[@]} - 1 )) other jobs."
