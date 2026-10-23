@@ -82,7 +82,21 @@ public sealed class SqliteStateTests : IDisposable
         }
 
         var ledger = new SqliteUsageLedger(Open());
-        ledger.Record(new UsageRecord(_time.GetUtcNow(), "new", "c", null, null, false, 20, 10, 0, 0, 0.2m, 0.2m, "work", SubscriptionValueUsd: 0.5m));
+        ledger.Record(new UsageRecord
+        {
+            Timestamp = _time.GetUtcNow(),
+            Model = "new",
+            Connector = "c",
+            IsLocal = false,
+            InputTokens = 20,
+            OutputTokens = 10,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 0.2m,
+            ReferenceCostUsd = 0.2m,
+            Profile = "work",
+            SubscriptionValueUsd = 0.5m,
+        });
 
         DateTimeOffset since = _time.GetUtcNow().AddHours(-1), until = _time.GetUtcNow().AddHours(1);
         ledger.Total(since, until).Requests.Should().Be(2, "the old row survives the migration");
@@ -216,12 +230,12 @@ public sealed class SqliteStateTests : IDisposable
     public void A_restart_during_a_quota_cooldown_keeps_the_original_expiry()
     {
         ModelDefinition claude = Model("claude", 4);
-        var before = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(Open()));
+        var before = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(Open()) });
         before.ReportFailure(claude, ModelFailureKind.QuotaExceeded);
         DateTimeOffset expiry = before.GetCooldowns()["claude"];
 
         _time.Advance(TimeSpan.FromMinutes(5));
-        var after = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(Open()));
+        var after = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(Open()) });
 
         after.IsAvailable(claude).Should().BeFalse("the cooldown was stored with its absolute expiry");
         after.GetCooldowns()["claude"].Should().Be(expiry);
@@ -233,8 +247,8 @@ public sealed class SqliteStateTests : IDisposable
     public void Instances_sharing_the_file_see_each_others_cooldowns_after_a_refresh()
     {
         ModelDefinition claude = Model("claude", 4);
-        var a = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(Open()));
-        var b = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(Open()));
+        var a = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(Open()) });
+        var b = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(Open()) });
 
         a.ReportFailure(claude, ModelFailureKind.QuotaExceeded);
         Settle();
@@ -263,10 +277,10 @@ public sealed class SqliteStateTests : IDisposable
     [Fact]
     public void Warm_prompt_caches_survive_a_restart_until_they_expire()
     {
-        var opus = new WarmCache("opus", 80_000, _time.GetUtcNow().AddMinutes(5));
+        var opus = new WarmCache { Model = "opus", CachedTokens = 80_000, ExpiresAt = _time.GetUtcNow().AddMinutes(5) };
         var before = new SqliteWarmCaches(Open());
         before.Remember("conversation", opus);
-        before.Remember("conversation", new WarmCache("sonnet", 20_000, _time.GetUtcNow().AddMinutes(5)));
+        before.Remember("conversation", new WarmCache { Model = "sonnet", CachedTokens = 20_000, ExpiresAt = _time.GetUtcNow().AddMinutes(5) });
         before.Forget("conversation", "SONNET");
 
         new SqliteWarmCaches(Open()).Lookup("conversation").Should().Equal(opus);
@@ -328,6 +342,22 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void Activity_past_the_count_cap_on_a_running_router_leaves_the_files_too()
+    {
+        // Under the cap the running router prunes every 100th entry, without a restart or the hourly prune.
+        var store = new SqliteActivityStore(Open(o => o.ActivityMaxEntries = 5));
+        for (int i = 1; i <= 100; i++)
+        {
+            store.Append(new RoutingActivityEntry { Id = i, Timestamp = _time.GetUtcNow(), PromptPreview = i <= 5 ? "capped-out 1d3e " + i : "kept " + i });
+        }
+
+        Settle();
+
+        store.Recent(1000).Should().HaveCount(5);
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("capped-out 1d3e");
+    }
+
+    [Fact]
     public async Task A_purge_empties_the_log_once_a_reader_that_held_it_has_finished()
     {
         var store = new SqliteActivityStore(Open());
@@ -350,7 +380,7 @@ public sealed class SqliteStateTests : IDisposable
         await Task.Delay(300);
         read.Commit();
 
-        (await purge).Should().Be(new ActivityPurgeResult(1, Complete: true));
+        (await purge).Should().Be(new ActivityPurgeResult { Removed = 1, Complete = true });
         string files = DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db");
         files.Should().NotContain("purge-me 3f9d", "the purge waits for the reader, then empties the log");
     }
@@ -372,7 +402,7 @@ public sealed class SqliteStateTests : IDisposable
             }
 
             store.PurgeWithResult(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1))
-                .Should().Be(new ActivityPurgeResult(1, Complete: false), "the rows are gone, but the log still holds them");
+                .Should().Be(new ActivityPurgeResult { Removed = 1, Complete = false }, "the rows are gone, but the log still holds them");
             _logs.Messages.Should().Contain(m => m.Contains("could not be emptied", StringComparison.Ordinal));
             read.Commit();
         }
@@ -396,8 +426,29 @@ public sealed class SqliteStateTests : IDisposable
             feedback.Add(new RoutingFeedback { Id = i, Timestamp = _time.GetUtcNow(), EntryId = i, Kind = FeedbackKind.Judged, Detail = "graded 1/5 by judge: aged-out 5e7a" });
         }
 
-        usage.Record(new UsageRecord(_time.GetUtcNow(), "aged-out-usage-5e7a", "c", null, null, false, 1, 1, 0, 0, 0m, 0m));
-        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "aged-out-auditor-5e7a", null, "PUT", "/router/api/config", null, 200, "changed"));
+        usage.Record(new UsageRecord
+        {
+            Timestamp = _time.GetUtcNow(),
+            Model = "aged-out-usage-5e7a",
+            Connector = "c",
+            IsLocal = false,
+            InputTokens = 1,
+            OutputTokens = 1,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 0m,
+            ReferenceCostUsd = 0m,
+        });
+        audit.Append(new AuditEntry
+        {
+            Id = 0,
+            Timestamp = _time.GetUtcNow(),
+            Actor = "aged-out-auditor-5e7a",
+            Method = "PUT",
+            Path = "/router/api/config",
+            Status = 200,
+            Summary = "changed",
+        });
 
         // Past retention but not pruned yet: already left out of every read, the export's included.
         _time.Advance(TimeSpan.FromDays(40));
@@ -542,7 +593,7 @@ public sealed class SqliteStateTests : IDisposable
         File.WriteAllBytes(DbPath, Encoding.UTF8.GetBytes(new string('x', 4096)));
 
         SqliteRouterDatabase database = Open();
-        var tracker = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(database));
+        var tracker = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(database) });
         var history = new SqliteConfigurationHistory(database);
         tracker.ReportFailure(Model("claude", 4), ModelFailureKind.QuotaExceeded);
         long id = history.Record(new RouterConfiguration { FallbackTier = 2 }, "startup");
@@ -578,7 +629,19 @@ public sealed class SqliteStateTests : IDisposable
         var timer = System.Diagnostics.Stopwatch.StartNew();
         for (int i = 0; i < 100; i++)
         {
-            ledger.Record(new UsageRecord(_time.GetUtcNow(), "cloud", "c", null, null, false, 10, 10, 0, 0, 0.25m, 0.25m));
+            ledger.Record(new UsageRecord
+            {
+                Timestamp = _time.GetUtcNow(),
+                Model = "cloud",
+                Connector = "c",
+                IsLocal = false,
+                InputTokens = 10,
+                OutputTokens = 10,
+                CacheReadTokens = 0,
+                CacheWriteTokens = 0,
+                CostUsd = 0.25m,
+                ReferenceCostUsd = 0.25m,
+            });
             activity.Append(new RoutingActivityEntry { Id = i + 1, Timestamp = _time.GetUtcNow(), PromptPreview = "p" + i });
         }
 
@@ -596,7 +659,7 @@ public sealed class SqliteStateTests : IDisposable
     public void A_locked_database_degrades_to_memory_without_throwing()
     {
         SqliteRouterDatabase database = Open(o => o.BusyTimeout = TimeSpan.FromSeconds(1));
-        var tracker = new ModelHealthTracker(Selection, _time, new SqliteCooldownStore(database));
+        var tracker = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = new SqliteCooldownStore(database) });
         using var holder = new SqliteConnection($"Data Source={DbPath};Pooling=False");
         holder.Open();
         using (SqliteCommand begin = holder.CreateCommand())
@@ -638,11 +701,33 @@ public sealed class SqliteStateTests : IDisposable
         }
 
         var ledger = new SqliteUsageLedger(Open());
-        ledger.Record(new UsageRecord(_time.GetUtcNow(), "a", "c", null, null, false, 1, 1, 0, 0, 0.3m, 0.3m));
+        ledger.Record(new UsageRecord
+        {
+            Timestamp = _time.GetUtcNow(),
+            Model = "a",
+            Connector = "c",
+            IsLocal = false,
+            InputTokens = 1,
+            OutputTokens = 1,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 0.3m,
+            ReferenceCostUsd = 0.3m,
+        });
         new SqliteUsageLedger(Open()).Total(Since, Until).Requests.Should().Be(3, "opening the migrated file again changes nothing");
 
         UsageTotals total = ledger.Total(Since, Until);
-        total.Should().Be(new UsageTotals(3, 12, 7, 0, 0, 0.4000000000001m, 0.5m, 0.5m));
+        total.Should().Be(new UsageTotals
+        {
+            Requests = 3,
+            InputTokens = 12,
+            OutputTokens = 7,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 0.4000000000001m,
+            ReferenceCostUsd = 0.5m,
+            SubscriptionValueUsd = 0.5m,
+        });
         ledger.Total(Since, Until, model: "A").CostUsd.Should().Be(0.4m);
         ledger.Summarize(Since, Until, UsageGrouping.Profile).Select(g => g.Key).Should().BeEquivalentTo("work", "(no profile)");
         using var check = new SqliteConnection($"Data Source={DbPath};Pooling=False");
@@ -668,7 +753,20 @@ public sealed class SqliteStateTests : IDisposable
         var ledger = new SqliteUsageLedger(Open());
         foreach (decimal cost in new[] { 0.1m, 0.1m, 0.1m, 0.0000000000001m, 1234567.000000000001m })
         {
-            ledger.Record(new UsageRecord(_time.GetUtcNow(), "m", "c", null, null, false, 1, 1, 0, 0, cost, cost * 2, SubscriptionValueUsd: cost));
+            ledger.Record(new UsageRecord
+            {
+                Timestamp = _time.GetUtcNow(),
+                Model = "m",
+                Connector = "c",
+                IsLocal = false,
+                InputTokens = 1,
+                OutputTokens = 1,
+                CacheReadTokens = 0,
+                CacheWriteTokens = 0,
+                CostUsd = cost,
+                ReferenceCostUsd = cost * 2,
+                SubscriptionValueUsd = cost,
+            });
         }
 
         UsageTotals total = ledger.Total(Since, Until);
@@ -696,9 +794,23 @@ public sealed class SqliteStateTests : IDisposable
         DateTimeOffset start = new(2026, 10, 23, 20, 0, 0, TimeSpan.Zero);
         for (int i = 0; i < 300; i++)
         {
-            var record = new UsageRecord(
-                start.AddMinutes(17 * i), i % 3 == 0 ? "Cloud" : i % 3 == 1 ? "cloud" : "local", i % 2 == 0 ? "c" : "d", i % 4 == 0 ? null : "r" + (i % 2),
-                i % 5 == 0 ? null : "k", i % 3 == 2, i, 2 * i, i % 7, i % 11, i * 0.001m, i * 0.002m, i % 6 == 0 ? null : "p", i * 0.0005m);
+            var record = new UsageRecord
+            {
+                Timestamp = start.AddMinutes(17 * i),
+                Model = i % 3 == 0 ? "Cloud" : i % 3 == 1 ? "cloud" : "local",
+                Connector = i % 2 == 0 ? "c" : "d",
+                Route = i % 4 == 0 ? null : "r" + (i % 2),
+                Client = i % 5 == 0 ? null : "k",
+                IsLocal = i % 3 == 2,
+                InputTokens = i,
+                OutputTokens = 2 * i,
+                CacheReadTokens = i % 7,
+                CacheWriteTokens = i % 11,
+                CostUsd = i * 0.001m,
+                ReferenceCostUsd = i * 0.002m,
+                Profile = i % 6 == 0 ? null : "p",
+                SubscriptionValueUsd = i * 0.0005m,
+            };
             records.Add(record);
             ledger.Record(record);
         }
@@ -759,7 +871,19 @@ public sealed class SqliteStateTests : IDisposable
         int reads = ledger.Reads;
         for (int i = 0; i < 50; i++)
         {
-            ledger.Record(new UsageRecord(_time.GetUtcNow(), "cloud", "c", null, null, false, 1000, 100, 0, 0, 0m, 0m));
+            ledger.Record(new UsageRecord
+            {
+                Timestamp = _time.GetUtcNow(),
+                Model = "cloud",
+                Connector = "c",
+                IsLocal = false,
+                InputTokens = 1000,
+                OutputTokens = 100,
+                CacheReadTokens = 0,
+                CacheWriteTokens = 0,
+                CostUsd = 0m,
+                ReferenceCostUsd = 0m,
+            });
             gate.Blocking(cloud, configuration.Usage).Should().BeNull();
         }
 
@@ -780,7 +904,19 @@ public sealed class SqliteStateTests : IDisposable
     {
         var a = new SqliteUsageLedger(Open());
         var b = new SqliteUsageLedger(Open());
-        UsageRecord Request() => new(_time.GetUtcNow(), "cloud", "c", null, null, false, 10, 10, 0, 0, 0.25m, 0.25m);
+        UsageRecord Request() => new UsageRecord
+        {
+            Timestamp = _time.GetUtcNow(),
+            Model = "cloud",
+            Connector = "c",
+            IsLocal = false,
+            InputTokens = 10,
+            OutputTokens = 10,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 0.25m,
+            ReferenceCostUsd = 0.25m,
+        };
         a.Total(Since, Until, connector: "c").Requests.Should().Be(0);
 
         b.Record(Request());
@@ -1111,6 +1247,39 @@ public sealed class DurableStateHostTests : RouterHostTest
         JsonNode.Parse(await purge.Content.ReadAsStringAsync())!["removed"]!.GetValue<int>().Should().Be(2);
         JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray().Should().BeEmpty();
         DatabaseFiles().Should().NotContain("purge-me 7a1c");
+        foreach (string format in new[] { "jsonl", "csv" })
+        {
+            (await client.GetStringAsync($"/router/api/activity/export?format={format}&prompts=true&since=2000-01-01T00:00:00Z"))
+                .Should().NotContain("purge-me 7a1c", $"the {format} export reads the purged store");
+        }
+    }
+
+    [Fact]
+    public async Task The_routers_log_holds_no_prompt_text_even_when_previews_are_stored()
+    {
+        // The local backend fails with an error that quotes the prompt, as some servers do; the cloud model answers.
+        LocalHttp = new StubHttpMessageHandler((_, body) => new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        {
+            Content = new StringContent(new JsonObject { ["error"] = new JsonObject { ["message"] = "could not continue: " + body } }.ToJsonString(), Encoding.UTF8, "application/json"),
+        });
+        var logs = new CapturingLoggerProvider();
+        HttpClient client = await StartDurableAsync(
+            o => o.StorePrompts = PromptStorage.On,
+            services: s =>
+            {
+                s.AddSingleton<ILoggerProvider>(logs);
+                s.Configure<LoggerFilterOptions>(o => o.MinLevel = LogLevel.Trace);
+            });
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Chat("logmarker 6d2a: the severance terms for the Leeds office"));
+        await client.PostAsync("/semantic-router/classify", JsonBody(new JsonObject { ["prompt"] = "logmarker 6d2a: and the second office" }));
+        await WaitForStoredActivityAsync(1);
+
+        response.Headers.GetValues("X-Prompt-Route-Model").Should().Equal("cloud");
+        LocalHttp.Requests.Should().ContainSingle().Which.Body.Should().Contain("logmarker 6d2a");
+        DatabaseFiles().Should().Contain("logmarker 6d2a", "StorePrompts: On keeps the preview");
+        logs.Messages.Should().NotBeEmpty();
+        logs.All.Should().NotContain("logmarker 6d2a", "the log names decisions and errors, never the prompt (docs/host.md)");
     }
 
     [Fact]

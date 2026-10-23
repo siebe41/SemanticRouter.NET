@@ -1,16 +1,29 @@
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>Where one note has been sent since the router started (or since the log was cleared).</summary>
-/// <param name="LocalContent">Requests that carried the note's text to a local model.</param>
-/// <param name="LocalReference">Requests that only mentioned the note, to a local model.</param>
-/// <param name="CloudContent">Requests that carried the note's text to a model that is not local.</param>
-/// <param name="CloudReference">Requests that only mentioned the note, to a model that is not local.</param>
-/// <param name="FirstShared">The first time.</param>
-/// <param name="LastShared">The latest time.</param>
-/// <param name="Models">Requests per model.</param>
-public sealed record MemoryExposure(
-    int LocalContent, int LocalReference, int CloudContent, int CloudReference,
-    DateTimeOffset FirstShared, DateTimeOffset LastShared, IReadOnlyDictionary<string, int> Models);
+public sealed record MemoryExposure
+{
+    /// <summary>Requests that carried the note's text to a local model.</summary>
+    public required int LocalContent { get; init; }
+
+    /// <summary>Requests that only mentioned the note, to a local model.</summary>
+    public required int LocalReference { get; init; }
+
+    /// <summary>Requests that carried the note's text to a model that is not local.</summary>
+    public required int CloudContent { get; init; }
+
+    /// <summary>Requests that only mentioned the note, to a model that is not local.</summary>
+    public required int CloudReference { get; init; }
+
+    /// <summary>The first time.</summary>
+    public required DateTimeOffset FirstShared { get; init; }
+
+    /// <summary>The latest time.</summary>
+    public required DateTimeOffset LastShared { get; init; }
+
+    /// <summary>Requests per model.</summary>
+    public required IReadOnlyDictionary<string, int> Models { get; init; }
+}
 
 /// <summary>
 /// Counts, per memory note, the requests that carried it to each model, split by local and cloud. Kept in memory: it
@@ -64,10 +77,16 @@ internal sealed class MemoryExposureLog
         {
             return _notes.ToDictionary(
                 kv => kv.Key,
-                kv => new MemoryExposure(
-                    kv.Value.LocalContent, kv.Value.LocalReference, kv.Value.CloudContent, kv.Value.CloudReference,
-                    kv.Value.FirstShared, kv.Value.LastShared,
-                    new Dictionary<string, int>(kv.Value.Models, StringComparer.OrdinalIgnoreCase)),
+                kv => new MemoryExposure
+                {
+                    LocalContent = kv.Value.LocalContent,
+                    LocalReference = kv.Value.LocalReference,
+                    CloudContent = kv.Value.CloudContent,
+                    CloudReference = kv.Value.CloudReference,
+                    FirstShared = kv.Value.FirstShared,
+                    LastShared = kv.Value.LastShared,
+                    Models = new Dictionary<string, int>(kv.Value.Models, StringComparer.OrdinalIgnoreCase),
+                },
                 StringComparer.Ordinal);
         }
     }

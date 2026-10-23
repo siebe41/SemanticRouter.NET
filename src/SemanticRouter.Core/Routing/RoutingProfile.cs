@@ -97,6 +97,10 @@ public static class Glob
 }
 
 /// <summary>A daily time window such as <c>08:00-18:00</c>, or <c>22:00-06:00</c> across midnight.</summary>
+/// <remarks>
+/// Frozen: a window is a start and an end. Its constructor and <c>Deconstruct</c> are public API, so it gains no
+/// positional members.
+/// </remarks>
 public readonly record struct TimeWindow(TimeOnly Start, TimeOnly End)
 {
     /// <summary>Parses <c>HH:mm-HH:mm</c>.</summary>

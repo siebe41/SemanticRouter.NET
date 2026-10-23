@@ -23,31 +23,59 @@ public enum RouteHealthKind
 }
 
 /// <summary>One problem found in the routes.</summary>
-/// <param name="Kind">What is wrong.</param>
-/// <param name="Route">The route it concerns.</param>
-/// <param name="OtherRoute">The other route involved, if any.</param>
-/// <param name="Message">What is wrong and what to do about it.</param>
-/// <param name="Utterances">The utterances involved.</param>
-/// <param name="Similarity">The similarity behind the finding, or the overlapping fraction for <see cref="RouteHealthKind.Overlap"/>.</param>
-public sealed record RouteHealthFinding(
-    RouteHealthKind Kind, string Route, string? OtherRoute, string Message, IReadOnlyList<string> Utterances, float? Similarity);
+public sealed record RouteHealthFinding
+{
+    /// <summary>What is wrong.</summary>
+    public required RouteHealthKind Kind { get; init; }
+
+    /// <summary>The route it concerns.</summary>
+    public required string Route { get; init; }
+
+    /// <summary>The other route involved, if any.</summary>
+    public string? OtherRoute { get; init; }
+
+    /// <summary>What is wrong and what to do about it.</summary>
+    public required string Message { get; init; }
+
+    /// <summary>The utterances involved.</summary>
+    public required IReadOnlyList<string> Utterances { get; init; }
+
+    /// <summary>The similarity behind the finding, or the overlapping fraction for <see cref="RouteHealthKind.Overlap"/>.</summary>
+    public float? Similarity { get; init; }
+}
 
 /// <summary>How close two routes are.</summary>
-/// <param name="Route">One route.</param>
-/// <param name="OtherRoute">The other route.</param>
-/// <param name="CentroidSimilarity">Cosine similarity of the routes' mean utterance vectors.</param>
-/// <param name="AmbiguousFraction">
-/// The larger of the two directions: the fraction of a route's utterances that would trigger ambiguity escalation between
-/// the two routes: their best match in the other route is within <see cref="SemanticRouterOptions.AmbiguityMargin"/> of
-/// their best match in their own route, and both clear their route's similarity threshold.
-/// </param>
-public sealed record RouteOverlap(string Route, string OtherRoute, float CentroidSimilarity, float AmbiguousFraction);
+public sealed record RouteOverlap
+{
+    /// <summary>One route.</summary>
+    public required string Route { get; init; }
+
+    /// <summary>The other route.</summary>
+    public required string OtherRoute { get; init; }
+
+    /// <summary>Cosine similarity of the routes' mean utterance vectors.</summary>
+    public required float CentroidSimilarity { get; init; }
+
+    /// <summary>
+    /// The larger of the two directions: the fraction of a route's utterances that would trigger ambiguity escalation between
+    /// the two routes: their best match in the other route is within <see cref="SemanticRouterOptions.AmbiguityMargin"/> of
+    /// their best match in their own route, and both clear their route's similarity threshold.
+    /// </summary>
+    public required float AmbiguousFraction { get; init; }
+}
 
 /// <summary>The findings of <see cref="RouteHealthAnalyzer"/>.</summary>
-/// <param name="Findings">Problems, most serious kinds first.</param>
-/// <param name="Overlaps">Every pair of routes, closest first.</param>
-/// <param name="UtteranceCount">Utterances embedded.</param>
-public sealed record RouteHealthReport(IReadOnlyList<RouteHealthFinding> Findings, IReadOnlyList<RouteOverlap> Overlaps, int UtteranceCount);
+public sealed record RouteHealthReport
+{
+    /// <summary>Problems, most serious kinds first.</summary>
+    public required IReadOnlyList<RouteHealthFinding> Findings { get; init; }
+
+    /// <summary>Every pair of routes, closest first.</summary>
+    public required IReadOnlyList<RouteOverlap> Overlaps { get; init; }
+
+    /// <summary>Utterances embedded.</summary>
+    public required int UtteranceCount { get; init; }
+}
 
 /// <summary>
 /// Checks the routes' utterances for problems that hurt routing: too few examples, duplicates, utterances that also
@@ -97,16 +125,19 @@ public sealed class RouteHealthAnalyzer
             int count = route.Utterances.Count(u => !string.IsNullOrWhiteSpace(u));
             if (count < MinUtterances)
             {
-                findings.Add(new RouteHealthFinding(
-                    RouteHealthKind.FewUtterances, route.Name, null,
-                    $"'{route.Name}' has {count} utterance{(count == 1 ? string.Empty : "s")}; {MinUtterances} or more varied examples make a more robust route.",
-                    [], null));
+                findings.Add(new RouteHealthFinding
+                {
+                    Kind = RouteHealthKind.FewUtterances,
+                    Route = route.Name,
+                    Message = $"'{route.Name}' has {count} utterance{(count == 1 ? string.Empty : "s")}; {MinUtterances} or more varied examples make a more robust route.",
+                    Utterances = [],
+                });
             }
         }
 
         if (texts.Count == 0)
         {
-            return new RouteHealthReport(findings, [], 0);
+            return new RouteHealthReport { Findings = findings, Overlaps = [], UtteranceCount = 0 };
         }
 
         IReadOnlyList<ReadOnlyMemory<float>> raw = await _embeddings.GenerateEmbeddingsAsync(texts, cancellationToken).ConfigureAwait(false);
@@ -128,14 +159,23 @@ public sealed class RouteHealthAnalyzer
                 RouteDefinition first = routes[owner[a]];
                 RouteDefinition second = routes[owner[b]];
                 findings.Add(owner[a] == owner[b]
-                    ? new RouteHealthFinding(
-                        RouteHealthKind.DuplicateUtterances, first.Name, null,
-                        $"'{texts[a]}' and '{texts[b]}' in '{first.Name}' are near-duplicates; replace one with a different phrasing.",
-                        [texts[a], texts[b]], similarity)
-                    : new RouteHealthFinding(
-                        RouteHealthKind.ConflictingUtterances, first.Name, second.Name,
-                        $"'{texts[a]}' ({first.Name}, tier {first.Tier}) and '{texts[b]}' ({second.Name}, tier {second.Tier}) are near-identical; keep it in one route.",
-                        [texts[a], texts[b]], similarity));
+                    ? new RouteHealthFinding
+                    {
+                        Kind = RouteHealthKind.DuplicateUtterances,
+                        Route = first.Name,
+                        Message = $"'{texts[a]}' and '{texts[b]}' in '{first.Name}' are near-duplicates; replace one with a different phrasing.",
+                        Utterances = [texts[a], texts[b]],
+                        Similarity = similarity,
+                    }
+                    : new RouteHealthFinding
+                    {
+                        Kind = RouteHealthKind.ConflictingUtterances,
+                        Route = first.Name,
+                        OtherRoute = second.Name,
+                        Message = $"'{texts[a]}' ({first.Name}, tier {first.Tier}) and '{texts[b]}' ({second.Name}, tier {second.Tier}) are near-identical; keep it in one route.",
+                        Utterances = [texts[a], texts[b]],
+                        Similarity = similarity,
+                    });
             }
         }
 
@@ -152,24 +192,37 @@ public sealed class RouteHealthAnalyzer
                 }
 
                 float fraction = Math.Max(Ambiguous(a, b), Ambiguous(b, a));
-                overlaps.Add(new RouteOverlap(routes[a].Name, routes[b].Name, VectorMath.Dot(centroids[a], centroids[b]), fraction));
+                overlaps.Add(new RouteOverlap
+                {
+                    Route = routes[a].Name,
+                    OtherRoute = routes[b].Name,
+                    CentroidSimilarity = VectorMath.Dot(centroids[a], centroids[b]),
+                    AmbiguousFraction = fraction,
+                });
 
                 // Escalating between routes with the same requirements changes nothing, so it is not worth reporting.
                 if (fraction >= OverlapFraction && !SameRequirements(routes[a], routes[b]))
                 {
                     string percent = (fraction * 100).ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "%";
-                    findings.Add(new RouteHealthFinding(
-                        RouteHealthKind.Overlap, routes[a].Name, routes[b].Name,
-                        $"{percent} of the utterances of '{routes[a].Name}' (tier {routes[a].Tier}) or '{routes[b].Name}' (tier {routes[b].Tier}) match the other route almost as well, so prompts like them get tier {Math.Max(routes[a].Tier, routes[b].Tier)}. Make the utterances more distinct, or merge the routes.",
-                        [], fraction));
+                    findings.Add(new RouteHealthFinding
+                    {
+                        Kind = RouteHealthKind.Overlap,
+                        Route = routes[a].Name,
+                        OtherRoute = routes[b].Name,
+                        Message = $"{percent} of the utterances of '{routes[a].Name}' (tier {routes[a].Tier}) or '{routes[b].Name}' (tier {routes[b].Tier}) match the other route almost as well, so prompts like them get tier {Math.Max(routes[a].Tier, routes[b].Tier)}. Make the utterances more distinct, or merge the routes.",
+                        Utterances = [],
+                        Similarity = fraction,
+                    });
                 }
             }
         }
 
-        return new RouteHealthReport(
-            findings.OrderByDescending(f => f.Kind).ThenBy(f => f.Route, StringComparer.OrdinalIgnoreCase).ToArray(),
-            overlaps.OrderByDescending(o => o.AmbiguousFraction).ThenByDescending(o => o.CentroidSimilarity).ToArray(),
-            texts.Count);
+        return new RouteHealthReport
+        {
+            Findings = findings.OrderByDescending(f => f.Kind).ThenBy(f => f.Route, StringComparer.OrdinalIgnoreCase).ToArray(),
+            Overlaps = overlaps.OrderByDescending(o => o.AmbiguousFraction).ThenByDescending(o => o.CentroidSimilarity).ToArray(),
+            UtteranceCount = texts.Count,
+        };
 
         // Leave-one-out: each utterance of route x against the rest of x and against route y.
         float Ambiguous(int x, int y)

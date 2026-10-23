@@ -52,7 +52,7 @@ export function tierChip(level) {
   const draft = tiers().find((t) => t.Level === level);
   const name = running ? running.name : draft && draft.Name;
   const description = running ? running.description : draft && draft.Description;
-  return `<span class="tier" title="${h(`Tier ${level}${description ? ': ' + description : ''}`)}">T${level}${name ? ' · ' + h(name) : ''}</span>`;
+  return `<span class="tier" title="${h(`Tier ${level}${description ? ': ' + description : ''}`)}">T${h(level)}${name ? ' · ' + h(name) : ''}</span>`;
 }
 
 /* "00:15:00" → "15 min"; "1.00:00:00" → "1 d". Empty when it is not a duration. */

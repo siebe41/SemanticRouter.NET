@@ -128,6 +128,38 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Status_answers_while_a_slow_embedding_provider_builds_the_route_index()
+    {
+        using var embeddings = new BlockingEmbeddings();
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+            },
+            routing: o => o.Routes.Add(Route("smalltalk", 1, "hello how are you")),
+            services: s => s.AddSingleton<IEmbeddingProvider>(embeddings),
+            mockClassifier: false);
+        embeddings.Building.Wait(TimeSpan.FromSeconds(30)).Should().BeTrue("the start-up warm-up embeds the routes");
+        try
+        {
+            Task<HttpResponseMessage> chat = client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+            JsonNode status = await ReadNodeAsync(await client.GetAsync("/router/api/status").WaitAsync(TimeSpan.FromSeconds(30)));
+
+            status["service"]!["state"]!.GetValue<string>().Should().Be("starting");
+            status["warmedUp"]!.GetValue<bool>().Should().BeFalse();
+            chat.IsCompleted.Should().BeFalse("the chat request waits for the route index");
+            embeddings.Release.Set();
+            (await chat).StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+        finally
+        {
+            embeddings.Release.Set();
+        }
+    }
+
+    [Fact]
     public async Task Dashboard_assets_are_served_with_the_prefix_injected()
     {
         HttpClient client = await StartDispatchAsync();
@@ -342,5 +374,31 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         second.Version.Should().Be(first.Version + 1);
         second.Connectors.Names.Should().BeEquivalentTo("lmstudio");
         provider.Current.Should().BeSameAs(second);
+    }
+
+    /// <summary>Embeds on the calling thread like ONNX, and holds the route-index build until released.</summary>
+    private sealed class BlockingEmbeddings : IEmbeddingProvider, IDisposable
+    {
+        private readonly HashingEmbeddingProvider _inner = new();
+
+        public ManualResetEventSlim Building { get; } = new();
+
+        public ManualResetEventSlim Release { get; } = new();
+
+        public ValueTask<ReadOnlyMemory<float>> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default) =>
+            _inner.GenerateEmbeddingAsync(text, cancellationToken);
+
+        public ValueTask<IReadOnlyList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default)
+        {
+            Building.Set();
+            Release.Wait(TimeSpan.FromSeconds(30), cancellationToken);
+            return _inner.GenerateEmbeddingsAsync(texts, cancellationToken);
+        }
+
+        public void Dispose()
+        {
+            Building.Dispose();
+            Release.Dispose();
+        }
     }
 }

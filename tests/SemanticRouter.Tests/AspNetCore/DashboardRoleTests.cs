@@ -127,7 +127,7 @@ public sealed class DashboardRoleTests : RouterHostTest
             Examples = [Secret + "-EXAMPLE"],
             State = TuningChangeState.Applied,
         });
-        Services.GetRequiredService<IEvaluationSetStore>().Save([new EvaluationCase(Secret + "-EVALUATION", 1)]);
+        Services.GetRequiredService<IEvaluationSetStore>().Save([new EvaluationCase { Prompt = Secret + "-EVALUATION", ExpectedTier = 1 }]);
 
         // A connector down for over an hour: the notice's detail quotes what it said.
         Services.GetRequiredService<ConnectorIncidents>().Failed("lmstudio", ModelFailureKind.Unavailable, Secret + "-INCIDENT");
@@ -255,7 +255,7 @@ public sealed class DashboardRoleTests : RouterHostTest
         HttpClient client = await StartAsync();
         SeedText();
         Services.GetRequiredService<IEvaluationSetStore>().Save(
-            [new EvaluationCase("shared prompt", 1), new EvaluationCase(Secret + "-LOCAL", 2) { LocalOnly = true }]);
+            [new EvaluationCase { Prompt = "shared prompt", ExpectedTier = 1 }, new EvaluationCase { Prompt = Secret + "-LOCAL", ExpectedTier = 2, LocalOnly = true }]);
 
         async Task<(HttpStatusCode Status, string Body)> GetAsync(string path, string token)
         {
@@ -309,7 +309,7 @@ public sealed class DashboardRoleTests : RouterHostTest
         (await export.Content.ReadAsStringAsync()).Should().Contain(Secret + "-PROMPT");
         (await client.SendAsync(Request(HttpMethod.Get, "/router/api/activity/export?prompts=true", ReadOnlyToken))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
 
-        Services.GetRequiredService<IEvaluationSetStore>().Save([new EvaluationCase(Secret + "-LOCAL", 2) { LocalOnly = true }]);
+        Services.GetRequiredService<IEvaluationSetStore>().Save([new EvaluationCase { Prompt = Secret + "-LOCAL", ExpectedTier = 2, LocalOnly = true }]);
         string adminSet = await (await client.SendAsync(Request(HttpMethod.Get, "/router/api/evaluation/set", AdminToken))).Content.ReadAsStringAsync();
         adminSet.Should().Contain(Secret + "-LOCAL", "the admin can export the local-only prompts, so it sees them too");
         string readOnlySet = await (await client.SendAsync(Request(HttpMethod.Get, "/router/api/evaluation/set", ReadOnlyToken))).Content.ReadAsStringAsync();

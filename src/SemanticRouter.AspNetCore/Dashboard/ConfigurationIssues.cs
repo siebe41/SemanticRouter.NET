@@ -7,13 +7,18 @@ using System.Text.RegularExpressions;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>A problem with a configuration document, tied to the field it is about.</summary>
-/// <param name="Path">
-/// The field, as the dashboard's <c>data-bind</c> attributes name it: property names as in the configuration JSON,
-/// dot-separated, with array indexes and dictionary keys (<c>Routes.1.Name</c>, <c>Connectors.local.Timeout</c>,
-/// <c>Middleware.RateLimits.*.RequestsPerMinute</c>). <see langword="null"/> when the problem has no single field.
-/// </param>
-/// <param name="Message">What is wrong and how to fix it.</param>
-public sealed record ConfigurationIssue(string? Path, string Message);
+public sealed record ConfigurationIssue
+{
+    /// <summary>
+    /// The field, as the dashboard's <c>data-bind</c> attributes name it: property names as in the configuration JSON,
+    /// dot-separated, with array indexes and dictionary keys (<c>Routes.1.Name</c>, <c>Connectors.local.Timeout</c>,
+    /// <c>Middleware.RateLimits.*.RequestsPerMinute</c>). <see langword="null"/> when the problem has no single field.
+    /// </summary>
+    public string? Path { get; init; }
+
+    /// <summary>What is wrong and how to fix it.</summary>
+    public required string Message { get; init; }
+}
 
 /// <summary>
 /// Ties validation messages to the field they are about, so the dashboard can show each one next to its input, and
@@ -26,7 +31,7 @@ internal static partial class ConfigurationIssues
 
     /// <summary>The field of each error in <paramref name="errors"/>, worked out against <paramref name="document"/>.</summary>
     public static IReadOnlyList<ConfigurationIssue> Locate(IEnumerable<string> errors, RouterConfiguration document) =>
-        [.. errors.Select(e => new ConfigurationIssue(PathOf(e, document), e))];
+        [.. errors.Select(e => new ConfigurationIssue { Path = PathOf(e, document), Message = e })];
 
     /// <summary>The field a validation message is about, or <see langword="null"/>.</summary>
     internal static string? PathOf(string error, RouterConfiguration document)
@@ -295,7 +300,7 @@ internal static partial class ConfigurationIssues
         if (document is null || exception.Path is not { Length: > 1 } jsonPath)
         {
             string where = exception.LineNumber is { } line ? $" (line {line + 1}, position {(exception.BytePositionInLine ?? 0) + 1})" : string.Empty;
-            return new ConfigurationIssue(null, $"The configuration is not valid JSON{where}. Check for a missing comma, quote or bracket.");
+            return new ConfigurationIssue { Message = $"The configuration is not valid JSON{where}. Check for a missing comma, quote or bracket." };
         }
 
         string[] segments = Segments(jsonPath);
@@ -326,7 +331,7 @@ internal static partial class ConfigurationIssues
             { } t when t != typeof(string) && typeof(System.Collections.IEnumerable).IsAssignableFrom(t) => $"{shown} should be a list in [ ]",
             _ => $"{shown} is not valid here",
         };
-        return new ConfigurationIssue(path, expected);
+        return new ConfigurationIssue { Path = path, Message = expected };
     }
 
     /// <summary>The type the parser expected, from its message ("… could not be converted to System.TimeSpan. Path: …").</summary>

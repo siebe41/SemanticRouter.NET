@@ -1,12 +1,23 @@
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>One applied configuration document.</summary>
-/// <param name="Id">Increasing version id.</param>
-/// <param name="Timestamp">When it was applied.</param>
-/// <param name="Source">What applied it: <c>startup</c>, <c>admin API</c>, <c>reset</c>, <c>rollback</c>, …</param>
-/// <param name="Actor">Who applied it, when known (e.g. <c>local</c>, <c>admin token from 203.0.113.7</c>).</param>
-/// <param name="Note">Extra detail, e.g. <c>to version 12</c> or <c>not saved</c>.</param>
-public sealed record RouterConfigurationVersion(long Id, DateTimeOffset Timestamp, string Source, string? Actor, string? Note);
+public sealed record RouterConfigurationVersion
+{
+    /// <summary>Increasing version id.</summary>
+    public required long Id { get; init; }
+
+    /// <summary>When it was applied.</summary>
+    public required DateTimeOffset Timestamp { get; init; }
+
+    /// <summary>What applied it: <c>startup</c>, <c>admin API</c>, <c>reset</c>, <c>rollback</c>, …</summary>
+    public required string Source { get; init; }
+
+    /// <summary>Who applied it, when known (e.g. <c>local</c>, <c>admin token from 203.0.113.7</c>).</summary>
+    public string? Actor { get; init; }
+
+    /// <summary>Extra detail, e.g. <c>to version 12</c> or <c>not saved</c>.</summary>
+    public string? Note { get; init; }
+}
 
 /// <summary>
 /// Keeps every configuration document the router applied, so the dashboard can show what changed and roll back.
@@ -33,8 +44,14 @@ public sealed class InMemoryRouterConfigurationHistory : IRouterConfigurationHis
     private readonly Lock _gate = new();
     private long _next = 1;
 
+    /// <summary>Keeps the latest 50 documents.</summary>
+    public InMemoryRouterConfigurationHistory()
+        : this(50)
+    {
+    }
+
     /// <summary>Keeps the latest <paramref name="capacity"/> documents.</summary>
-    public InMemoryRouterConfigurationHistory(int capacity = 50)
+    public InMemoryRouterConfigurationHistory(int capacity)
     {
         _capacity = Math.Max(2, capacity);
     }
@@ -45,7 +62,14 @@ public sealed class InMemoryRouterConfigurationHistory : IRouterConfigurationHis
         ArgumentNullException.ThrowIfNull(document);
         lock (_gate)
         {
-            var version = new RouterConfigurationVersion(_next++, DateTimeOffset.UtcNow, source, actor, note);
+            var version = new RouterConfigurationVersion
+            {
+                Id = _next++,
+                Timestamp = DateTimeOffset.UtcNow,
+                Source = source,
+                Actor = actor,
+                Note = note,
+            };
             _versions.AddFirst((version, document.ToJson()));
             while (_versions.Count > _capacity)
             {

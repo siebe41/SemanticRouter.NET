@@ -69,12 +69,16 @@ public sealed partial class ChatCompletionRequest
             {
                 JsonValueKind.String => choice.GetString() switch
                 {
-                    "none" => new ToolChoice(ToolChoiceMode.None),
-                    "required" => new ToolChoice(ToolChoiceMode.Required),
+                    "none" => new ToolChoice { Mode = ToolChoiceMode.None },
+                    "required" => new ToolChoice { Mode = ToolChoiceMode.Required },
                     _ => default,
                 },
                 JsonValueKind.Object when choice.GetString("name") is { } name
-                    => new ToolChoice(ToolChoiceMode.Named, byClientName.TryGetValue((choice.GetString("namespace"), name), out string? wire) ? wire : name),
+                    => new ToolChoice
+                    {
+                        Mode = ToolChoiceMode.Named,
+                        Name = byClientName.TryGetValue((choice.GetString("namespace"), name), out string? wire) ? wire : name,
+                    },
                 _ => default,
             };
         }
@@ -105,7 +109,7 @@ public sealed partial class ChatCompletionRequest
             TopP = root.GetDouble("top_p"),
             UserId = root.GetString("safety_identifier") ?? root.GetString("user"),
             PromptCacheKey = root.GetString("prompt_cache_key"),
-            Reasoning = reasoning.GetString("effort") is { } effort && effort != "none" ? new ReasoningRequest(effort, null) : null,
+            Reasoning = reasoning.GetString("effort") is { } effort && effort != "none" ? new ReasoningRequest { Effort = effort } : null,
             ResponseFormat = text.TryGetObject("format", out JsonElement format) ? ReadResponseFormat(format, nested: false) : null,
             ParallelToolCalls = root.TryGetProperty("parallel_tool_calls", out JsonElement parallel) && parallel.ValueKind == JsonValueKind.False ? false : null,
             HostedTools = hosted.Distinct(StringComparer.Ordinal).ToArray(),
@@ -136,13 +140,15 @@ public sealed partial class ChatCompletionRequest
             {
                 case "function" when tool.GetString("name") is { Length: > 0 } name:
                     string? ns = @namespace == DefaultToolNamespace ? null : @namespace;
-                    tools.Add(new ToolDefinition(
-                        WireToolName(ns, name),
-                        tool.GetString("description"),
-                        tool.TryGetObject("parameters", out JsonElement parameters) ? parameters.GetRawText() : """{"type":"object","properties":{}}""",
-                        ToolKind.Function,
-                        ns,
-                        ns is null ? null : name));
+                    tools.Add(new ToolDefinition
+                    {
+                        Name = WireToolName(ns, name),
+                        Description = tool.GetString("description"),
+                        InputSchemaJson = tool.TryGetObject("parameters", out JsonElement parameters) ? parameters.GetRawText() : """{"type":"object","properties":{}}""",
+                        Kind = ToolKind.Function,
+                        Namespace = ns,
+                        ClientName = ns is null ? null : name,
+                    });
                     break;
 
                 case "custom" when tool.GetString("name") is { Length: > 0 } name:
@@ -153,7 +159,15 @@ public sealed partial class ChatCompletionRequest
                         description += $"\n\nThe input is free text that must match this {format.GetString("syntax") ?? "grammar"} grammar:\n{grammar.Trim()}";
                     }
 
-                    tools.Add(new ToolDefinition(WireToolName(customNs, name), description, ToolDefinition.CustomInputSchema, ToolKind.Custom, customNs, customNs is null ? null : name));
+                    tools.Add(new ToolDefinition
+                    {
+                        Name = WireToolName(customNs, name),
+                        Description = description,
+                        InputSchemaJson = ToolDefinition.CustomInputSchema,
+                        Kind = ToolKind.Custom,
+                        Namespace = customNs,
+                        ClientName = customNs is null ? null : name,
+                    });
                     break;
 
                 case "namespace" when tool.TryGetArray("tools", out JsonElement inner):
@@ -191,24 +205,28 @@ public sealed partial class ChatCompletionRequest
 
             case "function_call":
                 // The namespace is resolved against the declared tools once all of them are known.
-                AddTurn(turns, "assistant", [new ToolUseBlock(
-                    item.GetString("call_id") ?? item.GetString("id") ?? JsonHelpers.NewToolUseId(),
-                    (item.GetString("namespace") ?? string.Empty) + "\u0000" + (item.GetString("name") ?? string.Empty),
-                    JsonHelpers.EnsureJsonObject(item.GetString("arguments")))]);
+                AddTurn(turns, "assistant", [new ToolUseBlock
+                {
+                    Id = item.GetString("call_id") ?? item.GetString("id") ?? JsonHelpers.NewToolUseId(),
+                    Name = (item.GetString("namespace") ?? string.Empty) + "\u0000" + (item.GetString("name") ?? string.Empty),
+                    InputJson = JsonHelpers.EnsureJsonObject(item.GetString("arguments")),
+                }]);
                 break;
 
             case "custom_tool_call":
-                AddTurn(turns, "assistant", [new ToolUseBlock(
-                    item.GetString("call_id") ?? item.GetString("id") ?? JsonHelpers.NewToolUseId(),
-                    (item.GetString("namespace") ?? string.Empty) + "\u0000" + (item.GetString("name") ?? string.Empty),
-                    JsonHelpers.InputObject(item.GetString("input") ?? string.Empty))]);
+                AddTurn(turns, "assistant", [new ToolUseBlock
+                {
+                    Id = item.GetString("call_id") ?? item.GetString("id") ?? JsonHelpers.NewToolUseId(),
+                    Name = (item.GetString("namespace") ?? string.Empty) + "\u0000" + (item.GetString("name") ?? string.Empty),
+                    InputJson = JsonHelpers.InputObject(item.GetString("input") ?? string.Empty),
+                }]);
                 break;
 
             case "function_call_output" or "custom_tool_call_output":
                 bool images = false;
                 string output = item.TryGetProperty("output", out JsonElement value) ? ReadToolOutput(value, ref images) : string.Empty;
                 hasImages |= images;
-                AddTurn(turns, "user", [new ToolResultBlock(item.GetString("call_id") ?? string.Empty, output, IsError: false)]);
+                AddTurn(turns, "user", [new ToolResultBlock { ToolUseId = item.GetString("call_id") ?? string.Empty, Content = output, IsError = false }]);
                 break;
 
             case "additional_tools" when item.TryGetArray("tools", out JsonElement declared):
@@ -250,7 +268,7 @@ public sealed partial class ChatCompletionRequest
             return;
         }
 
-        turns.Add(new ChatTurn(role, blocks));
+        turns.Add(new ChatTurn { Role = role, Blocks = blocks });
     }
 
     private static void ReadResponsesContent(JsonElement content, List<ContentBlock> blocks, List<string> protocolOnly, ref bool hasImages)
@@ -259,7 +277,7 @@ public sealed partial class ChatCompletionRequest
         {
             if (content.GetString() is { Length: > 0 } text)
             {
-                blocks.Add(new TextBlock(text));
+                blocks.Add(new TextBlock { Text = text });
             }
 
             return;
@@ -275,7 +293,7 @@ public sealed partial class ChatCompletionRequest
             switch (part.GetString("type"))
             {
                 case "input_text" or "output_text" or "text" when part.GetString("text") is { } text:
-                    blocks.Add(new TextBlock(text));
+                    blocks.Add(new TextBlock { Text = text });
                     break;
                 case "input_image":
                     hasImages = true;
@@ -285,7 +303,7 @@ public sealed partial class ChatCompletionRequest
                     protocolOnly.Add("input_file");
                     break;
                 case "refusal" when part.GetString("refusal") is { } refusal:
-                    blocks.Add(new TextBlock(refusal));
+                    blocks.Add(new TextBlock { Text = refusal });
                     break;
             }
         }

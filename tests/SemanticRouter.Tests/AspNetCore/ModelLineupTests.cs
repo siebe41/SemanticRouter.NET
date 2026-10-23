@@ -12,7 +12,7 @@ public sealed class ModelLineupTests : RouterHostTest
     private static readonly ConnectorOptions LmStudio = new() { BaseAddress = new Uri("http://localhost:1234") };
 
     private static IReadOnlyList<ModelLineupEntry> Suggest(string connector, ConnectorOptions options, params string[] ids) =>
-        ModelLineup.Suggest(connector, options, ids.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, []);
+        ModelLineup.Suggest(connector, options, ids.Select(id => new DiscoveredModel { Id = id }).ToArray(), ModelLoading.Unknown, []);
 
     [Fact]
     public void Claude_code_gets_one_tier_per_family_and_fable_starts_disabled()
@@ -100,7 +100,7 @@ public sealed class ModelLineupTests : RouterHostTest
         IReadOnlyList<ModelLineupEntry> lineup = ModelLineup.Suggest("ollama", ollama, probe.Details, probe.Loading, []);
         var proxy = new ConnectorOptions { BaseAddress = new Uri("http://localhost:4000") };
 
-        ModelLineupEntry proxied = ModelLineup.Suggest("litellm", proxy, [new DiscoveredModel("qwen3-32b")], ModelLoading.Unknown, []).Single();
+        ModelLineupEntry proxied = ModelLineup.Suggest("litellm", proxy, [new DiscoveredModel { Id = "qwen3-32b" }], ModelLoading.Unknown, []).Single();
 
         lineup.Single(e => e.Model.Id == "llama3.2:latest").Suggestion!.IsLocal.Should().BeTrue();
         ModelLineupEntry cloud = lineup.Single(e => e.Model.Id == "gpt-oss:120b-cloud");
@@ -134,7 +134,7 @@ public sealed class ModelLineupTests : RouterHostTest
         ];
 
         IReadOnlyList<ModelLineupEntry> lineup = ModelLineup.Suggest(
-            "lmstudio", LmStudio, [new DiscoveredModel("qwen/qwen3-8b"), new DiscoveredModel("qwen/qwen3-coder-30b"), new DiscoveredModel("other/qwen3-8b")], ModelLoading.Unknown, catalog);
+            "lmstudio", LmStudio, [new DiscoveredModel { Id = "qwen/qwen3-8b" }, new DiscoveredModel { Id = "qwen/qwen3-coder-30b" }, new DiscoveredModel { Id = "other/qwen3-8b" }], ModelLoading.Unknown, catalog);
 
         lineup.Select(e => e.Suggestion!.Name).Should().Equal("lmstudio-qwen3-8b-2", "lmstudio-qwen3-coder-30b", "lmstudio-qwen3-8b-3");
         lineup[1].Should().Match<ModelLineupEntry>(e => e.InCatalog == "my-coder" && e.InCatalogTier == 2 && !e.Recommended);
@@ -250,7 +250,7 @@ public sealed class ModelLineupTests : RouterHostTest
 
             ModelFamilyTable table = ModelFamilyTable.Load(file);
             IReadOnlyList<ModelLineupEntry> lineup = ModelLineup.Suggest(
-                "lmstudio", LmStudio, [new DiscoveredModel("qwen/qwen3-coder-30b"), new DiscoveredModel("acme/widget-13b")], ModelLoading.Unknown, [], table);
+                "lmstudio", LmStudio, [new DiscoveredModel { Id = "qwen/qwen3-coder-30b" }, new DiscoveredModel { Id = "acme/widget-13b" }], ModelLoading.Unknown, [], table);
 
             lineup.Select(e => (e.Family, e.Suggestion!.Tier)).Should().Equal(("Qwen3 Coder", 3), ("Acme Widget", 4));
             lineup[1].Reason.Should().Contain("Our own fine-tune");

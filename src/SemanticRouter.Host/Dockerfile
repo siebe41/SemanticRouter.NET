@@ -14,7 +14,7 @@
 #
 # Base images are pinned by digest (Dependabot updates them); the runtime is Ubuntu chiseled: no shell or package
 # manager, only what .NET needs. The -extra variant keeps ICU and time zone data, for budgets in a local time zone.
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:0d99ebf1ccad15037b5c98c9fe8979d6b8dbac23812feae2277a0b277b5c5ffa AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:747cbade5bfd918a175ac32f8f1d931edec2c7d0d5397a3de72eaef1ac1f66d2 AS build
 WORKDIR /src
 COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props .editorconfig ./
 COPY src/ src/
@@ -31,7 +31,7 @@ RUN dotnet run --file deploy/third-party-notices.cs -- /app/THIRD-PARTY-NOTICES.
 # The runtime image has no shell to create the data directory, so it is made here and copied over.
 RUN mkdir -p /data
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra@sha256:3ed6558056b54d5c9dfefb7ff473728e022ff2bf1d976cbf8ee07b05ec594374
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra@sha256:9e3919aff68057f3e45125c5255a71d3b5f40364e45ede883348688851b9f0df
 ARG VERSION=
 ARG REVISION=
 LABEL org.opencontainers.image.title="semantic-router" \

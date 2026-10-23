@@ -9,16 +9,32 @@ namespace SemanticRouter.AspNetCore;
 internal readonly record struct RateLimitDecision(bool Admitted, TimeSpan RetryAfter, string? Detail);
 
 /// <summary>A client's rate limit and what it used in the last minute, for the dashboard.</summary>
-/// <param name="Client">The client: a gateway client name, or the address of a client without a key.</param>
-/// <param name="Limit">The entry that applies: the client's name or <c>*</c>.</param>
-/// <param name="RequestsPerMinute">The request limit, if any.</param>
-/// <param name="TokensPerMinute">The token limit, if any.</param>
-/// <param name="Requests">Requests admitted in the last minute.</param>
-/// <param name="Tokens">Tokens charged in the last minute.</param>
-/// <param name="Limited">Requests turned away since the router started.</param>
-/// <param name="LastLimited">When the last one was turned away.</param>
-public sealed record RateLimitStatus(
-    string Client, string Limit, int? RequestsPerMinute, int? TokensPerMinute, int Requests, long Tokens, long Limited, DateTimeOffset? LastLimited);
+public sealed record RateLimitStatus
+{
+    /// <summary>The client: a gateway client name, or the address of a client without a key.</summary>
+    public required string Client { get; init; }
+
+    /// <summary>The entry that applies: the client's name or <c>*</c>.</summary>
+    public required string Limit { get; init; }
+
+    /// <summary>The request limit, if any.</summary>
+    public int? RequestsPerMinute { get; init; }
+
+    /// <summary>The token limit, if any.</summary>
+    public int? TokensPerMinute { get; init; }
+
+    /// <summary>Requests admitted in the last minute.</summary>
+    public required int Requests { get; init; }
+
+    /// <summary>Tokens charged in the last minute.</summary>
+    public required long Tokens { get; init; }
+
+    /// <summary>Requests turned away since the router started.</summary>
+    public required long Limited { get; init; }
+
+    /// <summary>When the last one was turned away.</summary>
+    public DateTimeOffset? LastLimited { get; init; }
+}
 
 /// <summary>
 /// Per-client rate limits (<see cref="PromptRouterMiddlewareOptions.RateLimits"/>) over a sliding minute: requests per
@@ -132,8 +148,17 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
                 usage.Prune(now);
                 if (LimitFor(options, client, usage.Remote) is { } limit)
                 {
-                    status.Add(new RateLimitStatus(
-                        client, limit.Name, limit.Limit.RequestsPerMinute, limit.Limit.TokensPerMinute, usage.Requests, usage.Tokens, usage.Limited, usage.LastLimited));
+                    status.Add(new RateLimitStatus
+                    {
+                        Client = client,
+                        Limit = limit.Name,
+                        RequestsPerMinute = limit.Limit.RequestsPerMinute,
+                        TokensPerMinute = limit.Limit.TokensPerMinute,
+                        Requests = usage.Requests,
+                        Tokens = usage.Tokens,
+                        Limited = usage.Limited,
+                        LastLimited = usage.LastLimited,
+                    });
                 }
             }
 

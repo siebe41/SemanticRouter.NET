@@ -120,7 +120,12 @@ internal sealed class MarkdownMemorySource : IMemorySource
                 continue;
             }
 
-            documents.Add(new MemoryDocument(Path.GetRelativePath(root, file).Replace('\\', '/'), content) { Modified = info.LastWriteTimeUtc });
+            documents.Add(new MemoryDocument
+            {
+                Path = Path.GetRelativePath(root, file).Replace('\\', '/'),
+                Content = content,
+                Modified = info.LastWriteTimeUtc,
+            });
         }
 
         return (documents, skipped);

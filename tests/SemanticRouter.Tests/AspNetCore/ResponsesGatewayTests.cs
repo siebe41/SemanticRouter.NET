@@ -292,6 +292,21 @@ public sealed class ResponsesGatewayTests : RouterHostTest
     }
 
     [Fact]
+    public void A_pass_through_body_that_names_a_property_twice_still_gets_its_model_and_loses_relayed_thinking()
+    {
+        byte[] body = Encoding.UTF8.GetBytes($$"""
+            {"model":"claude-sonnet-9","model":"claude-haiku-9","messages":[
+              {"role":"assistant","role":"assistant","content":[{"type":"thinking","thinking":"6 times 7.","signature":"{{ThinkingBlock.RouterSignature}}"},{"type":"text","text":"42"}]}]}
+            """);
+
+        JsonElement rewritten = JsonDocument.Parse(OpenAICompatibleConnector.RewriteModel(body, "opus-api", stripRelayedThinking: true)).RootElement;
+
+        rewritten.EnumerateObject().Count(p => p.Name == "model").Should().Be(1);
+        rewritten.GetProperty("model").GetString().Should().Be("opus-api");
+        rewritten.GetProperty("messages")[0].GetProperty("content").EnumerateArray().Select(b => b.GetProperty("type").GetString()).Should().Equal("text");
+    }
+
+    [Fact]
     public async Task Json_schema_replies_from_an_anthropic_backend_arrive_as_text()
     {
         AnthropicHttp = StubHttpMessageHandler.Json("""

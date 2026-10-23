@@ -47,8 +47,8 @@ public sealed class ModelCacheShareTests
 
         var tracker = new ModelCacheTracker(activity, clock);
 
-        tracker.Typical(Model("CACHED", 3), "agentic").Should().Be(new PromptCacheShare(0.8, 0.1));
-        PromptCacheShare overall = new(4000 / 8000.0, 500 / 8000.0);
+        tracker.Typical(Model("CACHED", 3), "agentic").Should().Be(new PromptCacheShare { Read = 0.8, Write = 0.1 });
+        PromptCacheShare overall = new PromptCacheShare { Read = 4000 / 8000.0, Write = 500 / 8000.0 };
         tracker.Typical(Model("cached", 3), "chat").Should().Be(overall, "chat has 3 turns with usage, fewer than 5: the model's share over all its turns");
         tracker.Typical(Model("cached", 3), null).Should().Be(overall);
         tracker.Typical(Model("sparse", 3), "chat").Should().BeNull("3 turns are too few to tell");
@@ -56,8 +56,8 @@ public sealed class ModelCacheShareTests
 
         tracker.Configure(new ModelSelectionOptions { CacheShareSamples = 3, CacheShareWindow = TimeSpan.FromDays(3) });
 
-        tracker.Typical(Model("cached", 3), "chat").Should().Be(new PromptCacheShare(0, 0));
-        tracker.Typical(Model("cached", 3), "stale").Should().Be(new PromptCacheShare(1, 0));
-        tracker.Typical(Model("sparse", 3), "chat").Should().Be(new PromptCacheShare(1, 0));
+        tracker.Typical(Model("cached", 3), "chat").Should().Be(new PromptCacheShare { Read = 0, Write = 0 });
+        tracker.Typical(Model("cached", 3), "stale").Should().Be(new PromptCacheShare { Read = 1, Write = 0 });
+        tracker.Typical(Model("sparse", 3), "chat").Should().Be(new PromptCacheShare { Read = 1, Write = 0 });
     }
 }

@@ -17,6 +17,11 @@ public interface IModelCacheShare
 }
 
 /// <summary>The share of a model's input tokens read from and written to the provider's prompt cache.</summary>
-/// <param name="Read">Cache reads ÷ all input tokens (uncached input, cache reads and cache writes), 0 to 1.</param>
-/// <param name="Write">Cache writes ÷ all input tokens, 0 to 1.</param>
-public sealed record PromptCacheShare(double Read, double Write);
+public sealed record PromptCacheShare
+{
+    /// <summary>Cache reads ÷ all input tokens (uncached input, cache reads and cache writes), 0 to 1.</summary>
+    public required double Read { get; init; }
+
+    /// <summary>Cache writes ÷ all input tokens, 0 to 1.</summary>
+    public required double Write { get; init; }
+}

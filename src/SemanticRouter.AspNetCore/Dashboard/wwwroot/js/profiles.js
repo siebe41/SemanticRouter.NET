@@ -6,7 +6,7 @@ import { reasonHtml, tierChip } from './labels.js';
 
 /* Profiles: named routing policies, how requests pick one, and a tester that compares them for one prompt. */
 export const STRATEGY_OPTIONS = (value) => `<option value="" ${value ? '' : 'selected'}>(configured)</option>` + STRATEGIES.map((x) => `<option ${x === value ? 'selected' : ''}>${x}</option>`).join('');
-export const tierSelect = (bind, value, blank) => `<select data-bind="${bind}" data-kind="number" data-nullable="1"><option value="" ${value == null ? 'selected' : ''}>${blank}</option>${tiers().map((t) => `<option value="${t.Level}" ${t.Level === value ? 'selected' : ''}>${t.Level} · ${h(t.Name)}</option>`).join('')}</select>`;
+export const tierSelect = (bind, value, blank) => `<select data-bind="${h(bind)}" data-kind="number" data-nullable="1"><option value="" ${value == null ? 'selected' : ''}>${blank}</option>${tiers().map((t) => `<option value="${h(t.Level)}" ${t.Level === value ? 'selected' : ''}>${h(t.Level)} · ${h(t.Name)}</option>`).join('')}</select>`;
 
 export function profileTesterCard() {
   const t = state.profileTester;
@@ -35,21 +35,21 @@ views.profiles = () => {
     <div class="card section"><div class="card-head"><h2>Profiles</h2><span class="spacer"></span>${admin ? '<button class="btn primary small" data-action="profile-add">Add profile</button>' : ''}</div>
     ${names.map((name) => {
       const pr = profiles[name]; const key = 'profile:' + name; const p = `Profiles.${name}`;
-      return `<div class="item ${state.open.has(key) ? 'open' : ''}" data-key="${key}">
-        <div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}"><span class="chev">▶</span><span class="title">${h(name)}</span>
+      return `<div class="item ${state.open.has(key) ? 'open' : ''}" data-key="${h(key)}">
+        <div class="item-head" data-action="toggle" data-key="${h(key)}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}"><span class="chev">▶</span><span class="title">${h(name)}</span>
           <span class="meta">${pr.LocalOnly ? '<span class="badge warn">local only</span>' : ''}${pr.Strategy ? `<span class="badge">${h(pr.Strategy)}</span>` : ''}${pr.MinTier != null ? `<span>tier ≥ ${pr.MinTier}</span>` : ''}${pr.MaxTier != null ? `<span>tier ≤ ${pr.MaxTier}</span>` : ''}${(pr.AllowedModels || []).length ? `<span>${pr.AllowedModels.length} allowed</span>` : ''}${(pr.DeniedModels || []).length + (pr.DeniedConnectors || []).length ? `<span>${(pr.DeniedModels || []).length + (pr.DeniedConnectors || []).length} denied</span>` : ''}</span>
           <span class="spacer"></span><span class="muted small">${h(pr.Description || '')}</span></div>
         <div class="item-body"><div class="form-grid">
           <label class="field"><span class="name">Name</span><input type="text" data-action-input="profile-rename" data-name="${h(name)}" value="${h(name)}"><span class="hint">Rules, virtual models, client mappings and budgets follow a rename. No <code>@</code> or <code>.</code>.</span></label>
-          <label class="field wide"><span class="name">Description</span><input type="text" data-bind="${p}.Description" data-kind="nulltext" value="${h(pr.Description || '')}"></label>
-          <label class="field"><span class="name">Strategy</span><select data-bind="${p}.Strategy" data-kind="nulltext">${STRATEGY_OPTIONS(pr.Strategy)}</select></label>
+          <label class="field wide"><span class="name">Description</span><input type="text" data-bind="${h(p)}.Description" data-kind="nulltext" value="${h(pr.Description || '')}"></label>
+          <label class="field"><span class="name">Strategy</span><select data-bind="${h(p)}.Strategy" data-kind="nulltext">${STRATEGY_OPTIONS(pr.Strategy)}</select></label>
           <label class="field"><span class="name">Minimum tier</span>${tierSelect(p + '.MinTier', pr.MinTier, '(none)')}</label>
           <label class="field"><span class="name">Maximum tier</span>${tierSelect(p + '.MaxTier', pr.MaxTier, '(none)')}<span class="hint">Caps the requirement, so cheaper models are acceptable.</span></label>
           ${pickList({ bind: `${p}.AllowedModels`, values: pr.AllowedModels, known: models, chips: true, label: 'Allowed models', otherLabel: 'Other allowed models or globs', otherPlaceholder: 'globs, e.g. api-*', hint: 'None ticked: every model.' })}
           ${pickList({ bind: `${p}.DeniedModels`, values: pr.DeniedModels, known: models, chips: true, label: 'Denied models', otherLabel: 'Other denied models or globs', otherPlaceholder: 'globs, e.g. *-preview' })}
           ${pickList({ bind: `${p}.AllowedConnectors`, values: pr.AllowedConnectors, known: connectors, chips: true, label: 'Allowed connectors', otherLabel: 'Other allowed connectors', hint: 'None ticked: every connector.' })}
           ${pickList({ bind: `${p}.DeniedConnectors`, values: pr.DeniedConnectors, known: connectors, chips: true, label: 'Denied connectors', otherLabel: 'Other denied connectors' })}
-          <label class="check wide"><input type="checkbox" data-bind="${p}.LocalOnly" data-kind="bool" ${pr.LocalOnly ? 'checked' : ''}> Local only: only models marked <i>local</i> answer, even on failover</label>
+          <label class="check wide"><input type="checkbox" data-bind="${h(p)}.LocalOnly" data-kind="bool" ${pr.LocalOnly ? 'checked' : ''}> Local only: only models marked <i>local</i> answer, even on failover</label>
         </div>${admin ? `<div class="row-actions" style="margin-top:10px"><button class="btn danger small" data-action="profile-remove" data-name="${h(name)}">Remove</button></div>` : ''}</div></div>`;
     }).join('') || '<p class="muted small">No profiles. Every request is routed by the prompt alone.</p>'}
     </div>
@@ -79,9 +79,9 @@ views.profiles = () => {
     <div class="card section"><div class="card-head"><h2>Virtual models</h2><span class="muted small">Model names clients can pick (listed by <code>/v1/models</code>). <code>auto@profile</code> works for every profile too.</span></div>
       <div class="table-wrap"><table><tr><th>Name</th><th>Profile</th><th>Strategy</th><th>Description</th><th><span class="visually-hidden">Actions</span></th></tr>
         ${virtuals.map(([n, v]) => `<tr><td><input type="text" aria-label="Virtual model name" data-action-input="virtual-rename" data-name="${h(n)}" value="${h(n)}"></td>
-          <td><select aria-label="Profile of ${h(n)}" data-bind="Middleware.VirtualModels.${n}.Profile" data-kind="nulltext">${profileOptions(v.Profile, '(none)')}</select></td>
-          <td><select aria-label="Strategy of ${h(n)}" data-bind="Middleware.VirtualModels.${n}.Strategy" data-kind="nulltext">${STRATEGY_OPTIONS(v.Strategy)}</select></td>
-          <td><input type="text" aria-label="Description of ${h(n)}" data-bind="Middleware.VirtualModels.${n}.Description" data-kind="nulltext" value="${h(v.Description || '')}"></td>
+          <td><select aria-label="Profile of ${h(n)}" data-bind="Middleware.VirtualModels.${h(n)}.Profile" data-kind="nulltext">${profileOptions(v.Profile, '(none)')}</select></td>
+          <td><select aria-label="Strategy of ${h(n)}" data-bind="Middleware.VirtualModels.${h(n)}.Strategy" data-kind="nulltext">${STRATEGY_OPTIONS(v.Strategy)}</select></td>
+          <td><input type="text" aria-label="Description of ${h(n)}" data-bind="Middleware.VirtualModels.${h(n)}.Description" data-kind="nulltext" value="${h(v.Description || '')}"></td>
           <td>${admin ? `<button class="btn danger small" data-action="virtual-remove" data-name="${h(n)}">Remove</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted small">No virtual models.</td></tr>'}
       </table></div>${admin ? '<div class="inline" style="margin-top:8px"><button class="btn small" data-action="virtual-add">Add virtual model</button></div>' : ''}
     </div>

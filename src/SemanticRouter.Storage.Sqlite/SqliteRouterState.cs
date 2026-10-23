@@ -1202,7 +1202,12 @@ internal sealed class SqliteWarmCaches(SqliteRouterDatabase database) : IWarmCac
             var caches = new List<WarmCache>();
             while (reader.Read())
             {
-                caches.Add(new WarmCache(reader.GetString(0), reader.GetInt32(1), new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero)));
+                caches.Add(new WarmCache
+                {
+                    Model = reader.GetString(0),
+                    CachedTokens = reader.GetInt32(1),
+                    ExpiresAt = new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero),
+                });
             }
 
             return caches;
@@ -1548,8 +1553,8 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
     public int Purge(DateTimeOffset since, DateTimeOffset until) => PurgeWithResult(since, until).Removed;
 
     // A database that is not in use holds nothing to purge; one that fails during the purge may still hold it.
-    public ActivityPurgeResult PurgeWithResult(DateTimeOffset since, DateTimeOffset until) => !database.Available ? new ActivityPurgeResult(0) :
-        database.Run("purging activity", new ActivityPurgeResult(0, Complete: false), connection =>
+    public ActivityPurgeResult PurgeWithResult(DateTimeOffset since, DateTimeOffset until) => !database.Available ? new ActivityPurgeResult { Removed = 0 } :
+        database.Run("purging activity", new ActivityPurgeResult { Removed = 0, Complete = false }, connection =>
         {
             int removed;
             using (SqliteCommand command = SqliteRouterDatabase.Command(
@@ -1566,7 +1571,7 @@ internal sealed class SqliteActivityStore(SqliteRouterDatabase database) : IRout
                 vacuum.ExecuteNonQuery();
             }
 
-            return new ActivityPurgeResult(removed, database.EmptyLogAfterPurge(connection, "purging activity"));
+            return new ActivityPurgeResult { Removed = removed, Complete = database.EmptyLogAfterPurge(connection, "purging activity") };
         });
 }
 
@@ -1608,9 +1613,14 @@ internal sealed class SqliteConfigurationHistory(SqliteRouterDatabase database) 
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
             {
-                versions.Add(new RouterConfigurationVersion(
-                    reader.GetInt64(0), new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero), reader.GetString(2),
-                    reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4)));
+                versions.Add(new RouterConfigurationVersion
+                {
+                    Id = reader.GetInt64(0),
+                    Timestamp = new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero),
+                    Source = reader.GetString(2),
+                    Actor = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    Note = reader.IsDBNull(4) ? null : reader.GetString(4),
+                });
             }
 
             return versions;
@@ -1835,9 +1845,17 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
                 using SqliteDataReader reader = command.ExecuteReader();
                 while (reader.Read())
                 {
-                    totals.Add(KeyOf(reader, by, days), reader.GetString(1), new UsageTotals(
-                        reader.GetInt64(2), reader.GetInt64(3), reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6),
-                        FromPico(reader, 7), FromPico(reader, 9), FromPico(reader, 11)));
+                    totals.Add(KeyOf(reader, by, days), reader.GetString(1), new UsageTotals
+                    {
+                        Requests = reader.GetInt64(2),
+                        InputTokens = reader.GetInt64(3),
+                        OutputTokens = reader.GetInt64(4),
+                        CacheReadTokens = reader.GetInt64(5),
+                        CacheWriteTokens = reader.GetInt64(6),
+                        CostUsd = FromPico(reader, 7),
+                        ReferenceCostUsd = FromPico(reader, 9),
+                        SubscriptionValueUsd = FromPico(reader, 11),
+                    });
                     inexact |= reader.GetInt64(13) > 0;
                 }
             }
@@ -1969,12 +1987,23 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
         using SqliteDataReader reader = command.ExecuteReader();
         while (reader.Read())
         {
-            records.Add(new UsageRecord(
-                new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero), reader.GetString(1), reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetInt64(5) != 0,
-                reader.GetInt64(6), reader.GetInt64(7), reader.GetInt64(8), reader.GetInt64(9),
-                decimal.Parse(reader.GetString(10), CultureInfo.InvariantCulture), decimal.Parse(reader.GetString(11), CultureInfo.InvariantCulture),
-                reader.IsDBNull(12) ? null : reader.GetString(12), decimal.Parse(reader.GetString(13), CultureInfo.InvariantCulture)));
+            records.Add(new UsageRecord
+            {
+                Timestamp = new DateTimeOffset(reader.GetInt64(0), TimeSpan.Zero),
+                Model = reader.GetString(1),
+                Connector = reader.GetString(2),
+                Route = reader.IsDBNull(3) ? null : reader.GetString(3),
+                Client = reader.IsDBNull(4) ? null : reader.GetString(4),
+                IsLocal = reader.GetInt64(5) != 0,
+                InputTokens = reader.GetInt64(6),
+                OutputTokens = reader.GetInt64(7),
+                CacheReadTokens = reader.GetInt64(8),
+                CacheWriteTokens = reader.GetInt64(9),
+                CostUsd = decimal.Parse(reader.GetString(10), CultureInfo.InvariantCulture),
+                ReferenceCostUsd = decimal.Parse(reader.GetString(11), CultureInfo.InvariantCulture),
+                Profile = reader.IsDBNull(12) ? null : reader.GetString(12),
+                SubscriptionValueUsd = decimal.Parse(reader.GetString(13), CultureInfo.InvariantCulture),
+            });
         }
 
         return records;
@@ -2108,10 +2137,18 @@ internal sealed class SqliteAuditLog(SqliteRouterDatabase database) : IAuditLog
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
             {
-                entries.Add(new AuditEntry(
-                    reader.GetInt64(0), new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero), reader.GetString(2),
-                    reader.IsDBNull(3) ? null : reader.GetString(3), reader.GetString(4), reader.GetString(5),
-                    reader.IsDBNull(6) ? null : reader.GetString(6), reader.GetInt32(7), reader.GetString(8)));
+                entries.Add(new AuditEntry
+                {
+                    Id = reader.GetInt64(0),
+                    Timestamp = new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero),
+                    Actor = reader.GetString(2),
+                    Client = reader.IsDBNull(3) ? null : reader.GetString(3),
+                    Method = reader.GetString(4),
+                    Path = reader.GetString(5),
+                    Route = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    Status = reader.GetInt32(7),
+                    Summary = reader.GetString(8),
+                });
             }
 
             return entries;

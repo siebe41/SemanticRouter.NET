@@ -333,9 +333,11 @@ internal static partial class RouterHost
             starting.On = false;
         }
 
-        var instance = new RouterInstance(Environment.ProcessId, [.. app.Urls], DateTimeOffset.UtcNow, Version);
+        // Listening before it is recorded, so whoever reads the record can stop it.
+        var instance = new RouterInstance(Environment.ProcessId, [.. app.Urls], DateTimeOffset.UtcNow, Version,
+            OperatingSystem.IsWindows() ? RouterInstance.NewStopEventName() : null);
+        IDisposable? stopListener = OperatingSystem.IsWindows() ? instance.ListenForStop(app.Lifetime) : null;
         instance.Write(settings.ConfigurationDirectory);
-        IDisposable? stopListener = OperatingSystem.IsWindows() ? RouterInstance.ListenForStop(app.Lifetime) : null;
         return new RunningRouter(app, instance, settings.ConfigurationDirectory, stopListener);
     }
 
