@@ -37,17 +37,34 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           version="${tag#v}"
           mkdir -p sboms
-          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir sboms \
-            --pattern "SemanticRouter-$version-desktop.cdx.json" --pattern "SemanticRouter-$version-packages.cdx.json"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir sboms --pattern "SemanticRouter-$version-*.cdx.json"
           # Syft names the self-contained .NET runtime `pkg:nuget/runtimepack.Microsoft.NETCore.App.Runtime.<rid>` (and the
           # same for ASP.NET Core); the advisories name the package without the prefix, so the scan would never match them.
+          # The release renames them (deploy/sbom-complete.cs); this is for the releases from before it did.
           for sbom in sboms/*.cdx.json; do
             jq '(.components[]? | select((.purl // "") | startswith("pkg:nuget/runtimepack.")))
               |= (.name |= ltrimstr("runtimepack.") | .purl |= sub("^pkg:nuget/runtimepack\\."; "pkg:nuget/"))' \
               "$sbom" > "$sbom.tmp"
             mv "$sbom.tmp" "$sbom"
           done
-          echo "desktop=sboms/SemanticRouter-$version-desktop.cdx.json" >> "$GITHUB_OUTPUT"
+          # The desktop app has an SBOM per platform for its archives and one per platform for its installers (earlier
+          # releases had one for every platform): one scan covers all their components. The image has its own check.
+          desktop=()
+          for sbom in sboms/*.cdx.json; do
+            case "$sbom" in
+              *-packages.cdx.json | *-image.cdx.json) ;;
+              *) desktop+=("$sbom") ;;
+            esac
+          done
+          if [ "${#desktop[@]}" -eq 0 ]; then
+            echo "::error::$tag has no desktop SBOM."
+            exit 1
+          fi
+          # The same package from several platforms is one component: Syft's bom-refs differ per file, so they are
+          # merged by purl, and only a component without one by its bom-ref (or, with neither, by its whole content).
+          jq -s '.[0] + { components: ([.[].components[]?] | unique_by(.purl // ."bom-ref" // tojson)), dependencies: [] }' "${desktop[@]}" \
+            > desktop.cdx.json
+          echo "desktop=desktop.cdx.json" >> "$GITHUB_OUTPUT"
           echo "packages=sboms/SemanticRouter-$version-packages.cdx.json" >> "$GITHUB_OUTPUT"
 
       - name: Scan the desktop app's SBOM

@@ -7,12 +7,17 @@
     "if 'runtimes' is set, targets a runtime identifier starting with one of them (a deps.json without one matches all).",
     "'{Id}' in a version is that package's version. 'texts' are paths from the repository root; a component without",
     "texts of its own gets the standard text of each licence in its expression from deploy/third-party/licences.",
+    "deploy/sbom-complete.cs reads both too. It takes an id ending in '*' in licences for every package id that starts",
+    "with the rest: the container's shared frameworks, which come with the base image, not from a restore. It adds a",
+    "component with 'addedBy': 'vpk' only to the SBOMs of the installers and update packages, where vpk adds it.",
     "The Rust crates in Velopack's native binaries are in velopack-crates.json, written by velopack-crates.py."
   ],
   "licences": {
     "Avalonia.Angle.Windows.Natives": "BSD-3-Clause",
     "Microsoft.ML.OnnxRuntime": "MIT",
-    "Microsoft.ML.OnnxRuntime.Managed": "MIT"
+    "Microsoft.ML.OnnxRuntime.Managed": "MIT",
+    "Microsoft.AspNetCore.App.Runtime.*": "MIT",
+    "Microsoft.NETCore.App.Runtime.*": "MIT"
   },
   "components": [
     {
@@ -40,7 +45,8 @@
       "licence": "MIT",
       "copyright": "Copyright (c) 2021 Caelan Sayler, Copyright (c) 2024 Velopack Ltd.",
       "project": "https://github.com/velopack/velopack",
-      "with": "Velopack"
+      "with": "Velopack",
+      "addedBy": "vpk"
     },
     {
       "name": "Rust standard library",
@@ -59,6 +65,7 @@
       "copyright": "Copyright (c) 2004-23 probonopd",
       "project": "https://github.com/AppImage/type2-runtime",
       "with": "Velopack",
+      "addedBy": "vpk",
       "runtimes": [ "linux-" ]
     },
     {
@@ -68,6 +75,7 @@
       "copyright": "Copyright (c) 2005-2020 Rich Felker, et al.",
       "project": "https://musl.libc.org",
       "with": "Velopack",
+      "addedBy": "vpk",
       "runtimes": [ "linux-" ]
     },
     {
@@ -77,6 +85,7 @@
       "copyright": "Copyright (C) 2001-2007 Miklos Szeredi, and the libfuse contributors",
       "project": "https://github.com/libfuse/libfuse",
       "with": "Velopack",
+      "addedBy": "vpk",
       "runtimes": [ "linux-" ]
     },
     {
@@ -86,6 +95,7 @@
       "copyright": "Copyright (c) 2012 Dave Vasilevsky, Phillip Lougher",
       "project": "https://github.com/vasi/squashfuse",
       "with": "Velopack",
+      "addedBy": "vpk",
       "runtimes": [ "linux-" ]
     },
     {
@@ -95,6 +105,7 @@
       "copyright": "Copyright (c) Meta Platforms, Inc. and affiliates.",
       "project": "https://github.com/facebook/zstd",
       "with": "Velopack",
+      "addedBy": "vpk",
       "runtimes": [ "linux-" ]
     },
     {
@@ -104,6 +115,7 @@
       "copyright": "Copyright (C) Jean-loup Gailly and Mark Adler",
       "project": "https://zlib.net",
       "with": "Velopack",
+      "addedBy": "vpk",
       "runtimes": [ "linux-" ]
     }
   ]
