@@ -534,7 +534,7 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
             break;
         }
 
-        call = new ToolUseBlock(JsonHelpers.NewToolUseId(), name, input);
+        call = new ToolUseBlock { Id = JsonHelpers.NewToolUseId(), Name = name, InputJson = input };
         problem = null;
         return true;
     }

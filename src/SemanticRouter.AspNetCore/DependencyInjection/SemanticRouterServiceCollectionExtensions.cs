@@ -79,7 +79,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<IToolCallAffinity, ToolCallAffinity>();
         services.TryAddSingleton<IWarmCacheStore>(sp => new WarmCacheStore(sp.GetService<TimeProvider>()));
         services.TryAddSingleton(sp => new GatewayKeyThrottle(sp.GetService<TimeProvider>() ?? TimeProvider.System));
-        services.TryAddSingleton<RoutingActivityLog>();
+        services.TryAddSingleton(sp => new RoutingActivityLog(sp.GetService<IRoutingActivityStore>()));
         services.TryAddSingleton(sp => new GatewayGuard(
             sp.GetService<IOptions<RouterDashboardOptions>>()?.Value.PublicOrigins ?? []));
         services.TryAddSingleton<RoutingFeedbackLog>();

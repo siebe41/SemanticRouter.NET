@@ -33,8 +33,15 @@ public sealed class WarmCacheStore : IWarmCacheStore
     private readonly TimeProvider _time;
     private readonly TrackerPruning _pruning;
 
+    /// <summary>Creates an empty store on the system clock.</summary>
+    public WarmCacheStore()
+        : this(null)
+    {
+    }
+
     /// <summary>Creates an empty store.</summary>
-    public WarmCacheStore(TimeProvider? time = null)
+    /// <param name="time">The clock; the system clock when <see langword="null"/>.</param>
+    public WarmCacheStore(TimeProvider? time)
     {
         _time = time ?? TimeProvider.System;
         _pruning = new TrackerPruning(MaxConversations, PruneAbove, _time);

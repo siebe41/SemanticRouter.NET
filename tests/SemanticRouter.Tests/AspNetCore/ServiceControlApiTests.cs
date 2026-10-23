@@ -136,12 +136,28 @@ public sealed class ServiceControlApiTests : RouterHostTest
 
         public string? Locked { get; set; }
 
-        public Task<RouterServiceDescription> DescribeAsync(CancellationToken cancellationToken = default) => Task.FromResult(new RouterServiceDescription(
-            new RouterListenDescription("local", 5080, _urls, null, "/config/semantic-router.host.json", null, Locked is null, false),
-            new RouterBackgroundService("fake service", false, null, "/fake/unit", "fake log", []),
-            "foreground",
-            [.. RouterServiceActions.All.Where(a => Refusal(a) is null)],
-            null));
+        public Task<RouterServiceDescription> DescribeAsync(CancellationToken cancellationToken = default) => Task.FromResult(new RouterServiceDescription
+        {
+            Listen = new RouterListenDescription
+            {
+                Scope = "local",
+                Port = 5080,
+                Urls = _urls,
+                File = "/config/semantic-router.host.json",
+                Editable = Locked is null,
+                RestartNeeded = false,
+            },
+            Background = new RouterBackgroundService
+            {
+                Kind = "fake service",
+                Installed = false,
+                Location = "/fake/unit",
+                LogHint = "fake log",
+                Notes = [],
+            },
+            RunsAs = "foreground",
+            Actions = [.. RouterServiceActions.All.Where(a => Refusal(a) is null)],
+        });
 
         public Task<RouterServiceDescription> SetListenAsync(RouterListenChange change, CancellationToken cancellationToken = default)
         {

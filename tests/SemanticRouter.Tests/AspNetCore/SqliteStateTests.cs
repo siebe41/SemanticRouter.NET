@@ -82,7 +82,21 @@ public sealed class SqliteStateTests : IDisposable
         }
 
         var ledger = new SqliteUsageLedger(Open());
-        ledger.Record(new UsageRecord(_time.GetUtcNow(), "new", "c", null, null, false, 20, 10, 0, 0, 0.2m, 0.2m, "work", SubscriptionValueUsd: 0.5m));
+        ledger.Record(new UsageRecord
+        {
+            Timestamp = _time.GetUtcNow(),
+            Model = "new",
+            Connector = "c",
+            IsLocal = false,
+            InputTokens = 20,
+            OutputTokens = 10,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 0.2m,
+            ReferenceCostUsd = 0.2m,
+            Profile = "work",
+            SubscriptionValueUsd = 0.5m,
+        });
 
         DateTimeOffset since = _time.GetUtcNow().AddHours(-1), until = _time.GetUtcNow().AddHours(1);
         ledger.Total(since, until).Requests.Should().Be(2, "the old row survives the migration");
@@ -350,7 +364,7 @@ public sealed class SqliteStateTests : IDisposable
         await Task.Delay(300);
         read.Commit();
 
-        (await purge).Should().Be(new ActivityPurgeResult(1, Complete: true));
+        (await purge).Should().Be(new ActivityPurgeResult { Removed = 1, Complete = true });
         string files = DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db");
         files.Should().NotContain("purge-me 3f9d", "the purge waits for the reader, then empties the log");
     }
@@ -372,7 +386,7 @@ public sealed class SqliteStateTests : IDisposable
             }
 
             store.PurgeWithResult(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1))
-                .Should().Be(new ActivityPurgeResult(1, Complete: false), "the rows are gone, but the log still holds them");
+                .Should().Be(new ActivityPurgeResult { Removed = 1, Complete = false }, "the rows are gone, but the log still holds them");
             _logs.Messages.Should().Contain(m => m.Contains("could not be emptied", StringComparison.Ordinal));
             read.Commit();
         }
@@ -396,8 +410,29 @@ public sealed class SqliteStateTests : IDisposable
             feedback.Add(new RoutingFeedback { Id = i, Timestamp = _time.GetUtcNow(), EntryId = i, Kind = FeedbackKind.Judged, Detail = "graded 1/5 by judge: aged-out 5e7a" });
         }
 
-        usage.Record(new UsageRecord(_time.GetUtcNow(), "aged-out-usage-5e7a", "c", null, null, false, 1, 1, 0, 0, 0m, 0m));
-        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "aged-out-auditor-5e7a", null, "PUT", "/router/api/config", null, 200, "changed"));
+        usage.Record(new UsageRecord
+        {
+            Timestamp = _time.GetUtcNow(),
+            Model = "aged-out-usage-5e7a",
+            Connector = "c",
+            IsLocal = false,
+            InputTokens = 1,
+            OutputTokens = 1,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 0m,
+            ReferenceCostUsd = 0m,
+        });
+        audit.Append(new AuditEntry
+        {
+            Id = 0,
+            Timestamp = _time.GetUtcNow(),
+            Actor = "aged-out-auditor-5e7a",
+            Method = "PUT",
+            Path = "/router/api/config",
+            Status = 200,
+            Summary = "changed",
+        });
 
         // Past retention but not pruned yet: already left out of every read, the export's included.
         _time.Advance(TimeSpan.FromDays(40));
@@ -578,7 +613,19 @@ public sealed class SqliteStateTests : IDisposable
         var timer = System.Diagnostics.Stopwatch.StartNew();
         for (int i = 0; i < 100; i++)
         {
-            ledger.Record(new UsageRecord(_time.GetUtcNow(), "cloud", "c", null, null, false, 10, 10, 0, 0, 0.25m, 0.25m));
+            ledger.Record(new UsageRecord
+            {
+                Timestamp = _time.GetUtcNow(),
+                Model = "cloud",
+                Connector = "c",
+                IsLocal = false,
+                InputTokens = 10,
+                OutputTokens = 10,
+                CacheReadTokens = 0,
+                CacheWriteTokens = 0,
+                CostUsd = 0.25m,
+                ReferenceCostUsd = 0.25m,
+            });
             activity.Append(new RoutingActivityEntry { Id = i + 1, Timestamp = _time.GetUtcNow(), PromptPreview = "p" + i });
         }
 
@@ -638,11 +685,33 @@ public sealed class SqliteStateTests : IDisposable
         }
 
         var ledger = new SqliteUsageLedger(Open());
-        ledger.Record(new UsageRecord(_time.GetUtcNow(), "a", "c", null, null, false, 1, 1, 0, 0, 0.3m, 0.3m));
+        ledger.Record(new UsageRecord
+        {
+            Timestamp = _time.GetUtcNow(),
+            Model = "a",
+            Connector = "c",
+            IsLocal = false,
+            InputTokens = 1,
+            OutputTokens = 1,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 0.3m,
+            ReferenceCostUsd = 0.3m,
+        });
         new SqliteUsageLedger(Open()).Total(Since, Until).Requests.Should().Be(3, "opening the migrated file again changes nothing");
 
         UsageTotals total = ledger.Total(Since, Until);
-        total.Should().Be(new UsageTotals(3, 12, 7, 0, 0, 0.4000000000001m, 0.5m, 0.5m));
+        total.Should().Be(new UsageTotals
+        {
+            Requests = 3,
+            InputTokens = 12,
+            OutputTokens = 7,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 0.4000000000001m,
+            ReferenceCostUsd = 0.5m,
+            SubscriptionValueUsd = 0.5m,
+        });
         ledger.Total(Since, Until, model: "A").CostUsd.Should().Be(0.4m);
         ledger.Summarize(Since, Until, UsageGrouping.Profile).Select(g => g.Key).Should().BeEquivalentTo("work", "(no profile)");
         using var check = new SqliteConnection($"Data Source={DbPath};Pooling=False");
@@ -668,7 +737,20 @@ public sealed class SqliteStateTests : IDisposable
         var ledger = new SqliteUsageLedger(Open());
         foreach (decimal cost in new[] { 0.1m, 0.1m, 0.1m, 0.0000000000001m, 1234567.000000000001m })
         {
-            ledger.Record(new UsageRecord(_time.GetUtcNow(), "m", "c", null, null, false, 1, 1, 0, 0, cost, cost * 2, SubscriptionValueUsd: cost));
+            ledger.Record(new UsageRecord
+            {
+                Timestamp = _time.GetUtcNow(),
+                Model = "m",
+                Connector = "c",
+                IsLocal = false,
+                InputTokens = 1,
+                OutputTokens = 1,
+                CacheReadTokens = 0,
+                CacheWriteTokens = 0,
+                CostUsd = cost,
+                ReferenceCostUsd = cost * 2,
+                SubscriptionValueUsd = cost,
+            });
         }
 
         UsageTotals total = ledger.Total(Since, Until);
@@ -696,9 +778,23 @@ public sealed class SqliteStateTests : IDisposable
         DateTimeOffset start = new(2026, 10, 23, 20, 0, 0, TimeSpan.Zero);
         for (int i = 0; i < 300; i++)
         {
-            var record = new UsageRecord(
-                start.AddMinutes(17 * i), i % 3 == 0 ? "Cloud" : i % 3 == 1 ? "cloud" : "local", i % 2 == 0 ? "c" : "d", i % 4 == 0 ? null : "r" + (i % 2),
-                i % 5 == 0 ? null : "k", i % 3 == 2, i, 2 * i, i % 7, i % 11, i * 0.001m, i * 0.002m, i % 6 == 0 ? null : "p", i * 0.0005m);
+            var record = new UsageRecord
+            {
+                Timestamp = start.AddMinutes(17 * i),
+                Model = i % 3 == 0 ? "Cloud" : i % 3 == 1 ? "cloud" : "local",
+                Connector = i % 2 == 0 ? "c" : "d",
+                Route = i % 4 == 0 ? null : "r" + (i % 2),
+                Client = i % 5 == 0 ? null : "k",
+                IsLocal = i % 3 == 2,
+                InputTokens = i,
+                OutputTokens = 2 * i,
+                CacheReadTokens = i % 7,
+                CacheWriteTokens = i % 11,
+                CostUsd = i * 0.001m,
+                ReferenceCostUsd = i * 0.002m,
+                Profile = i % 6 == 0 ? null : "p",
+                SubscriptionValueUsd = i * 0.0005m,
+            };
             records.Add(record);
             ledger.Record(record);
         }
@@ -759,7 +855,19 @@ public sealed class SqliteStateTests : IDisposable
         int reads = ledger.Reads;
         for (int i = 0; i < 50; i++)
         {
-            ledger.Record(new UsageRecord(_time.GetUtcNow(), "cloud", "c", null, null, false, 1000, 100, 0, 0, 0m, 0m));
+            ledger.Record(new UsageRecord
+            {
+                Timestamp = _time.GetUtcNow(),
+                Model = "cloud",
+                Connector = "c",
+                IsLocal = false,
+                InputTokens = 1000,
+                OutputTokens = 100,
+                CacheReadTokens = 0,
+                CacheWriteTokens = 0,
+                CostUsd = 0m,
+                ReferenceCostUsd = 0m,
+            });
             gate.Blocking(cloud, configuration.Usage).Should().BeNull();
         }
 
@@ -780,7 +888,19 @@ public sealed class SqliteStateTests : IDisposable
     {
         var a = new SqliteUsageLedger(Open());
         var b = new SqliteUsageLedger(Open());
-        UsageRecord Request() => new(_time.GetUtcNow(), "cloud", "c", null, null, false, 10, 10, 0, 0, 0.25m, 0.25m);
+        UsageRecord Request() => new UsageRecord
+        {
+            Timestamp = _time.GetUtcNow(),
+            Model = "cloud",
+            Connector = "c",
+            IsLocal = false,
+            InputTokens = 10,
+            OutputTokens = 10,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 0.25m,
+            ReferenceCostUsd = 0.25m,
+        };
         a.Total(Since, Until, connector: "c").Requests.Should().Be(0);
 
         b.Record(Request());

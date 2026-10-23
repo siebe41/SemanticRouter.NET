@@ -374,7 +374,7 @@ internal static class InitCommand
         {
             // Claude's lineup, one tier each: Haiku 2, Sonnet 3, Opus 4, Fable 5 (disabled until you enable it).
             foreach (ModelLineupEntry entry in ModelLineup.Suggest(
-                         connector, options, ModelLineup.CliModelIds(preset).Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, document.Models))
+                         connector, options, ModelLineup.CliModelIds(preset).Select(id => new DiscoveredModel { Id = id }).ToArray(), ModelLoading.Unknown, document.Models))
             {
                 ModelDefinition model = entry.Suggestion!;
                 model.Description = description;
