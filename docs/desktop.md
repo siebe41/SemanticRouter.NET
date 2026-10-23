@@ -22,11 +22,11 @@ The first start is the same as from the archives: the [welcome window](#using-it
 
 ### Signing
 
-The release workflow signs the Windows and macOS installers with these credentials, set as repository secrets and variables (or as secrets and variables of the `release` environment):
+The release workflow signs the Windows and macOS installers with these credentials, set as repository secrets and variables (the macOS ones may instead be secrets and variables of the `release` environment; the Windows ones are read both in `release`, which checks that they are set, and in `windows-signing`, which signs, so keep them at repository level):
 
 | Platform | What it takes | Repository secrets | Repository variables |
 |---|---|---|---|
-| Windows | An [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) account and certificate profile, and an app registration allowed to sign with it | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` | `AZURE_SIGNING_ENDPOINT` (e.g. `https://weu.codesigning.azure.net`), `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` |
+| Windows | An [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) account and certificate profile, and an app registration allowed to sign with it (the *Certificate Profile Signer* role on the profile), with a federated credential for this repository's `windows-signing` environment instead of a client secret ([below](#signing-in-to-azure)) | `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` | `AZURE_SIGNING_ENDPOINT` (e.g. `https://weu.codesigning.azure.net`), `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` |
 | macOS | An Apple Developer account: the *Developer ID Application* and *Developer ID Installer* certificates (exported as `.p12`, base64) and an app-specific password for notarization | `APPLE_BUILD_CERTIFICATE_BASE64`, `APPLE_INSTALLER_CERTIFICATE_BASE64`, `APPLE_P12_PASSWORD`, `APPLE_ID`, `APPLE_APP_PASSWORD`, `APPLE_TEAM_ID` | `APPLE_SIGN_APP_IDENTITY`, `APPLE_SIGN_INSTALL_IDENTITY` (the certificates' names, e.g. `Developer ID Application: Ada Lovelace`) |
 
 Signing is required. The release's first job checks, for each platform, whether every secret and variable in its row is set; it sees only whether each one is set, never its value. Then:
@@ -38,9 +38,9 @@ Signing is required. The release's first job checks, for each platform, whether 
 | None set, `ALLOW_UNSIGNED_RELEASE` not set (or anything but `true`) | Fails before anything is published, naming the platform. |
 | Some set, some not | Fails before anything is published, naming the missing settings. `ALLOW_UNSIGNED_RELEASE` does not change this. |
 
-Until the certificates exist, set the variable `ALLOW_UNSIGNED_RELEASE` to `true` (in the `release` environment, Settings > Environments > release, or for the repository, Settings > Secrets and variables > Actions > Variables), or every release fails at its first job, and tick **Allow unsigned installers** each time you run "Cut a release". Delete the variable once both platforms sign, so that a lost secret stops a release instead of publishing unsigned installers. The run's summary has a **Code signing** table, and each installer job adds a line per installer saying whether it was signed. The Linux AppImage and the archives are never code-signed.
+Until the certificates exist, set the variable `ALLOW_UNSIGNED_RELEASE` to `true` (in the `release` environment, Settings > Environments > release, or for the repository, Settings > Secrets and variables > Actions > Variables), or every release fails at its first job, and tick **Allow unsigned installers** each time you run "Cut a release". Once both platforms' settings are in, run **Actions > Signing dry run** ([The signing dry run](releases.md#the-signing-dry-run)). It signs, notarizes and checks a throw-away build with them and uploads nothing. When it passes on both platforms, delete the variable, so that a lost secret stops a release instead of publishing unsigned installers. Run it again after rotating or renewing any signing secret or certificate. The run's summary has a **Code signing** table, and each installer job adds a line per installer saying whether it was signed. The Linux AppImage and the archives are never code-signed.
 
-The app is built in jobs that hold no secret and can only read the repository (`installer-build`, `desktop-build`): `deploy/publish-desktop.sh` publishes it on each installer's own OS. The signing jobs download that build and run no `dotnet build` or `publish`, so no package's build code runs next to a signing credential; they only install vpk, which packs, signs and uploads. The macOS job imports the certificates into a temporary keychain and stores a `notarytool` profile, and vpk signs, notarizes and staples the app and the `.pkg`.
+The app is built in jobs that hold no secret and can only read the repository (`installer-build`, `desktop-build`): `deploy/publish-desktop.sh` publishes it on each installer's own OS. The signing jobs download that build and run no `dotnet build` or `publish`, so no package's build code runs next to a signing credential; they only install vpk, which packs, signs and uploads, and they install it before anything signing-related happens. Each secret goes only to the step that uses it: the certificates, their password and the Apple ID's password to the step that sets up signing, and the workflow's token to the steps that fetch the previous release and upload (`deploy/workflow-secrets-check.sh`, which CI runs, fails a workflow that does otherwise; [Where the secrets are](releases.md#where-the-secrets-are)). The macOS job imports the certificates into a temporary keychain and stores a `notarytool` profile, and vpk signs, notarizes and staples the app and the `.pkg`. Both jobs set up signing with `deploy/signing-setup.sh` and check the result with `deploy/check-signature-windows.ps1` or `deploy/check-signature-macos.sh`, the same scripts the signing dry run uses.
 
 On macOS, vpk signs the app with the hardened runtime and the entitlements in `deploy/macos/SemanticRouter.entitlements`. Because it signs with `--deep`, every executable and library in the bundle gets the same entitlements:
 
@@ -52,9 +52,21 @@ On macOS, vpk signs the app with the hardened runtime and the entitlements in `d
 
 The app does not get vpk's other defaults. `allow-dyld-environment-variables` would let `DYLD_INSERT_LIBRARIES` load code into it. `disable-library-validation` would let it load libraries signed by anyone, and it needs neither: vpk re-signs every native library in the bundle (ONNX Runtime, SkiaSharp, SQLite, Avalonia's) with the same Developer ID, and the app loads nothing from outside it except Apple's system libraries. CI fails when the file grants anything else (`deploy/macos-entitlements-check.sh`), so a new entitlement comes with a line in this table. CI packs unsigned, so that check reads the source: the entitlements file, and that `deploy/package-installer.sh` passes it to vpk and writes the usage string. It does not inspect a signed app.
 
-Locally, `deploy/package-installer.sh` builds and signs in one go with the same settings as environment variables (see the script's header); with `PUBLISH_DIR` it packages an app already published there instead.
+Locally, `deploy/package-installer.sh` builds and signs in one go with the same settings as environment variables (see the script's header); with `PUBLISH_DIR` it packages an app already published there instead. On Windows, sign in with `az login` first, or set `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and `AZURE_CLIENT_SECRET` for an app registration that has a client secret.
 
 Independently of code signing, every installer, archive and update package has a build provenance attestation and a line in the release's `SHA256SUMS`, made after signing, so you can check a download came from this repository's release workflow: see [Verifying a release](releases.md). Each platform's archive and installer has its own SBOM on the release, with every package's licence (the installer's also lists Velopack's updater and, on Linux, the AppImage runtime), and `THIRD-PARTY-NOTICES.txt` covers the app too; the notices also ship next to the executable ([SBOMs and third-party notices](releases.md#sboms-and-third-party-notices)).
+
+#### Signing in to Azure
+
+The Windows job logs in to Azure with [OpenID Connect](https://learn.microsoft.com/entra/workload-id/workload-identity-federation-create-trust): GitHub gives the job a token that names the repository and the job's environment, Azure exchanges it for an access token that lasts about an hour, and vpk's signing uses that login. No Azure secret is stored, and there is none to rotate or leak. The job logs out of Azure as soon as it has signed, before it checks the signature and uploads.
+
+Azure trusts the token by its environment, so the jobs that sign Windows binaries run in an environment of their own, `windows-signing`: release.yml's `installer-windows` and the [signing dry run](releases.md#the-signing-dry-run)'s `windows` job, and no other (`deploy/workflow-secrets-check.sh`, which CI runs, fails a workflow that puts another job there). The other jobs that ask for an OIDC token (`nuget`, `image-sign`, `checksums`) run in `release`, whose token Azure does not accept. Inside `installer-windows` any step could ask for the token, so that job runs only vpk, pinned actions and this repository's scripts. To set it up:
+
+- **Settings > Environments > New environment** `windows-signing`. Under **Deployment branches and tags**, allow only `main` (the dry run) and `v*` tags (the release), as for `release`. A required reviewer there would ask for a second approval in each release; the deployment rule is what keeps a branch's copy of a workflow out.
+- On the app registration (**Microsoft Entra ID > App registrations >** the app **> Certificates & secrets > Federated credentials > Add credential**): scenario **GitHub Actions deploying Azure resources**, organization `siebe41`, repository `SemanticRouter.NET`, entity type **Environment**, environment `windows-signing` (the subject is `repo:siebe41/SemanticRouter.NET:environment:windows-signing`; the audience stays `api://AzureADTokenExchange`). Create none for `release`.
+- `AZURE_TENANT_ID` and `AZURE_CLIENT_ID` stay repository secrets; delete any `AZURE_CLIENT_SECRET` secret and the app registration's client secret, which nothing uses any more.
+
+No Azure subscription is needed for the login (`allow-no-subscriptions`); the role on the certificate profile is what allows signing.
 
 ### Updates
 
@@ -81,7 +93,7 @@ An administrator can turn updates off, take them from an internal feed, make the
 - **Windows:** **Settings → Apps → SemanticRouter → Uninstall** (or `%LOCALAPPDATA%\SemanticRouter\Update.exe uninstall`). It removes the background service (unless it runs the `semantic-router` tool) and the app's sign-in entry first, then the program and the Start menu entry.
 - **macOS and Linux** have no uninstaller: turn off **Keep the router running in the background** and **Start at sign-in** in the tray menu (or run `SemanticRouter --uninstall-service`), quit, then delete `SemanticRouter.app` or the AppImage.
 
-The configuration directory (your configuration, the state database, the logs) stays; delete it yourself if you no longer want it (see [the tool's docs](host.md) for where it is).
+The configuration directory and, on Windows with the default directory, the local data directory `%LOCALAPPDATA%\semantic-router` (state database, models, logs, web view profile) stay; delete them yourself if you no longer want them (see [where things live](host.md#where-things-live)).
 
 ### The archives
 
@@ -132,7 +144,7 @@ When something [needs a decision](dashboard.md#digest-and-notifications), the ap
 
 The router can run in two places, and the app shows it either way:
 
-- **In the background (recommended).** Tick **Keep the router running in the background** in the tray menu (the welcome window offers it on first start). The operating system's own service manager then runs `SemanticRouter --headless` (this same program, with no window or tray) whenever you sign in, restarts it if it fails, and keeps it answering when the app is closed. The app shows that router; the status line says "Using the router already running on …", **Restart router** restarts the service, and quitting the app leaves it running. It is the same per-user service as [`semantic-router service`](host.md#run-it-in-the-background) (a systemd user unit, a launchd agent, or a sign-in entry on Windows), run by the app instead of the tool. Being a GUI program, it starts on Windows without a console window.
+- **In the background (recommended).** Tick **Keep the router running in the background** in the tray menu (the welcome window offers it on first start). The operating system's own service manager then runs `SemanticRouter --headless` (this same program, with no window or tray) whenever you sign in, restarts it if it fails (on Linux and macOS; the Windows sign-in entry does not), and keeps it answering when the app is closed. The app shows that router; the status line says "Using the router already running on …", **Restart router** restarts the service, and quitting the app leaves it running. It is the same per-user service as [`semantic-router service`](host.md#run-it-in-the-background) (a systemd user unit, a launchd agent, or a sign-in entry on Windows), run by the app instead of the tool. Being a GUI program, it starts on Windows without a console window.
 - **Inside the app.** With the box unticked the app runs the router itself, and quitting the app stops it.
 
 Switching hands the port over: the app stops its own router before the service starts, and starts it again when the service is removed. If the service cannot be set up (no systemd user session, for example), the app keeps running the router itself and the tray menu says why.
@@ -155,7 +167,7 @@ For scripts and installers, without the tray:
 
 ## Where things live
 
-Everything is in the router's [configuration directory](host.md#where-things-live), shared with the tool:
+Everything is in the router's [configuration directory](host.md#where-things-live), shared with the tool. On Windows with the default directory, `logs/` and `webview/` are in the local data directory, `%LOCALAPPDATA%\semantic-router`, instead ([Windows and roaming profiles](host.md#windows-and-roaming-profiles)):
 
 | File or folder | What it holds |
 |---|---|
@@ -181,7 +193,7 @@ The installers install for one user, with no administrator rights, and that is t
 | macOS | `SemanticRouter.app` in `~/Applications` (installed for the current user) or `/Applications` | The background service is the launchd agent `~/Library/LaunchAgents/io.github.siebe41.semantic-router.plist`; start at sign-in is `~/Library/LaunchAgents/io.github.siebe41.semantic-router.desktop.plist`. |
 | Linux | The AppImage, wherever it was put | The background service is the systemd user unit `~/.config/systemd/user/semantic-router.service`; start at sign-in is `~/.config/autostart/semantic-router.desktop`. |
 
-All of these are per user. The configuration directory (configuration, state database, logs) is the router's usual one ([where things live](host.md#where-things-live)). `SemanticRouter --install-service` and `--uninstall-service` set the background service up or remove it from a script, without the welcome window; see [the app and the background service](#the-app-and-the-background-service).
+All of these are per user. The configuration directory (configuration, state database, models, logs, web view profile; on Windows with the default directory, the last four are in the local data directory) is the router's usual one ([where things live](host.md#where-things-live)). `SemanticRouter --install-service` and `--uninstall-service` set the background service up or remove it from a script, without the welcome window; see [the app and the background service](#the-app-and-the-background-service).
 
 ### Deploying the installer
 

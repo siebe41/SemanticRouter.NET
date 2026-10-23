@@ -53,7 +53,7 @@ You don't have to type them in. **Discover models** on the dashboard's Models pa
 | Provider | Asked with | Suggested tier |
 |---|---|---|
 | Claude (Claude Code CLI, Anthropic API, Copilot) | the preset's names (`haiku`, `sonnet`, `opus`, `claude-fable-5-1`), `GET /v1/models`, or the Copilot SDK | by family, one rung each: Haiku **2**, Sonnet **3**, Opus **4**, Fable **5** |
-| LM Studio | `GET /v1/models` and `GET /api/v0/models` | from the [model-family table](#the-model-family-table) when it has a tier for the family, else by size: ≤ 9B **1**, ≤ 35B **2**, larger **3** |
+| LM Studio | `GET /v1/models` and `GET /api/v0/models` | from the [model-family table](#the-model-family-table) when it has a tier for the family, else by size: ≤ 9.5B **1**, ≤ 35B **2**, larger **3** |
 | Ollama | `GET /v1/models`, `/api/tags`, `/api/ps`, `POST /api/show` | family table, else by size, as above |
 | vLLM, llama.cpp, other OpenAI-compatible servers | `GET /v1/models` | family table, else by the size in the model id, as above |
 | Other APIs (OpenAI, Gemini, OpenRouter, …) | `GET /v1/models` | family table (Gemini Flash **2**, Gemini Pro **3**, …), else 2 for `mini`/`nano`/`lite`/`small` models, otherwise 3. Not ticked by default: review the tier and set the prices. |

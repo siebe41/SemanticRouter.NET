@@ -20,7 +20,7 @@ Claude Code reads `ANTHROPIC_BASE_URL` and sends the Messages API there, with it
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:5080
-export ANTHROPIC_AUTH_TOKEN=semantic-router        # any value: the router never reads or forwards it
+export ANTHROPIC_AUTH_TOKEN=semantic-router        # any value from this machine; with gateway keys set, send yours (required from other machines). Never forwarded
 export CLAUDE_CODE_MAX_CONTEXT_TOKENS=131072       # the smallest context window among your tool-capable models
 export CLAUDE_CODE_AUTO_MODE_SERVER=0
 claude --model semantic-router

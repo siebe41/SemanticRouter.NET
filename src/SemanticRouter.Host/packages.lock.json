@@ -69,7 +69,7 @@
       "semanticrouter.connectors.copilot": {
         "type": "Project",
         "dependencies": {
-          "GitHub.Copilot.SDK": "[1.0.23, 1.1.0)",
+          "GitHub.Copilot.SDK": "[1.0.26, 1.1.0)",
           "SemanticRouter.AspNetCore": "[0.6.0, )"
         }
       },
@@ -102,9 +102,9 @@
       },
       "GitHub.Copilot.SDK": {
         "type": "CentralTransitive",
-        "requested": "[1.0.23, 1.1.0)",
-        "resolved": "1.0.23",
-        "contentHash": "2pt/q3VezCOVDFTMavsCjsU6bvj5obDgQQNxEqs5nMsnI9WmzFev1VSra+6Z9Ys/kGItuH3DxbtZIp7AG1Y8OA==",
+        "requested": "[1.0.26, 1.1.0)",
+        "resolved": "1.0.26",
+        "contentHash": "z5irU7ylg09KnZIE/82lbk08ZZ6S0mHc0RA+EzYrOxYrdBm+GEx+QDLM5dqOYE0xwvBxWRIkSKeGHeUcMkQGuA==",
         "dependencies": {
           "Microsoft.Extensions.AI.Abstractions": "10.2.0"
         }

@@ -391,6 +391,25 @@ public sealed class HostTests : IDisposable
     }
 
     [Fact]
+    public async Task Doctor_does_not_check_a_connector_that_offline_mode_turns_off()
+    {
+        var document = RouterConfiguration.FromJson(RouterHost.Template());
+        document.Connectors["openai"] = new ConnectorOptions { BaseAddress = new Uri("https://api.example.com"), ApiKey = "sk-doctor-test" };
+        document.Models.Add(new ModelDefinition { Name = "cloud", Connector = "openai", Model = "gpt-x", Tier = 3 });
+        new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")).Save(document);
+        StubHttpMessageHandler handler = StubHttpMessageHandler.Json("""{"data":[{"id":"gpt-x"}]}""");
+        var output = new StringWriter();
+
+        await DoctorCommand.RunAsync(Settings("doctor", "--SemanticRouter:Network:Offline=true"), output, builder =>
+            builder.Services.AddHttpClient(OpenAICompatibleConnector.HttpClientNamePrefix + "openai").ConfigurePrimaryHttpMessageHandler(() => handler));
+
+        string report = output.ToString();
+        handler.Requests.Should().BeEmpty($"its egress line says it is never contacted: {report}");
+        report.Should().Contain("[ OK ] egress: connector openai: api.example.com (never contacted: api.example.com is not reachable in offline mode (Network:Offline)).");
+        report.Should().Contain("[ OK ] connector openai: not checked: api.example.com is not reachable in offline mode (Network:Offline).");
+    }
+
+    [Fact]
     public async Task Doctor_lists_every_host_the_router_will_contact_without_webhook_tokens()
     {
         var document = RouterConfiguration.FromJson(RouterHost.Template());
