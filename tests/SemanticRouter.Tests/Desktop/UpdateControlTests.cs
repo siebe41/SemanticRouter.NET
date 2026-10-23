@@ -562,8 +562,10 @@ public sealed class UpdateControlTests : IDisposable
     public void Doctor_says_what_the_policy_does_to_desktop_updates()
     {
         EgressList.Updates(MachinePolicy.None).Should().Be(
-            "desktop app updates: api.github.com, github.com, release-assets.githubusercontent.com and objects.githubusercontent.com (only the installed desktop app; untick Check for updates automatically in its tray menu to turn this off).");
+            "desktop app updates: api.github.com, github.com, release-assets.githubusercontent.com and objects.githubusercontent.com (only the installed desktop app; applied only when the release workflow attested it; untick Check for updates automatically in its tray menu to turn this off).");
         EgressList.Updates(MachinePolicy.FromJson("""{"Updates":{"Mode":"Off","Apply":"Notify"}}""")).Should().Be("desktop app updates: off (your organization's policy).");
+        EgressList.Updates(MachinePolicy.FromJson("""{"Updates":{"Mode":"Feed","Feed":"https://updates.corp.example/router"}}""")).Should().Be(
+            "desktop app updates: updates.corp.example (your organization's feed) (only the installed desktop app; untick Check for updates automatically in its tray menu to turn this off).");
         EgressList.Updates(MachinePolicy.FromJson("""{"Updates":{"Mode":"Feed","Feed":"https://updates.corp.example/router","Apply":"Notify","Publisher":"A1B2C3D4E5"}}""")).Should().Be(
             "desktop app updates: updates.corp.example (your organization's feed) (only the installed desktop app; applied only when the person chooses to; applied only when signed by A1B2C3D4E5; untick Check for updates automatically in its tray menu to turn this off).");
     }
@@ -693,6 +695,12 @@ public sealed class UpdateControlTests : IDisposable
 
         public List<string> Calls { get; } = [];
 
+        /// <summary>The feed also offers 1.0.1 as a delta from 1.0.0.</summary>
+        public bool Deltas { get; set; }
+
+        /// <summary>What the updater last asked Velopack to download.</summary>
+        public UpdateInfo? Requested { get; private set; }
+
         public bool Downloaded { get; set; }
 
         public string? Package { get; set; }
@@ -712,12 +720,13 @@ public sealed class UpdateControlTests : IDisposable
             Calls.Add("check");
             return CheckError is { } error
                 ? Task.FromException<UpdateInfo?>(new HttpRequestException(error))
-                : Task.FromResult<UpdateInfo?>(UpToDate ? null : new UpdateInfo(_latest, false));
+                : Task.FromResult<UpdateInfo?>(UpToDate ? null : Deltas ? new UpdateInfo(_latest, false, Asset("1.0.0", VelopackAssetType.Full), [Asset("1.0.1", VelopackAssetType.Delta)]) : new UpdateInfo(_latest, false));
         }
 
         public Task DownloadAsync(UpdateInfo update, CancellationToken cancellationToken)
         {
             Calls.Add("download");
+            Requested = update;
             Downloaded = true;
             return Task.CompletedTask;
         }
@@ -735,5 +744,13 @@ public sealed class UpdateControlTests : IDisposable
         }
 
         public void ApplyAfterExit(VelopackAsset asset, bool restart, string[] arguments) => Calls.Add($"apply {asset.Version} restart={restart}");
+
+        private static VelopackAsset Asset(string version, VelopackAssetType type) => new()
+        {
+            PackageId = "SemanticRouter",
+            Version = SemanticVersion.Parse(version),
+            Type = type,
+            FileName = $"SemanticRouter-{version}-win-x64-{(type == VelopackAssetType.Delta ? "delta" : "full")}.nupkg",
+        };
     }
 }

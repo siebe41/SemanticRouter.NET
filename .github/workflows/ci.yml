@@ -141,6 +141,12 @@ jobs:
           deploy/third-party-notices-check.sh notices/desktop/THIRD-PARTY-NOTICES.txt \
             "Velopack native binaries" "Rust standard library" "AppImage type2-runtime"
 
+      # The release still attests every update package as the desktop app checks it, and the app carries Sigstore's
+      # current trust root: like the weekly advisory run, a new trust root fails CI until it is copied in.
+      - name: Update attestation
+        if: runner.os == 'Linux'
+        run: deploy/update-attestation-check.sh --online
+
       # Package validation (Directory.Build.targets) fails the pack when a library package's public API breaks the last
       # release on nuget.org; restore downloaded that release.
       - name: Pack

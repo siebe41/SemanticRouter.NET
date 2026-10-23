@@ -34,6 +34,8 @@
     <None Include="..\fixtures\upgrade\*.zip" Link="fixtures\upgrade\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <!-- A list of files written by deploy/update-file-list.cs, for UpdateControlTests. -->
     <None Include="..\fixtures\update-file-list\*.dll" Link="fixtures\update-file-list\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- GitHub's attestations for the 0.5.0 release's full packages (the API's answer, bundle_url left out), for UpdateAttestationTests. -->
+    <None Include="..\fixtures\attestation\*.json" Link="fixtures\attestation\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <!-- The desktop app's tray icons, for DesktopTests. -->
     <None Include="..\..\src\SemanticRouter.Desktop\Assets\tray*" Link="tray-icons\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <!-- The intended public API of the library packages, for ApiSurfaceDocumentationTests. -->
