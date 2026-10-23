@@ -10,7 +10,7 @@ export async function loadEvaluationSet() {
   try {
     const [r, judge] = await Promise.all([api('GET', '/evaluation/set'), api('GET', '/judge/agreement').catch(() => null)]);
     state.evaluation.judge = judge;
-    state.evaluation.location = r.location; state.evaluation.count = r.count;
+    state.evaluation.location = r.location; state.evaluation.count = r.count; state.evaluation.withheld = r.localOnlyWithheld || 0;
     state.evaluation.text = r.cases.map((c) => JSON.stringify(Object.fromEntries(Object.entries({ prompt: c.prompt, tier: c.tier, route: c.route, localOnly: c.localOnly || undefined, note: c.note }).filter(([, v]) => v != null)))).join('\n');
     state.evaluation.savedText = state.evaluation.text; // what the router holds: typed changes beyond it are unsaved
   } catch (e) { state.evaluation.text = ''; state.evaluation.savedText = null; toast(e.message, 'danger'); }
@@ -145,7 +145,7 @@ views.evaluate = () => {
   const empty = !(ev.text || '').trim();
   return `
     <div class="section-head"><h1>Evaluate routing</h1><span class="muted">Run labelled prompts through the running configuration. No model is called, only the embedding provider.</span></div>
-    <div class="card section"><div class="card-head"><h2>Evaluation set</h2><span class="muted small">${plural(ev.count, 'prompt')} · ${ev.location ? 'kept in <code class="break">' + h(ev.location) + '</code>' : 'kept in memory (lost on restart)'}</span><span class="spacer"></span>
+    <div class="card section"><div class="card-head"><h2>Evaluation set</h2><span class="muted small">${plural(ev.count, 'prompt')}${ev.withheld ? ` (and ${plural(ev.withheld, 'local-only prompt')} only the admin role sees)` : ''} · ${ev.location ? 'kept in <code class="break">' + h(ev.location) + '</code>' : 'kept in memory (lost on restart)'}</span><span class="spacer"></span>
         <a class="btn small" href="${API}/evaluation/set/export" download>Download</a></div>
       ${empty ? `<div class="empty-note small"><b>No labelled prompts yet.</b> Type them below, one JSON object per line (as in the grey example), then <b>Save set</b> and <b>Run</b>. Faster: on <a href="#/activity">Activity</a>, the tag button on a request labels it with the tier it should have had.</div>` : ''}
       <textarea id="evaluation-text" aria-label="Evaluation set (JSON Lines)" rows="8" spellcheck="false" data-state="evaluation.text" placeholder='{"prompt":"summarize this email","tier":1,"route":"rewrite-summarize"}'>${h(ev.text)}</textarea>

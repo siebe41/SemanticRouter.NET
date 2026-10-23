@@ -30,7 +30,7 @@ public class SemanticPromptClassifierTests
     [Fact]
     public async Task Routes_to_the_semantically_closest_route()
     {
-        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, CreateOptions(), Complexity(0.1).Object);
+        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, CreateOptions(), new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.1).Object });
 
         PromptClassificationResult local = await classifier.ClassifyAsync("hi friend");
         PromptClassificationResult cloud = await classifier.ClassifyAsync("architect a platform");
@@ -50,7 +50,7 @@ public class SemanticPromptClassifierTests
     {
         SemanticRouterOptions options = CreateOptions();
         options.FallbackTier = 2;
-        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, options, Complexity(0.1).Object);
+        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, options, new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.1).Object });
 
         PromptClassificationResult result = await classifier.ClassifyAsync("weather in paris");
 
@@ -67,7 +67,7 @@ public class SemanticPromptClassifierTests
         Mock<IEmbeddingProvider> provider = FromTable(Table);
         SemanticRouterOptions options = CreateOptions();
         options.ClassificationCache.Enabled = false; // every request embeds its prompt; only the index is shared
-        var classifier = new SemanticPromptClassifier(provider.Object, options, Complexity(0.1).Object);
+        var classifier = new SemanticPromptClassifier(provider.Object, options, new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.1).Object });
 
         await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => classifier.ClassifyAsync("hi friend").AsTask()));
 
@@ -83,7 +83,7 @@ public class SemanticPromptClassifierTests
             .Throws(new HttpRequestException("embedding server down"))
             .Returns(ValueTask.FromResult<IReadOnlyList<ReadOnlyMemory<float>>>(
                 [new ReadOnlyMemory<float>(Table["hello"]), new ReadOnlyMemory<float>(Table["design a system"])]));
-        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), Complexity(0.1).Object);
+        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.1).Object });
 
         Func<Task> first = () => classifier.ClassifyAsync("hi friend").AsTask();
         await first.Should().ThrowAsync<HttpRequestException>();
@@ -96,7 +96,7 @@ public class SemanticPromptClassifierTests
     public async Task Very_complex_prompts_short_circuit_without_calling_the_embedding_provider()
     {
         Mock<IEmbeddingProvider> provider = FromTable(Table);
-        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), Complexity(0.95).Object);
+        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.95).Object });
 
         PromptClassificationResult result = await classifier.ClassifyAsync("hello");
 
@@ -113,7 +113,7 @@ public class SemanticPromptClassifierTests
         RouteDefinition pii = Route("pii", 1, "customer record");
         pii.LocalOnly = true;
         options.Routes.Add(pii);
-        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, options, Complexity(0.99, tokens: 90_000).Object);
+        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, options, new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.99, tokens: 90_000).Object });
 
         PromptClassificationResult result = await classifier.ClassifyAsync("customer record");
 
@@ -126,7 +126,7 @@ public class SemanticPromptClassifierTests
     {
         SemanticRouterOptions options = CreateOptions();
         options.ComplexityShortCircuitThreshold = 1.1;
-        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, options, Complexity(0.95).Object);
+        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, options, new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.95).Object });
 
         PromptClassificationResult result = await classifier.ClassifyAsync("hi friend");
 
@@ -141,7 +141,7 @@ public class SemanticPromptClassifierTests
     {
         Mock<IEmbeddingProvider> provider = FromTable(Table);
         Mock<IComplexityAnalyzer> analyzer = Complexity(0.1);
-        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), analyzer.Object);
+        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), new SemanticPromptClassifierDependencies { ComplexityAnalyzer = analyzer.Object });
 
         PromptClassificationResult result = await classifier.ClassifyAsync(prompt);
 
@@ -155,7 +155,7 @@ public class SemanticPromptClassifierTests
     public async Task No_routes_means_no_embedding_calls()
     {
         Mock<IEmbeddingProvider> provider = FromTable(Table);
-        var classifier = new SemanticPromptClassifier(provider.Object, new SemanticRouterOptions(), Complexity(0.1).Object);
+        var classifier = new SemanticPromptClassifier(provider.Object, new SemanticRouterOptions(), new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.1).Object });
 
         PromptClassificationResult result = await classifier.ClassifyAsync("hello");
 
@@ -168,8 +168,8 @@ public class SemanticPromptClassifierTests
     {
         var selector = new Mock<IRouteSelector>();
         selector.Setup(s => s.SelectRoute(It.IsAny<IReadOnlyList<RouteScore>>(), It.IsAny<ComplexityAnalysis>()))
-            .Returns(new RouteDecision(5, RoutingReason.AmbiguousMatchEscalation));
-        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, CreateOptions(), Complexity(0.1).Object, selector.Object);
+            .Returns(new RouteDecision { RequiredTier = 5, Reason = RoutingReason.AmbiguousMatchEscalation });
+        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, CreateOptions(), new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.1).Object, RouteSelector = selector.Object });
 
         PromptClassificationResult result = await classifier.ClassifyAsync("hi friend");
 
@@ -184,7 +184,7 @@ public class SemanticPromptClassifierTests
     {
         SemanticRouterOptions options = CreateOptions();
         options.MaxReportedScores = 1;
-        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, options, Complexity(0.1).Object);
+        var classifier = new SemanticPromptClassifier(FromTable(Table).Object, options, new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.1).Object });
 
         (await classifier.ClassifyAsync("hi friend")).TopScores.Should().ContainSingle();
     }
@@ -196,7 +196,7 @@ public class SemanticPromptClassifierTests
         Mock<IEmbeddingProvider> provider = FromTable(Table);
         provider.Setup(p => p.GenerateEmbeddingsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
             .Returns(new ValueTask<IReadOnlyList<ReadOnlyMemory<float>>>(gate.Task));
-        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), Complexity(0.1).Object);
+        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.1).Object });
 
         using var cts = new CancellationTokenSource();
         Task cancelled = classifier.ClassifyAsync("hi friend", cts.Token).AsTask();
@@ -207,6 +207,42 @@ public class SemanticPromptClassifierTests
         gate.SetResult([new ReadOnlyMemory<float>(Table["hello"]), new ReadOnlyMemory<float>(Table["design a system"])]);
 
         (await pending).RouteName.Should().Be("smalltalk");
+        provider.Verify(p => p.GenerateEmbeddingsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Requests_wait_for_an_index_a_synchronous_provider_is_building_without_blocking_their_thread()
+    {
+        // Like ONNX and Hashing: the embeddings are computed on the calling thread and returned already completed.
+        using var building = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        Mock<IEmbeddingProvider> provider = FromTable(Table);
+        provider.Setup(p => p.GenerateEmbeddingsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                building.Set();
+                release.Wait(TimeSpan.FromSeconds(30));
+                return ValueTask.FromResult<IReadOnlyList<ReadOnlyMemory<float>>>(
+                    [new ReadOnlyMemory<float>(Table["hello"]), new ReadOnlyMemory<float>(Table["design a system"])]);
+            });
+        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.1).Object });
+
+        Task warmUp = Task.Run(() => classifier.WarmUpAsync().AsTask());
+        building.Wait(TimeSpan.FromSeconds(30)).Should().BeTrue("the warm-up starts embedding");
+        try
+        {
+            ValueTask<PromptClassificationResult> pending = classifier.ClassifyAsync("hi friend");
+
+            pending.IsCompleted.Should().BeFalse("a request waits for the index asynchronously, not by blocking its thread on the build");
+            release.Set();
+            (await pending).RouteName.Should().Be("smalltalk");
+            await warmUp;
+        }
+        finally
+        {
+            release.Set();
+        }
+
         provider.Verify(p => p.GenerateEmbeddingsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 

@@ -54,35 +54,36 @@ internal static class EndpointHealth
             EndpointTarget target = Target(options, models);
             EndpointCheck? check = checks?.Last(name, target.Key);
 
-            var status = new EndpointStatus(
-                name,
-                options.Type == ConnectorTypes.Cli ? $"Cli/{options.Preset}" : options.Type.ToString(),
-                target.Host,
-                target.Scheme,
-                target.Program,
-                target.Via,
-                target.Local,
-                target.Encrypted,
-                State: "ok",
-                StateNote: null,
-                models.Length,
-                cooling.Length,
-                cooling.Length > 0 ? cooling.Min() : null,
-                tried.Count,
-                tried.Count - served.Length,
-                tried.Count > 0 ? Math.Round((double)served.Length / tried.Count, 3) : null,
-                tried.Count > 0 ? tried.Max(a => a.At) : null,
-                served.Length > 0 ? served.Max(a => a.At) : null,
-                lastFailure?.At,
-                lastFailure?.Error,
-                failingSince.TryGetValue(name, out DateTimeOffset since) ? since : null,
-                limitDays.GetValueOrDefault(name),
-                Percentile(served.Select(a => a.FirstByte), 0.5),
-                Percentile(served.Select(a => a.FirstByte), 0.95),
-                Percentile(served.Select(a => a.Total), 0.5),
-                Percentile(served.Select(a => a.Total), 0.95),
-                Percentile(served.Select(a => a.TokensPerSecond), 0.5),
-                check);
+            var status = new EndpointStatus
+            {
+                Connector = name,
+                Kind = options.Type == ConnectorTypes.Cli ? $"Cli/{options.Preset}" : options.Type.ToString(),
+                Host = target.Host,
+                Scheme = target.Scheme,
+                Program = target.Program,
+                Via = target.Via,
+                Local = target.Local,
+                Encrypted = target.Encrypted,
+                State = "ok",
+                Models = models.Length,
+                ModelsCoolingDown = cooling.Length,
+                CooldownUntil = cooling.Length > 0 ? cooling.Min() : null,
+                Attempts = tried.Count,
+                Failures = tried.Count - served.Length,
+                SuccessRate = tried.Count > 0 ? Math.Round((double)served.Length / tried.Count, 3) : null,
+                LastUsed = tried.Count > 0 ? tried.Max(a => a.At) : null,
+                LastSuccess = served.Length > 0 ? served.Max(a => a.At) : null,
+                LastFailure = lastFailure?.At,
+                LastError = lastFailure?.Error,
+                FailingSince = failingSince.TryGetValue(name, out DateTimeOffset since) ? since : null,
+                LimitDays = limitDays.GetValueOrDefault(name),
+                FirstByteP50 = Percentile(served.Select(a => a.FirstByte), 0.5),
+                FirstByteP95 = Percentile(served.Select(a => a.FirstByte), 0.95),
+                TotalP50 = Percentile(served.Select(a => a.Total), 0.5),
+                TotalP95 = Percentile(served.Select(a => a.Total), 0.95),
+                TokensPerSecond = Percentile(served.Select(a => a.TokensPerSecond), 0.5),
+                Check = check,
+            };
             (string state, string? note) = State(status);
             return status with { State = state, StateNote = note };
         })];
@@ -272,9 +273,13 @@ internal sealed class EndpointChecks(TimeProvider? time = null)
                 long started = _time.GetTimestamp();
                 IReadOnlyList<RouterCheck> results = await check().ConfigureAwait(false);
                 RouterCheckStatus worst = results.Count == 0 ? RouterCheckStatus.Ok : results.Max(r => r.Status);
-                var outcome = new EndpointCheck(
-                    _time.GetUtcNow(), worst.ToString(), Math.Round(_time.GetElapsedTime(started).TotalMilliseconds, 0),
-                    [.. results.Select(r => r.Subject.StartsWith("connector ", StringComparison.Ordinal) ? r.Message : $"{r.Subject}: {r.Message}")]);
+                var outcome = new EndpointCheck
+                {
+                    At = _time.GetUtcNow(),
+                    Status = worst.ToString(),
+                    Milliseconds = Math.Round(_time.GetElapsedTime(started).TotalMilliseconds, 0),
+                    Messages = [.. results.Select(r => r.Subject.StartsWith("connector ", StringComparison.Ordinal) ? r.Message : $"{r.Subject}: {r.Message}")],
+                };
                 _last[connector] = (target, outcome);
                 return outcome;
             }
@@ -288,45 +293,105 @@ internal sealed class EndpointChecks(TimeProvider? time = null)
 }
 
 /// <summary>A connector's endpoint and its health, as <c>GET api/status</c> reports it under <c>endpoints</c>.</summary>
-/// <param name="Connector">The connector's name.</param>
-/// <param name="Kind">Its type (<c>OpenAICompatible</c>, <c>Anthropic</c>, <c>Cli/ClaudeCode</c>, …).</param>
-/// <param name="Host">The host (and port, when not the default) requests go to; <see langword="null"/> for a program.</param>
-/// <param name="Scheme"><c>https</c> or <c>http</c>, for an address.</param>
-/// <param name="Program">The program a CLI or Copilot connector runs on this machine.</param>
-/// <param name="Via">Whom that program sends prompts to (<c>Anthropic</c>, <c>OpenAI</c>, <c>GitHub Copilot</c>), when its preset says.</param>
-/// <param name="Local">Whether prompts stay on this machine (a loopback address, or a custom command whose models are all local).</param>
-/// <param name="Encrypted">Whether requests leave this machine only over TLS (HTTPS, or a vendor CLI).</param>
-/// <param name="State"><c>ok</c>, <c>degraded</c>, <c>failing</c>, <c>down</c>, <c>idle</c> or <c>unused</c>.</param>
-/// <param name="StateNote">Why the state is what it is.</param>
-/// <param name="Models">Enabled models served through it.</param>
-/// <param name="ModelsCoolingDown">How many of them are cooling down.</param>
-/// <param name="CooldownUntil">When the first of those becomes available again.</param>
-/// <param name="Attempts">Requests sent to it in the activity log (failed attempts that failed over included).</param>
-/// <param name="Failures">How many of those failed.</param>
-/// <param name="SuccessRate">The share that was answered.</param>
-/// <param name="LastUsed">The latest request sent to it.</param>
-/// <param name="LastSuccess">The latest it answered.</param>
-/// <param name="LastFailure">The latest that failed.</param>
-/// <param name="LastError">Why that one failed (redacted).</param>
-/// <param name="FailingSince">Since when every request to it has failed, when they all have.</param>
-/// <param name="LimitDays">Days in the last 7 on which it hit a usage limit.</param>
-/// <param name="FirstByteP50">Median time to the first byte of a reply, in milliseconds, from the start of the attempt that served it.</param>
-/// <param name="FirstByteP95">95th percentile time to the first byte.</param>
-/// <param name="TotalP50">Median time to the end of a reply.</param>
-/// <param name="TotalP95">95th percentile time to the end of a reply.</param>
-/// <param name="TokensPerSecond">Median output tokens per second after the first byte, when the backend reported usage.</param>
-/// <param name="Check">The latest on-demand check, if any since it was last pointed somewhere else.</param>
-public sealed record EndpointStatus(
-    string Connector, string Kind, string? Host, string? Scheme, string? Program, string? Via, bool Local, bool Encrypted,
-    string State, string? StateNote, int Models, int ModelsCoolingDown, DateTimeOffset? CooldownUntil,
-    int Attempts, int Failures, double? SuccessRate, DateTimeOffset? LastUsed, DateTimeOffset? LastSuccess, DateTimeOffset? LastFailure, string? LastError,
-    DateTimeOffset? FailingSince, int LimitDays,
-    double? FirstByteP50, double? FirstByteP95, double? TotalP50, double? TotalP95, double? TokensPerSecond,
-    EndpointCheck? Check);
+public sealed record EndpointStatus
+{
+    /// <summary>The connector's name.</summary>
+    public required string Connector { get; init; }
+
+    /// <summary>Its type (<c>OpenAICompatible</c>, <c>Anthropic</c>, <c>Cli/ClaudeCode</c>, …).</summary>
+    public required string Kind { get; init; }
+
+    /// <summary>The host (and port, when not the default) requests go to; <see langword="null"/> for a program.</summary>
+    public string? Host { get; init; }
+
+    /// <summary><c>https</c> or <c>http</c>, for an address.</summary>
+    public string? Scheme { get; init; }
+
+    /// <summary>The program a CLI or Copilot connector runs on this machine.</summary>
+    public string? Program { get; init; }
+
+    /// <summary>Whom that program sends prompts to (<c>Anthropic</c>, <c>OpenAI</c>, <c>GitHub Copilot</c>), when its preset says.</summary>
+    public string? Via { get; init; }
+
+    /// <summary>Whether prompts stay on this machine (a loopback address, or a custom command whose models are all local).</summary>
+    public required bool Local { get; init; }
+
+    /// <summary>Whether requests leave this machine only over TLS (HTTPS, or a vendor CLI).</summary>
+    public required bool Encrypted { get; init; }
+
+    /// <summary><c>ok</c>, <c>degraded</c>, <c>failing</c>, <c>down</c>, <c>idle</c> or <c>unused</c>.</summary>
+    public required string State { get; init; }
+
+    /// <summary>Why the state is what it is.</summary>
+    public string? StateNote { get; init; }
+
+    /// <summary>Enabled models served through it.</summary>
+    public required int Models { get; init; }
+
+    /// <summary>How many of them are cooling down.</summary>
+    public required int ModelsCoolingDown { get; init; }
+
+    /// <summary>When the first of those becomes available again.</summary>
+    public DateTimeOffset? CooldownUntil { get; init; }
+
+    /// <summary>Requests sent to it in the activity log (failed attempts that failed over included).</summary>
+    public required int Attempts { get; init; }
+
+    /// <summary>How many of those failed.</summary>
+    public required int Failures { get; init; }
+
+    /// <summary>The share that was answered.</summary>
+    public double? SuccessRate { get; init; }
+
+    /// <summary>The latest request sent to it.</summary>
+    public DateTimeOffset? LastUsed { get; init; }
+
+    /// <summary>The latest it answered.</summary>
+    public DateTimeOffset? LastSuccess { get; init; }
+
+    /// <summary>The latest that failed.</summary>
+    public DateTimeOffset? LastFailure { get; init; }
+
+    /// <summary>Why that one failed (redacted).</summary>
+    public string? LastError { get; init; }
+
+    /// <summary>Since when every request to it has failed, when they all have.</summary>
+    public DateTimeOffset? FailingSince { get; init; }
+
+    /// <summary>Days in the last 7 on which it hit a usage limit.</summary>
+    public required int LimitDays { get; init; }
+
+    /// <summary>Median time to the first byte of a reply, in milliseconds, from the start of the attempt that served it.</summary>
+    public double? FirstByteP50 { get; init; }
+
+    /// <summary>95th percentile time to the first byte.</summary>
+    public double? FirstByteP95 { get; init; }
+
+    /// <summary>Median time to the end of a reply.</summary>
+    public double? TotalP50 { get; init; }
+
+    /// <summary>95th percentile time to the end of a reply.</summary>
+    public double? TotalP95 { get; init; }
+
+    /// <summary>Median output tokens per second after the first byte, when the backend reported usage.</summary>
+    public double? TokensPerSecond { get; init; }
+
+    /// <summary>The latest on-demand check, if any since it was last pointed somewhere else.</summary>
+    public EndpointCheck? Check { get; init; }
+}
 
 /// <summary>The outcome of checking a connector on demand: reachable, credentials accepted, installed, signed in.</summary>
-/// <param name="At">When the check finished.</param>
-/// <param name="Status"><c>Ok</c>, <c>Warning</c> or <c>Failed</c>: the worst of its findings.</param>
-/// <param name="Milliseconds">How long it took.</param>
-/// <param name="Messages">What it found. Never contains a secret.</param>
-public sealed record EndpointCheck(DateTimeOffset At, string Status, double Milliseconds, IReadOnlyList<string> Messages);
+public sealed record EndpointCheck
+{
+    /// <summary>When the check finished.</summary>
+    public required DateTimeOffset At { get; init; }
+
+    /// <summary><c>Ok</c>, <c>Warning</c> or <c>Failed</c>: the worst of its findings.</summary>
+    public required string Status { get; init; }
+
+    /// <summary>How long it took.</summary>
+    public required double Milliseconds { get; init; }
+
+    /// <summary>What it found. Never contains a secret.</summary>
+    public required IReadOnlyList<string> Messages { get; init; }
+}

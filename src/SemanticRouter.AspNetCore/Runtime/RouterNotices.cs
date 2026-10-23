@@ -24,14 +24,26 @@ public enum NoticeKind
 }
 
 /// <summary>One thing that needs a decision.</summary>
-/// <param name="Key">Stable while the condition lasts, e.g. <c>down:lmstudio</c>, so it is announced once.</param>
-/// <param name="Kind">What kind of decision.</param>
-/// <param name="Title">One line, e.g. "lmstudio has been down for 2 hours".</param>
-/// <param name="Detail">What happened and what would help.</param>
-/// <param name="Link">The dashboard page to decide on, e.g. <c>#/learned</c>.</param>
-/// <param name="Since">Since when, as far as the router knows.</param>
-public sealed record RouterNotice(string Key, NoticeKind Kind, string Title, string Detail, string Link, DateTimeOffset Since)
+public sealed record RouterNotice
 {
+    /// <summary>Stable while the condition lasts, e.g. <c>down:lmstudio</c>, so it is announced once.</summary>
+    public required string Key { get; init; }
+
+    /// <summary>What kind of decision.</summary>
+    public required NoticeKind Kind { get; init; }
+
+    /// <summary>One line, e.g. "lmstudio has been down for 2 hours".</summary>
+    public required string Title { get; init; }
+
+    /// <summary>What happened and what would help.</summary>
+    public required string Detail { get; init; }
+
+    /// <summary>The dashboard page to decide on, e.g. <c>#/learned</c>.</summary>
+    public required string Link { get; init; }
+
+    /// <summary>Since when, as far as the router knows.</summary>
+    public required DateTimeOffset Since { get; init; }
+
     /// <summary>
     /// <see cref="Detail"/> without text that can come from prompts or replies (a learned utterance, a connector's
     /// error), for webhooks while <see cref="NotificationOptions.IncludeDetails"/> is off. <see langword="null"/>: none
@@ -83,14 +95,14 @@ internal sealed class RouterNotices(
             string settings = string.Join(", ", kept.Settings.Take(3).Select(s => s.Setting)) + (kept.Settings.Count > 3 ? ", …" : string.Empty);
             string detail = $"The template the configuration started from changed {settings} too. " +
                             "For each, take the new default or keep yours, on the Overview.";
-            notices.Add(new RouterNotice(
-                $"template:{kept.From}-{kept.To}",
-                NoticeKind.TemplateDefaults,
-                $"The upgrade kept {kept.Settings.Count} setting{(kept.Settings.Count == 1 ? string.Empty : "s")} you had changed",
-                detail,
-                "#/overview",
-                kept.At)
+            notices.Add(new RouterNotice
             {
+                Key = $"template:{kept.From}-{kept.To}",
+                Kind = NoticeKind.TemplateDefaults,
+                Title = $"The upgrade kept {kept.Settings.Count} setting{(kept.Settings.Count == 1 ? string.Empty : "s")} you had changed",
+                Detail = detail,
+                Link = "#/overview",
+                Since = kept.At,
                 PlainDetail = detail,
             });
         }
@@ -103,14 +115,14 @@ internal sealed class RouterNotices(
         int needed = configuration.Notifications.LimitDays;
         foreach ((string connector, int days, string? detail) in incidents.LimitDays().Where(l => l.Days >= needed))
         {
-            notices.Add(new RouterNotice(
-                "limit:" + connector,
-                NoticeKind.LimitReached,
-                $"{connector} keeps hitting its usage limit",
-                LimitDetail(days, detail),
-                "#/models",
-                _time.GetUtcNow().AddDays(-7))
+            notices.Add(new RouterNotice
             {
+                Key = "limit:" + connector,
+                Kind = NoticeKind.LimitReached,
+                Title = $"{connector} keeps hitting its usage limit",
+                Detail = LimitDetail(days, detail),
+                Link = "#/models",
+                Since = _time.GetUtcNow().AddDays(-7),
                 PlainDetail = LimitDetail(days, null),
             });
         }
@@ -132,8 +144,14 @@ internal sealed class RouterNotices(
             string period = budget.Period.ToString().ToLowerInvariant();
             string detail = $"It was spent in {spent} of the last {BudgetPeriods} {period}s ({status.Covers}; now {status.Describe()}). " +
                 "Raise it, or let cheaper models take more of this work.";
-            notices.Add(new RouterNotice("budget:" + budget.Name, NoticeKind.LimitReached, $"Budget {budget.Name} keeps running out", detail, "#/usage", status.PeriodStart)
+            notices.Add(new RouterNotice
             {
+                Key = "budget:" + budget.Name,
+                Kind = NoticeKind.LimitReached,
+                Title = $"Budget {budget.Name} keeps running out",
+                Detail = detail,
+                Link = "#/usage",
+                Since = status.PeriodStart,
                 PlainDetail = detail,
             });
         }
@@ -173,14 +191,14 @@ internal sealed class RouterNotices(
             string detail = $"It is left out of {excluded.Length} of the {judged.Length} kinds of work it does ({work}) until " +
                 $"{excluded.Max(r => r.ExcludedUntil)!.Value.ToString("d MMM HH:mm", CultureInfo.InvariantCulture)} UTC: {Clip(excluded[0].Detail ?? string.Empty)}. " +
                 "Check the model and its connector, or take it out of the catalog.";
-            notices.Add(new RouterNotice(
-                "unreliable:" + model.Key,
-                NoticeKind.ModelUnreliable,
-                $"{model.Key} is unreliable for most of its work",
-                detail,
-                "#/models",
-                excluded.Min(r => r.ExcludedSince) ?? now)
+            notices.Add(new RouterNotice
             {
+                Key = "unreliable:" + model.Key,
+                Kind = NoticeKind.ModelUnreliable,
+                Title = $"{model.Key} is unreliable for most of its work",
+                Detail = detail,
+                Link = "#/models",
+                Since = excluded.Min(r => r.ExcludedSince) ?? now,
                 PlainDetail = detail,
             });
         }
@@ -196,14 +214,14 @@ internal sealed class RouterNotices(
                 continue;
             }
 
-            notices.Add(new RouterNotice(
-                "down:" + connector,
-                NoticeKind.ConnectorDown,
-                $"{connector} has been down for {Duration(now - since)}",
-                DownDetail(since, detail),
-                "#/connectors",
-                since)
+            notices.Add(new RouterNotice
             {
+                Key = "down:" + connector,
+                Kind = NoticeKind.ConnectorDown,
+                Title = $"{connector} has been down for {Duration(now - since)}",
+                Detail = DownDetail(since, detail),
+                Link = "#/connectors",
+                Since = since,
                 PlainDetail = DownDetail(since, null),
             });
         }
@@ -225,14 +243,14 @@ internal sealed class RouterNotices(
         string why = configuration.Tuning.Mode == TuningMode.Suggest
             ? "Tuning:Mode is Suggest, so it applies nothing on its own"
             : "they undo or redo a change someone turned down earlier";
-        notices.Add(new RouterNotice(
-            "tuning:suggestions",
-            NoticeKind.TuningSuggestion,
-            waiting.Length == 1 ? "Automatic tuning has a suggestion" : $"Automatic tuning has {waiting.Length} suggestions",
-            Detail(c => c.Summary),
-            "#/learned",
-            waiting.Min(c => c.Timestamp))
+        notices.Add(new RouterNotice
         {
+            Key = "tuning:suggestions",
+            Kind = NoticeKind.TuningSuggestion,
+            Title = waiting.Length == 1 ? "Automatic tuning has a suggestion" : $"Automatic tuning has {waiting.Length} suggestions",
+            Detail = Detail(c => c.Summary),
+            Link = "#/learned",
+            Since = waiting.Min(c => c.Timestamp),
             PlainDetail = Detail(c => c.PlainSummary),
         });
 

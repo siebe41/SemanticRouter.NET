@@ -112,7 +112,11 @@ internal sealed class ModelCacheTracker(RoutingActivityLog activity, TimeProvide
         }
 
         double total = turns.Sum(Total);
-        return new PromptCacheShare(turns.Sum(e => (double)(e.CacheReadTokens ?? 0)) / total, turns.Sum(e => (double)(e.CacheCreationTokens ?? 0)) / total);
+        return new PromptCacheShare
+        {
+            Read = turns.Sum(e => (double)(e.CacheReadTokens ?? 0)) / total,
+            Write = turns.Sum(e => (double)(e.CacheCreationTokens ?? 0)) / total,
+        };
     }
 
     /// <summary>All input tokens of a turn: uncached input, cache reads and cache writes.</summary>

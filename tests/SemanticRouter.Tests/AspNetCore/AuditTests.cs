@@ -135,6 +135,28 @@ public sealed class AuditTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Each_entry_is_a_log_event_with_a_fixed_id_and_named_fields_for_a_SIEM()
+    {
+        HttpClient client = await StartBehindProxyAsync(Proxy);
+        StringContent config = await CurrentConfigAsync(client, Request(HttpMethod.Get, "/router/api/config", "alice@corp.example"));
+
+        (await client.SendAsync(Request(HttpMethod.Put, "/router/api/config?persist=false", "alice@corp.example", content: config))).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // docs/dashboard.md#audit-log documents these; SIEM rules depend on them, so a change here is a breaking change.
+        CapturedLogEvent logged = _logs.Events.Should().ContainSingle(e => e.Category == "SemanticRouter.Audit").Which;
+        logged.Level.Should().Be(LogLevel.Information);
+        logged.EventId.Id.Should().Be(1);
+        logged.EventId.Name.Should().Be("AuditEntry");
+        logged.Fields.Keys.Should().BeEquivalentTo("Actor", "Client", "Method", "Path", "Status", "Summary", "{OriginalFormat}");
+        logged.Fields["Actor"].Should().Be("alice@corp.example");
+        logged.Fields["Client"].Should().Be(Client);
+        logged.Fields["Method"].Should().Be("PUT");
+        logged.Fields["Path"].Should().Be("/router/api/config");
+        logged.Fields["Status"].Should().Be(200);
+        logged.Fields["Summary"].Should().Be(Audit().Single().Summary);
+    }
+
+    [Fact]
     public async Task Roles_come_from_the_user_then_their_groups_and_an_unmapped_user_is_refused()
     {
         HttpClient client = await StartBehindProxyAsync(Proxy);
@@ -276,7 +298,7 @@ public sealed class AuditTests : RouterHostTest
 
         IReadOnlyList<AuditEntry> entries = Audit();
         entries.Select(e => e.Summary).Should().Equal(
-            "exported activity: 1 entry, with prompt previews",
+            "exported activity: 1 entry, with prompt text",
             $"added an utterance to a route: route smalltalk, version {Services.GetRequiredService<RouterRuntimeProvider>().Current.Version}",
             "classified a prompt",
             "deleted activity: 0 entries, everything");
@@ -356,7 +378,16 @@ public sealed class AuditTests : RouterHostTest
         DateTimeOffset start = DateTimeOffset.UnixEpoch;
         for (int i = 0; i < 5; i++)
         {
-            log.Append(new AuditEntry(0, start.AddMinutes(i), "this machine", null, "POST", "/router/api/x", null, 200, "did " + i));
+            log.Append(new AuditEntry
+            {
+                Id = 0,
+                Timestamp = start.AddMinutes(i),
+                Actor = "this machine",
+                Method = "POST",
+                Path = "/router/api/x",
+                Status = 200,
+                Summary = "did " + i,
+            });
         }
 
         log.Query(null, null, 10).Select(e => (e.Id, e.Summary)).Should().Equal((5, "did 4"), (4, "did 3"), (3, "did 2"));
@@ -384,7 +415,18 @@ public sealed class SqliteAuditLogTests : IDisposable
         return new SqliteRouterDatabase(Options.Create(new SqliteStateOptions { Path = DbPath }), factory.CreateLogger<SqliteRouterDatabase>(), _time);
     }
 
-    private AuditEntry Entry(string summary) => new(0, _time.GetUtcNow(), "alice@corp.example", "203.0.113.9", "PUT", "/router/api/config", "/router/api/config", 200, summary);
+    private AuditEntry Entry(string summary) => new AuditEntry
+    {
+        Id = 0,
+        Timestamp = _time.GetUtcNow(),
+        Actor = "alice@corp.example",
+        Client = "203.0.113.9",
+        Method = "PUT",
+        Path = "/router/api/config",
+        Route = "/router/api/config",
+        Status = 200,
+        Summary = summary,
+    };
 
     [Fact]
     public void Entries_survive_a_restart_and_are_pruned_only_past_the_retention()

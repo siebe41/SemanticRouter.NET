@@ -17,10 +17,14 @@ internal static class EvaluationApi
 
     public static void Map(RouteGroupBuilder api, JsonSerializerOptions json, Func<HttpContext, string> actor)
     {
-        api.MapGet("/evaluation/set", (IEvaluationSetStore store) =>
+        api.MapGet("/evaluation/set", (HttpContext context, IEvaluationSetStore store) =>
         {
+            // Prompts labelled local-only are the admin's alone, as on the export (localOnly=true): only their number is
+            // given to anyone else. Decided on the signed-in role, so an admin under a read-only policy still sees them.
             IReadOnlyList<EvaluationCase> cases = store.Load();
-            return Results.Json(new EvaluationSetResponse(store.Location, cases.Count, cases.Select(CaseDto.From).ToArray()), json);
+            bool admin = DashboardAccess.SignedInRoleOf(context) == RouterDashboardRole.Admin;
+            CaseDto[] shown = [.. cases.Where(c => admin || !c.LocalOnly).Select(CaseDto.From)];
+            return Results.Json(new EvaluationSetResponse(store.Location, shown.Length, shown, cases.Count - shown.Length), json);
         });
 
         api.MapPut("/evaluation/set", async (HttpContext context, IEvaluationSetStore store) =>
@@ -57,7 +61,7 @@ internal static class EvaluationApi
             // Prompts labelled local-only stay on this machine unless the export asks for them.
             IEnumerable<EvaluationCase> cases = store.Load().Where(c => localOnly == true || !c.LocalOnly);
             return Results.File(Encoding.UTF8.GetBytes(EvaluationSet.ToJsonLines(cases)), "application/jsonl", "semantic-router.evaluation.jsonl");
-        }).Audited("exported the evaluation set");
+        }).WithMetadata(new DashboardPromptExportMetadata("localOnly")).Audited("exported the evaluation set");
 
         api.MapPost("/evaluate", async (HttpContext context, RouterRuntimeProvider provider, IEvaluationSetStore store, bool? calibrate) =>
         {
@@ -314,15 +318,17 @@ internal static class EvaluationApi
     {
         public static CaseDto From(EvaluationCase item) => new(item.Prompt, item.ExpectedTier, item.ExpectedRoute, item.LocalOnly, item.Note);
 
-        public EvaluationCase ToCase() => new(Prompt.Trim(), Tier)
+        public EvaluationCase ToCase() => new()
         {
+            Prompt = Prompt.Trim(),
+            ExpectedTier = Tier,
             ExpectedRoute = string.IsNullOrWhiteSpace(Route) ? null : Route.Trim(),
             LocalOnly = LocalOnly,
             Note = string.IsNullOrWhiteSpace(Note) ? null : Note,
         };
     }
 
-    public sealed record EvaluationSetResponse(string? Location, int Count, IReadOnlyList<CaseDto> Cases);
+    public sealed record EvaluationSetResponse(string? Location, int Count, IReadOnlyList<CaseDto> Cases, int LocalOnlyWithheld = 0);
 
     public sealed record ScoreDto(string Route, int Tier, float Similarity);
 

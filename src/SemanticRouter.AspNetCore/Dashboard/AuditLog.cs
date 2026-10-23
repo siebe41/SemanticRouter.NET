@@ -10,17 +10,35 @@ namespace SemanticRouter.AspNetCore;
 /// <summary>
 /// One action taken through the dashboard or admin API. Never holds a request body, a token or prompt text.
 /// </summary>
-/// <param name="Id">Increasing id, assigned by the log.</param>
-/// <param name="Timestamp">When the request finished.</param>
-/// <param name="Actor">Who: the user a trusted proxy named, <c>admin token</c>, <c>read-only token</c>, <c>this machine</c>, …</param>
-/// <param name="Client">The client's address (after a known proxy's <c>X-Forwarded-For</c>); <see langword="null"/> in-process.</param>
-/// <param name="Method">The HTTP method.</param>
-/// <param name="Path">The request path, without the query string.</param>
-/// <param name="Route">The endpoint's route template, e.g. <c>/router/api/config/history/{id:long}/rollback</c>.</param>
-/// <param name="Status">The status code answered.</param>
-/// <param name="Summary">What was done, e.g. <c>applied the configuration: version 12, saved</c>.</param>
-public sealed record AuditEntry(
-    long Id, DateTimeOffset Timestamp, string Actor, string? Client, string Method, string Path, string? Route, int Status, string Summary);
+public sealed record AuditEntry
+{
+    /// <summary>Increasing id, assigned by the log.</summary>
+    public required long Id { get; init; }
+
+    /// <summary>When the request finished.</summary>
+    public required DateTimeOffset Timestamp { get; init; }
+
+    /// <summary>Who: the user a trusted proxy named, <c>admin token</c>, <c>read-only token</c>, <c>this machine</c>, …</summary>
+    public required string Actor { get; init; }
+
+    /// <summary>The client's address (after a known proxy's <c>X-Forwarded-For</c>); <see langword="null"/> in-process.</summary>
+    public string? Client { get; init; }
+
+    /// <summary>The HTTP method.</summary>
+    public required string Method { get; init; }
+
+    /// <summary>The request path, without the query string.</summary>
+    public required string Path { get; init; }
+
+    /// <summary>The endpoint's route template, e.g. <c>/router/api/config/history/{id:long}/rollback</c>.</summary>
+    public string? Route { get; init; }
+
+    /// <summary>The status code answered.</summary>
+    public required int Status { get; init; }
+
+    /// <summary>What was done, e.g. <c>applied the configuration: version 12, saved</c>.</summary>
+    public required string Summary { get; init; }
+}
 
 /// <summary>
 /// An append-only record of changes made through the dashboard and admin API, sign-ins and sign-outs. Entries are
@@ -43,8 +61,14 @@ public sealed class InMemoryAuditLog : IAuditLog
     private readonly Lock _gate = new();
     private long _next = 1;
 
+    /// <summary>Keeps the latest 5000 entries.</summary>
+    public InMemoryAuditLog()
+        : this(5000)
+    {
+    }
+
     /// <summary>Keeps the latest <paramref name="capacity"/> entries.</summary>
-    public InMemoryAuditLog(int capacity = 5000)
+    public InMemoryAuditLog(int capacity)
     {
         _capacity = Math.Max(1, capacity);
     }
@@ -92,6 +116,15 @@ internal sealed record DashboardAuditMetadata(string Summary);
 /// </summary>
 internal sealed partial class DashboardAudit(IAuditLog log, TimeProvider time, ILogger logger)
 {
+    /// <summary>The log category of audit entries.</summary>
+    public const string LogCategory = "SemanticRouter.Audit";
+
+    /// <summary>The event id of an audit entry in the logs.</summary>
+    public const int AuditEventId = 1;
+
+    /// <summary>The event name of an audit entry in the logs.</summary>
+    public const string AuditEventName = "AuditEntry";
+
     private const string SummaryKey = "SemanticRouter.AuditSummary";
     private const string DetailKey = "SemanticRouter.AuditDetail";
     private const int MaxText = 300;
@@ -144,16 +177,18 @@ internal sealed partial class DashboardAudit(IAuditLog log, TimeProvider time, I
             summary += ": " + more;
         }
 
-        var entry = new AuditEntry(
-            0,
-            time.GetUtcNow(),
-            Clip(actor ?? "anonymous"),
-            context.Connection.RemoteIpAddress?.ToString(),
-            method,
-            Clip((context.Request.PathBase + context.Request.Path).Value ?? "/"),
-            RouteOf(endpoint) is { } route ? Clip(route) : null,
-            status,
-            Clip(summary));
+        var entry = new AuditEntry
+        {
+            Id = 0,
+            Timestamp = time.GetUtcNow(),
+            Actor = Clip(actor ?? "anonymous"),
+            Client = context.Connection.RemoteIpAddress?.ToString(),
+            Method = method,
+            Path = Clip((context.Request.PathBase + context.Request.Path).Value ?? "/"),
+            Route = RouteOf(endpoint) is { } route ? Clip(route) : null,
+            Status = status,
+            Summary = Clip(summary),
+        };
         AuditEntry stored = log.Append(entry);
         LogEntry(logger, stored.Actor, stored.Client ?? "this machine", stored.Method, stored.Path, stored.Status, stored.Summary);
     }
@@ -188,7 +223,8 @@ internal sealed partial class DashboardAudit(IAuditLog log, TimeProvider time, I
         return lines.ToString();
     }
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Audit: {Actor} from {Client}: {Method} {Path} -> {Status}: {Summary}")]
+    // SIEM rules match on the category, this id and name, and the field names (docs/dashboard.md#audit-log): keep them.
+    [LoggerMessage(EventId = AuditEventId, EventName = AuditEventName, Level = LogLevel.Information, Message = "Audit: {Actor} from {Client}: {Method} {Path} -> {Status}: {Summary}")]
     private static partial void LogEntry(ILogger logger, string actor, string client, string method, string path, int status, string summary);
 }
 

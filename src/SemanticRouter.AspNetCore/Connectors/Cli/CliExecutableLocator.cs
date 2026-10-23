@@ -1,14 +1,20 @@
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>The result of <see cref="CliExecutableLocator.Find(string)"/>.</summary>
-/// <param name="Requested">The executable as configured.</param>
-/// <param name="Path">The full path of a directly startable executable, or <see langword="null"/>.</param>
-/// <param name="ScriptPath">
-/// A script wrapper that was found instead (an npm <c>.cmd</c> shim, a <c>.bat</c> or <c>.ps1</c> file). The router
-/// never starts these: <c>cmd.exe</c> would re-parse the prompt, which may contain shell syntax.
-/// </param>
-public sealed record CliExecutableLookup(string Requested, string? Path, string? ScriptPath)
+public sealed record CliExecutableLookup
 {
+    /// <summary>The executable as configured.</summary>
+    public required string Requested { get; init; }
+
+    /// <summary>The full path of a directly startable executable, or <see langword="null"/>.</summary>
+    public string? Path { get; init; }
+
+    /// <summary>
+    /// A script wrapper that was found instead (an npm <c>.cmd</c> shim, a <c>.bat</c> or <c>.ps1</c> file). The router
+    /// never starts these: <c>cmd.exe</c> would re-parse the prompt, which may contain shell syntax.
+    /// </summary>
+    public string? ScriptPath { get; init; }
+
     /// <summary>Whether a startable executable was found.</summary>
     public bool Found => Path is not null;
 
@@ -71,7 +77,7 @@ public static class CliExecutableLocator
             string? script = Path.IsPathRooted(executable) || HasDirectory(executable)
                 ? (File.Exists(executable) ? Path.GetFullPath(executable) : null)
                 : Search(executable, [string.Empty], searchPath);
-            return new CliExecutableLookup(executable, null, script ?? executable);
+            return new CliExecutableLookup { Requested = executable, ScriptPath = script ?? executable };
         }
 
         if (Path.IsPathRooted(executable) || HasDirectory(executable))
@@ -79,24 +85,24 @@ public static class CliExecutableLocator
             string full = Path.GetFullPath(executable);
             if (File.Exists(full))
             {
-                return new CliExecutableLookup(executable, full, null);
+                return new CliExecutableLookup { Requested = executable, Path = full };
             }
 
             if (windows && !Path.HasExtension(full) && File.Exists(full + ".exe"))
             {
-                return new CliExecutableLookup(executable, full + ".exe", null);
+                return new CliExecutableLookup { Requested = executable, Path = full + ".exe" };
             }
 
-            return new CliExecutableLookup(executable, null, windows ? FindScriptBeside(full) : null);
+            return new CliExecutableLookup { Requested = executable, ScriptPath = windows ? FindScriptBeside(full) : null };
         }
 
         string[] extensions = windows && !Path.HasExtension(executable) ? [".exe", ".com"] : [string.Empty];
         if (Search(executable, extensions, searchPath) is { } found)
         {
-            return new CliExecutableLookup(executable, found, null);
+            return new CliExecutableLookup { Requested = executable, Path = found };
         }
 
-        return new CliExecutableLookup(executable, null, windows ? Search(executable, ScriptExtensions, searchPath) : null);
+        return new CliExecutableLookup { Requested = executable, ScriptPath = windows ? Search(executable, ScriptExtensions, searchPath) : null };
     }
 
     private static bool HasDirectory(string executable) =>

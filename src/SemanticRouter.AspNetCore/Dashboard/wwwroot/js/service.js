@@ -374,7 +374,7 @@ views.service = () => {
         ${actionButton(sv, 'restart', 'Restart', '')}
         ${actionButton(sv, 'stop', 'Stop…', 'danger')}
         <button class="btn ghost small" data-action="service-load">Refresh</button></div>
-      <div class="table-wrap plain">${runsOn().replace('<table class="kv">', `<table class="kv"><tr><th>Runs as</th><td>${h(RUNS_AS[sv.runsAs] || sv.runsAs)}</td></tr>`)}</div>
+      <div class="table-wrap plain">${runsOn().replace('<table class="kv">', () => `<table class="kv"><tr><th>Runs as</th><td>${h(RUNS_AS[sv.runsAs] || sv.runsAs)}</td></tr>`)}</div>
     </div>
     ${listenCard(data)}
     ${backgroundCard(data)}`;

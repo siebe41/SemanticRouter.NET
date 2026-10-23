@@ -17,7 +17,11 @@ public sealed class CliAdapterTests : IDisposable
     [Fact]
     public void Claude_reads_the_prompt_from_stdin_and_disables_every_tool()
     {
-        (List<string> args, string? stdin) = new ClaudeCodeCliAdapter().Build(Request("sonnet", new ChatMessage("user", "hello there")));
+        (List<string> args, string? stdin) = new ClaudeCodeCliAdapter().Build(Request("sonnet", new ChatMessage
+        {
+            Role = "user",
+            Content = "hello there",
+        }));
 
         args.Take(2).Should().Equal(["-p", "--output-format"], "the prompt is not on the command line, where other users could read it");
         args.Should().NotContain(a => a.Contains("hello there", StringComparison.Ordinal));
@@ -35,7 +39,7 @@ public sealed class CliAdapterTests : IDisposable
     public void Claude_puts_an_argument_prompt_straight_after_print()
     {
         (List<string> args, string? stdin) = new ClaudeCodeCliAdapter().Build(
-            Request(CliPromptInput.Argument, "sonnet", new ChatMessage("user", "hello there")));
+            Request(CliPromptInput.Argument, "sonnet", new ChatMessage { Role = "user", Content = "hello there" }));
 
         args.Take(2).Should().Equal("-p", "hello there");
         stdin.Should().BeNull();
@@ -45,7 +49,7 @@ public sealed class CliAdapterTests : IDisposable
     public void Claude_sends_system_messages_as_the_system_prompt()
     {
         (List<string> args, _) = new ClaudeCodeCliAdapter().Build(Request(null,
-            new ChatMessage("system", "Be terse."), new ChatMessage("user", "hi")));
+            new ChatMessage { Role = "system", Content = "Be terse." }, new ChatMessage { Role = "user", Content = "hi" }));
 
         args.Should().ContainInOrder("--system-prompt", "Be terse.");
         args.Should().NotContain("--system-prompt-file", "Claude Code 2.1.293 has no such flag");
@@ -58,7 +62,7 @@ public sealed class CliAdapterTests : IDisposable
         string system = new('s', 500);
 
         (List<string> args, string? stdin) = new ClaudeCodeCliAdapter().Build(Request(null,
-            new ChatMessage("system", system), new ChatMessage("user", "hi")));
+            new ChatMessage { Role = "system", Content = system }, new ChatMessage { Role = "user", Content = "hi" }));
 
         args.Should().NotContain("--system-prompt");
         stdin.Should().StartWith("[system]\n" + system);
@@ -69,7 +73,11 @@ public sealed class CliAdapterTests : IDisposable
     {
         string prompt = new('x', 500);
 
-        (List<string> args, string? stdin) = new ClaudeCodeCliAdapter().Build(Request(CliPromptInput.Argument, null, new ChatMessage("user", prompt)));
+        (List<string> args, string? stdin) = new ClaudeCodeCliAdapter().Build(Request(CliPromptInput.Argument, null, new ChatMessage
+        {
+            Role = "user",
+            Content = prompt,
+        }));
 
         args[1].Should().Be("--output-format");
         stdin.Should().Be(prompt);
@@ -78,7 +86,11 @@ public sealed class CliAdapterTests : IDisposable
     [Fact]
     public void Prompts_starting_with_a_dash_are_not_read_as_options()
     {
-        (List<string> args, _) = new ClaudeCodeCliAdapter().Build(Request(CliPromptInput.Argument, null, new ChatMessage("user", "--help me")));
+        (List<string> args, _) = new ClaudeCodeCliAdapter().Build(Request(CliPromptInput.Argument, null, new ChatMessage
+        {
+            Role = "user",
+            Content = "--help me",
+        }));
 
         args[1].Should().Be(" --help me");
     }
@@ -116,7 +128,7 @@ public sealed class CliAdapterTests : IDisposable
     public void Copilot_reads_the_prompt_from_stdin_and_denies_tools()
     {
         (List<string> args, string? stdin) = new CopilotCliAdapter().Build(Request("claude-sonnet-5.5",
-            new ChatMessage("system", "Be terse."), new ChatMessage("user", "-hi")));
+            new ChatMessage { Role = "system", Content = "Be terse." }, new ChatMessage { Role = "user", Content = "-hi" }));
 
         stdin.Should().Be("[system]\nBe terse.\n\n-hi");
         args.Should().NotContain(a => a.StartsWith("--prompt", StringComparison.Ordinal) || a.Contains("Be terse", StringComparison.Ordinal));
@@ -129,7 +141,7 @@ public sealed class CliAdapterTests : IDisposable
     public void Copilot_passes_an_argument_prompt_as_a_single_token()
     {
         (List<string> args, string? stdin) = new CopilotCliAdapter().Build(Request(CliPromptInput.Argument, null,
-            new ChatMessage("system", "Be terse."), new ChatMessage("user", "-hi")));
+            new ChatMessage { Role = "system", Content = "Be terse." }, new ChatMessage { Role = "user", Content = "-hi" }));
 
         args[0].Should().Be("--prompt=[system]\nBe terse.\n\n-hi");
         stdin.Should().BeNull();
@@ -138,7 +150,7 @@ public sealed class CliAdapterTests : IDisposable
     [Fact]
     public void Codex_reads_the_prompt_from_stdin_in_a_read_only_sandbox()
     {
-        (List<string> args, string? stdin) = new CodexCliAdapter().Build(Request("gpt-6.1-sol", new ChatMessage("user", "hi")));
+        (List<string> args, string? stdin) = new CodexCliAdapter().Build(Request("gpt-6.1-sol", new ChatMessage { Role = "user", Content = "hi" }));
 
         args[0].Should().Be("exec");
         args.Should().ContainInOrder("--sandbox", "read-only");
@@ -193,14 +205,14 @@ public sealed class CliAdapterTests : IDisposable
         };
 
         (List<string> args, string? stdin) = new CustomCliAdapter().Build(
-            new CliRequest("llama3", [new ChatMessage("user", "hi")], _workingDirectory, options));
+            new CliRequest("llama3", [new ChatMessage { Role = "user", Content = "hi" }], _workingDirectory, options));
 
         args.Should().Equal("run", "llama3", "--prompt", "hi");
         stdin.Should().BeNull();
 
         options.PromptInput = CliPromptInput.Stdin;
         options.Arguments = ["run", "-m", "{model}", "--quiet"];
-        (args, stdin) = new CustomCliAdapter().Build(new CliRequest(null, [new ChatMessage("user", "hi")], _workingDirectory, options));
+        (args, stdin) = new CustomCliAdapter().Build(new CliRequest(null, [new ChatMessage { Role = "user", Content = "hi" }], _workingDirectory, options));
         args.Should().Equal(["run", "--quiet"], "a missing model drops both the placeholder and its option");
         stdin.Should().Be("hi");
     }
@@ -216,7 +228,7 @@ public sealed class CliAdapterTests : IDisposable
         };
 
         (List<string> args, _) = new CustomCliAdapter().Build(
-            new CliRequest(null, [new ChatMessage("user", "--exec rm -rf ~")], _workingDirectory, options));
+            new CliRequest(null, [new ChatMessage { Role = "user", Content = "--exec rm -rf ~" }], _workingDirectory, options));
 
         args.Should().Equal("run", " --exec rm -rf ~", "--prompt=--exec rm -rf ~");
     }
@@ -224,11 +236,11 @@ public sealed class CliAdapterTests : IDisposable
     [Fact]
     public void Transcript_passes_single_messages_through_and_labels_conversations()
     {
-        ChatTranscript.Render([new ChatMessage("user", "hi")]).Should().Be((null, "hi"));
+        ChatTranscript.Render([new ChatMessage { Role = "user", Content = "hi" }]).Should().Be((null, "hi"));
 
         (string? system, string prompt) = ChatTranscript.Render(
         [
-            new ChatMessage("system", "S"), new ChatMessage("user", "Q1"), new ChatMessage("assistant", "A1"), new ChatMessage("user", "Q2"),
+            new ChatMessage { Role = "system", Content = "S" }, new ChatMessage { Role = "user", Content = "Q1" }, new ChatMessage { Role = "assistant", Content = "A1" }, new ChatMessage { Role = "user", Content = "Q2" },
         ]);
 
         system.Should().Be("S");
@@ -252,7 +264,7 @@ public sealed class CliAdapterTests : IDisposable
     [Fact]
     public void Codex_runs_without_update_checks_or_analytics()
     {
-        (List<string> args, _) = new CodexCliAdapter().Build(Request("gpt-6.1-sol", new ChatMessage("user", "hi")));
+        (List<string> args, _) = new CodexCliAdapter().Build(Request("gpt-6.1-sol", new ChatMessage { Role = "user", Content = "hi" }));
 
         args.Should().ContainInOrder("-c", "check_for_update_on_startup=false")
             .And.ContainInOrder("-c", "analytics.enabled=false")

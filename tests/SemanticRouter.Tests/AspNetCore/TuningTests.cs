@@ -20,17 +20,17 @@ public sealed class TuningTests : RouterHostTest
     /// Small talk ("hello") uses the default threshold, 0.80; reasoning ("design a system") has its own, 0.90.
     /// Small-talk prompts sit at 0.765 (right from 0.76), reasoning prompts at 0.825 (right from 0.82).
     /// </summary>
-    private async Task<HttpClient> StartTunedAsync(Action<TuningOptions>? tuning = null, int smallTalk = 3, int reasoning = 3)
+    private async Task<HttpClient> StartTunedAsync(Action<TuningOptions>? tuning = null, int smallTalk = 3, int reasoning = 3, bool localSmallTalk = false)
     {
-        var cases = new List<EvaluationCase> { new(_embeddings.At("what is the weather in paris", 0, 0.3f), 3) };
+        var cases = new List<EvaluationCase> { new EvaluationCase { Prompt = _embeddings.At("what is the weather in paris", 0, 0.3f), ExpectedTier = 3 } };
         for (int i = 0; i < smallTalk; i++)
         {
-            cases.Add(new EvaluationCase(_embeddings.At($"hi there {i}", 0, 0.765f), 1) { ExpectedRoute = "smalltalk" });
+            cases.Add(new EvaluationCase { Prompt = _embeddings.At($"hi there {i}", 0, 0.765f), ExpectedTier = 1, ExpectedRoute = "smalltalk" });
         }
 
         for (int i = 0; i < reasoning; i++)
         {
-            cases.Add(new EvaluationCase(_embeddings.At($"design the ledger {i}", 2, 0.825f), 4) { ExpectedRoute = "reasoning" });
+            cases.Add(new EvaluationCase { Prompt = _embeddings.At($"design the ledger {i}", 2, 0.825f), ExpectedTier = 4, ExpectedRoute = "reasoning" });
         }
 
         HttpClient client = await StartAsync(
@@ -39,7 +39,9 @@ public sealed class TuningTests : RouterHostTest
             {
                 o.DefaultSimilarityThreshold = 0.80f;
                 o.FallbackTier = 3;
-                o.Routes.Add(Route("smalltalk", 1, "hello"));
+                RouteDefinition smallTalkRoute = Route("smalltalk", 1, "hello");
+                smallTalkRoute.LocalOnly = localSmallTalk;
+                o.Routes.Add(smallTalkRoute);
                 RouteDefinition reasoningRoute = Route("reasoning", 4, "design a system");
                 reasoningRoute.SimilarityThreshold = 0.90f;
                 o.Routes.Add(reasoningRoute);
@@ -122,6 +124,24 @@ public sealed class TuningTests : RouterHostTest
         JsonElement done = await RunAsync(client);
         done.GetProperty("changes").GetArrayLength().Should().Be(0);
         done.GetProperty("result").GetString().Should().StartWith("Nothing to change: 7 of 7 prompts");
+    }
+
+    [Fact]
+    public async Task A_change_counts_local_only_prompts_but_does_not_quote_them()
+    {
+        HttpClient client = await StartTunedAsync(smallTalk: 1, reasoning: 0, localSmallTalk: true);
+        IEvaluationSetStore labels = Services.GetRequiredService<IEvaluationSetStore>();
+        const string Secret = "LOCAL-SECRET";
+        labels.Save([.. labels.Load(), .. Enumerable.Range(1, 2).Select(i => new EvaluationCase { Prompt = _embeddings.At($"{Secret} hi {i}", 0, 0.765f), ExpectedTier = 1, ExpectedRoute = "smalltalk", LocalOnly = true })]);
+
+        JsonElement change = Changes(await RunAsync(client)).Single();
+
+        change.GetProperty("why").GetString().Should()
+            .Contain("3 labelled prompts route to the tier they need that do not now (3 from the evaluation set), 2 local-only prompts not quoted, e.g. \"hi there 0\"");
+        change.GetProperty("examples").EnumerateArray().Select(x => x.GetString()).Should().Equal("hi there 0");
+        // The text is never stored, so no role reads it: not the learned list, nor the applied change's history note.
+        (await client.GetStringAsync("/router/api/tuning")).Should().NotContain(Secret);
+        (await client.GetStringAsync("/router/api/config/history")).Should().NotContain(Secret).And.Contain("2 local-only prompts not quoted");
     }
 
     [Fact]
@@ -293,7 +313,7 @@ public sealed class TuningTests : RouterHostTest
                 ServedBy = "local",
                 Grade = 2,
             });
-            cases.Add(new EvaluationCase(prompt, agrees ? 3 : 1) { Note = $"labelled from activity #{entry.Id}" });
+            cases.Add(new EvaluationCase { Prompt = prompt, ExpectedTier = agrees ? 3 : 1, Note = $"labelled from activity #{entry.Id}" });
         }
 
         labels.Save(cases);
@@ -355,7 +375,7 @@ public sealed class TuningTests : RouterHostTest
         const string prompt = "ship the release notes";
         _embeddings.Set(prompt, [0f, 0f, 0f, 0f, 0f, 1f]);
         _embeddings.Set("draft the release notes", [0f, 0f, 0f, 0f, 0.5f, 0.866f]);
-        labels.Save([.. labels.Load(), new EvaluationCase(prompt, 1) { ExpectedRoute = "smalltalk" }, new EvaluationCase("draft the release notes", 1), new EvaluationCase(_embeddings.At("good day", 0, 0.9f), 1)]);
+        labels.Save([.. labels.Load(), new EvaluationCase { Prompt = prompt, ExpectedTier = 1, ExpectedRoute = "smalltalk" }, new EvaluationCase { Prompt = "draft the release notes", ExpectedTier = 1 }, new EvaluationCase { Prompt = _embeddings.At("good day", 0, 0.9f), ExpectedTier = 1 }]);
 
         JsonElement run = await RunAsync(client);
 

@@ -3,16 +3,20 @@ namespace SemanticRouter;
 /// <summary>
 /// The output of an <see cref="IRouteSelector"/>: what a model must be able to do to answer the prompt, and why.
 /// </summary>
-/// <param name="RequiredTier">The minimum model tier.</param>
-/// <param name="Reason">How <paramref name="RequiredTier"/> was decided.</param>
-/// <param name="Route">The route the decision is attributed to, or <see langword="null"/> for fallbacks.</param>
-/// <param name="Similarity">The similarity of <paramref name="Route"/>, or of the best candidate on a fallback.</param>
-public sealed record RouteDecision(
-    int RequiredTier,
-    RoutingReason Reason,
-    RouteDefinition? Route = null,
-    float? Similarity = null)
+public sealed record RouteDecision
 {
+    /// <summary>The minimum model tier.</summary>
+    public required int RequiredTier { get; init; }
+
+    /// <summary>How <see cref="RequiredTier"/> was decided.</summary>
+    public required RoutingReason Reason { get; init; }
+
+    /// <summary>The route the decision is attributed to, or <see langword="null"/> for fallbacks.</summary>
+    public RouteDefinition? Route { get; init; }
+
+    /// <summary>The similarity of <see cref="Route"/>, or of the best candidate on a fallback.</summary>
+    public float? Similarity { get; init; }
+
     /// <summary>Capability tags the serving model must declare.</summary>
     public IReadOnlyList<string> RequiredCapabilities { get; init; } = [];
 

@@ -142,8 +142,10 @@ internal sealed class KnowledgeGraphMemorySource : IMemorySource
             {
                 string type = g.First().Type;
                 string folder = type.Length > 0 ? type.Replace('/', '-') + "/" : string.Empty;
-                return new MemoryDocument(folder + g.Key.Replace('/', '-'), string.Join('\n', g.SelectMany(e => e.Observations).Distinct()))
+                return new MemoryDocument
                 {
+                    Path = folder + g.Key.Replace('/', '-'),
+                    Content = string.Join('\n', g.SelectMany(e => e.Observations).Distinct()),
                     Title = g.Key,
                     Modified = modified,
                     Tags = type.Length > 0 ? [type] : [],

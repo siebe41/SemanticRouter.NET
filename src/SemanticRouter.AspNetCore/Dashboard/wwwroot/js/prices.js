@@ -1,8 +1,6 @@
 /* Semantic Router dashboard: cloud models' list prices, looked up with POST api/prices/lookup (OpenRouter's public
    price list) and written into the draft. Local models are never looked up. */
-import { api, state } from './core.js';
-
-const isSubscription = (conn) => !!conn && (conn.Type === 'Cli' || conn.Type === 'Copilot');
+import { api, runsProgram, state } from './core.js';
 
 /** What of a connector says whose price a model pays: its type, preset and host. */
 const asked = (conn, model) => ({ model, type: (conn && conn.Type) || 'OpenAICompatible', preset: (conn && conn.Preset) || 'Custom', baseAddress: (conn && conn.BaseAddress) || null });
@@ -20,7 +18,7 @@ export async function lookUpPrices(connector, models) {
  * context window is filled in only when the model has none.
  */
 export function applyPrice(model, price, conn) {
-  if (isSubscription(conn)) {
+  if (runsProgram(conn)) {
     Object.assign(model, { ApiInputCostPerMillionTokens: price.input, ApiOutputCostPerMillionTokens: price.output, ApiCacheReadCostPerMillionTokens: price.cacheRead ?? null, ApiCacheWriteCostPerMillionTokens: price.cacheWrite ?? null });
   } else {
     Object.assign(model, { InputCostPerMillionTokens: price.input, OutputCostPerMillionTokens: price.output, CacheReadCostPerMillionTokens: price.cacheRead ?? null, CacheWriteCostPerMillionTokens: price.cacheWrite ?? null });

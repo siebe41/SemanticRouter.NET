@@ -26,7 +26,14 @@ public sealed record ModelRequirements
 }
 
 /// <summary>A model eligible to serve a request, in the order it should be tried.</summary>
-/// <param name="Model">The catalog entry.</param>
-/// <param name="EstimatedCost">Estimated marginal cost of the request in USD, cached input at the cache prices when the model's cache share is known.</param>
-/// <param name="MeetsRequiredTier"><see langword="false"/> for below-tier fallbacks.</param>
-public sealed record ModelCandidate(ModelDefinition Model, decimal EstimatedCost, bool MeetsRequiredTier);
+public sealed record ModelCandidate
+{
+    /// <summary>The catalog entry.</summary>
+    public required ModelDefinition Model { get; init; }
+
+    /// <summary>Estimated marginal cost of the request in USD, cached input at the cache prices when the model's cache share is known.</summary>
+    public required decimal EstimatedCost { get; init; }
+
+    /// <summary><see langword="false"/> for below-tier fallbacks.</summary>
+    public required bool MeetsRequiredTier { get; init; }
+}

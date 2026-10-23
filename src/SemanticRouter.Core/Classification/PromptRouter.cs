@@ -92,14 +92,17 @@ public sealed record PromptRoutingRequest
 }
 
 /// <summary>The routing outcome: requirements, and the models to try in order.</summary>
-/// <param name="Classification">Why the requirements are what they are.</param>
-/// <param name="Requirements">What a model must satisfy.</param>
-/// <param name="Candidates">Models to try, best first. Empty when nothing can serve the request.</param>
-public sealed record RoutingPlan(
-    PromptClassificationResult Classification,
-    ModelRequirements Requirements,
-    IReadOnlyList<ModelCandidate> Candidates)
+public sealed record RoutingPlan
 {
+    /// <summary>Why the requirements are what they are.</summary>
+    public required PromptClassificationResult Classification { get; init; }
+
+    /// <summary>What a model must satisfy.</summary>
+    public required ModelRequirements Requirements { get; init; }
+
+    /// <summary>Models to try, best first. Empty when nothing can serve the request.</summary>
+    public required IReadOnlyList<ModelCandidate> Candidates { get; init; }
+
     /// <summary>
     /// The first candidate is the conversation's previous model (<see cref="PromptRoutingRequest.PreferredModel"/>) or
     /// the model with its warm prompt cache (<see cref="PromptRoutingRequest.WarmCaches"/>), moved ahead of the ranking.
@@ -147,6 +150,29 @@ public interface IPromptRouter
 }
 
 /// <summary>
+/// The collaborators of a <see cref="PromptRouter"/> that have a default. One left <see langword="null"/> gets its
+/// default.
+/// </summary>
+/// <remarks>A new collaborator becomes a property here, so code that creates a router keeps working.</remarks>
+public sealed class PromptRouterDependencies
+{
+    /// <summary>Ranks the catalog. Defaults to a <see cref="DefaultModelSelector"/> with <see cref="SemanticRouterOptions.Selection"/>.</summary>
+    public IModelSelector? Selector { get; init; }
+
+    /// <summary>Skips models in cooldown. Defaults to a <see cref="ModelHealthTracker"/> of the router's own.</summary>
+    public IModelHealth? Health { get; init; }
+
+    /// <summary>The clock for <see cref="ModelDefinition.ActiveHours"/>. Defaults to the system clock.</summary>
+    public TimeProvider? Time { get; init; }
+
+    /// <summary>Skips models for the kinds of work they keep failing at. None by default.</summary>
+    public IModelReliability? Reliability { get; init; }
+
+    /// <summary>Recent time to first byte per model, for the <see cref="RoutingPlan.SelectionNote"/>. None by default.</summary>
+    public IModelLatency? Latency { get; init; }
+}
+
+/// <summary>
 /// Default <see cref="IPromptRouter"/>: <see cref="IPromptClassifier"/> decides the requirements,
 /// <see cref="IModelSelector"/> ranks the catalog, <see cref="IModelHealth"/> skips models in cooldown, and an optional
 /// <see cref="IModelReliability"/> skips models for the kinds of work they keep failing at.
@@ -168,24 +194,27 @@ public sealed class PromptRouter : IPromptRouter
     private readonly TimeZoneInfo _zone;
     private readonly TimeProvider _time;
 
+    /// <summary>Creates a router with the default collaborators.</summary>
+    public PromptRouter(IPromptClassifier classifier, SemanticRouterOptions options)
+        : this(classifier, options, new PromptRouterDependencies())
+    {
+    }
+
     /// <summary>Creates a router.</summary>
-    public PromptRouter(
-        IPromptClassifier classifier,
-        SemanticRouterOptions options,
-        IModelSelector? selector = null,
-        IModelHealth? health = null,
-        TimeProvider? time = null,
-        IModelReliability? reliability = null,
-        IModelLatency? latency = null)
+    /// <param name="classifier">Decides the requirements.</param>
+    /// <param name="options">The catalog, routes, profiles and selection settings.</param>
+    /// <param name="dependencies">Collaborators that replace the defaults; <see langword="null"/> keeps them all.</param>
+    public PromptRouter(IPromptClassifier classifier, SemanticRouterOptions options, PromptRouterDependencies? dependencies)
     {
         ArgumentNullException.ThrowIfNull(classifier);
         ArgumentNullException.ThrowIfNull(options);
+        dependencies ??= new();
 
         _classifier = classifier;
-        _selector = selector ?? new DefaultModelSelector(options.Selection);
-        _health = health ?? new ModelHealthTracker(options.Selection);
-        _reliability = reliability;
-        _latency = latency;
+        _selector = dependencies.Selector ?? new DefaultModelSelector(options.Selection);
+        _health = dependencies.Health ?? new ModelHealthTracker(options.Selection);
+        _reliability = dependencies.Reliability;
+        _latency = dependencies.Latency;
         _strategy = options.Selection.Strategy;
         _outputTokens = options.Selection.EstimatedOutputTokens;
         _models = options.Models.ToArray();
@@ -196,7 +225,7 @@ public sealed class PromptRouter : IPromptRouter
             .GroupBy(r => r.Name, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(g => g.Key, g => g.First().PreferredModel!, StringComparer.OrdinalIgnoreCase);
         _zone = options.Selection.EffectiveTimeZone;
-        _time = time ?? TimeProvider.System;
+        _time = dependencies.Time ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -228,10 +257,12 @@ public sealed class PromptRouter : IPromptRouter
         {
             int tokens = request.EstimatedInputTokens ?? TokenEstimator.Estimate(request.Prompt);
             var requirements = new ModelRequirements { RequiredTier = forced.Tier, EstimatedInputTokens = tokens, Profile = request.Profile, LocalOnly = request.LocalOnly || profile?.LocalOnly == true };
-            return new RoutingPlan(
-                PromptClassificationResult.Bypass(forced.Tier, RoutingReason.ModelOverride),
-                requirements,
-                [new ModelCandidate(forced, forced.EstimateCost(tokens, 0), MeetsRequiredTier: true)]);
+            return new RoutingPlan
+            {
+                Classification = PromptClassificationResult.Bypass(forced.Tier, RoutingReason.ModelOverride),
+                Requirements = requirements,
+                Candidates = [new ModelCandidate { Model = forced, EstimatedCost = forced.EstimateCost(tokens, 0), MeetsRequiredTier = true }],
+            };
         }
 
         if (request.AffinityModel is { } affinity
@@ -243,7 +274,12 @@ public sealed class PromptRouter : IPromptRouter
             var pinnedRequest = request with { EstimatedInputTokens = request.EstimatedInputTokens ?? TokenEstimator.Estimate(request.Prompt) };
             RoutingPlan plan = Plan(PromptClassificationResult.Bypass(pinned.Tier, RoutingReason.ConversationAffinity), pinnedRequest);
             ModelCandidate first = plan.Candidates.FirstOrDefault(c => c.Model == pinned)
-                ?? new ModelCandidate(pinned, pinned.EstimateCost(plan.Requirements.EstimatedInputTokens, 0), MeetsRequiredTier: true);
+                ?? new ModelCandidate
+                {
+                    Model = pinned,
+                    EstimatedCost = pinned.EstimateCost(plan.Requirements.EstimatedInputTokens, 0),
+                    MeetsRequiredTier = true,
+                };
             return plan with { Candidates = [first, .. plan.Candidates.Where(c => c.Model != pinned)] };
         }
 
@@ -360,8 +396,11 @@ public sealed class PromptRouter : IPromptRouter
         if (WeighWarmCaches(request, requirements, candidates) is { } warm)
         {
             bool first = warm.Stay == candidates[0], stays = first || warm.StayCost < warm.MoveCost;
-            return new RoutingPlan(classification, requirements, stays ? [warm.Stay, .. candidates.Where(c => c != warm.Stay)] : candidates)
+            return new RoutingPlan
             {
+                Classification = classification,
+                Requirements = requirements,
+                Candidates = stays ? [warm.Stay, .. candidates.Where(c => c != warm.Stay)] : candidates,
                 Unreliable = unreliable,
                 Sticky = stays,
                 RouteModel = stays && !first ? null : routeModel,
@@ -381,12 +420,22 @@ public sealed class PromptRouter : IPromptRouter
             && previous.Model.Tier <= requirements.RequiredTier
             && _health.IsAvailable(previous.Model))
         {
-            return new RoutingPlan(classification, requirements, [previous, .. candidates.Where(c => c != previous)]) { Sticky = true, Unreliable = unreliable };
+            return new RoutingPlan
+            {
+                Classification = classification,
+                Requirements = requirements,
+                Candidates = [previous, .. candidates.Where(c => c != previous)],
+                Sticky = true,
+                Unreliable = unreliable,
+            };
         }
 
         bool sticky = request.PreferredModel is { } same && candidates.Count > 0 && string.Equals(candidates[0].Model.Name, same, StringComparison.OrdinalIgnoreCase);
-        return new RoutingPlan(classification, requirements, candidates)
+        return new RoutingPlan
         {
+            Classification = classification,
+            Requirements = requirements,
+            Candidates = candidates,
             Unreliable = unreliable,
             OutsideActiveHours = resting,
             Sticky = sticky,

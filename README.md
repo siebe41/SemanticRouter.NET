@@ -388,6 +388,8 @@ RoutingPlan plan = await router.RouteAsync(new PromptRoutingRequest { Prompt = "
 // plan.Classification.RequiredTier == 1, plan.Candidates[0].Model.Name == "local"
 ```
 
+Collaborators with a default, such as a cooldown tracker shared between routers or a clock, go in a dependencies object: `new PromptRouter(classifier, options, new PromptRouterDependencies { Health = health, Time = clock })`.
+
 ## Configuration reference
 
 Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/appsettings.json` is a complete annotated example.
@@ -614,7 +616,7 @@ The benchmark always runs with Hashing embeddings, so these rows include no embe
 
 | To… | Do this |
 |---|---|
-| Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. To make a new connector type selectable in configuration (`"Type": "Bedrock"`), register an `IChatConnectorFactory` whose `Type` is that name; implement `IModelDiscovery` for the dashboard's Discover button and the doctor. Type names match case-insensitively. The router treats a connector of such a type like a CLI (offline mode turns it off) unless the factory sets `UsesBaseAddress`, which makes it an HTTP connector held to the policy's endpoint rules for its `BaseAddress`. |
+| Add a provider with its own protocol | Implement `IChatConnector` and call `.AddConnector<T>()`. To make a new connector type selectable in configuration (`"Type": "Bedrock"`), register an `IChatConnectorFactory` whose `Type` is that name; implement `IModelDiscovery` for the dashboard's Discover button and the doctor. Type names match case-insensitively. The router treats a connector of such a type like a CLI (offline mode turns it off) unless the factory sets `UsesBaseAddress`, which makes it an HTTP connector held to the policy's endpoint rules for its `BaseAddress`. The dashboard offers the type on the Connectors page with the fields that fit. |
 | Keep configuration somewhere other than a file | Implement `IRouterConfigurationStore` and call `.UseConfigurationStore<T>()`. |
 | Use another embedding backend | Implement `IEmbeddingProvider` and call `.UseEmbeddingProvider<T>()`. For an in-process model: `.UseOnnxEmbeddings()` from `SemanticRouter.Embeddings.Onnx`. To make a new provider selectable in configuration (`"Provider": "MyModel"`), register an `IEmbeddingProviderFactory` whose `Kind` is that name; set its `RunsInProcess` when the model runs in the router's process, so prompts that must stay local may use it. |
 | Change how requirements are derived | Implement `IRouteSelector` or `IComplexityAnalyzer`. |
@@ -653,7 +655,7 @@ CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every pull r
 | Vulnerable packages | a direct or transitive NuGet package has a published advisory | `dotnet list package --vulnerable --include-transitive` |
 | npm audit | a package that the documentation site, the dashboard's end-to-end tests or the demo-video tool ships (its `dependencies`) has a high or critical advisory, or a `package-lock.json` has no Dependabot entry; the rest is listed in the job summary | `deploy/npm-audit-check.sh` |
 | Formatting | code differs from `dotnet format` under `.editorconfig` | `dotnet format` (fixes in place) |
-| Build, test, pack | any warning, test failure or packaging error; a library package whose public API removed or changed something the last release on nuget.org has ([package validation](CONTRIBUTING.md#public-api-and-package-validation)); or a package that depends on another SemanticRouter package without an exact version ([CONTRIBUTING.md](CONTRIBUTING.md#package-versions-and-dependencies)) | the commands above |
+| Build, test, pack | any warning, test failure or packaging error; a public type or member of a library package that its `PublicAPI.*.txt` files do not list, or one they list that is gone ([public API files](CONTRIBUTING.md#public-api-and-package-validation)); a library package whose public API removed or changed something the last release on nuget.org has ([package validation](CONTRIBUTING.md#public-api-and-package-validation)); or a package that depends on another SemanticRouter package without an exact version ([CONTRIBUTING.md](CONTRIBUTING.md#package-versions-and-dependencies)) | the commands above |
 | Container image | the image does not start, reports another version than it was built as, serves a remote client without a gateway key or an admin request without the token, or [Trivy](https://trivy.dev) finds a high or critical vulnerability that has a fix | `docker build -f src/SemanticRouter.Host/Dockerfile -t semantic-router .`, then `trivy image --ignore-unfixed --severity HIGH,CRITICAL semantic-router` |
 
 A leaked key must be revoked at the provider; removing it from the code does not remove it from history. For a confirmed false positive, add the fingerprint gitleaks prints to `.gitleaksignore`. Dependabot ([`.github/dependabot.yml`](.github/dependabot.yml)) proposes NuGet, GitHub Actions, container base image and npm updates weekly; actions are pinned to commit SHAs and base images to digests.

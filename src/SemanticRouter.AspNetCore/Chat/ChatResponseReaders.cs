@@ -210,7 +210,12 @@ internal static class OpenAIResponseReader
     {
         int? cached = usage.TryGetObject("prompt_tokens_details", out JsonElement details) ? details.GetInt("cached_tokens") : null;
         int? prompt = usage.GetInt("prompt_tokens");
-        return new ChatUsage(prompt is { } p && cached is { } c ? p - c : prompt, usage.GetInt("completion_tokens"), cached);
+        return new ChatUsage
+        {
+            InputTokens = prompt is { } p && cached is { } c ? p - c : prompt,
+            OutputTokens = usage.GetInt("completion_tokens"),
+            CacheReadTokens = cached,
+        };
     }
 }
 
@@ -325,7 +330,8 @@ internal static class AnthropicResponseReader
                 await writer.EndToolCallAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            await writer.CompleteAsync(stop, new ChatUsage(inputTokens, outputTokens, cacheRead, cacheCreate), cancellationToken).ConfigureAwait(false);
+            var usage = new ChatUsage { InputTokens = inputTokens, OutputTokens = outputTokens, CacheReadTokens = cacheRead, CacheCreationTokens = cacheCreate };
+            await writer.CompleteAsync(stop, usage, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -359,11 +365,13 @@ internal static class AnthropicResponseReader
         ChatUsage usage = default;
         if (root.TryGetObject("usage", out JsonElement usageElement))
         {
-            usage = new ChatUsage(
-                usageElement.GetInt("input_tokens"),
-                usageElement.GetInt("output_tokens"),
-                usageElement.GetInt("cache_read_input_tokens"),
-                usageElement.GetInt("cache_creation_input_tokens"));
+            usage = new ChatUsage
+            {
+                InputTokens = usageElement.GetInt("input_tokens"),
+                OutputTokens = usageElement.GetInt("output_tokens"),
+                CacheReadTokens = usageElement.GetInt("cache_read_input_tokens"),
+                CacheCreationTokens = usageElement.GetInt("cache_creation_input_tokens"),
+            };
         }
 
         await writer.CompleteAsync(MapStopReason(root.GetString("stop_reason") ?? "end_turn"), usage, cancellationToken).ConfigureAwait(false);
@@ -614,7 +622,12 @@ internal static class ResponsesResponseReader
     {
         int? cached = usage.TryGetObject("input_tokens_details", out JsonElement details) ? details.GetInt("cached_tokens") : null;
         int? input = usage.GetInt("input_tokens");
-        return new ChatUsage(input is { } i && cached is { } c ? i - c : input, usage.GetInt("output_tokens"), cached is > 0 ? cached : null);
+        return new ChatUsage
+        {
+            InputTokens = input is { } i && cached is { } c ? i - c : input,
+            OutputTokens = usage.GetInt("output_tokens"),
+            CacheReadTokens = cached is > 0 ? cached : null,
+        };
     }
 
     private static async Task RelayJsonAsync(JsonElement root, IChatResponseWriter writer, CancellationToken cancellationToken)

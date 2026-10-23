@@ -311,6 +311,20 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
         broken["issues"]![0]!["path"].Should().BeNull();
     }
 
+    [Fact]
+    public async Task A_document_that_names_a_property_twice_is_read_with_the_last_value()
+    {
+        HttpClient client = await StartDispatchAsync();
+        string config = (await ConfigAsync(client)).ToJsonString();
+
+        // An empty catalog first, then the real one: the second wins, as RouterConfiguration.FromJson reads it. This threw (500).
+        HttpResponseMessage twice = await client.PostAsync("/router/api/config/validate", Body("{\"Models\":[]," + config[1..]));
+        HttpResponseMessage once = await client.PostAsync("/router/api/config/validate", Body(config));
+
+        twice.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await NodeAsync(twice)).ToJsonString().Should().Be((await NodeAsync(once)).ToJsonString());
+    }
+
     [Theory]
     [InlineData("Connector 'local' MaxConcurrency must be at least 1.", "Connectors.local.MaxConcurrency")]
     [InlineData("Connector 'local' needs an absolute BaseAddress.", "Connectors.local.BaseAddress")]
@@ -456,9 +470,13 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
     public async Task Setup_lists_the_presets_and_what_the_detector_found_without_changing_anything()
     {
         var detector = new FixedDetector(
-            new SetupDetection("claude-code", "Claude Code", "cli", "claude-cli",
-                new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode, ToolCalling = CliToolCalling.Prompted })
+            new SetupDetection
             {
+                Id = "claude-code",
+                Title = "Claude Code",
+                Kind = "cli",
+                ConnectorName = "claude-cli",
+                Connector = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode, ToolCalling = CliToolCalling.Prompted },
                 Detail = "Signed in · claude 2.1.3 at /usr/local/bin/claude",
                 Consent = SetupApi.Consent(CliPreset.ClaudeCode),
                 Models = [new ModelDefinition { Name = "claude-sonnet", Connector = "claude-cli", Model = "sonnet", Tier = 3 }],
@@ -498,7 +516,14 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
     [Fact]
     public async Task Setup_says_when_a_model_is_needed_and_leaves_out_what_the_policy_or_offline_mode_turns_off()
     {
-        var detector = new FixedDetector(new SetupDetection("claude-code", "Claude Code", "cli", "claude-cli", new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode }));
+        var detector = new FixedDetector(new SetupDetection
+        {
+            Id = "claude-code",
+            Title = "Claude Code",
+            Kind = "cli",
+            ConnectorName = "claude-cli",
+            Connector = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.ClaudeCode },
+        });
         HttpClient client = await StartDispatchAsync(
             routing: o => o.Models.ToList().ForEach(m => m.Enabled = false),
             services: s =>
