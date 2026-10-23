@@ -8,7 +8,7 @@ How a request moves through the router, how configuration reloads without droppi
 |---|---|---|
 | `SemanticRouter.Core` | nothing | Vector math, token estimator, complexity heuristics, the route index, `DefaultRouteSelector`, `DefaultModelSelector`, `ModelHealthTracker`, `PromptRouter`, and the option types (`SemanticRouterOptions`, `RouteDefinition`, `ModelDefinition`, `TierDefinition`). Zero package references, AOT-compatible. |
 | `SemanticRouter.AspNetCore` | Core, ASP.NET Core | Everything that touches HTTP and processes: the middleware and dispatcher, the three wire protocols, connectors, the runtime and configuration store, the dashboard and its embedded assets. |
-| `SemanticRouter.Hosting` | AspNetCore, Storage.Sqlite, Embeddings.Onnx, Connectors.Copilot | What the tool and the desktop app share: `run`, `init` (detects local servers and CLIs), `doctor` (`RouterDoctor`), `models`, `service`, the embedded starting template and evaluation set, the per-OS configuration directory and the key ring. |
+| `SemanticRouter.Hosting` | AspNetCore, Storage.Sqlite, Embeddings.Onnx, Connectors.Copilot | What the tool and the desktop app share: `run`, `init` (detects local servers and CLIs), `doctor` (over the AspNetCore package's `RouterDoctor` checks), `models`, `service`, the embedded starting template and evaluation set, the per-OS configuration directory and the key ring. |
 | `SemanticRouter.Host` | Hosting | The `semantic-router` .NET tool and container image: the command line over `SemanticRouter.Hosting`. See [Install and run](host.md). |
 | `SemanticRouter.Desktop` | Hosting, Avalonia | The desktop app: tray icon, dashboard window, welcome window, start at sign-in and updates. See [Desktop app](desktop.md). |
 | `SemanticRouter.Storage.Sqlite` | AspNetCore, `Microsoft.Data.Sqlite` | Durable state in one SQLite file: cooldowns, tool-call affinity, activity, configuration history (`UseSqliteState`). |
@@ -112,7 +112,7 @@ flowchart LR
 
 ## Durable state
 
-Out of the box everything is in memory. `SemanticRouter.Storage.Sqlite` keeps it in one SQLite file instead. The `semantic-router` tool uses it by default (`semantic-router.db` next to the configuration).
+Out of the box everything is in memory. `SemanticRouter.Storage.Sqlite` keeps it in one SQLite file instead. The `semantic-router` tool uses it by default (`semantic-router.db` in the [local data directory](host.md#where-things-live): next to the configuration, except on Windows with the default directory, where it is in `%LOCALAPPDATA%\semantic-router`).
 
 ```csharp
 builder.Services.AddSemanticPromptRouting(builder.Configuration.GetSection("SemanticRouter"))
@@ -191,4 +191,4 @@ builder.Services.AddSingleton<IChatConnectorFactory, BedrockConnectorFactory>();
 
 ## Safety rules that shape the design
 
-These are enforced in code and explained in [Subscription CLI terms](TERMS.md): the router never reads or forwards credentials of a client or a CLI; CLI connectors answer loopback clients only and run in a fresh empty directory with their own tools off; subscription limits become cooldowns, never retries or account rotation; the admin API is loopback-only by default (remote access needs a token, and writes must come from the dashboard's own origin); and local-only routes can only be served by models marked local, including on failover.
+These are enforced in code and explained in [Subscription CLI terms](TERMS.md): the router never forwards a client's credentials (it reads a client's key only to check it against the [gateway keys](clients.md)) and never reads or forwards a CLI's; CLI connectors answer loopback clients only and run in a fresh empty directory with their own tools off; subscription limits become cooldowns, never retries or account rotation; the admin API is loopback-only by default (remote access needs a token, and writes must come from the dashboard's own origin); and local-only routes can only be served by models marked local, including on failover.

@@ -11,7 +11,7 @@ That answers the question a router like this raises: when Claude Code reads your
 
 ## Set it up
 
-Add sources under `SemanticRouter:Memory` in the configuration file. The Memory page's **Add Claude Code** adds Claude Code's memory in its default place; a path you type there (with **Add folder** or **Add MCP graph**, or a changed one) is refused over the dashboard unless `Dashboard:AllowProcessSettings` is on (see [Privacy](#privacy)):
+Add sources under `SemanticRouter:Memory` in the configuration file. The Memory page's **Add Claude Code's memory** adds Claude Code's memory in its default place; a path you type there (with **Add a notes folder** or **Add an MCP memory graph**, or a changed one) is refused over the dashboard unless `Dashboard:AllowProcessSettings` is on (see [Privacy](#privacy)):
 
 ```jsonc
 "SemanticRouter": {
