@@ -1,0 +1,12 @@
+{
+  "voice": "af_heart",
+  "lines": {
+    "hook": "You probably use more than one AI tool. Semantic Router dot net sits behind all of them.",
+    "claude": "Claude Code, with one line of setup.",
+    "copilot": "GitHub Copilot C L I, with its own provider settings.",
+    "codex": "Codex, through the Responses API.",
+    "vscode": "And Copilot's chat in VS Code, as a custom endpoint.",
+    "live": "Every turn from every tool goes to the cheapest model that can handle it. And the dashboard shows each decision, side by side.",
+    "end": "Semantic Router dot net. Open source, one command to install. Stop paying frontier prices for small prompts."
+  }
+}

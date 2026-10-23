@@ -2,7 +2,7 @@
   "lines": {
     "title": "Let's take a closer look at how Semantic Router dot net decides where each prompt goes, and what happens when something goes wrong.",
     "two-questions": "Every request comes down to two questions. First: what does this prompt actually need? That's a tier, plus things like code or tools. Second: which of your models is the cheapest one that can handle it?",
-    "routes": "The first answer comes from routes. A route is just a handful of example prompts, plus the tier that kind of request needs. You start with eight of them, from small talk at the bottom, up to debugging and agentic coding at the top.",
+    "routes": "The first answer comes from routes. A route is just a handful of example prompts, plus the tier that kind of request needs. You start with nine of them, from small talk at the bottom, up to debugging and agentic coding at the top.",
     "tester": "When a prompt comes in, the router compares it with every example. This one is closest to complex code, so it needs tier four, and a model that can write code.",
     "simple": "Now something smaller: a regular expression for email addresses. That's simple code, so tier two is plenty, and the local coder goes first.",
     "complex": "Ask for the same thing, but add a list of things to reason through, and the complexity score goes up. Long prompts, code, structure, and phrases like step by step all push it higher. Past a threshold, the prompt moves up a tier.",

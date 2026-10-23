@@ -4,7 +4,7 @@
   "description": "Records the SemanticRouter.NET demo video. See README.md.",
   "scripts": {
     "record": "node record.js",
-    "test": "node --test captions.test.js"
+    "test": "node --test captions.test.js stills.test.js"
   },
   "dependencies": {
     "@xterm/xterm": "6.0.0",

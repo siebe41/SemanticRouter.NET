@@ -57,7 +57,7 @@ module.exports = async function deepDive(k) {
   await sleep(500);
 
   line = k.say('routes');
-  await k.stage('caption', 'Routes: example prompts, each with the tier it needs', 'Routes page · 8 routes from init');
+  await k.stage('caption', 'Routes: example prompts, each with the tier it needs', 'Routes page · 9 routes from init');
   await sleep(1500);
   await k.highlight('text=complex-code');
   await sleep(1200);
@@ -161,7 +161,7 @@ module.exports = async function deepDive(k) {
   await k.stage('layout', 'dash');
   await k.go('overview');
   line = k.say('failover');
-  await k.stage('caption', 'Out of quota → cool down → the next model takes over', 'Overview → Endpoints');
+  await k.stage('caption', 'Out of quota → cool down → the next model takes over', 'Overview → Connector endpoints');
   await sleep(1200);
   await k.dashScroll('h2:has-text("Endpoints")', 'start');
   // The row grows when the cooldown shows (on the dashboard's next refresh); outline it once it has.

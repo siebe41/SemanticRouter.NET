@@ -1,0 +1,15 @@
+{
+  "voice": "af_heart",
+  "lines": {
+    "title": "Here's Semantic Router dot net in VS Code. Copilot's chat, its agent mode, and the command line tools in the terminal, all on one router on your machine.",
+    "add": "In the chat's model picker, open manage language models, and add a custom endpoint. Give it a name and any key, and pick chat completions. The router speaks the other two as well.",
+    "models": "VS Code opens a small JSON file for the models. Add the router's names: auto lets the router decide, and best always takes the most capable model. Mark them as tool capable, so agent mode can use them.",
+    "pick": "Now pick auto, and chat as usual. Inline completions still come from Copilot itself. The router handles chat and agent mode.",
+    "ask": "A quick question about this file goes to a small local model.",
+    "agent": "Switch to agent mode and ask for a change across the project. That's a bigger job, so it goes up a tier. And while the agent works, every tool result goes back to the model that asked for it.",
+    "utility": "VS Code's own small jobs, like naming the chat, go to the smallest model.",
+    "terminal": "And the command line tools? Open the terminal right here. Claude Code, Copilot C L I and Codex all point at the same router, each with a few lines of setup.",
+    "live": "The Live page shows them side by side: the chat, the agent and the terminal, each turn on the model that fits it.",
+    "end": "That's Semantic Router dot net in VS Code. It's open source and MIT licensed. Install it with one command, and keep using the tools you like."
+  }
+}

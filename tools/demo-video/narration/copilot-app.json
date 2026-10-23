@@ -1,0 +1,11 @@
+{
+  "voice": "af_heart",
+  "lines": {
+    "title": "The GitHub Copilot app can use your own model provider too. Here's how to put Semantic Router dot net behind it.",
+    "add": "Open settings, then model providers, and add an OpenAI compatible provider. Use the router's address, and any key. The router holds the real credentials.",
+    "pick": "Then choose semantic router in the session's model picker.",
+    "context": "The app wraps every message in context: your workspace, the time, a few reminders. The router sets that aside, and routes on what you actually typed.",
+    "turns": "So a quick question stays on a local model, and a hard one goes to a frontier model.",
+    "end": "That's Semantic Router dot net with the Copilot app. Open source, MIT licensed, and one command to install."
+  }
+}
