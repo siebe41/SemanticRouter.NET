@@ -135,6 +135,28 @@ public sealed class AuditTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Each_entry_is_a_log_event_with_a_fixed_id_and_named_fields_for_a_SIEM()
+    {
+        HttpClient client = await StartBehindProxyAsync(Proxy);
+        StringContent config = await CurrentConfigAsync(client, Request(HttpMethod.Get, "/router/api/config", "alice@corp.example"));
+
+        (await client.SendAsync(Request(HttpMethod.Put, "/router/api/config?persist=false", "alice@corp.example", content: config))).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // docs/dashboard.md#audit-log documents these; SIEM rules depend on them, so a change here is a breaking change.
+        CapturedLogEvent logged = _logs.Events.Should().ContainSingle(e => e.Category == "SemanticRouter.Audit").Which;
+        logged.Level.Should().Be(LogLevel.Information);
+        logged.EventId.Id.Should().Be(1);
+        logged.EventId.Name.Should().Be("AuditEntry");
+        logged.Fields.Keys.Should().BeEquivalentTo("Actor", "Client", "Method", "Path", "Status", "Summary", "{OriginalFormat}");
+        logged.Fields["Actor"].Should().Be("alice@corp.example");
+        logged.Fields["Client"].Should().Be(Client);
+        logged.Fields["Method"].Should().Be("PUT");
+        logged.Fields["Path"].Should().Be("/router/api/config");
+        logged.Fields["Status"].Should().Be(200);
+        logged.Fields["Summary"].Should().Be(Audit().Single().Summary);
+    }
+
+    [Fact]
     public async Task Roles_come_from_the_user_then_their_groups_and_an_unmapped_user_is_refused()
     {
         HttpClient client = await StartBehindProxyAsync(Proxy);

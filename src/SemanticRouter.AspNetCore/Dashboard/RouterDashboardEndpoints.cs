@@ -50,7 +50,7 @@ public static partial class RouterDashboardEndpoints
         var audit = new DashboardAudit(
             auditLog,
             endpoints.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System,
-            endpoints.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SemanticRouter.Audit"));
+            endpoints.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(DashboardAudit.LogCategory));
         RouteGroupBuilder group = endpoints.MapGroup(prefix);
         var themes = new ThemeCatalog(options.ThemesDirectory ?? (endpoints.ServiceProvider.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store
             ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Location))!, "themes")
