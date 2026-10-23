@@ -89,6 +89,19 @@ public sealed class ConfigurationIssuesTests
     }
 
     [Fact]
+    public void A_bad_profile_name_points_at_that_profile_not_at_the_quoted_at_sign()
+    {
+        // "Profile names must not be empty or contain '@' ('work@home')."
+        var at = new RouterConfiguration();
+        at.Profiles["work@home"] = new RoutingProfile();
+        var empty = new RouterConfiguration();
+        empty.Profiles[string.Empty] = new RoutingProfile();
+
+        PathFor(at, "Profile names must not be empty").Should().Be("Profiles.work@home");
+        PathFor(empty, "Profile names must not be empty").Should().Be("Profiles");
+    }
+
+    [Fact]
     public void An_unknown_selection_time_zone_points_at_it()
     {
         var document = new RouterConfiguration();
@@ -101,6 +114,7 @@ public sealed class ConfigurationIssuesTests
     [InlineData("""{"DefaultSimilarityThreshold":"high"}""", "DefaultSimilarityThreshold", "\"high\" is not a number; write it without quotes, e.g. 0.5")]
     [InlineData("""{"ClassificationCache":{"Enabled":"yes"}}""", "ClassificationCache.Enabled", "\"yes\" is not true or false")]
     [InlineData("""{"Routes":[{"Name":5}]}""", "Routes.0.Name", "5 should be text in quotes")]
+    [InlineData("""{"Connectors":{"local":{"BaseAddress":5}}}""", "Connectors.local.BaseAddress", "5 is not an address; use one like http://localhost:1234")]
     [InlineData("""{"Connectors":[1]}""", "Connectors", "[1] should be an object of names and values")]
     [InlineData("""{"Routes":{"a":1}}""", "Routes", "{\"a\":1} should be a list in [ ]")]
     public void A_value_that_does_not_fit_its_field_says_the_format_it_needs(string json, string path, string message)
