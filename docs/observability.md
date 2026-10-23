@@ -121,7 +121,7 @@ Failed attempts are marked with error status. HTTP backends receive `traceparent
 | `semantic_router.cli.active` | {process} | `connector` |
 | `semantic_router.cli.queued` | {request} | `connector` (waiting for `MaxConcurrency`) |
 
-The names are constants on `SemanticRouterDiagnostics`, except `semantic_router.state.dropped_writes`, which the SQLite state store (`SemanticRouter.Storage.Sqlite`) records on the same meter. A Prometheus scrape of the router (with `app.MapPrometheusScrapingEndpoint()` from `OpenTelemetry.Exporter.Prometheus.AspNetCore`):
+The names are constants on `SemanticRouterDiagnostics`, except `semantic_router.state.dropped_writes`, which the SQLite state store (`SemanticRouter.Storage.Sqlite`) records under the same meter name (`SemanticRouter`). A Prometheus scrape of the router (with `app.MapPrometheusScrapingEndpoint()` from `OpenTelemetry.Exporter.Prometheus.AspNetCore`):
 
 ```yaml
 scrape_configs:

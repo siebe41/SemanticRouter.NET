@@ -81,7 +81,7 @@ An administrator can turn updates off, take them from an internal feed, make the
 - **Windows:** **Settings → Apps → SemanticRouter → Uninstall** (or `%LOCALAPPDATA%\SemanticRouter\Update.exe uninstall`). It removes the background service (unless it runs the `semantic-router` tool) and the app's sign-in entry first, then the program and the Start menu entry.
 - **macOS and Linux** have no uninstaller: turn off **Keep the router running in the background** and **Start at sign-in** in the tray menu (or run `SemanticRouter --uninstall-service`), quit, then delete `SemanticRouter.app` or the AppImage.
 
-The configuration directory (your configuration, the state database, the logs; on Windows with the default directory, the database and logs are in the local data directory) stays; delete it yourself if you no longer want it (see [the tool's docs](host.md) for where it is).
+The configuration directory and, on Windows with the default directory, the local data directory `%LOCALAPPDATA%\semantic-router` (state database, models, logs, web view profile) stay; delete them yourself if you no longer want them (see [where things live](host.md#where-things-live)).
 
 ### The archives
 
@@ -181,7 +181,7 @@ The installers install for one user, with no administrator rights, and that is t
 | macOS | `SemanticRouter.app` in `~/Applications` (installed for the current user) or `/Applications` | The background service is the launchd agent `~/Library/LaunchAgents/io.github.siebe41.semantic-router.plist`; start at sign-in is `~/Library/LaunchAgents/io.github.siebe41.semantic-router.desktop.plist`. |
 | Linux | The AppImage, wherever it was put | The background service is the systemd user unit `~/.config/systemd/user/semantic-router.service`; start at sign-in is `~/.config/autostart/semantic-router.desktop`. |
 
-All of these are per user. The configuration directory (configuration, state database, logs; on Windows with the default directory, the database and logs are in the local data directory) is the router's usual one ([where things live](host.md#where-things-live)). `SemanticRouter --install-service` and `--uninstall-service` set the background service up or remove it from a script, without the welcome window; see [the app and the background service](#the-app-and-the-background-service).
+All of these are per user. The configuration directory (configuration, state database, models, logs, web view profile; on Windows with the default directory, the last four are in the local data directory) is the router's usual one ([where things live](host.md#where-things-live)). `SemanticRouter --install-service` and `--uninstall-service` set the background service up or remove it from a script, without the welcome window; see [the app and the background service](#the-app-and-the-background-service).
 
 ### Deploying the installer
 
