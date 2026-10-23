@@ -1,5 +1,7 @@
 # Security policy
 
+<!-- Maintainers: this policy and the "Report a security vulnerability" link in .github/ISSUE_TEMPLATE/config.yml only work while private vulnerability reporting is switched on (Settings > Code security > Private vulnerability reporting). It is a repository setting, so nothing in the code keeps it on. Check it with `gh api repos/siebe41/SemanticRouter.NET/private-vulnerability-reporting`, which should answer {"enabled":true}. -->
+
 ## Supported versions
 
 <!-- owner: confirm the support policy -->
@@ -13,6 +15,10 @@ Only the latest minor release gets security fixes. A fix goes to `main` and ship
 
 The security fixes in each release are listed under **Security** in the [changelog](CHANGELOG.md).
 
+### Before and after 1.0
+
+Versions follow [Semantic Versioning](https://semver.org/). Until 1.0.0 they are 0.x, and a minor version can break the .NET API of the packages, the configuration, the HTTP endpoints or behaviour; its changelog lines say what broke. From 1.0.0 on, a break waits for the next major version. The .NET API of the library packages is checked against the latest 1.x release on every pull request ([Public API and package validation](CONTRIBUTING.md#public-api-and-package-validation)); the configuration, the HTTP endpoints and behaviour are held to the same rule in review. <!-- owner: confirm the exception --> The exception is a security fix that can only close a hole by changing a default or refusing something that used to work: it ships in the next minor or patch release, and its line under **Security** in the changelog says what to change. The .NET API is not part of this exception: a break there still waits for the next major version.
+
 ## Verifying a release
 
 Every release asset has a build provenance attestation and a line in `SHA256SUMS`; the container image is signed with keyless cosign and has provenance and SBOM attestations. CycloneDX SBOMs and `THIRD-PARTY-NOTICES.txt` are attached to each release. [Verifying a release](docs/releases.md) has the commands (`gh attestation verify`, `sha256sum -c SHA256SUMS`, `cosign verify`). A file or image that fails these checks did not come from this repository's release workflow; please report where you got it.
@@ -21,13 +27,13 @@ Every release asset has a build provenance attestation and a line in `SHA256SUMS
 
 Please do not open a public issue, discussion or pull request for a security problem.
 
-Report it privately through GitHub's private vulnerability reporting: on the repository's **Security** tab, choose **Report a vulnerability**. This opens a private advisory that only you and the maintainers can see. If you cannot use GitHub, email `<security contact address>` instead. <!-- owner: replace with a contact address, or delete this sentence --> Include:
+Report it privately through GitHub's private vulnerability reporting: on the repository's **Security** tab, choose **Report a vulnerability**. This opens a private advisory that only you and the maintainers can see. If you cannot use GitHub, email `<<ANDREW: address>>` instead. <!-- owner: replace the marker with a contact address, or delete this sentence --> Include:
 
 - what is affected (package or component, version or commit);
 - how to reproduce it, with the configuration involved (replace real keys with placeholders);
 - what an attacker gains, and from where (another process on the same machine, a web page in a browser, another machine on the network).
 
-Replies come in the advisory. Once a fix is released, the advisory is published, with credit to the reporter unless you ask otherwise.
+Replies come in the advisory, or by email if you reported by email. Once a fix is released, the advisory is published, with credit to the reporter unless you ask otherwise; an email reporter is credited by name in the advisory text.
 
 ## Response targets
 
