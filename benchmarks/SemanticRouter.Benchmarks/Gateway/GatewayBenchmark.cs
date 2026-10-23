@@ -15,9 +15,14 @@
 //   --host <dll>          the semantic-router.dll to run (default: the one the solution build produced)
 //   --memory-state        the latency table with the router's state in memory (the database cannot be opened), to see
 //                         what the database costs
+//   --embeddings <kind>   what the router classifies with: hashing (default, the template's) or onnx[:<model>] (default
+//                         model all-MiniLM-L6-v2), loaded through Embeddings:ModelPath from the files the classification
+//                         benchmark keeps in SEMANTIC_ROUTER_TEST_MODELS (or %TEMP%/semantic-router-test-models); they
+//                         are downloaded there first when missing, so the router itself never downloads during a run
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using SemanticRouter.Embeddings.Onnx;
 
 namespace SemanticRouter.Benchmarks.Gateway;
 
@@ -40,28 +45,40 @@ internal static class GatewayBenchmark
             return 2;
         }
 
-        Console.WriteLine($"Gateway benchmark on {Environment.ProcessorCount} logical CPUs, {System.Runtime.InteropServices.RuntimeInformation.OSDescription}. " +
+        RouterEmbeddings? embeddings;
+        try
+        {
+            embeddings = await EmbeddingsAsync(Option(args, "--embeddings"));
+        }
+        catch (ArgumentException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return 2;
+        }
+
+        Console.WriteLine($"Gateway benchmark on {Environment.ProcessorCount} logical CPUs, {System.Runtime.InteropServices.RuntimeInformation.OSDescription}, " +
+                          $"{embeddings?.Name ?? "Hashing"} embeddings. " +
                           "The load generator, the stub backend and the router share the machine: compare the columns, not production throughput.");
         Console.WriteLine();
 
         await using StubBackend stub = await StubBackend.StartAsync();
-        var results = new JsonObject();
+        var results = new JsonObject { ["embeddings"] = embeddings?.Name ?? "Hashing" };
         bool passed = true;
         if (args.Contains("--latency") || (soak == 0 && !faults))
         {
-            results["latency"] = await LatencyAsync(repository, host, stub, quick ? TimeSpan.FromSeconds(4) : TimeSpan.FromSeconds(10), args.Contains("--memory-state"));
+            results["latency"] = await LatencyAsync(repository, host, stub, embeddings, quick ? TimeSpan.FromSeconds(4) : TimeSpan.FromSeconds(10), args.Contains("--memory-state"));
         }
 
         if (soak > 0)
         {
-            (JsonObject report, bool ok) = await SoakAsync(repository, host, stub, TimeSpan.FromSeconds(soak));
+            (JsonObject report, bool ok) = await SoakAsync(repository, host, stub, embeddings, TimeSpan.FromSeconds(soak));
             results["soak"] = report;
             passed &= ok;
         }
 
         if (faults)
         {
-            (JsonObject report, bool ok) = await FaultsAsync(repository, host, stub);
+            (JsonObject report, bool ok) = await FaultsAsync(repository, host, stub, embeddings);
             results["faults"] = report;
             passed &= ok;
         }
@@ -80,15 +97,23 @@ internal static class GatewayBenchmark
         return passed ? 0 : 1;
     }
 
-    private static async Task<JsonArray> LatencyAsync(string repository, string host, StubBackend stub, TimeSpan duration, bool memoryState)
+    private static async Task<JsonArray> LatencyAsync(string repository, string host, StubBackend stub, RouterEmbeddings? embeddings, TimeSpan duration, bool memoryState)
     {
-        string home = RouterProcess.Prepare(repository, stub.Address, "ok", memoryState);
+        string home = RouterProcess.Prepare(repository, stub.Address, "ok", embeddings, memoryState);
         await using RouterProcess router = await RouterProcess.StartAsync(host, home);
         using HttpClient http = LoadGenerator.Client();
         var load = new LoadGenerator(http);
+
+        Sample first = (await load.SendAsync(router.Address, 1, 1, stream: false))[0];
         var rows = new JsonArray();
         var failures = new List<string>();
-        Console.WriteLine($"Short prompt, not streamed, every prompt different, {duration.TotalSeconds:0} s per row after 2 s of warm-up, state {(memoryState ? "in memory" : "in SQLite")}. Times in ms.");
+        Console.WriteLine($"Short prompt, not streamed, every prompt different, {duration.TotalSeconds:0} s per row after 2 s of warm-up, state {(memoryState ? "in memory" : "in SQLite")}, {embeddings?.Name ?? "Hashing"} embeddings. Times in ms.");
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+            $"Not in the table: the route index was ready {router.WarmUp.Waited.TotalMilliseconds:0} ms after the router answered (status {router.WarmUp.State}), and the first request then took {first.Total.TotalMilliseconds:0} ms (HTTP {first.Status})."));
+        if (first.Status != 200)
+        {
+            Console.WriteLine($"The first request failed ({first.Body}). The router's last lines:\n{router.Output()}");
+        }
         Console.WriteLine();
         Console.WriteLine("| c | Stub direct, total p50 / p95 / p99 | Router, first byte p50 / p95 / p99 | Router, total p50 / p95 / p99 | Router requests/s | Errors | Router RSS |");
         Console.WriteLine("|---|---|---|---|---|---|---|");
@@ -126,11 +151,11 @@ internal static class GatewayBenchmark
         return rows;
     }
 
-    private static async Task<(JsonObject Report, bool Passed)> SoakAsync(string repository, string host, StubBackend stub, TimeSpan duration)
+    private static async Task<(JsonObject Report, bool Passed)> SoakAsync(string repository, string host, StubBackend stub, RouterEmbeddings? embeddings, TimeSpan duration)
     {
         const int C = 8;
         TimeSpan window = TimeSpan.FromSeconds(Math.Clamp(duration.TotalSeconds / 8, 5, 30));
-        string home = RouterProcess.Prepare(repository, stub.Address, "ok");
+        string home = RouterProcess.Prepare(repository, stub.Address, "ok", embeddings);
         await using RouterProcess router = await RouterProcess.StartAsync(host, home);
         using HttpClient http = LoadGenerator.Client();
         var load = new LoadGenerator(http);
@@ -196,7 +221,7 @@ internal static class GatewayBenchmark
         return (new JsonObject { ["windows"] = windows }, passed);
     }
 
-    private static async Task<(JsonObject Report, bool Passed)> FaultsAsync(string repository, string host, StubBackend stub)
+    private static async Task<(JsonObject Report, bool Passed)> FaultsAsync(string repository, string host, StubBackend stub, RouterEmbeddings? embeddings)
     {
         const int C = 4, N = 40;
         bool passed = true;
@@ -208,7 +233,7 @@ internal static class GatewayBenchmark
 
         foreach ((string fault, bool stream) in new[] { ("500", false), ("429", false), ("hang", false), ("stall", true), ("drop", true) })
         {
-            string home = RouterProcess.Prepare(repository, stub.Address, fault, keepAll: true);
+            string home = RouterProcess.Prepare(repository, stub.Address, fault, embeddings, keepAll: true);
             List<Sample> samples;
             await using (RouterProcess router = await RouterProcess.StartAsync(host, home))
             {
@@ -241,7 +266,7 @@ internal static class GatewayBenchmark
 
         // Clients that go away mid-reply.
         {
-            string home = RouterProcess.Prepare(repository, stub.Address, "slowstream", keepAll: true);
+            string home = RouterProcess.Prepare(repository, stub.Address, "slowstream", embeddings, keepAll: true);
             await using (RouterProcess router = await RouterProcess.StartAsync(host, home))
             {
                 await load.SendAsync(router.Address, C, N, stream: true, cancelAfterFirstByte: TimeSpan.FromMilliseconds(300));
@@ -258,7 +283,7 @@ internal static class GatewayBenchmark
 
         // Two routers on one database (the service and the desktop app, or two hosts on a shared home).
         {
-            string home = RouterProcess.Prepare(repository, stub.Address, "ok", keepAll: true);
+            string home = RouterProcess.Prepare(repository, stub.Address, "ok", embeddings, keepAll: true);
             List<Sample>[] runs;
             await using (RouterProcess first = await RouterProcess.StartAsync(host, home))
             await using (RouterProcess second = await RouterProcess.StartAsync(host, home))
@@ -310,6 +335,27 @@ internal static class GatewayBenchmark
                 }
             }
         }
+    }
+
+    /// <summary>The <c>--embeddings</c> option: null for the template's Hashing provider.</summary>
+    private static async Task<RouterEmbeddings?> EmbeddingsAsync(string? option)
+    {
+        if (option is null || option.Equals("hashing", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        string[] parts = option.Split(':', 2);
+        if (!parts[0].Equals("onnx", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException($"--embeddings {option}: use hashing or onnx[:<model>].");
+        }
+
+        string name = parts.Length > 1 ? parts[1] : OnnxEmbeddingModels.DefaultModel;
+        OnnxModelInfo model = OnnxEmbeddingModels.Find(name)
+            ?? throw new ArgumentException($"--embeddings {option}: '{name}' is not a known ONNX model ({string.Join(", ", OnnxEmbeddingModels.Known.Select(m => m.Name))}).");
+        string models = Environment.GetEnvironmentVariable("SEMANTIC_ROUTER_TEST_MODELS") is { Length: > 0 } cache ? cache : Path.Combine(Path.GetTempPath(), "semantic-router-test-models");
+        return await RouterEmbeddings.OnnxAsync(model, models);
     }
 
     private static bool Check(bool condition, string what)

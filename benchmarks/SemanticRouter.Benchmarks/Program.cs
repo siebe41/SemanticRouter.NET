@@ -4,7 +4,7 @@
 //   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks -- --remote http://localhost:11434 nomic-embed-text
 //   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks -- latency http://localhost:5000 <model> …   (see LatencyBenchmark.cs)
 //   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks -- tool-calls http://localhost:5000 <model> …   (see ToolCallBenchmark.cs)
-//   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks -- gateway [--quick] [--soak 300] [--faults]   (see Gateway/GatewayBenchmark.cs)
+//   dotnet run -c Release --project benchmarks/SemanticRouter.Benchmarks -- gateway [--quick] [--soak 300] [--faults] [--embeddings onnx]   (see Gateway/GatewayBenchmark.cs)
 //
 // Each provider classifies every prompt of the set (the classification cache is off, so every prompt is embedded)
 // for several rounds after a warm-up, and is calibrated on the set to find the range of thresholds that route it best.

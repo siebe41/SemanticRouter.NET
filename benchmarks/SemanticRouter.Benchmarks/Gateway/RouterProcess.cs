@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
+using SemanticRouter.Embeddings.Onnx;
 
 namespace SemanticRouter.Benchmarks.Gateway;
 
@@ -28,6 +29,9 @@ internal sealed class RouterProcess : IAsyncDisposable
 
     public string Home { get; }
 
+    /// <summary>How long the route index took to embed after the router first answered, and the state it then reported.</summary>
+    public (TimeSpan Waited, string State) WarmUp { get; private set; }
+
     /// <summary>The router's resident memory now, in MB.</summary>
     public double ResidentMegabytes
     {
@@ -39,8 +43,9 @@ internal sealed class RouterProcess : IAsyncDisposable
     }
 
     /// <summary>Writes the configuration for a scenario: <paramref name="primary"/> is what the stub does for the first model.</summary>
+    /// <param name="embeddings">What the router classifies with; the template's Hashing provider when null.</param>
     /// <param name="keepAll">Keep every activity entry, so a scenario can count them (the default keeps 10,000).</param>
-    public static string Prepare(string repository, Uri stub, string primary, bool memoryState = false, bool keepAll = false)
+    public static string Prepare(string repository, Uri stub, string primary, RouterEmbeddings? embeddings, bool memoryState = false, bool keepAll = false)
     {
         string home = Directory.CreateTempSubdirectory("gateway-bench").FullName;
         if (memoryState)
@@ -62,6 +67,13 @@ internal sealed class RouterProcess : IAsyncDisposable
             },
         };
         root["Models"] = new JsonArray(Model("primary", primary, 0.1m), Model("backup", "ok", 1m));
+
+        // The saved file sits above environment variables and the command line, so the embeddings are set here.
+        if (embeddings is not null)
+        {
+            root["Embeddings"] = embeddings.Section.DeepClone();
+            root["DefaultSimilarityThreshold"] = embeddings.Threshold;
+        }
 
         if (keepAll)
         {
@@ -119,6 +131,7 @@ internal sealed class RouterProcess : IAsyncDisposable
             {
                 if ((await http.GetAsync(new Uri(router.Address, "/router/api/status"))).IsSuccessStatusCode)
                 {
+                    router.WarmUp = await router.WarmedUpAsync();
                     return router;
                 }
             }
@@ -133,6 +146,37 @@ internal sealed class RouterProcess : IAsyncDisposable
         string output = router.Output();
         await router.DisposeAsync();
         throw new InvalidOperationException("The router did not start:\n" + output);
+    }
+
+    /// <summary>
+    /// Waits until the router's status is no longer <c>starting</c>: it answers before its route index is embedded, which
+    /// with an embedding model can take longer than a scenario. Returns how long it waited, and the state it ended in.
+    /// </summary>
+    private async Task<(TimeSpan Waited, string State)> WarmedUpAsync()
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        long started = Stopwatch.GetTimestamp();
+        string state = "?";
+        while (Stopwatch.GetElapsedTime(started) < TimeSpan.FromMinutes(5) && !_process.HasExited)
+        {
+            try
+            {
+                using JsonDocument status = JsonDocument.Parse(await http.GetStringAsync(new Uri(Address, "/router/api/status")));
+                state = status.RootElement.GetProperty("service").GetProperty("state").GetString() ?? "?";
+                if (state != "starting")
+                {
+                    break;
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                // busy
+            }
+
+            await Task.Delay(100);
+        }
+
+        return (Stopwatch.GetElapsedTime(started), state);
     }
 
     /// <summary>Stops the router the way a service manager does, so it finishes its writes.</summary>
@@ -232,5 +276,27 @@ internal sealed class RouterProcess : IAsyncDisposable
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         return ((IPEndPoint)listener.LocalEndpoint).Port;
+    }
+}
+
+/// <summary>An <c>Embeddings</c> section for the router's configuration, with the similarity threshold that suits it.</summary>
+internal sealed record RouterEmbeddings(string Name, JsonObject Section, float Threshold)
+{
+    /// <summary>
+    /// An ONNX model loaded from the files <see cref="OnnxModelDownloader"/> keeps in <paramref name="models"/> (fetched now
+    /// when missing), so the router finds them through <c>ModelPath</c> and does not download during the run.
+    /// </summary>
+    public static async Task<RouterEmbeddings> OnnxAsync(OnnxModelInfo model, string models)
+    {
+        using var http = new HttpClient();
+        (string modelFile, _) = await OnnxModelDownloader.EnsureAsync(model, models, http);
+        return new($"ONNX {model.Name}", new JsonObject
+        {
+            ["Provider"] = "Onnx",
+            ["Model"] = model.Name,
+            ["ModelPath"] = Path.GetDirectoryName(modelFile),
+            ["Pooling"] = model.Pooling.ToString(),
+            ["WarmUpOnStartup"] = true,
+        }, model.SuggestedThreshold);
     }
 }

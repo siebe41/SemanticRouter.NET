@@ -590,7 +590,15 @@ What the router itself adds, with no model behind it: the `semantic-router` tool
 | 8 | 6,124 | 1.1 / 2.3 / 5.7 ms | 8,256, 4.5 ms |
 | 32 | 7,847 | 3.5 / 7.5 / 12.7 ms | 10,583, 11.4 ms |
 
-The benchmark always runs with Hashing embeddings, so these rows include no embedding model's cost. With an embedding model, add its classification time inside the router to every request that misses the cache: 3.7 ms for ONNX `all-MiniLM-L6-v2` in the measurement above.
+These rows use Hashing embeddings, so they include no embedding model's cost. `--embeddings onnx` (or `onnx:bge-small-en-v1.5`) runs the router with an ONNX model instead, loaded from the files the classification benchmark keeps, so nothing is downloaded during the run. One back-to-back pair of runs on a desktop with 24 logical CPUs and Windows 11, busy with other sprint lanes' builds and tests at the time, so read it for the difference between the columns:
+
+| Clients | Hashing: requests/s, total p50 / p95 / p99 | ONNX `all-MiniLM-L6-v2`: requests/s, total p50 / p95 / p99 |
+|---|---|---|
+| 1 | 313, 1.6 / 10.1 / 16.7 ms | 148, 4.9 / 15.9 / 21.9 ms |
+| 8 | 852, 8.0 / 20.1 / 30.8 ms | 289, 24.6 / 50.4 / 67.1 ms |
+| 32 | 1,483, 11.7 / 28.9 / 52.3 ms | 577, 53.1 / 83.9 / 103.3 ms |
+
+Every prompt is new, so every request misses the classification cache and runs the model. At one client that adds about 3.3 ms, in line with the 3.7 ms above. With more clients the requests take turns on the CPU the model runs on, so the model, not the gateway, sets the throughput.
 
 ## Production guidance
 
