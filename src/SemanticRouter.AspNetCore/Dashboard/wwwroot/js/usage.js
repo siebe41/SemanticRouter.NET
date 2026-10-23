@@ -82,8 +82,8 @@ function budgetsEditor() {
         <td><div class="scope" role="radiogroup" aria-label="What budget ${h(b.Name || i + 1)} covers">${SCOPES.map(([k, label]) => `<label class="check small"><input type="radio" name="budget-scope-${i}" data-budget-scope="${k}" data-index="${i}" ${k === scope ? 'checked' : ''} ${targets[k].length ? '' : 'disabled'}> ${label}</label>`).join('')}</div>
           <select aria-label="${h(scope)} the budget covers" data-bind="Usage.Budgets.${i}.${scope}" data-kind="nulltext">${b[scope] ? '' : '<option value="" selected disabled>Pick one…</option>'}${options.map((x) => `<option ${x === b[scope] ? 'selected' : ''}>${h(x)}</option>`).join('')}${b[scope] && !options.includes(b[scope]) ? `<option selected>${h(b[scope])}</option>` : ''}</select></td>
         <td><select aria-label="Period" data-bind="Usage.Budgets.${i}.Period">${['Day', 'Week', 'Month'].map((p) => `<option ${p === (b.Period || 'Day') ? 'selected' : ''}>${p}</option>`).join('')}</select></td>
-        <td><input type="number" min="0" step="1000" aria-label="Max tokens" data-bind="Usage.Budgets.${i}.MaxTokens" data-kind="number" data-nullable="1" value="${b.MaxTokens ?? ''}" placeholder="no limit"></td>
-        <td><input type="number" min="0" step="0.01" aria-label="Max USD" data-bind="Usage.Budgets.${i}.MaxCostUsd" data-kind="float" data-nullable="1" value="${b.MaxCostUsd ?? ''}" placeholder="no limit"></td>
+        <td><input type="number" min="0" step="1000" aria-label="Max tokens" data-bind="Usage.Budgets.${i}.MaxTokens" data-kind="number" data-nullable="1" value="${h(b.MaxTokens ?? '')}" placeholder="no limit"></td>
+        <td><input type="number" min="0" step="0.01" aria-label="Max USD" data-bind="Usage.Budgets.${i}.MaxCostUsd" data-kind="float" data-nullable="1" value="${h(b.MaxCostUsd ?? '')}" placeholder="no limit"></td>
         <td><button class="btn danger small" data-action="budget-remove" data-index="${i}">Remove</button></td></tr>`;
       }).join('') || '<tr><td colspan="6" class="muted small">No budgets.</td></tr>'}
     </table></div>

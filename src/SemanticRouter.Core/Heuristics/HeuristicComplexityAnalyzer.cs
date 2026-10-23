@@ -18,8 +18,14 @@ public sealed class HeuristicComplexityAnalyzer : IComplexityAnalyzer
     private readonly ComplexityHeuristicsOptions _options;
     private readonly string[] _reasoningKeywords;
 
+    /// <summary>Creates an analyzer with the default options.</summary>
+    public HeuristicComplexityAnalyzer()
+        : this(null)
+    {
+    }
+
     /// <summary>Creates an analyzer with the given options (or defaults).</summary>
-    public HeuristicComplexityAnalyzer(ComplexityHeuristicsOptions? options = null)
+    public HeuristicComplexityAnalyzer(ComplexityHeuristicsOptions? options)
     {
         _options = options ?? new ComplexityHeuristicsOptions();
         _reasoningKeywords = ((IEnumerable<string>?)_options.ReasoningKeywords ?? ComplexityHeuristicsOptions.DefaultReasoningKeywords)

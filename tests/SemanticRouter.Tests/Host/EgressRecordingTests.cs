@@ -14,7 +14,7 @@ namespace SemanticRouter.Tests.Host;
 /// process with a recording proxy in <c>HTTPS_PROXY</c> and <c>HTTP_PROXY</c>, a configuration whose connectors and judge
 /// are on made-up hosts, and Hashing embeddings. The proxy answers every request itself and forwards nothing. After
 /// start-up, <c>doctor</c>, a chat call (which the judge grades), a classify call and a dashboard page load, every host
-/// the proxy saw must be named on one of the <c>egress</c> lines <c>doctor</c> printed (<see cref="EgressList.For"/>);
+/// the proxy saw must be named on one of the <c>egress</c> lines <c>doctor</c> printed (the child's own list);
 /// offline, the proxy must see nothing.
 /// </summary>
 public sealed class EgressRecordingTests : IDisposable
@@ -60,6 +60,8 @@ public sealed class EgressRecordingTests : IDisposable
         // Doctor's connector check reaches the judge's host first (its models), so wait for the grading call itself.
         IReadOnlyList<string> egress = await DriveAsync(settings, proxy, until: () => Chatted(proxy, Judge));
 
+        await proxy.DrainAsync();
+
         Uri[] seen = [.. proxy.Destinations];
         string requests = string.Join(Environment.NewLine, proxy.Requests);
         Chatted(proxy, Llm).Should().BeTrue($"the chat call went through the proxy: {requests}");
@@ -84,6 +86,8 @@ public sealed class EgressRecordingTests : IDisposable
 
         // Nothing to wait for, so watch for 30 seconds of what the router does in the background (the judge among it).
         IReadOnlyList<string> egress = await DriveAsync(settings, proxy, until: () => true, settle: TimeSpan.FromSeconds(30));
+
+        await proxy.DrainAsync();
 
         // The dashboard's setup looks for LM Studio and Ollama on this machine, which offline mode allows.
         proxy.Destinations.Where(d => !d.IsLoopback).Should().BeEmpty(
@@ -177,7 +181,8 @@ public sealed class EgressRecordingTests : IDisposable
                          "routes/health", "memory", "tuning", "feedback/summary", "evaluation/set", "service", "themes", "judge/agreement",
                      })
             {
-                using HttpResponseMessage _ = await http.GetAsync(new Uri($"/router/api/{api}", UriKind.Relative), cancellationToken);
+                using HttpResponseMessage response = await http.GetAsync(new Uri($"/router/api/{api}", UriKind.Relative), cancellationToken);
+                response.IsSuccessStatusCode.Should().BeTrue($"dashboard API {api} returned {response.StatusCode}");
             }
 
             while (!until())

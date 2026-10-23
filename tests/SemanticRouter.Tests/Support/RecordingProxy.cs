@@ -16,6 +16,8 @@ internal sealed class RecordingProxy : IDisposable
 {
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
     private readonly CancellationTokenSource _stop = new();
+    private readonly ConcurrentBag<Task> _connections = [];
+    private readonly Task _accept;
     private readonly Func<string, Uri, (HttpStatusCode Status, string Json)>? _reply;
 
     /// <param name="reply">Answers a plain HTTP request (its method and absolute URL); <see langword="null"/> answers nothing.</param>
@@ -23,7 +25,7 @@ internal sealed class RecordingProxy : IDisposable
     {
         _reply = reply;
         _listener.Start();
-        _ = AcceptAsync();
+        _accept = AcceptAsync();
     }
 
     public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
@@ -48,6 +50,15 @@ internal sealed class RecordingProxy : IDisposable
         _stop.Cancel();
         _listener.Stop();
         _stop.Dispose();
+    }
+
+    /// <summary>Stops accepting and waits until every accepted connection has been recorded.</summary>
+    public async Task DrainAsync()
+    {
+        _stop.Cancel();
+        _listener.Stop();
+        await _accept;
+        await Task.WhenAll(_connections);
     }
 
     /// <summary>The destination of a request line, or <see langword="null"/> when it names none.</summary>
@@ -77,7 +88,7 @@ internal sealed class RecordingProxy : IDisposable
                 return;
             }
 
-            _ = RecordAsync(client, DateTime.UtcNow.ToString("HH:mm:ss", CultureInfo.InvariantCulture));
+            _connections.Add(RecordAsync(client, DateTime.UtcNow.ToString("HH:mm:ss", CultureInfo.InvariantCulture)));
         }
     }
 

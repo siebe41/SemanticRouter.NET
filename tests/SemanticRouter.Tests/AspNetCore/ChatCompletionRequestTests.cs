@@ -22,7 +22,7 @@ public class ChatCompletionRequestTests
 
         request.Model.Should().Be("auto:best");
         request.Stream.Should().BeTrue();
-        request.Messages.Should().Equal(new ChatMessage("system", "S"), new ChatMessage("user", "look"));
+        request.Messages.Should().Equal(new ChatMessage { Role = "system", Content = "S" }, new ChatMessage { Role = "user", Content = "look" });
         request.HasImages.Should().BeTrue();
         request.HasTools.Should().BeFalse();
         request.EstimatedInputTokens.Should().BePositive();
@@ -44,7 +44,7 @@ public class ChatCompletionRequestTests
     [Fact]
     public void Accepts_a_bare_prompt()
     {
-        Parse("""{"prompt":"hi"}""").Messages.Should().Equal(new ChatMessage("user", "hi"));
+        Parse("""{"prompt":"hi"}""").Messages.Should().Equal(new ChatMessage { Role = "user", Content = "hi" });
     }
 
     [Theory]

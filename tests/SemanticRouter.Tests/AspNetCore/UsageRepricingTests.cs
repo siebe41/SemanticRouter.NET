@@ -27,7 +27,20 @@ public sealed class UsageRepricingTests
 
     // A million tokens of each kind, recorded when the model was free.
     private UsageRecord Million(string model, string connector = "c", string? route = null) =>
-        new(_time.GetUtcNow(), model, connector, route, null, false, 1_000_000, 1_000_000, 1_000_000, 1_000_000, 0m, 0m);
+        new UsageRecord
+        {
+            Timestamp = _time.GetUtcNow(),
+            Model = model,
+            Connector = connector,
+            Route = route,
+            IsLocal = false,
+            InputTokens = 1_000_000,
+            OutputTokens = 1_000_000,
+            CacheReadTokens = 1_000_000,
+            CacheWriteTokens = 1_000_000,
+            CostUsd = 0m,
+            ReferenceCostUsd = 0m,
+        };
 
     [Fact]
     public void A_price_set_after_the_requests_prices_them_and_their_cache_tokens()
@@ -78,7 +91,20 @@ public sealed class UsageRepricingTests
     public void A_model_no_longer_in_the_catalog_keeps_its_recorded_cost()
     {
         var ledger = new InMemoryUsageLedger();
-        ledger.Record(new UsageRecord(_time.GetUtcNow(), "gone", "c", null, null, false, 10, 10, 0, 0, 1.25m, 1.25m, SubscriptionValueUsd: 0.5m));
+        ledger.Record(new UsageRecord
+        {
+            Timestamp = _time.GetUtcNow(),
+            Model = "gone",
+            Connector = "c",
+            IsLocal = false,
+            InputTokens = 10,
+            OutputTokens = 10,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 1.25m,
+            ReferenceCostUsd = 1.25m,
+            SubscriptionValueUsd = 0.5m,
+        });
 
         UsageTotals totals = ledger.TotalAtCurrentPrices(Catalog(), Since, Until);
 
@@ -139,6 +165,6 @@ public sealed class UsageRepricingTests
 
         public UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) => _totals;
 
-        public IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null) => [new("all", _totals)];
+        public IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null) => [new UsageGroup { Key = "all", Totals = _totals }];
     }
 }

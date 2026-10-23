@@ -47,10 +47,10 @@ public class ThresholdTunerTests
     {
         EvaluationCase[] confirmed =
         [
-            new(At("hi there", 0.725f), 1),
-            new(At("hey you", 0.715f), 1),
-            new(At("good morning", 0.705f), 1),
-            new(At("what is the weather in paris", 0.30f), 3),
+            new EvaluationCase { Prompt = At("hi there", 0.725f), ExpectedTier = 1 },
+            new EvaluationCase { Prompt = At("hey you", 0.715f), ExpectedTier = 1 },
+            new EvaluationCase { Prompt = At("good morning", 0.705f), ExpectedTier = 1 },
+            new EvaluationCase { Prompt = At("what is the weather in paris", 0.30f), ExpectedTier = 3 },
         ];
         var path = new List<float>();
         var fixedCounts = new List<int>();
@@ -83,10 +83,10 @@ public class ThresholdTunerTests
         // Lowering the threshold fixes three small-talk prompts but sends a tier-4 prompt to the tier-1 route.
         EvaluationCase[] confirmed =
         [
-            new(At("hi there", 0.705f), 1),
-            new(At("hey you", 0.705f), 1),
-            new(At("good morning", 0.705f), 1),
-            new(At("hello world, now prove the scheduler is deadlock free", 0.725f), 4),
+            new EvaluationCase { Prompt = At("hi there", 0.705f), ExpectedTier = 1 },
+            new EvaluationCase { Prompt = At("hey you", 0.705f), ExpectedTier = 1 },
+            new EvaluationCase { Prompt = At("good morning", 0.705f), ExpectedTier = 1 },
+            new EvaluationCase { Prompt = At("hello world, now prove the scheduler is deadlock free", 0.725f), ExpectedTier = 4 },
         ];
 
         ThresholdTuning tuning = await TuneAsync(Configuration(0.80f, fallbackTier: 4), confirmed);
@@ -98,9 +98,9 @@ public class ThresholdTunerTests
     [Fact]
     public async Task Automatic_labels_count_at_their_weight_and_need_the_minimum_gain()
     {
-        EvaluationCase[] confirmed = [new(At("what is the weather in paris", 0.30f), 3)];
-        EvaluationCase one = new(At("hiya", 0.705f), 1);
-        EvaluationCase[] three = [one, new(At("howdy", 0.705f), 1), new(At("heya", 0.715f), 1)];
+        EvaluationCase[] confirmed = [new EvaluationCase { Prompt = At("what is the weather in paris", 0.30f), ExpectedTier = 3 }];
+        EvaluationCase one = new EvaluationCase { Prompt = At("hiya", 0.705f), ExpectedTier = 1 };
+        EvaluationCase[] three = [one, new EvaluationCase { Prompt = At("howdy", 0.705f), ExpectedTier = 1 }, new EvaluationCase { Prompt = At("heya", 0.715f), ExpectedTier = 1 }];
 
         ThresholdTuning single = await TuneAsync(Configuration(0.72f), confirmed, [one]);
         ThresholdTuning several = await TuneAsync(Configuration(0.72f), confirmed, three);
@@ -115,8 +115,8 @@ public class ThresholdTunerTests
     [Fact]
     public async Task Each_automatic_label_can_carry_its_own_weight()
     {
-        EvaluationCase[] confirmed = [new(At("what is the weather in paris", 0.30f), 3)];
-        EvaluationCase[] two = [new(At("hiya", 0.705f), 1), new(At("howdy", 0.705f), 1)];
+        EvaluationCase[] confirmed = [new EvaluationCase { Prompt = At("what is the weather in paris", 0.30f), ExpectedTier = 3 }];
+        EvaluationCase[] two = [new EvaluationCase { Prompt = At("hiya", 0.705f), ExpectedTier = 1 }, new EvaluationCase { Prompt = At("howdy", 0.705f), ExpectedTier = 1 }];
 
         ThresholdTuning implicitOnly = await TuneAsync(Configuration(0.72f), confirmed, two, new ThresholdTuningOptions { AutomaticWeight = 0.4 });
         ThresholdTuning judged = await TuneAsync(Configuration(0.72f), confirmed, two, new ThresholdTuningOptions { AutomaticWeight = 0.4, AutomaticWeights = [0.75, 0.4] });
@@ -132,9 +132,9 @@ public class ThresholdTunerTests
         _table["plan the rollout"] = [0f, 0f, 0.79f, 0.613f];
         EvaluationCase[] confirmed =
         [
-            new(At("hi there", 0.705f), 1),
-            new(At("hey you", 0.705f), 1),
-            new("plan the rollout", 3) { Note = "0.79 from reasoning: must stay below the threshold" },
+            new EvaluationCase { Prompt = At("hi there", 0.705f), ExpectedTier = 1 },
+            new EvaluationCase { Prompt = At("hey you", 0.705f), ExpectedTier = 1 },
+            new EvaluationCase { Prompt = "plan the rollout", ExpectedTier = 3, Note = "0.79 from reasoning: must stay below the threshold" },
         ];
         SemanticRouterOptions options = Configuration(0.80f);
         options.Routes[0].SimilarityThreshold = 0.74f;
@@ -159,10 +159,10 @@ public class ThresholdTunerTests
         _table["my diagnosis is hello"] = [0.68f, 0.717f, 0f, 0.1533f];
         EvaluationCase[] confirmed =
         [
-            new("my diagnosis is hello", 1) { LocalOnly = true },
-            new(At("summarize the incident", 0.715f), 3),
-            new(At("summarize the outage", 0.715f), 3),
-            new(At("summarize the postmortem", 0.715f), 3),
+            new EvaluationCase { Prompt = "my diagnosis is hello", ExpectedTier = 1, LocalOnly = true },
+            new EvaluationCase { Prompt = At("summarize the incident", 0.715f), ExpectedTier = 3 },
+            new EvaluationCase { Prompt = At("summarize the outage", 0.715f), ExpectedTier = 3 },
+            new EvaluationCase { Prompt = At("summarize the postmortem", 0.715f), ExpectedTier = 3 },
         ];
 
         ThresholdTuning tuning = await TuneAsync(options, confirmed);
@@ -170,6 +170,6 @@ public class ThresholdTunerTests
         ThresholdStep step = tuning.Steps.Should().ContainSingle().Subject;
         (step.Route, step.Current, step.Proposed).Should().Be(("smalltalk", (float?)null, 0.72f));
         tuning.ConfirmedBefore.LocalOnlyMissed.Should().Be(0);
-        tuning.ConfirmedAfter.Should().Be(new TuningScore(4, 4, 0, 0, 0));
+        tuning.ConfirmedAfter.Should().Be(new TuningScore { Total = 4, Correct = 4, TooLow = 0, TooHigh = 0, LocalOnlyMissed = 0 });
     }
 }

@@ -283,7 +283,13 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
 
         if (succeeded)
         {
-            var usage = new ChatUsage(final?.InputTokens, final?.OutputTokens, final?.CacheReadTokens, final?.CacheCreationTokens);
+            var usage = new ChatUsage
+            {
+                InputTokens = final?.InputTokens,
+                OutputTokens = final?.OutputTokens,
+                CacheReadTokens = final?.CacheReadTokens,
+                CacheCreationTokens = final?.CacheCreationTokens,
+            };
             if (prompted is not null)
             {
                 // Without streamed deltas (plain-text CLIs, or streaming off), the whole reply goes through now; with them,
@@ -423,8 +429,12 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             .Append(toolFormat.Label).Append("\n{\"name\": \"<tool name>\", \"input\": { <arguments> }}\n```\n");
         ChatMessage[] messages =
         [
-            new("system", "You fix tool calls that could not be parsed. Reply with exactly one fenced tool_call block and no other text."),
-            new("user", prompt.ToString()),
+            new ChatMessage
+            {
+                Role = "system",
+                Content = "You fix tool calls that could not be parsed. Reply with exactly one fenced tool_call block and no other text.",
+            },
+            new ChatMessage { Role = "user", Content = prompt.ToString() },
         ];
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

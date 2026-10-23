@@ -334,10 +334,12 @@ internal sealed partial class AnswerJudge : IDisposable
             DashboardAccess.MarkRemote(context);
         }
 
-        var plan = new RoutingPlan(
-            new PromptClassificationResult { RequiredTier = judge.Tier, Reason = RoutingReason.ModelOverride, RouteName = UsageLabel, Complexity = new ComplexityAnalysis() },
-            new ModelRequirements { RequiredTier = judge.Tier, LocalOnly = job.Entry.LocalOnly, EstimatedInputTokens = chat.EstimatedInputTokens },
-            [new ModelCandidate(judge, 0m, MeetsRequiredTier: true)]);
+        var plan = new RoutingPlan
+        {
+            Classification = new PromptClassificationResult { RequiredTier = judge.Tier, Reason = RoutingReason.ModelOverride, RouteName = UsageLabel, Complexity = new ComplexityAnalysis() },
+            Requirements = new ModelRequirements { RequiredTier = judge.Tier, LocalOnly = job.Entry.LocalOnly, EstimatedInputTokens = chat.EstimatedInputTokens },
+            Candidates = [new ModelCandidate { Model = judge, EstimatedCost = 0m, MeetsRequiredTier = true }],
+        };
         var record = new RoutingActivityEntry { Route = UsageLabel, Client = UsageLabel, Tier = judge.Tier, LocalOnly = job.Entry.LocalOnly };
         await _dispatcher.DispatchAsync(context, runtime, plan, chat, body, record).ConfigureAwait(false);
         if (record.Outcome != "served")

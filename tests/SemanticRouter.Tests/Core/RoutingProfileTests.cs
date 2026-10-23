@@ -29,7 +29,7 @@ public class RoutingProfileTests
         var classifier = new Mock<IPromptClassifier>();
         classifier.Setup(c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PromptClassificationResult { RequiredTier = tier, Reason = RoutingReason.SemanticMatch, Complexity = ComplexityAnalysis.Empty });
-        return new PromptRouter(classifier.Object, options, health: health, time: time);
+        return new PromptRouter(classifier.Object, options, new PromptRouterDependencies { Health = health, Time = time });
     }
 
     private static string[] Names(RoutingPlan plan) => plan.Candidates.Select(c => c.Model.Name).ToArray();

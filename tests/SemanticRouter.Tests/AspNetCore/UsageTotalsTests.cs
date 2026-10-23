@@ -10,9 +10,20 @@ public sealed class UsageTotalsTests
 {
     private readonly ManualTimeProvider _time = new();
 
-    private UsageRecord Request(int i) => new(
-        _time.GetUtcNow().AddMinutes(-i), i % 2 == 0 ? "cloud" : "Other", i % 3 == 0 ? "c" : "d", null, null, false,
-        i, 2 * i, 0, 0, i * 0.001m, i * 0.002m, i % 4 == 0 ? "work" : null);
+    private UsageRecord Request(int i) => new UsageRecord
+    {
+        Timestamp = _time.GetUtcNow().AddMinutes(-i),
+        Model = i % 2 == 0 ? "cloud" : "Other",
+        Connector = i % 3 == 0 ? "c" : "d",
+        IsLocal = false,
+        InputTokens = i,
+        OutputTokens = 2 * i,
+        CacheReadTokens = 0,
+        CacheWriteTokens = 0,
+        CostUsd = i * 0.001m,
+        ReferenceCostUsd = i * 0.002m,
+        Profile = i % 4 == 0 ? "work" : null,
+    };
 
     [Fact]
     public void Running_totals_stay_equal_to_the_records_as_requests_arrive()
@@ -48,7 +59,19 @@ public sealed class UsageTotalsTests
         var ledger = new InMemoryUsageLedger();
         for (int i = 0; i < 200_000; i++)
         {
-            ledger.Record(new UsageRecord(_time.GetUtcNow().AddSeconds(-i), "cloud", "c", null, null, false, 1000, 100, 0, 0, 0m, 0m));
+            ledger.Record(new UsageRecord
+            {
+                Timestamp = _time.GetUtcNow().AddSeconds(-i),
+                Model = "cloud",
+                Connector = "c",
+                IsLocal = false,
+                InputTokens = 1000,
+                OutputTokens = 100,
+                CacheReadTokens = 0,
+                CacheWriteTokens = 0,
+                CostUsd = 0m,
+                ReferenceCostUsd = 0m,
+            });
         }
 
         var configuration = new RouterConfiguration();
@@ -62,7 +85,19 @@ public sealed class UsageTotalsTests
         var watch = Stopwatch.StartNew();
         for (int i = 0; i < 1000; i++)
         {
-            ledger.Record(new UsageRecord(_time.GetUtcNow(), "cloud", "c", null, null, false, 1000, 100, 0, 0, 0m, 0m));
+            ledger.Record(new UsageRecord
+            {
+                Timestamp = _time.GetUtcNow(),
+                Model = "cloud",
+                Connector = "c",
+                IsLocal = false,
+                InputTokens = 1000,
+                OutputTokens = 100,
+                CacheReadTokens = 0,
+                CacheWriteTokens = 0,
+                CostUsd = 0m,
+                ReferenceCostUsd = 0m,
+            });
             gate.Blocking(cloud, configuration.Usage);
         }
 

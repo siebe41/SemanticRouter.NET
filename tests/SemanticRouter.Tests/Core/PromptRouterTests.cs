@@ -28,7 +28,7 @@ public class PromptRouterTests
         }
 
         var health = new ModelHealthTracker();
-        return (new PromptRouter(classifier.Object, options, health: health), classifier, health);
+        return (new PromptRouter(classifier.Object, options, new PromptRouterDependencies { Health = health }), classifier, health);
     }
 
     [Fact]
