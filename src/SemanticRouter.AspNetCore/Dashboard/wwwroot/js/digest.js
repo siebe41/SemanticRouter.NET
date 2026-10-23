@@ -16,7 +16,7 @@ export function noticesCard() {
   if (!d || !d.notices.length) return '';
   return `<div class="card section notices" role="region" aria-label="Needs a decision">
     <div class="card-head"><h2>Needs a decision</h2><span class="badge warn">${d.notices.length}</span><span class="spacer"></span>${d.notify ? '' : '<span class="small muted">notifications are off (<span class="mono">Notifications:Enabled</span>)</span>'}</div>
-    ${d.notices.map((n) => `<div class="notice" data-kind="${h(n.kind)}"><div class="inline"><b>${h(n.title)}</b><span class="spacer"></span><a href="${h(n.link)}" class="small">decide →</a></div><div class="small muted">${h(n.detail)}</div></div>`).join('')}
+    ${d.notices.map((n) => `<div class="notice" data-kind="${h(n.kind)}"><div class="inline"><b>${h(n.title)}</b><span class="spacer"></span><a href="${h(/^#\//.test(n.link || '') ? n.link : '#/overview')}" class="small">decide →</a></div><div class="small muted">${h(n.detail)}</div></div>`).join('')}
   </div>`;
 }
 
