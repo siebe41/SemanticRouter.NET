@@ -6,7 +6,7 @@ import { fullStamp, plural, tierChip } from './labels.js';
 import { reliabilityBadges, reliabilityCard } from './reliability.js';
 import { addConnectorMenu, presetList } from './setup.js';
 import { addresses } from './service.js';
-import { CAPABILITY_HINTS, CONNECTOR_TYPES, MESSAGE_SELECTION, PRESETS, STRATEGIES, adminOnly, connectorNames, h, isReference, kv, lineupFor, lines, readOnly, state, tiers, views } from './core.js';
+import { CAPABILITY_HINTS, MESSAGE_SELECTION, PRESETS, STRATEGIES, adminOnly, connectorNames, connectorTypes, h, isBuiltInConnectorType, isInstalledConnectorType, isReference, kv, lineupFor, lines, readOnly, runsProgram, sameType, state, tiers, typeName, views } from './core.js';
 
 views.tiers = () => {
   const c = state.config;
@@ -91,9 +91,9 @@ const modelItem = (m, i) => {
   return `<div class="item ${state.open.has(key) ? 'open' : ''} ${m.Enabled === false ? 'disabled' : ''}" data-key="${key}">
     <div class="item-bar"><div class="item-head" data-action="toggle" data-key="${key}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
       <span class="chev">▶</span><span class="title">${h(m.Name || '(unnamed)')}</span>
-      <span class="meta">${tierChip(m.Tier)}<span class="mono">${h(m.Model || '')}</span><span>via ${h(m.Connector)}${conn ? ` <span class="faint">(${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? '/' + h(conn.Preset || 'Custom') : ''})</span>` : ' <span class="badge danger">unknown connector</span>'}</span>
+      <span class="meta">${tierChip(m.Tier)}<span class="mono">${h(m.Model || '')}</span><span>via ${h(m.Connector)}${conn ? ` <span class="faint">(${h(typeName(conn.Type))}${sameType(conn.Type, 'Cli') ? '/' + h(conn.Preset || 'Custom') : ''})</span>` : ' <span class="badge danger">unknown connector</span>'}</span>
       ${m.IsLocal ? '<span class="badge info">local</span>' : ''}${reliabilityBadges(m.Name)}${!free ? `<span class="badge">$${m.InputCostPerMillionTokens}/$${m.OutputCostPerMillionTokens} per M</span>${effectiveCostBadge(m)}` : m.IsLocal ? '<span class="badge ok">free</span>'
-        : !conn || conn.Type === 'Cli' || conn.Type === 'Copilot' ? `<span class="badge" title="Free per request, but it uses up the plan's quota${m.ApiInputCostPerMillionTokens != null ? '; its use is valued at the API price on Usage' : ''}">subscription${m.ApiInputCostPerMillionTokens != null ? ` · API $${m.ApiInputCostPerMillionTokens}/$${m.ApiOutputCostPerMillionTokens ?? 0}` : ''}</span>`
+        : !conn || runsProgram(conn) ? `<span class="badge" title="Free per request, but it uses up the plan's quota${m.ApiInputCostPerMillionTokens != null ? '; its use is valued at the API price on Usage' : ''}">subscription${m.ApiInputCostPerMillionTokens != null ? ` · API $${m.ApiInputCostPerMillionTokens}/$${m.ApiOutputCostPerMillionTokens ?? 0}` : ''}</span>`
         : '<span class="badge warn" title="Costs nothing as far as the router knows, so it ranks like a subscription: set its prices">no price set</span>'}${(m.Capabilities || []).map((c) => `<span class="badge">${h(c)}</span>`).join('')}</span>
     </div><label class="check item-switch"><input type="checkbox" data-bind="Models.${i}.Enabled" data-kind="bool" aria-label="${h(`${m.Name || 'This model'} enabled`)}" ${m.Enabled !== false ? 'checked' : ''}> enabled</label></div>
     <div class="item-body"><div class="form-grid">
@@ -107,7 +107,7 @@ const modelItem = (m, i) => {
       ${numField({ bind: `Models.${i}.OutputCostPerMillionTokens`, value: m.OutputCostPerMillionTokens, def: 0, label: 'Output cost ($ / M tokens)', min: 0, step: 0.01, float: true, placeholder: '0 (free)', hint: 'Empty for local models and flat-rate subscriptions.' })}
       <label class="field"><span class="name">Cache read cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheReadCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheReadCostPerMillionTokens ?? ''}" placeholder="input price"><span class="hint">Prompt-cache reads, if the provider prices them differently.</span></label>
       <label class="field"><span class="name">Cache write cost ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.CacheWriteCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.CacheWriteCostPerMillionTokens ?? ''}" placeholder="input price"></label>
-      ${free && !m.IsLocal && (!conn || conn.Type === 'Cli' || conn.Type === 'Copilot') ? `<label class="field"><span class="name">API input price ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.ApiInputCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.ApiInputCostPerMillionTokens ?? ''}" placeholder="not valued"><span class="hint">A subscription's use, valued at what the API charges. Shown on Usage, never counted as spend.</span></label>
+      ${free && !m.IsLocal && (!conn || runsProgram(conn)) ? `<label class="field"><span class="name">API input price ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.ApiInputCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.ApiInputCostPerMillionTokens ?? ''}" placeholder="not valued"><span class="hint">A subscription's use, valued at what the API charges. Shown on Usage, never counted as spend.</span></label>
       <label class="field"><span class="name">API output price ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.ApiOutputCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.ApiOutputCostPerMillionTokens ?? ''}" placeholder="not valued"></label>
       <label class="field"><span class="name">API cache read price ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.ApiCacheReadCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.ApiCacheReadCostPerMillionTokens ?? ''}" placeholder="API input price"><span class="hint">What the API charges for prompt-cache reads, usually far less than input.</span></label>
       <label class="field"><span class="name">API cache write price ($ / M)</span><input type="number" min="0" step="0.01" data-bind="Models.${i}.ApiCacheWriteCostPerMillionTokens" data-kind="float" data-nullable="1" value="${m.ApiCacheWriteCostPerMillionTokens ?? ''}" placeholder="API input price"></label>` : ''}
@@ -152,11 +152,11 @@ export const lineupPanel = (connector) => {
         if (e.inCatalog) return `<tr class="muted"><td></td><td class="mono small">${h(e.id)}</td>${facts}<td colspan="3" class="small">in the catalog as <b>${h(e.inCatalog)}</b></td></tr>`;
         if (!e.suggestion) return `<tr class="muted"><td></td><td class="mono small">${h(e.id)}</td>${facts}<td colspan="3" class="small">${h(e.reason)}</td></tr>`;
         const s = e.suggestion;
-        return `<tr><td><input type="checkbox" aria-label="Add ${h(e.id)}" data-state="${p}.selected" data-kind="bool" ${e.selected ? 'checked' : ''}></td>
+        return `<tr><td><input type="checkbox" aria-label="Add ${h(e.id)}" data-state="${h(p)}.selected" data-kind="bool" ${e.selected ? 'checked' : ''}></td>
           <td class="mono small">${h(e.id)}${s.Enabled === false ? ' <span class="badge">added disabled</span>' : ''}</td>${facts}
-          <td><input type="text" aria-label="Catalog name for ${h(e.id)}" data-state="${p}.suggestion.Name" value="${h(s.Name)}"></td>
-          <td><select aria-label="Tier for ${h(e.id)}" data-state="${p}.suggestion.Tier" data-kind="number">${tierOptions(s.Tier)}</select></td>
-          <td><input type="text" aria-label="Capabilities of ${h(e.id)}" data-state="${p}.suggestion.Capabilities" data-kind="csv" value="${h((s.Capabilities || []).join(', '))}"></td></tr>
+          <td><input type="text" aria-label="Catalog name for ${h(e.id)}" data-state="${h(p)}.suggestion.Name" value="${h(s.Name)}"></td>
+          <td><select aria-label="Tier for ${h(e.id)}" data-state="${h(p)}.suggestion.Tier" data-kind="number">${tierOptions(s.Tier)}</select></td>
+          <td><input type="text" aria-label="Capabilities of ${h(e.id)}" data-state="${h(p)}.suggestion.Capabilities" data-kind="csv" value="${h((s.Capabilities || []).join(', '))}"></td></tr>
           ${TIER_FROM[e.tierFrom] || own(e) ? `<tr class="lineup-reason"><td></td><td colspan="7" class="small muted">${TIER_FROM[e.tierFrom] ? `<span class="badge" title="${h(l.families || '')}">${TIER_FROM[e.tierFrom]}</span> ` : ''}${h(own(e))}</td></tr>` : ''}`;
       }).join('')}</table></div>` : ''}
     ${selectable.length ? `<div class="row-actions" style="margin-top:10px"><button class="btn primary small" data-action="lineup-add" data-index="${index}" ${selected ? '' : 'disabled'}>Add ${selected} selected to the catalog</button><span class="muted small">Added to the draft; Apply &amp; save to use them. Context, prices and the rest are on each model.</span></div>` : ''}
@@ -178,7 +178,7 @@ views.models = () => {
       const own = models.map((m, i) => ({ m, i })).filter((x) => (x.m.Connector || '').toLowerCase() === (connector || '').toLowerCase()).sort(byTier);
       const tierCounts = [...new Set(own.map((x) => x.m.Tier))].sort((a, b) => a - b).map((t) => `<span class="tier" title="${own.filter((x) => x.m.Tier === t).map((x) => h(x.m.Name)).join(', ')}">T${t}${own.filter((x) => x.m.Tier === t).length > 1 ? ' ×' + own.filter((x) => x.m.Tier === t).length : ''}</span>`).join('');
       return `<section class="model-group" aria-label="Models via ${h(connector)}">
-        <div class="section-head group-head"><h2>${h(connector || '(no connector)')}</h2>${conn ? `<span class="badge accent">${h(conn.Type || 'OpenAICompatible')}${conn.Type === 'Cli' ? ' / ' + h(conn.Preset || 'Custom') : ''}</span>` : '<span class="badge danger">unknown connector</span>'}<span class="muted small">${own.length} model${own.length === 1 ? '' : 's'}</span>${tierCounts}<span class="spacer"></span>${conn && !readOnly() && own.some((x) => !x.m.IsLocal) ? `<button class="btn small" data-action="prices-lookup" data-connector="${h(connector)}" title="Fills in the list prices of its cloud models (a subscription's API prices) from OpenRouter's public price list">Look up prices</button>` : ''}${conn && !readOnly() ? `<button class="btn small" data-action="lineup-discover" data-connector="${h(connector)}">Discover models</button>` : ''}</div>
+        <div class="section-head group-head"><h2>${h(connector || '(no connector)')}</h2>${conn ? `<span class="badge accent">${h(typeName(conn.Type))}${sameType(conn.Type, 'Cli') ? ' / ' + h(conn.Preset || 'Custom') : ''}</span>` : '<span class="badge danger">unknown connector</span>'}<span class="muted small">${own.length} model${own.length === 1 ? '' : 's'}</span>${tierCounts}<span class="spacer"></span>${conn && !readOnly() && own.some((x) => !x.m.IsLocal) ? `<button class="btn small" data-action="prices-lookup" data-connector="${h(connector)}" title="Fills in the list prices of its cloud models (a subscription's API prices) from OpenRouter's public price list">Look up prices</button>` : ''}${conn && !readOnly() ? `<button class="btn small" data-action="lineup-discover" data-connector="${h(connector)}">Discover models</button>` : ''}</div>
         ${lineupPanel(connector)}
         ${own.map((x) => modelItem(x.m, x.i)).join('')}
       </section>`;
@@ -196,55 +196,80 @@ export const secretField = (path, value, label) => `
       ? 'Typed keys are encrypted into the secret store when you save; the file keeps a <code>${secret:…}</code> reference.'
       : 'Typed keys are written to the configuration file when you save. Prefer <code>${env:VARIABLE}</code>, or leave empty to inherit from appsettings, user-secrets or the environment.'}</span></label>`;
 
+// What each built-in type is for; installed packages' types are offered after them.
+const TYPE_HINTS = {
+  OpenAICompatible: 'LM Studio, Ollama, vLLM, OpenAI, Gemini, OpenRouter…',
+  Anthropic: 'Messages API with a key',
+  Responses: 'OpenAI Responses API (/v1/responses)',
+  Cli: 'a vendor CLI on your own login',
+};
+
+/** The connector type picker: the router's types, installed packages' types, and the current one if no package provides it. */
+const typeField = (p, type) => {
+  const types = connectorTypes();
+  const known = types.some((t) => sameType(t, type));
+  const installed = types.filter((t) => !isBuiltInConnectorType(t));
+  const options = types.map((t) => `<option value="${h(t)}" ${sameType(t, type) ? 'selected' : ''}>${h(t)}</option>`).join('')
+    + (known ? '' : `<option value="${h(type)}" selected>${h(type)} (not installed)</option>`);
+  const hints = types.filter((t) => TYPE_HINTS[t]).map((t) => `${t}: ${TYPE_HINTS[t]}`);
+  if (installed.length) hints.push(`${installed.map(h).join(', ')}: from installed packages`);
+  return `<label class="field"><span class="name">Type</span><select data-bind="${h(p)}.Type">${options}</select><span class="hint">${hints.join(' · ')}.${known ? '' : ` No installed package provides ${h(type)}: the router skips this connector.`}</span></label>`;
+};
+
 views.connectors = () => {
   const conns = state.config.Connectors || {};
   return `
     <div class="section-head"><h1>Connectors</h1><span class="muted">How the router reaches each provider.</span><span class="spacer"></span>${readOnly() || !Object.keys(conns).length ? '' : addConnectorMenu()}</div>
     ${Object.entries(conns).map(([name, c]) => {
       const key = 'conn:' + name;
-      const type = c.Type || 'OpenAICompatible';
+      const type = typeName(c.Type);
+      // A type from an installed package (or one no package provides) is shown as the router runs it: calling its base
+      // address when the package says so, otherwise as a program.
+      const packaged = !isBuiltInConnectorType(type);
+      const program = runsProgram(c);
       const p = `Connectors.${name}`;
       const models = (state.config.Models || []).filter((m) => (m.Connector || '').toLowerCase() === name.toLowerCase());
       return `<div class="item ${state.open.has(key) ? 'open' : ''}" data-key="${h(key)}">
         <div class="item-head" data-action="toggle" data-key="${h(key)}" role="button" tabindex="0" aria-expanded="${state.open.has(key)}">
           <span class="chev">▶</span><span class="title">${h(name)}</span>
-          <span class="meta"><span class="badge accent">${h(type)}${type === 'Cli' ? ' / ' + h(c.Preset || 'Custom') : ''}</span><span class="mono">${h(type === 'Cli' ? (c.Executable || '(preset default)') : type === 'Copilot' ? (c.Executable || 'copilot') : (c.BaseAddress || ''))}</span><span>${plural(models.length, 'model')}</span>${connectorStateBadge(name)}${c.ApiKey === '***' ? '<span class="badge ok">key set</span>' : (isReference(c.ApiKey) ? '<span class="badge ok" title="' + h(c.ApiKey) + '">key: reference</span>' : '')}${type === 'Cli' && c.ToolCalling === 'Prompted' ? '<span class="badge info">prompted tools</span>' : ''}</span>
+          <span class="meta"><span class="badge accent">${h(type)}${sameType(type, 'Cli') ? ' / ' + h(c.Preset || 'Custom') : ''}</span><span class="mono">${h(sameType(type, 'Cli') ? (c.Executable || '(preset default)') : program ? (c.Executable || '(package default)') : (c.BaseAddress || ''))}</span><span>${plural(models.length, 'model')}</span>${packaged && !isInstalledConnectorType(type) ? '<span class="badge danger" title="No installed package provides this connector type, so the router skips it">not installed</span>' : ''}${connectorStateBadge(name)}${c.ApiKey === '***' ? '<span class="badge ok">key set</span>' : (isReference(c.ApiKey) ? '<span class="badge ok" title="' + h(c.ApiKey) + '">key: reference</span>' : '')}${sameType(type, 'Cli') && c.ToolCalling === 'Prompted' ? '<span class="badge info">prompted tools</span>' : ''}</span>
         </div>
         <div class="item-body"><div class="form-grid">
           <label class="field"><span class="name">Name</span><input type="text" data-action-input="connector-rename" data-name="${h(name)}" value="${h(name)}"><span class="hint">Models refer to it by this name; renaming updates them.</span></label>
-          <label class="field"><span class="name">Type</span><select data-bind="${h(p)}.Type">${CONNECTOR_TYPES.map((t) => `<option ${t === type ? 'selected' : ''}>${t}</option>`).join('')}</select><span class="hint">OpenAICompatible: LM Studio, Ollama, vLLM, OpenAI, Gemini, OpenRouter… · Anthropic: Messages API with a key · Responses: OpenAI Responses API (/v1/responses) · Cli: a vendor CLI on your own login · Copilot: GitHub's Copilot SDK on your Copilot sign-in (native tools and streaming).</span></label>
-          ${type === 'Cli' ? `
+          ${typeField(p, type)}
+          ${sameType(type, 'Cli') ? `
             <label class="field"><span class="name">Preset</span><select data-bind="${h(p)}.Preset">${PRESETS.map((x) => `<option ${x === (c.Preset || 'Custom') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>
             <label class="field"><span class="name">Executable</span><input type="text" data-bind="${h(p)}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="preset default (claude / copilot / codex)"><span class="hint">Started directly, never through a shell. On Windows use the .exe.</span></label>
             <label class="field"><span class="name">Tool calling</span><select data-bind="${h(p)}.ToolCalling">${['None', 'Prompted'].map((x) => `<option ${x === (c.ToolCalling || 'None') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Prompted lets agentic clients (Claude Code) use this CLI: tools are described in the prompt and tool calls parsed from the reply.</span></label>
             ${c.ToolCalling === 'Prompted' ? `<label class="check"><input type="checkbox" data-bind="${h(p)}.StreamPromptedReplies" data-kind="bool" ${c.StreamPromptedReplies !== false ? 'checked' : ''}> Stream text before tool calls <span class="muted">— off: buffer the reply, so a failed run can still fail over</span></label>
             <label class="check"><input type="checkbox" data-bind="${h(p)}.RepairToolCalls" data-kind="bool" ${c.RepairToolCalls !== false ? 'checked' : ''}> Repair broken tool calls <span class="muted">— one short extra run</span></label>
             <label class="field"><span class="name">Tool call parsing</span><select data-bind="${h(p)}.PromptedToolParsing">${['Lenient', 'Strict'].map((x) => `<option ${x === (c.PromptedToolParsing || 'Lenient') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Strict: only this run's own labelled block at the end of the reply is a call. Harder for text a tool returned to pass for a call.</span></label>` : ''}
-            ${numField({ bind: `${p}.MaxConcurrency`, value: c.MaxConcurrency, def: 2, label: 'Max concurrency', min: 1, step: 1, hint: 'Runs at the same time.' })}
-            ${numField({ bind: `${p}.MaxQueue`, value: c.MaxQueue, label: 'Max queue', min: 0, step: 1, nullable: true, placeholder: '16 (default)', hint: 'When this many requests are already waiting, the next one goes to another model.' })}
-            ${numField({ bind: `${p}.MaxArgumentLength`, value: c.MaxArgumentLength, def: 24000, label: 'Max argument length', min: 100, step: 1, hint: 'With Prompt input Argument, longer prompts go on stdin.' })}
-            ${durationField({ bind: `${p}.Timeout`, value: c.Timeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:05:00', label: 'Timeout', hint: 'Time to first output.' })}
-            ${durationField({ bind: `${p}.StallTimeout`, value: c.StallTimeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:05:00', label: 'Stall timeout', hint: 'Time allowed between lines of output once the reply has started. Default: the Timeout.' })}
+            ${numField({ bind: `${h(p)}.MaxConcurrency`, value: c.MaxConcurrency, def: 2, label: 'Max concurrency', min: 1, step: 1, hint: 'Runs at the same time.' })}
+            ${numField({ bind: `${h(p)}.MaxQueue`, value: c.MaxQueue, label: 'Max queue', min: 0, step: 1, nullable: true, placeholder: '16 (default)', hint: 'When this many requests are already waiting, the next one goes to another model.' })}
+            ${numField({ bind: `${h(p)}.MaxArgumentLength`, value: c.MaxArgumentLength, def: 24000, label: 'Max argument length', min: 100, step: 1, hint: 'With Prompt input Argument, longer prompts go on stdin.' })}
+            ${durationField({ bind: `${h(p)}.Timeout`, value: c.Timeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:05:00', label: 'Timeout', hint: 'Time to first output.' })}
+            ${durationField({ bind: `${h(p)}.StallTimeout`, value: c.StallTimeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:05:00', label: 'Stall timeout', hint: 'Time allowed between lines of output once the reply has started. Default: the Timeout.' })}
             ${(c.Preset || 'Custom') !== 'Codex' ? `<label class="field"><span class="name">Prompt input</span><select data-bind="${h(p)}.PromptInput">${['Stdin', 'Argument'].map((x) => `<option ${x === (c.PromptInput || 'Stdin') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Argument puts the prompt on the command line, where other users of this machine can read it.</span></label>` : ''}
             <label class="field wide"><span class="name">Arguments (one per line)</span><textarea data-bind="${h(p)}.Arguments" data-kind="lines" rows="3">${h(lines(c.Arguments))}</textarea><span class="hint">Presets: extra flags appended (e.g. <code>--effort</code> / <code>low</code>). Custom: the full template with <code>{model}</code> and <code>{prompt}</code>.</span></label>
             <label class="field"><span class="name">Quota error patterns</span><textarea data-bind="${h(p)}.QuotaErrorPatterns" data-kind="lines" rows="3">${h(lines(c.QuotaErrorPatterns))}</textarea><span class="hint">Output fragments that mean “out of quota” (added to the preset's).</span></label>
             <label class="field"><span class="name">Environment variables (KEY=value)</span><textarea data-bind="${h(p)}.EnvironmentVariables" data-kind="kv" rows="3">${h(kv(c.EnvironmentVariables))}</textarea></label>
             <label class="field"><span class="name">Remove environment variables</span><textarea data-bind="${h(p)}.RemoveEnvironmentVariables" data-kind="lines" data-nullable="1" rows="3">${h(lines(c.RemoveEnvironmentVariables))}</textarea><span class="hint">Empty = preset defaults (API keys that would switch billing away from your subscription).</span></label>
             <label class="check wide"><input type="checkbox" data-bind="${h(p)}.AllowRemoteClients" data-kind="bool" ${c.AllowRemoteClients ? 'checked' : ''}> Allow remote clients <span class="muted">— read docs/TERMS.md first; a personal subscription must not serve other people</span></label>`
-          : type === 'Copilot' ? `
-            <label class="field"><span class="name">Copilot CLI</span><input type="text" data-bind="${h(p)}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="copilot (from PATH)"><span class="hint">The SDK runs it as its runtime: <code>npm install -g @github/copilot</code>, then sign in once with <code>copilot</code> (/login) or <code>gh auth login</code>.</span></label>
-            <label class="field"><span class="name">Copilot home</span><input type="text" data-bind="${h(p)}.HomeDirectory" data-kind="nulltext" value="${h(c.HomeDirectory || '')}" placeholder="~/.copilot"><span class="hint">COPILOT_HOME for the runtime; the default reuses the CLI's login.</span></label>
-            ${numField({ bind: `${p}.MaxConcurrency`, value: c.MaxConcurrency, def: 2, label: 'Max concurrency', min: 1, step: 1 })}
-            ${numField({ bind: `${p}.MaxQueue`, value: c.MaxQueue, label: 'Max queue', min: 0, step: 1, nullable: true, placeholder: '16 (default)' })}
-            ${durationField({ bind: `${p}.Timeout`, value: c.Timeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:05:00', label: 'Timeout', hint: 'Time to first output.' })}
-            <label class="check wide"><input type="checkbox" data-bind="${h(p)}.AllowRemoteClients" data-kind="bool" ${c.AllowRemoteClients ? 'checked' : ''}> Allow remote clients <span class="muted">— read docs/TERMS.md first; a personal subscription must not serve other people</span></label>`
+          : program ? `
+            <p class="field wide muted small">The package's connector applies these settings, not the router: its documentation says which it supports, what to install and how to sign in. <b>Discover models</b> reports what is missing.</p>
+            <label class="field"><span class="name">Program</span><input type="text" data-bind="${h(p)}.Executable" data-kind="nulltext" value="${h(c.Executable || '')}" placeholder="the package's default"><span class="hint">For packages that start a program.</span></label>
+            <label class="field"><span class="name">Home directory</span><input type="text" data-bind="${h(p)}.HomeDirectory" data-kind="nulltext" value="${h(c.HomeDirectory || '')}" placeholder="the package's default"><span class="hint">Where the program keeps its sign-in and state, for packages that use one.</span></label>
+            ${numField({ bind: `${h(p)}.MaxConcurrency`, value: c.MaxConcurrency, def: 2, label: 'Max concurrency', min: 1, step: 1, hint: 'If the package limits concurrent runs.' })}
+            ${numField({ bind: `${h(p)}.MaxQueue`, value: c.MaxQueue, label: 'Max queue', min: 0, step: 1, nullable: true, placeholder: '16 (default)', hint: 'If the package limits its queue.' })}
+            ${durationField({ bind: `${h(p)}.Timeout`, value: c.Timeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:05:00', label: 'Timeout', hint: 'Time to first output, if the package applies one.' })}
+            <label class="check wide"><input type="checkbox" data-bind="${h(p)}.AllowRemoteClients" data-kind="bool" ${c.AllowRemoteClients ? 'checked' : ''}> Allow remote clients <span class="muted">— left off, only a package that checks it keeps other machines out (see its documentation); read docs/TERMS.md first, a personal subscription must not serve other people</span></label>`
           : `
-            <label class="field"><span class="name">Base address</span><input type="url" data-bind="${h(p)}.BaseAddress" data-kind="nulltext" value="${h(c.BaseAddress || '')}" placeholder="${type === 'Anthropic' ? 'https://api.anthropic.com' : 'http://localhost:1234'}"></label>
-            <label class="field"><span class="name">Request path</span><input type="text" data-bind="${h(p)}.RequestPath" data-empty="drop" value="${h(c.RequestPath && c.RequestPath !== '/v1/chat/completions' ? c.RequestPath : '')}" placeholder="/v1/chat/completions (default)"><span class="hint">${type === 'Anthropic' ? 'Leave the default; /v1/messages is used.' : 'Gemini: /v1beta/openai/chat/completions · OpenRouter: /api/v1/chat/completions'}</span></label>
+            <label class="field"><span class="name">Base address</span><input type="url" data-bind="${h(p)}.BaseAddress" data-kind="nulltext" value="${h(c.BaseAddress || '')}" placeholder="${sameType(type, 'Anthropic') ? 'https://api.anthropic.com' : 'http://localhost:1234'}"></label>
+            <label class="field"><span class="name">Request path</span><input type="text" data-bind="${h(p)}.RequestPath" data-empty="drop" value="${h(c.RequestPath && c.RequestPath !== '/v1/chat/completions' ? c.RequestPath : '')}" placeholder="/v1/chat/completions (default)"><span class="hint">${sameType(type, 'Anthropic') ? 'Leave the default; /v1/messages is used.' : 'Gemini: /v1beta/openai/chat/completions · OpenRouter: /api/v1/chat/completions'}</span></label>
             ${secretField(p + '.ApiKey', c.ApiKey, 'API key')}
-            ${durationField({ bind: `${p}.Timeout`, value: c.Timeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:01:40', label: 'Timeout', hint: 'Time to response headers.' })}
-            ${durationField({ bind: `${p}.StallTimeout`, value: c.StallTimeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:01:40', label: 'Stall timeout', hint: 'Time allowed between pieces of the reply once it has started. Default: the Timeout.' })}
-            ${type === 'Anthropic' ? `<label class="field"><span class="name">anthropic-version</span><input type="text" data-bind="${h(p)}.AnthropicVersion" data-empty="drop" value="${h(c.AnthropicVersion && c.AnthropicVersion !== '2023-06-01' ? c.AnthropicVersion : '')}" placeholder="2023-06-01 (default)"></label>
+            ${durationField({ bind: `${h(p)}.Timeout`, value: c.Timeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:01:40', label: 'Timeout', hint: 'Time to response headers.' })}
+            ${durationField({ bind: `${h(p)}.StallTimeout`, value: c.StallTimeout, def: '00:00:00', zeroMeansDefault: true, shownDefault: '00:01:40', label: 'Stall timeout', hint: 'Time allowed between pieces of the reply once it has started. Default: the Timeout.' })}
+            ${sameType(type, 'Anthropic') ? `<label class="field"><span class="name">anthropic-version</span><input type="text" data-bind="${h(p)}.AnthropicVersion" data-empty="drop" value="${h(c.AnthropicVersion && c.AnthropicVersion !== '2023-06-01' ? c.AnthropicVersion : '')}" placeholder="2023-06-01 (default)"></label>
             <label class="field"><span class="name">Prompt caching</span><select data-bind="${h(p)}.PromptCaching">${['Auto', 'Off'].map((x) => `<option ${x === (c.PromptCaching || 'Auto') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Auto: cache markers on requests translated from OpenAI and Codex clients, once the prompt is long enough to cache. Off: for servers that reject them.</span></label>
             <label class="field"><span class="name">Cache lifetime</span><select data-bind="${h(p)}.CacheTtl">${['5m', '1h'].map((x) => `<option ${x === (c.CacheTtl || '5m') ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">1h costs 2× the input price to write instead of 1.25×; worth it when turns are often more than 5 minutes apart.</span></label>` : ''}
             <label class="field"><span class="name">Extra headers (Name=value)</span><textarea data-bind="${h(p)}.Headers" data-kind="kv" rows="3">${h(kv(c.Headers))}</textarea><span class="hint">Azure: <code>api-key=…</code> · OpenAI org: <code>OpenAI-Organization=org_…</code></span></label>
@@ -310,22 +335,30 @@ views.embeddings = () => {
   const st = state.status.embeddings || {};
   const unavailable = st.unavailable || {};
   // A provider that cannot run here is offered only while it is the one configured, so the page can say why.
-  const available = (st.available || ['Hashing', 'OpenAICompatible']).filter((x) => !unavailable[x] || x === provider);
-  const onnxModels = (st.models || []).filter((m) => m.provider === 'Onnx');
-  const chosen = onnxModels.find((m) => m.name.toLowerCase() === (e.Model || 'all-MiniLM-L6-v2').toLowerCase());
+  const same = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+  const available = (st.available || ['Hashing', 'OpenAICompatible']).filter((x) => !unavailable[x] || same(x, provider));
+  // Providers other than the two built-in ones come from installed packages. One whose factory runs the model in this
+  // process (RunsInProcess) gets the models it offers (the first is its default) or one on disk; any other sends text to
+  // a server, as the router and the machine policy assume, so it gets the endpoint fields.
+  const packaged = available.filter((x) => !same(x, 'Hashing') && !same(x, 'OpenAICompatible'));
+  const runsHere = (x) => (st.runsInProcess || []).some((k) => same(k, x));
+  const providerModels = (st.models || []).filter((m) => same(m.provider, provider));
+  const chosen = e.Model ? providerModels.find((m) => same(m.name, e.Model)) : providerModels[0];
   const mb = (b) => Math.round(b / 1e6) + ' MB';
-  const onnxFields = () => `
-        <label class="field"><span class="name">Model</span><select data-bind="Embeddings.Model" data-kind="nulltext">${onnxModels.map((m) => `<option value="${h(m.name)}" ${m === chosen ? 'selected' : ''}>${h(m.name)} (${mb(m.downloadBytes)})</option>`).join('')}</select><span class="hint">${chosen ? h(chosen.description) + ' Downloaded and checksum-verified on first use.' : ''}</span></label>
-        <label class="field"><span class="name">Or a model on disk</span><input type="text" data-bind="Embeddings.ModelPath" data-kind="nulltext" value="${h(e.ModelPath || '')}" placeholder="a directory with model.onnx and vocab.txt"><span class="hint">Overrides the model above.</span></label>
+  const modelFields = () => `
+        ${providerModels.length
+          ? `<label class="field"><span class="name">Model</span><select data-bind="Embeddings.Model" data-kind="nulltext">${providerModels.map((m) => `<option value="${h(m.name)}" ${m === chosen ? 'selected' : ''}>${h(m.name)}${m.downloadBytes > 0 ? ` (${mb(m.downloadBytes)})` : ''}</option>`).join('')}${e.Model && !chosen ? `<option value="${h(e.Model)}" selected>${h(e.Model)}</option>` : ''}</select><span class="hint">${chosen ? h(chosen.description) + (chosen.downloadBytes > 0 ? ' Downloaded and checksum-verified on first use.' : '') : ''}</span></label>`
+          : `<label class="field"><span class="name">Model</span><input type="text" data-bind="Embeddings.Model" data-kind="nulltext" value="${h(e.Model || '')}" placeholder="the provider's default"></label>`}
+        <label class="field"><span class="name">Or a model on disk</span><input type="text" data-bind="Embeddings.ModelPath" data-kind="nulltext" value="${h(e.ModelPath || '')}" placeholder="a directory with the model's files"><span class="hint">Overrides the model above.</span></label>
         ${e.ModelPath ? `<label class="field"><span class="name">Pooling</span><select data-bind="Embeddings.Pooling" data-kind="nulltext">${['Mean', 'Cls'].map((x) => `<option ${x === (e.Pooling || 'Mean') ? 'selected' : ''}>${x}</option>`).join('')}</select></label>` : ''}
         ${chosen && !e.ModelPath ? `<div class="field wide"><span class="name">Similarity threshold</span><div class="inline"><span class="small">This model's suggested starting threshold is <b>${chosen.suggestedThreshold}</b>; the configuration has ${state.config.DefaultSimilarityThreshold}.</span>${chosen.suggestedThreshold !== state.config.DefaultSimilarityThreshold ? `<button class="btn small" data-action="embeddings-threshold" data-value="${chosen.suggestedThreshold}">Use ${chosen.suggestedThreshold}</button>` : ''}<a class="small" href="#/evaluate">Calibrate on your prompts →</a></div></div>` : ''}`;
   return `
     <div class="section-head"><h1>Embeddings</h1><span class="muted">How prompts and utterances are turned into vectors.</span></div>
     <div class="card section"><div class="form-grid">
-      <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${available.map((x) => `<option ${x === provider ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only). Onnx runs a real embedding model in this process; OpenAICompatible calls a server (LM Studio, Ollama, OpenAI).</span></label>
+      <label class="field"><span class="name">Provider</span><select data-bind="Embeddings.Provider">${available.map((x) => `<option value="${h(x)}" ${same(x, provider) ? 'selected' : ''}>${h(x)}</option>`).join('')}</select><span class="hint">Hashing is lexical (shared words only). OpenAICompatible calls a server (LM Studio, Ollama, OpenAI).${packaged.length ? ` ${packaged.map((x) => h(x) + (runsHere(x) ? ' (in this process)' : '')).join(', ')}: from installed packages.` : ''}</span></label>
       ${unavailable[provider] ? `<div class="field wide"><span class="name">Not available here</span><span class="small">${h(unavailable[provider])}</span></div>` : ''}
-      ${!unavailable[provider] && unavailable.Onnx ? `<p class="field wide muted small">${h(unavailable.Onnx)}</p>` : ''}
-      ${provider === 'Onnx' ? onnxFields() : provider === 'Hashing' ? numField({ bind: 'Embeddings.Dimensions', value: e.Dimensions, def: 512, label: 'Dimensions', min: 16, step: 1, hint: 'More dimensions, fewer accidental matches between unrelated words.' }) : `
+      ${Object.entries(unavailable).filter(([kind]) => !same(kind, provider)).map(([, why]) => `<p class="field wide muted small">${h(why)}</p>`).join('')}
+      ${runsHere(provider) ? modelFields() : same(provider, 'Hashing') ? numField({ bind: 'Embeddings.Dimensions', value: e.Dimensions, def: 512, label: 'Dimensions', min: 16, step: 1, hint: 'More dimensions, fewer accidental matches between unrelated words.' }) : `
         <label class="field"><span class="name">Endpoint</span><input type="url" data-bind="Embeddings.Endpoint" data-kind="nulltext" value="${h(e.Endpoint || '')}" placeholder="http://localhost:1234"></label>
         <label class="field"><span class="name">Model</span><input type="text" data-bind="Embeddings.Model" data-kind="nulltext" value="${h(e.Model || '')}" placeholder="text-embedding-nomic-embed-text-v1.5"></label>
         <label class="field"><span class="name">Request path</span><input type="text" data-bind="Embeddings.RequestPath" data-empty="drop" value="${h(e.RequestPath && e.RequestPath !== '/v1/embeddings' ? e.RequestPath : '')}" placeholder="/v1/embeddings (default)"></label>

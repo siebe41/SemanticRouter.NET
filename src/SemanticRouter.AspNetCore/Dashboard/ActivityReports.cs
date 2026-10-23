@@ -61,7 +61,11 @@ internal static class ActivityReports
     public static double[] Latencies(IEnumerable<RoutingActivityEntry> entries) =>
         [.. entries.Where(e => e.Outcome == "served" && e.TotalMilliseconds is not null).Select(e => e.TotalMilliseconds!.Value).Order()];
 
-    /// <summary>Writes entries as CSV (RFC 4180), with or without the prompt previews.</summary>
+    /// <summary>
+    /// Writes entries as CSV (RFC 4180), with or without prompt text: the prompt previews and the <c>detail</c> column
+    /// (failover notes, which can quote a failed CLI run's output), both kept only as <see cref="StateOptions.StorePrompts"/>
+    /// allows.
+    /// </summary>
     public static string ToCsv(IEnumerable<RoutingActivityEntry> entries, bool includePrompts)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -74,7 +78,9 @@ internal static class ActivityReports
             "cache_read_tokens", "cache_creation_tokens", "cost_usd", "trace_id", "detail", "prompted_tool_calls",
             "attempt_time_to_first_byte_ms", "attempt_ms",
         ];
-        builder.Append(string.Join(',', includePrompts ? [.. header, "prompt_preview"] : header)).Append("\r\n");
+        int detail = Array.IndexOf(header, "detail");
+        string[] columns = includePrompts ? [.. header, "prompt_preview"] : [.. header[..detail], .. header[(detail + 1)..]];
+        builder.Append(string.Join(',', columns)).Append("\r\n");
         foreach (RoutingActivityEntry e in entries)
         {
             object?[] row =
@@ -85,13 +91,17 @@ internal static class ActivityReports
                 e.TotalMilliseconds, e.InputTokens, e.OutputTokens, e.CacheReadTokens, e.CacheCreationTokens, e.CostUsd, e.TraceId, e.Detail,
                 e.PromptedToolCalls, e.AttemptTimeToFirstByteMilliseconds, e.AttemptMilliseconds,
             ];
-            builder.Append(string.Join(',', (includePrompts ? [.. row, e.PromptPreview] : row).Select(Cell))).Append("\r\n");
+            object?[] cells = includePrompts ? [.. row, e.PromptPreview] : [.. row[..detail], .. row[(detail + 1)..]];
+            builder.Append(string.Join(',', cells.Select(Cell))).Append("\r\n");
         }
 
         return builder.ToString();
     }
 
-    /// <summary>Writes entries as JSON Lines, with or without the prompt previews.</summary>
+    /// <summary>
+    /// Writes entries as JSON Lines, with or without prompt text: <c>promptPreview</c>, <c>detail</c> (which can quote a
+    /// failed CLI run's output) and <c>gradeNote</c> (the judge's reason about the answer).
+    /// </summary>
     public static string ToJsonLines(IEnumerable<RoutingActivityEntry> entries, bool includePrompts)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -102,6 +112,8 @@ internal static class ActivityReports
             if (!includePrompts)
             {
                 node.Remove("promptPreview");
+                node.Remove("detail");
+                node.Remove("gradeNote");
             }
 
             builder.Append(node.ToJsonString()).Append('\n');

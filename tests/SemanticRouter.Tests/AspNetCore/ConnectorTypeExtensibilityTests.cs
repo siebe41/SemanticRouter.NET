@@ -35,7 +35,7 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
 
     public ConnectorTypeExtensibilityTests() => ClassifyAs(tier: 4);
 
-    private Task<HttpClient> StartBedrockAsync(bool withFactory, string type = "bedrock") =>
+    private Task<HttpClient> StartBedrockAsync(bool withFactory, string type = "bedrock", IChatConnectorFactory? other = null) =>
         StartAsync(
             o =>
             {
@@ -57,6 +57,11 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
                 {
                     s.AddSingleton<IChatConnectorFactory>(_bedrock);
                 }
+
+                if (other is not null)
+                {
+                    s.AddSingleton(other);
+                }
             });
 
     [Fact]
@@ -72,6 +77,31 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
         _bedrock.Served.Should().Equal("anthropic.claude-sonnet");
         Services.GetRequiredService<RouterRuntimeProvider>().Current.Warnings.Should().NotContain(w => w.Contains("aws", StringComparison.Ordinal));
         CloudHttp.Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(true, new[] { "Bedrock" })]
+    [InlineData(false, new string[0])]
+    public async Task The_dashboard_offers_the_built_in_types_and_those_installed_packages_provide(bool withFactory, string[] installed)
+    {
+        HttpClient client = await StartBedrockAsync(withFactory);
+
+        JsonElement types = JsonDocument.Parse(await client.GetStringAsync(new Uri("/router/api/status", UriKind.Relative))).RootElement.GetProperty("connectorTypes");
+
+        types.GetProperty("builtIn").EnumerateArray().Select(t => t.GetString()).Should().Equal(ConnectorTypes.BuiltIn);
+        types.GetProperty("installed").EnumerateArray().Select(t => t.GetString()).Should().Equal(installed);
+        types.GetProperty("usesBaseAddress").EnumerateArray().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task The_dashboard_learns_which_installed_types_call_their_base_address()
+    {
+        HttpClient client = await StartBedrockAsync(withFactory: true, other: new GatewayFactory());
+
+        JsonElement types = JsonDocument.Parse(await client.GetStringAsync(new Uri("/router/api/status", UriKind.Relative))).RootElement.GetProperty("connectorTypes");
+
+        types.GetProperty("installed").EnumerateArray().Select(t => t.GetString()).Should().Equal("Bedrock", "LocalGateway");
+        types.GetProperty("usesBaseAddress").EnumerateArray().Select(t => t.GetString()).Should().Equal("LocalGateway");
     }
 
     [Fact]
@@ -185,6 +215,21 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
         await FluentActions.Awaiting(async () => await missing.GenerateEmbeddingAsync("hi", CancellationToken.None))
             .Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("No installed package provides the embedding provider 'Absent' (built in: Hashing, OpenAICompatible).");
+    }
+
+    [Fact]
+    public async Task The_dashboard_learns_which_packaged_embedding_providers_run_in_process()
+    {
+        HttpClient client = await StartAsync(services: s =>
+        {
+            s.AddSingleton<IEmbeddingProviderFactory>(new NamedEmbeddingFactory("InHouseModel", runsInProcess: true));
+            s.AddSingleton<IEmbeddingProviderFactory>(new NamedEmbeddingFactory("RemoteEmbed"));
+        });
+
+        JsonElement embeddings = JsonDocument.Parse(await client.GetStringAsync(new Uri("/router/api/status", UriKind.Relative))).RootElement.GetProperty("embeddings");
+
+        embeddings.GetProperty("available").EnumerateArray().Select(k => k.GetString()).Should().Contain(["InHouseModel", "RemoteEmbed"]);
+        embeddings.GetProperty("runsInProcess").EnumerateArray().Select(k => k.GetString()).Should().Equal("InHouseModel");
     }
 
     [Fact]
