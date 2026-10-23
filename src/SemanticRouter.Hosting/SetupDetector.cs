@@ -77,8 +77,13 @@ internal sealed class SetupDetector(IServiceProvider services) : IRouterSetupDet
             }
 
             (string id, string title) = Identify(connector, preset);
-            yield return new SetupDetection(id, title, "cli", connector, options)
+            yield return new SetupDetection
             {
+                Id = id,
+                Title = title,
+                Kind = "cli",
+                ConnectorName = connector,
+                Connector = options,
                 Detail = $"Found {script}",
                 Problem = lookup.Problem(connector),
             };
@@ -106,7 +111,16 @@ internal sealed class SetupDetector(IServiceProvider services) : IRouterSetupDet
             ? $"Running at {where} with {models.Length} chat model{(models.Length == 1 ? string.Empty : "s")}: " +
               string.Join(", ", models.Take(4).Select(m => m.Model ?? m.Name)) + (models.Length > 4 ? ", …" : string.Empty)
             : notes.FirstOrDefault(n => n.StartsWith(name + ": ", StringComparison.Ordinal)) is { } note ? note[(name.Length + 2)..] : $"Running at {where}";
-        return new SetupDetection(name, title, "local", name, connector) { Detail = detail, Models = models };
+        return new SetupDetection
+        {
+            Id = name,
+            Title = title,
+            Kind = "local",
+            ConnectorName = name,
+            Connector = connector,
+            Detail = detail,
+            Models = models,
+        };
     }
 
     private static async Task<SetupDetection> CliAsync(
@@ -133,8 +147,13 @@ internal sealed class SetupDetector(IServiceProvider services) : IRouterSetupDet
                 .Where(a => ClaudeNames.Any(n => a.Key.Contains(n, StringComparison.OrdinalIgnoreCase)))
                 .ToDictionary(a => a.Key, a => a.Value, StringComparer.OrdinalIgnoreCase)
             : [];
-        return new SetupDetection(id, title, "cli", name, connector)
+        return new SetupDetection
         {
+            Id = id,
+            Title = title,
+            Kind = "cli",
+            ConnectorName = name,
+            Connector = connector,
             Detail = detail,
             Consent = SetupApi.Consent(connector.Preset),
             Models = models,

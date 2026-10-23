@@ -114,6 +114,11 @@ jobs:
       - name: Test
         run: dotnet test --configuration Release
 
+      # The vpk the installer jobs install is the Velopack package's version, whose native binaries and Rust crates the
+      # desktop notices list.
+      - name: Velopack versions
+        run: deploy/velopack-version-check.sh
+
       # The tool package carries the licences and notices of the packages it ships, and of the fonts.
       - name: Third-party notices
         run: |
@@ -465,7 +470,8 @@ jobs:
           mkdir -p tool && unzip -q packages/SemanticRouter.Host.*.nupkg -d tool
           dotnet restore src/SemanticRouter.Host/SemanticRouter.Host.csproj --locked-mode
           dotnet run --file deploy/third-party-notices.cs -- artifacts/THIRD-PARTY-NOTICES.txt sbom tool
-          deploy/third-party-notices-check.sh artifacts/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)"             "Velopack native binaries" "AppImage type2-runtime"
+          deploy/third-party-notices-check.sh artifacts/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)" \
+            "Velopack native binaries" "Rust standard library" "AppImage type2-runtime"
 
       - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
@@ -656,45 +662,11 @@ jobs:
           mkdir -p published && tar -C published -xzf publish-win-x64.tar.gz
           PUBLISH_DIR=published deploy/package-installer.sh win-x64 "${GITHUB_REF_NAME#v}" installers/win-x64
 
-      # A release meant to be signed uploads nothing whose signature does not check out.
-      - name: Check the signature
+      # A release meant to be signed uploads nothing whose signature does not check out: the installer, and the
+      # programs in the update package it installs (deploy/installer-signature-check.ps1).
+      - name: Check the signatures
         shell: pwsh
-        run: |
-          $setup = @(Get-ChildItem installers/win-x64 -Filter '*-Setup.exe')
-          if ($setup.Count -eq 0) { Write-Output '::error::No Setup.exe in installers/win-x64.'; exit 1 }
-          foreach ($file in $setup) {
-            $status = (Get-AuthenticodeSignature $file.FullName).Status
-            if ($env:SIGNING -eq 'signed' -and $status -ne 'Valid') {
-              Write-Output "::error::$($file.Name) should be signed, but its signature is $status."
-              exit 1
-            }
-            $line = if ($status -eq 'Valid') { 'signed, signature checked' } else { "**unsigned** ($status)" }
-            Add-Content $env:GITHUB_STEP_SUMMARY "Windows installer ``$($file.Name)``: $line"
-          }
-          # The list of files (deploy/update-file-list.cs) must be signed with the same certificate as the installer,
-          # or every updater with a publisher policy refuses this release (docs/enterprise.md#update-publisher).
-          # This release's package: the folder also holds the previous release's, downloaded for the delta.
-          $name = "SemanticRouter-$($env:GITHUB_REF_NAME.TrimStart('v'))-win-x64-full.nupkg"
-          $package = @(Get-ChildItem installers/win-x64 -Filter $name)
-          if ($package.Count -ne 1) { Write-Output "::error::No $name in installers/win-x64."; exit 1 }
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $list = Join-Path $env:RUNNER_TEMP 'SemanticRouter.Files.dll'
-          $zip = [System.IO.Compression.ZipFile]::OpenRead($package[0].FullName)
-          try {
-            $entry = $zip.GetEntry('lib/app/SemanticRouter.Files.dll')
-            if ($null -eq $entry) { Write-Output "::error::$($package[0].Name) has no lib/app/SemanticRouter.Files.dll."; exit 1 }
-            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $list, $true)
-          } finally { $zip.Dispose() }
-          $signature = Get-AuthenticodeSignature $list
-          if ($env:SIGNING -eq 'signed') {
-            $installer = (Get-AuthenticodeSignature $setup[0].FullName).SignerCertificate.Subject
-            if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -ne $installer) {
-              Write-Output "::error::SemanticRouter.Files.dll in $($package[0].Name) should be signed by $installer, but its signature is $($signature.Status) ($($signature.SignerCertificate.Subject))."
-              exit 1
-            }
-          }
-          $line = if ($signature.Status -eq 'Valid') { 'signed, signature checked' } else { "**unsigned** ($($signature.Status))" }
-          Add-Content $env:GITHUB_STEP_SUMMARY "Windows update's list of files ``SemanticRouter.Files.dll``: $line"
+        run: deploy/installer-signature-check.ps1 -Installers installers/win-x64 -Version ($env:GITHUB_REF_NAME -replace '^v', '')
 
       - name: Attach
         shell: bash
@@ -773,29 +745,15 @@ jobs:
             PUBLISH_DIR="published/$rid" deploy/package-installer.sh "$rid" "${GITHUB_REF_NAME#v}" "installers/$rid"
           done
 
-      # A release meant to be signed uploads nothing whose signature or notarization ticket does not check out.
-      - name: Check the signature
+      # A release meant to be signed uploads nothing whose signature or notarization ticket does not check out: the
+      # installer, the app in it, and the app in the update package, each signed by this team
+      # (deploy/installer-signature-check.sh).
+      - name: Check the signatures
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          shopt -s nullglob
           for rid in osx-arm64 osx-x64; do
-            pkgs=("installers/$rid"/*-Setup.pkg)
-            if [ ${#pkgs[@]} -eq 0 ]; then
-              echo "::error::No Setup.pkg in installers/$rid."
-              exit 1
-            fi
-            for pkg in "${pkgs[@]}"; do
-              status="$(pkgutil --check-signature "$pkg" || true)"
-              if grep -q 'Status: signed' <<<"$status" && xcrun stapler validate "$pkg" >/dev/null 2>&1; then
-                line="signed and notarized, checked"
-              elif [ "$SIGNING" = signed ]; then
-                echo "$status"
-                echo "::error::$(basename "$pkg") should be signed and notarized, but is not."
-                exit 1
-              else
-                line="**unsigned**"
-              fi
-              echo "macOS installer \`$(basename "$pkg")\`: $line" >> "$GITHUB_STEP_SUMMARY"
-            done
+            deploy/installer-signature-check.sh "installers/$rid" "${GITHUB_REF_NAME#v}" "$rid"
           done
 
       - name: Attach

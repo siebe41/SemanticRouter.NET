@@ -87,7 +87,7 @@ public class JsonPromptExtractorTests
         string json = JsonSerializer.Serialize(new { messages = new[] { new { role = "user", content = "<environment_details>cwd: /src</environment_details>\nfix the build" } } });
         using JsonDocument document = JsonDocument.Parse(json);
 
-        new JsonPromptExtractor(injectedTags: ["<environment_details>", "not a tag!"]).ExtractPrompt(new DefaultHttpContext(), document.RootElement)
+        new JsonPromptExtractor(PromptMessageSelection.LastUserMessage, stripSystemReminders: true, injectedTags: ["<environment_details>", "not a tag!"]).ExtractPrompt(new DefaultHttpContext(), document.RootElement)
             .Should().Be("fix the build");
         Extract(json).Should().StartWith("<environment_details>", "only the configured extra tags are added to the built-in ones");
     }

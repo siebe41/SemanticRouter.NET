@@ -48,7 +48,7 @@ public sealed class QuotaResetParserTests
     public void A_parsed_reset_replaces_the_fixed_quota_cooldown_within_limits()
     {
         var time = new ManualTimeProvider();
-        var tracker = new ModelHealthTracker(new ModelSelectionOptions { QuotaCooldown = TimeSpan.FromMinutes(15) }, time);
+        var tracker = new ModelHealthTracker(new ModelSelectionOptions { QuotaCooldown = TimeSpan.FromMinutes(15) }, new ModelHealthTrackerDependencies { Time = time });
         ModelDefinition claude = Model("claude", 4);
         ModelDefinition codex = Model("codex", 4);
         ModelDefinition other = Model("other", 4);
@@ -203,7 +203,19 @@ public sealed class UsageAndTelemetryTests : RouterHostTest
         var gate = new BudgetGate(ledger, time, factory.CreateLogger<BudgetGate>());
         var usage = new UsageOptions { TimeZone = "UTC" };
         usage.Budgets.Add(new BudgetDefinition { Name = "monthly", Connector = "c", Period = BudgetPeriod.Month, MaxCostUsd = 10 });
-        ledger.Record(new UsageRecord(time.GetUtcNow(), "m", "c", null, null, false, 0, 0, 0, 0, 8.5m, 8.5m));
+        ledger.Record(new UsageRecord
+        {
+            Timestamp = time.GetUtcNow(),
+            Model = "m",
+            Connector = "c",
+            IsLocal = false,
+            InputTokens = 0,
+            OutputTokens = 0,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 8.5m,
+            ReferenceCostUsd = 8.5m,
+        });
 
         BudgetStatus status = gate.Status(usage).Single();
         status.Should().Match<BudgetStatus>(s => s.Warning && !s.Exceeded && s.Percent == 85);
@@ -425,15 +437,51 @@ public sealed class UsageAndTelemetryTests : RouterHostTest
             using (var database = new SqliteRouterDatabase(options, factory.CreateLogger<SqliteRouterDatabase>()))
             {
                 var first = new SqliteUsageLedger(database);
-                first.Record(new UsageRecord(now, "cloud", "openai", "complex-code", "laptop", false, 100, 50, 10, 0, 0.0012m, 0.01m));
-                first.Record(new UsageRecord(now, "local", "lmstudio", "smalltalk", null, true, 30, 20, 0, 0, 0m, 0.002m));
+                first.Record(new UsageRecord
+                {
+                    Timestamp = now,
+                    Model = "cloud",
+                    Connector = "openai",
+                    Route = "complex-code",
+                    Client = "laptop",
+                    IsLocal = false,
+                    InputTokens = 100,
+                    OutputTokens = 50,
+                    CacheReadTokens = 10,
+                    CacheWriteTokens = 0,
+                    CostUsd = 0.0012m,
+                    ReferenceCostUsd = 0.01m,
+                });
+                first.Record(new UsageRecord
+                {
+                    Timestamp = now,
+                    Model = "local",
+                    Connector = "lmstudio",
+                    Route = "smalltalk",
+                    IsLocal = true,
+                    InputTokens = 30,
+                    OutputTokens = 20,
+                    CacheReadTokens = 0,
+                    CacheWriteTokens = 0,
+                    CostUsd = 0m,
+                    ReferenceCostUsd = 0.002m,
+                });
             } // stopping saves what is still waiting
 
             var restarted = new SqliteUsageLedger(new SqliteRouterDatabase(options, factory.CreateLogger<SqliteRouterDatabase>()));
             UsageTotals totals = restarted.Total(now.AddMinutes(-1), now.AddMinutes(1));
             UsageTotals cloud = restarted.Total(now.AddMinutes(-1), now.AddMinutes(1), model: "cloud");
 
-            totals.Should().Be(new UsageTotals(2, 130, 70, 10, 0, 0.0012m, 0.012m));
+            totals.Should().Be(new UsageTotals
+            {
+                Requests = 2,
+                InputTokens = 130,
+                OutputTokens = 70,
+                CacheReadTokens = 10,
+                CacheWriteTokens = 0,
+                CostUsd = 0.0012m,
+                ReferenceCostUsd = 0.012m,
+            });
             totals.SavedUsd.Should().Be(0.0108m);
             cloud.Requests.Should().Be(1);
             restarted.Summarize(now.AddMinutes(-1), now.AddMinutes(1), UsageGrouping.Client).Select(g => g.Key).Should().BeEquivalentTo("laptop", "(no key)");

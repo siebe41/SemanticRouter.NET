@@ -23,13 +23,23 @@ public interface IRouterSetupDetector
 }
 
 /// <summary>Something <see cref="IRouterSetupDetector"/> found that the router could use.</summary>
-/// <param name="Id">A stable id, e.g. <c>claude-code</c>, <c>lmstudio</c>.</param>
-/// <param name="Title">What to call it, e.g. <c>Claude Code</c>.</param>
-/// <param name="Kind"><c>cli</c> (a subscription through a program here) or <c>local</c> (a model server on this machine).</param>
-/// <param name="ConnectorName">The connector's name, e.g. <c>claude-cli</c>.</param>
-/// <param name="Connector">The connector's settings.</param>
-public sealed record SetupDetection(string Id, string Title, string Kind, string ConnectorName, ConnectorOptions Connector)
+public sealed record SetupDetection
 {
+    /// <summary>A stable id, e.g. <c>claude-code</c>, <c>lmstudio</c>.</summary>
+    public required string Id { get; init; }
+
+    /// <summary>What to call it, e.g. <c>Claude Code</c>.</summary>
+    public required string Title { get; init; }
+
+    /// <summary><c>cli</c> (a subscription through a program here) or <c>local</c> (a model server on this machine).</summary>
+    public required string Kind { get; init; }
+
+    /// <summary>The connector's name, e.g. <c>claude-cli</c>.</summary>
+    public required string ConnectorName { get; init; }
+
+    /// <summary>The connector's settings.</summary>
+    public required ConnectorOptions Connector { get; init; }
+
     /// <summary>What was found, e.g. <c>Signed in · claude 2.1.3 at /usr/local/bin/claude</c>.</summary>
     public string? Detail { get; init; }
 

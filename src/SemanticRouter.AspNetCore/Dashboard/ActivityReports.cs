@@ -41,27 +41,43 @@ internal static class ActivityReports
             DateTimeOffset end = start + bucket;
             RoutingActivityEntry[] inBucket = entries.Where(e => e.Timestamp >= start && e.Timestamp < end).ToArray();
             double[] latencies = Latencies(inBucket);
-            buckets.Add(new ActivityBucket(
-                start,
-                inBucket.Length,
-                inBucket.Count(e => e.Outcome == "served"),
-                inBucket.Count(e => e.Outcome == "failed"),
-                inBucket.GroupBy(e => e.Tier).ToDictionary(g => g.Key.ToString(CultureInfo.InvariantCulture), g => g.Count()),
-                inBucket.Where(e => e.ServedBy is not null).GroupBy(e => e.ServedBy!, StringComparer.OrdinalIgnoreCase)
+            buckets.Add(new ActivityBucket
+            {
+                Start = start,
+                Requests = inBucket.Length,
+                Served = inBucket.Count(e => e.Outcome == "served"),
+                Failed = inBucket.Count(e => e.Outcome == "failed"),
+                ByTier = inBucket.GroupBy(e => e.Tier).ToDictionary(g => g.Key.ToString(CultureInfo.InvariantCulture), g => g.Count()),
+                ByModel = inBucket.Where(e => e.ServedBy is not null).GroupBy(e => e.ServedBy!, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase),
-                Percentile(latencies, 50),
-                Percentile(latencies, 95)));
+                P50Milliseconds = Percentile(latencies, 50),
+                P95Milliseconds = Percentile(latencies, 95),
+            });
         }
 
         double[] all = Latencies(entries);
-        return new ActivitySeries(since, until, bucket, entries.Count, Percentile(all, 50), Percentile(all, 95), Percentile(all, 99), buckets);
+        return new ActivitySeries
+        {
+            Since = since,
+            Until = until,
+            Bucket = bucket,
+            Requests = entries.Count,
+            P50Milliseconds = Percentile(all, 50),
+            P95Milliseconds = Percentile(all, 95),
+            P99Milliseconds = Percentile(all, 99),
+            Buckets = buckets,
+        };
     }
 
     /// <summary>Served requests' total times in milliseconds, ascending.</summary>
     public static double[] Latencies(IEnumerable<RoutingActivityEntry> entries) =>
         [.. entries.Where(e => e.Outcome == "served" && e.TotalMilliseconds is not null).Select(e => e.TotalMilliseconds!.Value).Order()];
 
-    /// <summary>Writes entries as CSV (RFC 4180), with or without the prompt previews.</summary>
+    /// <summary>
+    /// Writes entries as CSV (RFC 4180), with or without prompt text: the prompt previews and the <c>detail</c> column
+    /// (failover notes, which can quote a failed CLI run's output), both kept only as <see cref="StateOptions.StorePrompts"/>
+    /// allows.
+    /// </summary>
     public static string ToCsv(IEnumerable<RoutingActivityEntry> entries, bool includePrompts)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -74,7 +90,9 @@ internal static class ActivityReports
             "cache_read_tokens", "cache_creation_tokens", "cost_usd", "trace_id", "detail", "prompted_tool_calls",
             "attempt_time_to_first_byte_ms", "attempt_ms",
         ];
-        builder.Append(string.Join(',', includePrompts ? [.. header, "prompt_preview"] : header)).Append("\r\n");
+        int detail = Array.IndexOf(header, "detail");
+        string[] columns = includePrompts ? [.. header, "prompt_preview"] : [.. header[..detail], .. header[(detail + 1)..]];
+        builder.Append(string.Join(',', columns)).Append("\r\n");
         foreach (RoutingActivityEntry e in entries)
         {
             object?[] row =
@@ -85,13 +103,17 @@ internal static class ActivityReports
                 e.TotalMilliseconds, e.InputTokens, e.OutputTokens, e.CacheReadTokens, e.CacheCreationTokens, e.CostUsd, e.TraceId, e.Detail,
                 e.PromptedToolCalls, e.AttemptTimeToFirstByteMilliseconds, e.AttemptMilliseconds,
             ];
-            builder.Append(string.Join(',', (includePrompts ? [.. row, e.PromptPreview] : row).Select(Cell))).Append("\r\n");
+            object?[] cells = includePrompts ? [.. row, e.PromptPreview] : [.. row[..detail], .. row[(detail + 1)..]];
+            builder.Append(string.Join(',', cells.Select(Cell))).Append("\r\n");
         }
 
         return builder.ToString();
     }
 
-    /// <summary>Writes entries as JSON Lines, with or without the prompt previews.</summary>
+    /// <summary>
+    /// Writes entries as JSON Lines, with or without prompt text: <c>promptPreview</c>, <c>detail</c> (which can quote a
+    /// failed CLI run's output) and <c>gradeNote</c> (the judge's reason about the answer).
+    /// </summary>
     public static string ToJsonLines(IEnumerable<RoutingActivityEntry> entries, bool includePrompts)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -102,6 +124,8 @@ internal static class ActivityReports
             if (!includePrompts)
             {
                 node.Remove("promptPreview");
+                node.Remove("detail");
+                node.Remove("gradeNote");
             }
 
             builder.Append(node.ToJsonString()).Append('\n');
@@ -124,11 +148,57 @@ internal static class ActivityReports
 }
 
 /// <summary>Activity over a window.</summary>
-public sealed record ActivitySeries(
-    DateTimeOffset Since, DateTimeOffset Until, TimeSpan Bucket, int Requests, double? P50Milliseconds, double? P95Milliseconds, double? P99Milliseconds,
-    IReadOnlyList<ActivityBucket> Buckets);
+public sealed record ActivitySeries
+{
+    /// <summary>Start of the window (inclusive).</summary>
+    public required DateTimeOffset Since { get; init; }
+
+    /// <summary>End of the window (exclusive).</summary>
+    public required DateTimeOffset Until { get; init; }
+
+    /// <summary>Length of each bucket.</summary>
+    public required TimeSpan Bucket { get; init; }
+
+    /// <summary>Requests in the window.</summary>
+    public required int Requests { get; init; }
+
+    /// <summary>Median total time of the window's served requests, if any.</summary>
+    public double? P50Milliseconds { get; init; }
+
+    /// <summary>95th percentile total time of the served requests, if any.</summary>
+    public double? P95Milliseconds { get; init; }
+
+    /// <summary>99th percentile total time of the served requests, if any.</summary>
+    public double? P99Milliseconds { get; init; }
+
+    /// <summary>The window split into buckets of <see cref="Bucket"/>, oldest first.</summary>
+    public required IReadOnlyList<ActivityBucket> Buckets { get; init; }
+}
 
 /// <summary>One bucket of an <see cref="ActivitySeries"/>.</summary>
-public sealed record ActivityBucket(
-    DateTimeOffset Start, int Requests, int Served, int Failed, IReadOnlyDictionary<string, int> ByTier, IReadOnlyDictionary<string, int> ByModel,
-    double? P50Milliseconds, double? P95Milliseconds);
+public sealed record ActivityBucket
+{
+    /// <summary>Start of the bucket.</summary>
+    public required DateTimeOffset Start { get; init; }
+
+    /// <summary>Requests in the bucket.</summary>
+    public required int Requests { get; init; }
+
+    /// <summary>Requests a model served.</summary>
+    public required int Served { get; init; }
+
+    /// <summary>Requests no model could serve.</summary>
+    public required int Failed { get; init; }
+
+    /// <summary>Requests per required tier.</summary>
+    public required IReadOnlyDictionary<string, int> ByTier { get; init; }
+
+    /// <summary>Served requests per catalog model.</summary>
+    public required IReadOnlyDictionary<string, int> ByModel { get; init; }
+
+    /// <summary>Median total time of the bucket's served requests, if any.</summary>
+    public double? P50Milliseconds { get; init; }
+
+    /// <summary>95th percentile total time of the served requests, if any.</summary>
+    public double? P95Milliseconds { get; init; }
+}

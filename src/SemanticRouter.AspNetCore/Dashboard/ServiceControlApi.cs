@@ -56,49 +56,106 @@ public static class RouterServiceActions
 }
 
 /// <summary>How the router runs, for the dashboard's Service page.</summary>
-/// <param name="Listen">Where it listens, and where it will listen after a restart.</param>
-/// <param name="Background">The background service, or <see langword="null"/> when this machine has no service manager to run it.</param>
-/// <param name="RunsAs">
-/// <c>service</c> (the background service runs this router), <c>container</c>, or <c>foreground</c> (started from a
-/// terminal or by another program).
-/// </param>
-/// <param name="Actions">What the dashboard may do now (<see cref="RouterServiceActions"/>).</param>
-/// <param name="LastOutcome">How the last action that could not finish ended, when this router is still running because of it.</param>
-public sealed record RouterServiceDescription(
-    RouterListenDescription Listen, RouterBackgroundService? Background, string RunsAs, IReadOnlyList<string> Actions, RouterServiceOutcome? LastOutcome);
+public sealed record RouterServiceDescription
+{
+    /// <summary>Where it listens, and where it will listen after a restart.</summary>
+    public required RouterListenDescription Listen { get; init; }
+
+    /// <summary>The background service, or <see langword="null"/> when this machine has no service manager to run it.</summary>
+    public RouterBackgroundService? Background { get; init; }
+
+    /// <summary>
+    /// <c>service</c> (the background service runs this router), <c>container</c>, or <c>foreground</c> (started from a
+    /// terminal or by another program).
+    /// </summary>
+    public required string RunsAs { get; init; }
+
+    /// <summary>What the dashboard may do now (<see cref="RouterServiceActions"/>).</summary>
+    public required IReadOnlyList<string> Actions { get; init; }
+
+    /// <summary>How the last action that could not finish ended, when this router is still running because of it.</summary>
+    public RouterServiceOutcome? LastOutcome { get; init; }
+}
 
 /// <summary>Where the router listens.</summary>
-/// <param name="Scope"><c>local</c> (this machine only), <c>network</c> (every network interface) or <c>custom</c> (anything else) at the next start.</param>
-/// <param name="Port">The port at the next start.</param>
-/// <param name="Urls">The addresses it will listen on at the next start, as configured (<c>http://0.0.0.0:5080</c>).</param>
-/// <param name="Saved">The addresses saved from the dashboard, or <see langword="null"/> when none are.</param>
-/// <param name="File">Where the dashboard saves them.</param>
-/// <param name="PinnedBy">What decides the addresses instead of the saved setting, e.g. "the --urls option on the command line".</param>
-/// <param name="Editable">Whether the dashboard may change them (not when an environment variable, Kestrel endpoints or a container decide).</param>
-/// <param name="RestartNeeded">Whether the router listens elsewhere than it will after a restart.</param>
-public sealed record RouterListenDescription(
-    string Scope, int Port, string Urls, string? Saved, string File, string? PinnedBy, bool Editable, bool RestartNeeded);
+public sealed record RouterListenDescription
+{
+    /// <summary><c>local</c> (this machine only), <c>network</c> (every network interface) or <c>custom</c> (anything else) at the next start.</summary>
+    public required string Scope { get; init; }
+
+    /// <summary>The port at the next start.</summary>
+    public required int Port { get; init; }
+
+    /// <summary>The addresses it will listen on at the next start, as configured (<c>http://0.0.0.0:5080</c>).</summary>
+    public required string Urls { get; init; }
+
+    /// <summary>The addresses saved from the dashboard, or <see langword="null"/> when none are.</summary>
+    public string? Saved { get; init; }
+
+    /// <summary>Where the dashboard saves them.</summary>
+    public required string File { get; init; }
+
+    /// <summary>What decides the addresses instead of the saved setting, e.g. "the --urls option on the command line".</summary>
+    public string? PinnedBy { get; init; }
+
+    /// <summary>Whether the dashboard may change them (not when an environment variable, Kestrel endpoints or a container decide).</summary>
+    public required bool Editable { get; init; }
+
+    /// <summary>Whether the router listens elsewhere than it will after a restart.</summary>
+    public required bool RestartNeeded { get; init; }
+}
 
 /// <summary>The background service this machine's service manager runs.</summary>
-/// <param name="Kind">E.g. <c>systemd user service</c>, <c>launchd agent</c>, <c>Windows sign-in entry</c>.</param>
-/// <param name="Installed">Whether it is installed.</param>
-/// <param name="Status">What the service manager says about it, when installed.</param>
-/// <param name="Location">Where its definition lives.</param>
-/// <param name="LogHint">How to read what it logs.</param>
-/// <param name="Notes">What to know before installing it.</param>
-public sealed record RouterBackgroundService(string Kind, bool Installed, string? Status, string Location, string LogHint, IReadOnlyList<string> Notes);
+public sealed record RouterBackgroundService
+{
+    /// <summary>E.g. <c>systemd user service</c>, <c>launchd agent</c>, <c>Windows sign-in entry</c>.</summary>
+    public required string Kind { get; init; }
+
+    /// <summary>Whether it is installed.</summary>
+    public required bool Installed { get; init; }
+
+    /// <summary>What the service manager says about it, when installed.</summary>
+    public string? Status { get; init; }
+
+    /// <summary>Where its definition lives.</summary>
+    public required string Location { get; init; }
+
+    /// <summary>How to read what it logs.</summary>
+    public required string LogHint { get; init; }
+
+    /// <summary>What to know before installing it.</summary>
+    public required IReadOnlyList<string> Notes { get; init; }
+}
 
 /// <summary>How an action ended.</summary>
-/// <param name="Action">One of <see cref="RouterServiceActions.All"/>.</param>
-/// <param name="Succeeded">Whether it did what was asked.</param>
-/// <param name="Message">What happened, in a sentence or two.</param>
-/// <param name="At">When.</param>
-public sealed record RouterServiceOutcome(string Action, bool Succeeded, string Message, DateTimeOffset At);
+public sealed record RouterServiceOutcome
+{
+    /// <summary>One of <see cref="RouterServiceActions.All"/>.</summary>
+    public required string Action { get; init; }
+
+    /// <summary>Whether it did what was asked.</summary>
+    public required bool Succeeded { get; init; }
+
+    /// <summary>What happened, in a sentence or two.</summary>
+    public required string Message { get; init; }
+
+    /// <summary>When.</summary>
+    public required DateTimeOffset At { get; init; }
+}
 
 /// <summary>Where the router should listen from its next start.</summary>
-/// <param name="Scope"><c>local</c> (this machine only) or <c>network</c> (every network interface).</param>
-/// <param name="Port">1 to 65535.</param>
-public sealed record RouterListenChange(string Scope, int Port);
+/// <remarks>
+/// The body of <c>PUT api/service/listen</c>. Its members are not <see langword="required"/>, so a body that leaves one out
+/// gets <see cref="IRouterServiceControl.SetListenAsync"/>'s message about it rather than a binding error.
+/// </remarks>
+public sealed record RouterListenChange
+{
+    /// <summary><c>local</c> (this machine only) or <c>network</c> (every network interface).</summary>
+    public string Scope { get; init; } = string.Empty;
+
+    /// <summary>1 to 65535.</summary>
+    public int Port { get; init; }
+}
 
 /// <summary>
 /// <c>GET api/service</c>, <c>PUT api/service/listen</c> and <c>POST api/service/{action}</c>: the dashboard's Service
