@@ -85,7 +85,7 @@ Things to know:
 
 The dashboard does the same under **Admin → Service**: **Install and hand over** installs the service with the options this router runs with, stops this router and waits for the service's router to listen (when it does not, this one starts again and the page says why); **Reinstall** and **Remove the service** are there once it is installed, with **Restart** and **Stop** for whichever router you are looking at. A restart from the dashboard happens in the same process: the router stops, lets requests in flight finish, and starts again with the saved settings. Removing the service from the router it runs stops that router; from a router started in a terminal, that router keeps running. On macOS, the service's own router cannot reinstall itself (launchd would stop it first): run `service install` in a terminal.
 
-While it runs, the router records its process id and addresses in `semantic-router.instance.json`; `service status` reads it.
+While it runs, the router records its process id and addresses in `semantic-router.instance.json`; `service status` reads it. On Windows the record also names the event that stops this router cleanly, which `service stop` sets before it would end the process.
 
 ## What `init` adds
 
@@ -128,7 +128,7 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | `semantic-router.db.v<N>.bak` | The state database as it was before an upgrade migrated it from schema `N`, so the release that wrote it can be started on it again. See [Upgrading and going back](#upgrading-and-going-back). |
 | `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [Keeping secrets out of the file](dashboard.md#keeping-secrets-out-of-the-file). |
 | `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [Routing quality](routing-quality.md). |
-| `semantic-router.instance.json` | The running router's process id, addresses, start time and version. Removed when it stops. |
+| `semantic-router.instance.json` | The running router's process id, addresses, start time and version, and on Windows the event that stops it. Removed when it stops. |
 | `semantic-router.service.json`, `logs/` | Windows background service only: what the sign-in entry starts (in the configuration directory), and what it logs (in the local data directory). |
 | `models/` | Downloaded ONNX embedding models, one directory per model, in the local data directory. Copy a `models/{name}` directory there to run without internet access. |
 | `appsettings.json` (optional) | Host settings: logging, Kestrel, `SemanticRouter:Dashboard`, overrides. |

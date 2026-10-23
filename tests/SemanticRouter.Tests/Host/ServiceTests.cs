@@ -341,6 +341,7 @@ public sealed class ServiceTests : IDisposable
         instance.Should().NotBeNull();
         instance!.ProcessId.Should().Be(Environment.ProcessId);
         instance.Urls.Should().ContainSingle().Which.Should().StartWith("http://127.0.0.1:");
+        (instance.StopEvent is not null).Should().Be(OperatingSystem.IsWindows(), "a Windows router is stopped through its own event");
 
         using (var listener = new TcpListener(IPAddress.Loopback, FreePort()))
         {
@@ -385,6 +386,45 @@ public sealed class ServiceTests : IDisposable
         File.Exists(RouterInstance.PathIn(ConfigurationDirectory)).Should().BeTrue("another process's record is left alone");
         RouterInstance.Remove(ConfigurationDirectory, int.MaxValue);
         File.Exists(RouterInstance.PathIn(ConfigurationDirectory)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_stop_request_reaches_only_the_router_it_names_and_an_earlier_release_can_still_send_one()
+    {
+        // Records without a stop event come from earlier releases.
+        Directory.CreateDirectory(ConfigurationDirectory);
+        File.WriteAllText(RouterInstance.PathIn(ConfigurationDirectory),
+            """{ "processId": 4242, "urls": ["http://localhost:5080"], "startedAt": "2026-10-01T00:00:00+00:00", "version": "0.5.0" }""");
+        RouterInstance.Read(ConfigurationDirectory)!.StopEvent.Should().BeNull();
+
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // The test host runs several routers at once, and an event they share wakes only the one listening first.
+        static RouterInstance Record(int processId) =>
+            new(processId, ["http://localhost:5080"], DateTimeOffset.UtcNow, "1.0.0", RouterInstance.NewStopEventName());
+        var other = new StopRecorder();
+        var target = new StopRecorder();
+        RouterInstance named = Record(Environment.ProcessId);
+        using (Record(Environment.ProcessId).ListenForStop(other))
+        using (named.ListenForStop(target))
+        {
+            named.RequestStop().Should().BeTrue();
+            await target.Stopped.WaitAsync(TimeSpan.FromSeconds(10));
+            await Task.Delay(500);
+            other.Stopped.IsCompleted.Should().BeFalse("only the router the record names stops");
+        }
+
+        // An earlier release's `service stop` sets the process's event. A made-up process, so no other test's router hears it.
+        var current = new StopRecorder();
+        RouterInstance recorded = Record(Random.Shared.Next(1_000_000, int.MaxValue));
+        using (recorded.ListenForStop(current))
+        {
+            (recorded with { StopEvent = null }).RequestStop().Should().BeTrue();
+            await current.Stopped.WaitAsync(TimeSpan.FromSeconds(10));
+        }
     }
 
     [Fact]
@@ -484,5 +524,20 @@ public sealed class ServiceTests : IDisposable
         }
 
         public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class StopRecorder : IHostApplicationLifetime
+    {
+        private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Stopped => _stopped.Task;
+
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+
+        public CancellationToken ApplicationStopping => CancellationToken.None;
+
+        public CancellationToken ApplicationStopped => CancellationToken.None;
+
+        public void StopApplication() => _stopped.TrySetResult();
     }
 }
