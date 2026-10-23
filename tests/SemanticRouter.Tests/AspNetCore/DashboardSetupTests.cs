@@ -311,6 +311,20 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
         broken["issues"]![0]!["path"].Should().BeNull();
     }
 
+    [Fact]
+    public async Task A_document_that_names_a_property_twice_is_read_with_the_last_value()
+    {
+        HttpClient client = await StartDispatchAsync();
+        string config = (await ConfigAsync(client)).ToJsonString();
+
+        // An empty catalog first, then the real one: the second wins, as RouterConfiguration.FromJson reads it. This threw (500).
+        HttpResponseMessage twice = await client.PostAsync("/router/api/config/validate", Body("{\"Models\":[]," + config[1..]));
+        HttpResponseMessage once = await client.PostAsync("/router/api/config/validate", Body(config));
+
+        twice.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await NodeAsync(twice)).ToJsonString().Should().Be((await NodeAsync(once)).ToJsonString());
+    }
+
     [Theory]
     [InlineData("Connector 'local' MaxConcurrency must be at least 1.", "Connectors.local.MaxConcurrency")]
     [InlineData("Connector 'local' needs an absolute BaseAddress.", "Connectors.local.BaseAddress")]

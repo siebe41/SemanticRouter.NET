@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace SemanticRouter.AspNetCore;
@@ -355,6 +356,50 @@ internal static class JsonHelpers
     }
 
     public static string NewToolUseId() => "toolu_" + Guid.NewGuid().ToString("N")[..24];
+
+    /// <summary>
+    /// A client's body as a tree to edit. A property named twice keeps its last value, as
+    /// <see cref="JsonElement.TryGetProperty(string, out JsonElement)"/> reads it everywhere else; a plain
+    /// <see cref="JsonNode.Parse(ReadOnlySpan{byte}, JsonNodeOptions?, JsonDocumentOptions)"/> tree would throw
+    /// <see cref="ArgumentException"/> on first access instead. Throws <see cref="JsonException"/> when it isn't JSON.
+    /// </summary>
+    public static JsonNode? ParseEditable(ReadOnlyMemory<byte> json, JsonDocumentOptions options = default)
+    {
+        try
+        {
+            return JsonNode.Parse(json.Span, documentOptions: options with { AllowDuplicateProperties = false });
+        }
+        catch (JsonException)
+        {
+            // A repeated property name, or not JSON at all: the tolerant parse below tells them apart.
+        }
+
+        using JsonDocument document = JsonDocument.Parse(json, options);
+        return LastValueWins(document.RootElement);
+    }
+
+    /// <inheritdoc cref="ParseEditable(ReadOnlyMemory{byte}, JsonDocumentOptions)"/>
+    public static JsonNode? ParseEditable(string json, JsonDocumentOptions options = default) =>
+        ParseEditable(System.Text.Encoding.UTF8.GetBytes(json), options);
+
+    private static JsonNode? LastValueWins(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var obj = new JsonObject();
+                foreach (JsonProperty property in element.EnumerateObject())
+                {
+                    obj[property.Name] = LastValueWins(property.Value);
+                }
+
+                return obj;
+            case JsonValueKind.Array:
+                return new JsonArray([.. element.EnumerateArray().Select(LastValueWins)]);
+            default:
+                return JsonValue.Create(element.Clone());
+        }
+    }
 
     private static bool Unset(out JsonElement value)
     {

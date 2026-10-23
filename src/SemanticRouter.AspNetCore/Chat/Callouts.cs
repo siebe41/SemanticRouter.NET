@@ -175,7 +175,7 @@ internal static partial class Callouts
         JsonNode? root;
         try
         {
-            root = JsonNode.Parse(body.Span);
+            root = JsonHelpers.ParseEditable(body);
         }
         catch (JsonException)
         {
