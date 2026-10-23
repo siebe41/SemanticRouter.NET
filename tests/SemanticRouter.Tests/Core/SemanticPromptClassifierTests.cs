@@ -225,7 +225,7 @@ public class SemanticPromptClassifierTests
                 return ValueTask.FromResult<IReadOnlyList<ReadOnlyMemory<float>>>(
                     [new ReadOnlyMemory<float>(Table["hello"]), new ReadOnlyMemory<float>(Table["design a system"])]);
             });
-        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), Complexity(0.1).Object);
+        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), new SemanticPromptClassifierDependencies { ComplexityAnalyzer = Complexity(0.1).Object });
 
         Task warmUp = Task.Run(() => classifier.WarmUpAsync().AsTask());
         building.Wait(TimeSpan.FromSeconds(30)).Should().BeTrue("the warm-up starts embedding");

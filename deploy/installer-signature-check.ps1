@@ -8,11 +8,11 @@
 # - every *-Setup.exe in <dir>;
 # - from the update package SemanticRouter-<version>-<rid>-full.nupkg in <dir>, which Setup.exe installs and the
 #   installed app updates to: SemanticRouter.exe, Squirrel.exe (Velopack's updater) and SemanticRouter_ExecutionStub.exe,
-#   and every other executable image in it (a program or library: a file starting with MZ, whatever its name), as the
+#   SemanticRouter.Files.dll (the required signed data-file list), and every other executable image in it (a program or library: a file starting with MZ, whatever its name), as the
 #   desktop app checks an update with Updates:Publisher (src/SemanticRouter.Desktop/UpdatePublisher.cs).
 #
 # Who signed counts too, by the same rule as UpdatePublisher: the publisher is the certificate that signed the first
-# Setup.exe, or any certificate with the same subject (the same names in any order). The three programs above and the app's own files (SemanticRouter.*) must be signed by it; every other
+# Setup.exe, or any certificate with the same subject (the same names in any order). The programs and required list above and the app's own files (SemanticRouter.*) must be signed by it; every other
 # executable file by it or by Microsoft (UpdatePublisher.Microsoft), so a valid signature from anyone else fails.
 # The .NET host's unsigned files (*.runtimeconfig.json, *.deps.json), which UpdatePublisher also checks, are not.
 #
@@ -129,7 +129,7 @@ try {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     [IO.Compression.ZipFile]::ExtractToDirectory($package, $work)
     $app = Join-Path $work 'lib/app'
-    $named = 'SemanticRouter.exe', 'Squirrel.exe', 'SemanticRouter_ExecutionStub.exe'
+    $named = 'SemanticRouter.exe', 'Squirrel.exe', 'SemanticRouter_ExecutionStub.exe', 'SemanticRouter.Files.dll'
     foreach ($file in $named) {
         $path = Join-Path $app $file
         if (Test-Path -LiteralPath $path) {
@@ -140,7 +140,7 @@ try {
     }
 
     # The rest in one line: a self-contained app has a few hundred of them, most signed by Microsoft already. The
-    # app's own (SemanticRouter.*) must be the publisher's; the others may be Microsoft's instead. Only the three
+    # app's own (SemanticRouter.*) must be the publisher's; the others may be Microsoft's instead. Only the required
     # files checked above are left out, by their path: a file with one of their names in a subfolder is checked here.
     $others = @(Get-ChildItem -LiteralPath $app -Recurse -File |
         Where-Object { $named -notcontains [IO.Path]::GetRelativePath($app, $_.FullName) -and (Test-ExecutableImage $_.FullName) })

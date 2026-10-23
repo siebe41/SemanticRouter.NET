@@ -132,7 +132,7 @@ public sealed class TuningTests : RouterHostTest
         HttpClient client = await StartTunedAsync(smallTalk: 1, reasoning: 0, localSmallTalk: true);
         IEvaluationSetStore labels = Services.GetRequiredService<IEvaluationSetStore>();
         const string Secret = "LOCAL-SECRET";
-        labels.Save([.. labels.Load(), .. Enumerable.Range(1, 2).Select(i => new EvaluationCase(_embeddings.At($"{Secret} hi {i}", 0, 0.765f), 1) { ExpectedRoute = "smalltalk", LocalOnly = true })]);
+        labels.Save([.. labels.Load(), .. Enumerable.Range(1, 2).Select(i => new EvaluationCase { Prompt = _embeddings.At($"{Secret} hi {i}", 0, 0.765f), ExpectedTier = 1, ExpectedRoute = "smalltalk", LocalOnly = true })]);
 
         JsonElement change = Changes(await RunAsync(client)).Single();
 
