@@ -1,0 +1,18 @@
+#nullable enable
+*REMOVED*SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.OnnxEmbeddingProvider(string! modelFile, string! vocabFile, SemanticRouter.AspNetCore.EmbeddingPooling pooling = SemanticRouter.AspNetCore.EmbeddingPooling.Mean, int maxTokens = 256) -> void
+*REMOVED*SemanticRouter.Embeddings.Onnx.OnnxModelInfo.Deconstruct(out string! Name, out string! Repository, out string! Revision, out string! ModelFile, out string! ModelSha256, out long ModelBytes, out string! VocabSha256, out SemanticRouter.AspNetCore.EmbeddingPooling Pooling, out int Dimensions, out float SuggestedThreshold, out string! Description) -> void
+*REMOVED*SemanticRouter.Embeddings.Onnx.OnnxModelInfo.OnnxModelInfo(string! Name, string! Repository, string! Revision, string! ModelFile, string! ModelSha256, long ModelBytes, string! VocabSha256, SemanticRouter.AspNetCore.EmbeddingPooling Pooling, int Dimensions, float SuggestedThreshold, string! Description) -> void
+const SemanticRouter.Embeddings.Onnx.OnnxEmbeddingModels.DownloadHosts = "huggingface.co and its CDN (*.hf.co)" -> string!
+const SemanticRouter.Embeddings.Onnx.OnnxEmbeddings.Provider = "Onnx" -> string!
+const SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.TelemetryHost = "mobile.events.data.microsoft.com" -> string!
+const SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.TelemetryVariable = "ORT_DISABLE_TELEMETRY" -> string!
+SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.OnnxEmbeddingProvider(string! modelFile, string! vocabFile) -> void
+SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.OnnxEmbeddingProvider(string! modelFile, string! vocabFile, SemanticRouter.AspNetCore.EmbeddingPooling pooling) -> void
+SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.OnnxEmbeddingProvider(string! modelFile, string! vocabFile, SemanticRouter.AspNetCore.EmbeddingPooling pooling, int maxTokens) -> void
+SemanticRouter.Embeddings.Onnx.OnnxEmbeddings
+SemanticRouter.Embeddings.Onnx.OnnxModelInfo.OnnxModelInfo() -> void
+SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment
+static SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.DisableTelemetry() -> void
+static SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.TelemetrySetting.get -> string?
+static SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.TurnsTelemetryOff(string? value) -> bool
+static SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.Unavailable.get -> string?

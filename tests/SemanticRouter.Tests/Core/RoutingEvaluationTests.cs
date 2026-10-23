@@ -18,10 +18,10 @@ public class RoutingEvaluationTests
 
     private static readonly EvaluationCase[] Cases =
     [
-        new("hey", 1) { ExpectedRoute = "smalltalk" },
-        new("yo there", 1) { ExpectedRoute = "smalltalk" },
-        new("plan the architecture", 4) { ExpectedRoute = "reasoning" },
-        new("weather in paris", 3),
+        new EvaluationCase { Prompt = "hey", ExpectedTier = 1, ExpectedRoute = "smalltalk" },
+        new EvaluationCase { Prompt = "yo there", ExpectedTier = 1, ExpectedRoute = "smalltalk" },
+        new EvaluationCase { Prompt = "plan the architecture", ExpectedTier = 4, ExpectedRoute = "reasoning" },
+        new EvaluationCase { Prompt = "weather in paris", ExpectedTier = 3 },
     ];
 
     private static SemanticRouterOptions CreateOptions()
@@ -52,9 +52,9 @@ public class RoutingEvaluationTests
             {"prompt":"design it","expectedRoute":"reasoning","tier":4}
             """);
 
-        array.Should().Equal(new EvaluationCase("hi", 1) { ExpectedRoute = "smalltalk" }, new EvaluationCase("x", 3) { LocalOnly = true });
-        wrapped.Should().Equal(new EvaluationCase("hi", 1));
-        lines.Should().Equal(new EvaluationCase("hi", 1) { Note = "from activity" }, new EvaluationCase("design it", 4) { ExpectedRoute = "reasoning" });
+        array.Should().Equal(new EvaluationCase { Prompt = "hi", ExpectedTier = 1, ExpectedRoute = "smalltalk" }, new EvaluationCase { Prompt = "x", ExpectedTier = 3, LocalOnly = true });
+        wrapped.Should().Equal(new EvaluationCase { Prompt = "hi", ExpectedTier = 1 });
+        lines.Should().Equal(new EvaluationCase { Prompt = "hi", ExpectedTier = 1, Note = "from activity" }, new EvaluationCase { Prompt = "design it", ExpectedTier = 4, ExpectedRoute = "reasoning" });
         EvaluationSet.Parse(EvaluationSet.ToJsonLines(lines)).Should().Equal(lines);
     }
 
@@ -79,7 +79,7 @@ public class RoutingEvaluationTests
         report.TooLow.Should().Be(1, "'plan the architecture' falls back to tier 3");
         report.Tiers.Should().Equal(1, 3, 4);
         report.Confusion.Select(row => row.ToArray()).Should().BeEquivalentTo(new[] { new[] { 1, 1, 0 }, new[] { 0, 1, 0 }, new[] { 0, 1, 0 } }, o => o.WithStrictOrdering());
-        report.PerTier.Should().Equal(new TierAccuracy(1, 2, 1), new TierAccuracy(3, 1, 1), new TierAccuracy(4, 1, 0));
+        report.PerTier.Should().Equal(new TierAccuracy { Tier = 1, Total = 2, Correct = 1 }, new TierAccuracy { Tier = 3, Total = 1, Correct = 1 }, new TierAccuracy { Tier = 4, Total = 1, Correct = 0 });
         report.RouteLabelled.Should().Be(3);
         report.RouteCorrect.Should().Be(1);
         report.Misroutes.Select(m => m.Case.Prompt).Should().Equal("yo there", "plan the architecture");
@@ -97,7 +97,7 @@ public class RoutingEvaluationTests
 
         CalibrationReport calibration = evaluator.Calibrate(prepared);
 
-        calibration.Current.Should().Be(new CalibrationPoint(0.75f, 2, 1, 1, 4));
+        calibration.Current.Should().Be(new CalibrationPoint { Threshold = 0.75f, Correct = 2, TooLow = 1, TooHigh = 1, Total = 4 });
         calibration.Recommended.Correct.Should().Be(4);
         calibration.Recommended.Threshold.Should().Be(0.70f, "the passing range is 0.58-0.70 and ties go to the value closest to the current one");
         calibration.Sweep.Should().Contain(p => p.Threshold == 0.5f && p.Correct == 3 && p.TooHigh == 1, "below 0.58 'weather in paris' matches both routes");
@@ -115,13 +115,13 @@ public class RoutingEvaluationTests
             ["a quiet greeting"] = [0.63f, 0f, 0.776f], // smalltalk 0.63: should match
             ["design noise"] = [0f, 0.65f, 0.76f],       // reasoning 0.65: should not
         };
-        EvaluationCase[] cases = [new("a quiet greeting", 1), new("design noise", 3)];
+        EvaluationCase[] cases = [new EvaluationCase { Prompt = "a quiet greeting", ExpectedTier = 1 }, new EvaluationCase { Prompt = "design noise", ExpectedTier = 3 }];
         var evaluator = new RoutingEvaluator(FromTable(table).Object, CreateOptions(), Simple());
 
         CalibrationReport calibration = evaluator.Calibrate(await evaluator.PrepareAsync(cases));
 
         calibration.Recommended.Correct.Should().Be(1);
-        calibration.Routes.Should().ContainSingle().Which.Should().Be(new RouteThresholdRecommendation("smalltalk", null, 0.63f, 1, 2));
+        calibration.Routes.Should().ContainSingle().Which.Should().Be(new RouteThresholdRecommendation { Route = "smalltalk", Current = null, Recommended = 0.63f, CorrectBefore = 1, CorrectAfter = 2 });
         calibration.CorrectWithRoutes.Should().Be(2);
     }
 
@@ -132,7 +132,7 @@ public class RoutingEvaluationTests
         options.Routes[0].LocalOnly = true;
         var evaluator = new RoutingEvaluator(FromTable(Table).Object, options, Simple());
 
-        EvaluationReport report = await evaluator.EvaluateAsync([new("hey", 1) { LocalOnly = true }, new("weather in paris", 3) { LocalOnly = true }]);
+        EvaluationReport report = await evaluator.EvaluateAsync([new EvaluationCase { Prompt = "hey", ExpectedTier = 1, LocalOnly = true }, new EvaluationCase { Prompt = "weather in paris", ExpectedTier = 3, LocalOnly = true }]);
 
         report.Results[0].Correct.Should().BeTrue();
         report.Results[1].Correct.Should().BeFalse("tier 3 is right, but nothing keeps the prompt local");
@@ -151,9 +151,9 @@ public class RoutingEvaluationTests
         options.DefaultSimilarityThreshold = 0.9f;
         EvaluationCase[] cases =
         [
-            new("hello there, good morning", 1), new("thanks a lot for that", 1), new("translate this paragraph to French", 1),
-            new("summarize this article", 1), new("design the architecture of a payment platform", 4),
-            new("compare the trade-offs of microservices", 4), new("what is the capital of Australia?", 3),
+            new EvaluationCase { Prompt = "hello there, good morning", ExpectedTier = 1 }, new EvaluationCase { Prompt = "thanks a lot for that", ExpectedTier = 1 }, new EvaluationCase { Prompt = "translate this paragraph to French", ExpectedTier = 1 },
+            new EvaluationCase { Prompt = "summarize this article", ExpectedTier = 1 }, new EvaluationCase { Prompt = "design the architecture of a payment platform", ExpectedTier = 4 },
+            new EvaluationCase { Prompt = "compare the trade-offs of microservices", ExpectedTier = 4 }, new EvaluationCase { Prompt = "what is the capital of Australia?", ExpectedTier = 3 },
         ];
         var evaluator = new RoutingEvaluator(new HashingEmbeddingProvider(), options);
         PreparedEvaluation prepared = await evaluator.PrepareAsync(cases);

@@ -21,13 +21,32 @@ public sealed class OnnxEmbeddingProvider : IEmbeddingProvider, IDisposable
     private readonly bool _hasTokenTypes;
     private readonly string _output;
 
+    /// <summary>Loads a model that mean-pools its token vectors, for inputs up to <see cref="DefaultMaxTokens"/> tokens.</summary>
+    /// <param name="modelFile">The ONNX file (inputs <c>input_ids</c>, <c>attention_mask</c>, optionally <c>token_type_ids</c>; output the token vectors).</param>
+    /// <param name="vocabFile">The model's <c>vocab.txt</c> (uncased WordPiece).</param>
+    /// <exception cref="InvalidOperationException">ONNX Runtime cannot load on this machine (<see cref="OnnxRuntimeEnvironment.Unavailable"/>).</exception>
+    public OnnxEmbeddingProvider(string modelFile, string vocabFile)
+        : this(modelFile, vocabFile, EmbeddingPooling.Mean, DefaultMaxTokens)
+    {
+    }
+
+    /// <summary>Loads a model, for inputs up to <see cref="DefaultMaxTokens"/> tokens.</summary>
+    /// <param name="modelFile">The ONNX file (inputs <c>input_ids</c>, <c>attention_mask</c>, optionally <c>token_type_ids</c>; output the token vectors).</param>
+    /// <param name="vocabFile">The model's <c>vocab.txt</c> (uncased WordPiece).</param>
+    /// <param name="pooling">How token vectors become the sentence vector.</param>
+    /// <exception cref="InvalidOperationException">ONNX Runtime cannot load on this machine (<see cref="OnnxRuntimeEnvironment.Unavailable"/>).</exception>
+    public OnnxEmbeddingProvider(string modelFile, string vocabFile, EmbeddingPooling pooling)
+        : this(modelFile, vocabFile, pooling, DefaultMaxTokens)
+    {
+    }
+
     /// <summary>Loads a model.</summary>
     /// <param name="modelFile">The ONNX file (inputs <c>input_ids</c>, <c>attention_mask</c>, optionally <c>token_type_ids</c>; output the token vectors).</param>
     /// <param name="vocabFile">The model's <c>vocab.txt</c> (uncased WordPiece).</param>
     /// <param name="pooling">How token vectors become the sentence vector.</param>
     /// <param name="maxTokens">Longest input in tokens.</param>
     /// <exception cref="InvalidOperationException">ONNX Runtime cannot load on this machine (<see cref="OnnxRuntimeEnvironment.Unavailable"/>).</exception>
-    public OnnxEmbeddingProvider(string modelFile, string vocabFile, EmbeddingPooling pooling = EmbeddingPooling.Mean, int maxTokens = DefaultMaxTokens)
+    public OnnxEmbeddingProvider(string modelFile, string vocabFile, EmbeddingPooling pooling, int maxTokens)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modelFile);
         ArgumentException.ThrowIfNullOrWhiteSpace(vocabFile);

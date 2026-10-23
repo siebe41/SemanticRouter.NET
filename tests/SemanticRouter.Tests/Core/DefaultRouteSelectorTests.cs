@@ -51,7 +51,7 @@ public class DefaultRouteSelectorTests
     [Fact]
     public void Falls_back_when_no_routes_are_configured()
     {
-        Select(DefaultOptions(), Simple).Should().Be(new RouteDecision(3, RoutingReason.NoMatchFallback));
+        Select(DefaultOptions(), Simple).Should().Be(new RouteDecision { RequiredTier = 3, Reason = RoutingReason.NoMatchFallback });
     }
 
     [Fact]

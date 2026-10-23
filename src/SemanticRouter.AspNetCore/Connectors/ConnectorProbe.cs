@@ -28,12 +28,20 @@ public enum ConnectorProbeFailure
 }
 
 /// <summary>The outcome of <see cref="ConnectorProbe.ListModelsAsync"/>.</summary>
-/// <param name="Failure">What went wrong, or <see cref="ConnectorProbeFailure.None"/>.</param>
-/// <param name="Models">Model ids the server reported.</param>
-/// <param name="StatusCode">The HTTP status, when the server answered.</param>
-/// <param name="Message">A one-line explanation that names the setting to fix. Never contains a credential.</param>
-public sealed record ConnectorProbeResult(ConnectorProbeFailure Failure, IReadOnlyList<string> Models, int? StatusCode, string Message)
+public sealed record ConnectorProbeResult
 {
+    /// <summary>What went wrong, or <see cref="ConnectorProbeFailure.None"/>.</summary>
+    public required ConnectorProbeFailure Failure { get; init; }
+
+    /// <summary>Model ids the server reported.</summary>
+    public required IReadOnlyList<string> Models { get; init; }
+
+    /// <summary>The HTTP status, when the server answered.</summary>
+    public int? StatusCode { get; init; }
+
+    /// <summary>A one-line explanation that names the setting to fix. Never contains a credential.</summary>
+    public required string Message { get; init; }
+
     /// <summary>Whether the server answered with a model list.</summary>
     public bool Ok => Failure == ConnectorProbeFailure.None;
 
@@ -74,7 +82,12 @@ public static partial class ConnectorProbe
         ArgumentNullException.ThrowIfNull(client);
         if (connector.BaseAddress is not { IsAbsoluteUri: true } baseAddress)
         {
-            return new(ConnectorProbeFailure.Unreachable, [], null, $"SemanticRouter:Connectors:{name}:BaseAddress is not set.");
+            return new ConnectorProbeResult
+            {
+                Failure = ConnectorProbeFailure.Unreachable,
+                Models = [],
+                Message = $"SemanticRouter:Connectors:{name}:BaseAddress is not set.",
+            };
         }
 
         var uri = new Uri(baseAddress, "/v1/models");
@@ -90,34 +103,65 @@ public static partial class ConnectorProbe
             string statusText = status.ToString(CultureInfo.InvariantCulture);
             if (status is 401 or 403)
             {
-                return new(
-                    hasKey || status == 403 ? ConnectorProbeFailure.CredentialsRejected : ConnectorProbeFailure.AuthenticationRequired,
-                    [], status,
-                    $"{shown} answered HTTP {statusText}: {OpenAICompatibleConnector.CredentialAdvice(name, status, hasKey)}.");
+                return new ConnectorProbeResult
+                {
+                    Failure = hasKey || status == 403 ? ConnectorProbeFailure.CredentialsRejected : ConnectorProbeFailure.AuthenticationRequired,
+                    Models = [],
+                    StatusCode = status,
+                    Message = $"{shown} answered HTTP {statusText}: {OpenAICompatibleConnector.CredentialAdvice(name, status, hasKey)}.",
+                };
             }
 
             if (!response.IsSuccessStatusCode)
             {
-                return new(ConnectorProbeFailure.HttpError, [], status, $"{shown} answered HTTP {statusText}.");
+                return new ConnectorProbeResult
+                {
+                    Failure = ConnectorProbeFailure.HttpError,
+                    Models = [],
+                    StatusCode = status,
+                    Message = $"{shown} answered HTTP {statusText}.",
+                };
             }
 
             using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(timeoutSource.Token).ConfigureAwait(false));
             if (!json.RootElement.TryGetArray("data", out JsonElement data))
             {
-                return new(ConnectorProbeFailure.InvalidResponse, [], status, $"{shown} did not return a model list.");
+                return new ConnectorProbeResult
+                {
+                    Failure = ConnectorProbeFailure.InvalidResponse,
+                    Models = [],
+                    StatusCode = status,
+                    Message = $"{shown} did not return a model list.",
+                };
             }
 
             DiscoveredModel[] details = data.EnumerateArray().Select(ReadListedModel).OfType<DiscoveredModel>().ToArray();
-            return new(ConnectorProbeFailure.None, details.Select(d => d.Id).ToArray(), status, $"{shown}: {details.Length} model(s).") { Details = details };
+            return new ConnectorProbeResult
+            {
+                Failure = ConnectorProbeFailure.None,
+                Models = details.Select(d => d.Id).ToArray(),
+                StatusCode = status,
+                Message = $"{shown}: {details.Length} model(s).",
+                Details = details,
+            };
         }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            return new(ConnectorProbeFailure.Unreachable, [], null,
-                $"{shown} is not reachable ({(ex is OperationCanceledException ? "timed out" : ex.Message.TrimEnd('.'))}). {StartHint(name, baseAddress)}");
+            return new ConnectorProbeResult
+            {
+                Failure = ConnectorProbeFailure.Unreachable,
+                Models = [],
+                Message = $"{shown} is not reachable ({(ex is OperationCanceledException ? "timed out" : ex.Message.TrimEnd('.'))}). {StartHint(name, baseAddress)}",
+            };
         }
         catch (JsonException)
         {
-            return new(ConnectorProbeFailure.InvalidResponse, [], null, $"{shown} did not return JSON.");
+            return new ConnectorProbeResult
+            {
+                Failure = ConnectorProbeFailure.InvalidResponse,
+                Models = [],
+                Message = $"{shown} did not return JSON.",
+            };
         }
     }
 
@@ -192,8 +236,9 @@ public static partial class ConnectorProbe
 
         int? context = item.GetInt("max_input_tokens") ?? item.GetInt("context_length") ?? item.GetInt("max_context_length")
             ?? item.GetInt("max_model_len") ?? item.GetInt("context_window");
-        return new DiscoveredModel(id)
+        return new DiscoveredModel
         {
+            Id = id,
             Kind = LooksLikeEmbedding(id) ? DiscoveredModelKind.Embedding : DiscoveredModelKind.Chat,
             MaxContextLength = context,
             ParametersBillions = ParametersFromId(id),

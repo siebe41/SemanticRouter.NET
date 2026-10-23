@@ -1,0 +1,41 @@
+#nullable enable
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateBuilderExtensions
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.ActivityMaxAge.get -> System.TimeSpan
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.ActivityMaxAge.set -> void
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.ActivityMaxEntries.get -> int
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.ActivityMaxEntries.set -> void
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.AffinityWindow.get -> System.TimeSpan
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.AffinityWindow.set -> void
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.AuditRetention.get -> System.TimeSpan
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.AuditRetention.set -> void
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.BusyTimeout.get -> System.TimeSpan
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.BusyTimeout.set -> void
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.HistoryMaxEntries.get -> int
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.HistoryMaxEntries.set -> void
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.Path.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.Path.set -> void
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.SqliteStateOptions() -> void
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.UsageRetention.get -> System.TimeSpan
+*REMOVED*SemanticRouter.AspNetCore.SqliteStateOptions.UsageRetention.set -> void
+*REMOVED*static SemanticRouter.AspNetCore.SqliteStateBuilderExtensions.UseSqliteState(this SemanticRouter.AspNetCore.SemanticRouterBuilder! builder, string! path, System.Action<SemanticRouter.AspNetCore.SqliteStateOptions!>? configure = null) -> SemanticRouter.AspNetCore.SemanticRouterBuilder!
+Microsoft.Extensions.DependencyInjection.SqliteStateBuilderExtensions
+SemanticRouter.Storage.Sqlite.SqliteStateOptions
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.ActivityMaxAge.get -> System.TimeSpan
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.ActivityMaxAge.set -> void
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.ActivityMaxEntries.get -> int
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.ActivityMaxEntries.set -> void
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.AffinityWindow.get -> System.TimeSpan
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.AffinityWindow.set -> void
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.AuditRetention.get -> System.TimeSpan
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.AuditRetention.set -> void
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.BusyTimeout.get -> System.TimeSpan
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.BusyTimeout.set -> void
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.HistoryMaxEntries.get -> int
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.HistoryMaxEntries.set -> void
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.Path.get -> string!
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.Path.set -> void
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.SqliteStateOptions() -> void
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.UsageRetention.get -> System.TimeSpan
+SemanticRouter.Storage.Sqlite.SqliteStateOptions.UsageRetention.set -> void
+static Microsoft.Extensions.DependencyInjection.SqliteStateBuilderExtensions.UseSqliteState(this SemanticRouter.AspNetCore.SemanticRouterBuilder! builder, string! path, System.Action<SemanticRouter.Storage.Sqlite.SqliteStateOptions!>? configure = null) -> SemanticRouter.AspNetCore.SemanticRouterBuilder!

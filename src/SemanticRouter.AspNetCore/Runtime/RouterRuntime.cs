@@ -669,12 +669,21 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         IEmbeddingProvider embeddings = ResolveCustom<IEmbeddingProvider>() ?? CreateEmbeddingProvider(resolved.Embeddings);
         IComplexityAnalyzer complexity = ResolveCustom<IComplexityAnalyzer>() ?? new HeuristicComplexityAnalyzer(configuration.Complexity);
         IRouteSelector routeSelector = ResolveCustom<IRouteSelector>() ?? new DefaultRouteSelector(configuration);
-        IPromptClassifier classifier = ResolveCustom<IPromptClassifier>() ?? new SemanticPromptClassifier(embeddings, configuration, complexity, routeSelector);
+        IPromptClassifier classifier = ResolveCustom<IPromptClassifier>() ?? new SemanticPromptClassifier(
+            embeddings, configuration, new SemanticPromptClassifierDependencies { ComplexityAnalyzer = complexity, RouteSelector = routeSelector });
         IModelResidency? residency = _services.GetService<IModelResidency>();
         (residency as ModelResidencyTracker)?.Configure(resolved);
-        IModelSelector modelSelector = ResolveCustom<IModelSelector>() ?? new DefaultModelSelector(configuration.Selection, latency, cache, residency);
+        IModelSelector modelSelector = ResolveCustom<IModelSelector>() ?? new DefaultModelSelector(
+            configuration.Selection, new DefaultModelSelectorDependencies { Latency = latency, CacheShare = cache, Residency = residency });
         IModelHealth health = _services.GetRequiredService<IModelHealth>();
-        IPromptRouter router = ResolveCustom<IPromptRouter>() ?? new PromptRouter(classifier, configuration, modelSelector, health, _services.GetService<TimeProvider>(), _services.GetService<IModelReliability>(), latency);
+        IPromptRouter router = ResolveCustom<IPromptRouter>() ?? new PromptRouter(classifier, configuration, new PromptRouterDependencies
+        {
+            Selector = modelSelector,
+            Health = health,
+            Time = _services.GetService<TimeProvider>(),
+            Reliability = _services.GetService<IModelReliability>(),
+            Latency = latency,
+        });
         IPromptExtractor extractor = ResolveCustom<IPromptExtractor>() ?? new JsonPromptExtractor(
             configuration.Middleware.MessageSelection, configuration.Middleware.StripSystemReminders, configuration.Middleware.InjectedTags);
 

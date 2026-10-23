@@ -41,20 +41,32 @@ internal static class ActivityReports
             DateTimeOffset end = start + bucket;
             RoutingActivityEntry[] inBucket = entries.Where(e => e.Timestamp >= start && e.Timestamp < end).ToArray();
             double[] latencies = Latencies(inBucket);
-            buckets.Add(new ActivityBucket(
-                start,
-                inBucket.Length,
-                inBucket.Count(e => e.Outcome == "served"),
-                inBucket.Count(e => e.Outcome == "failed"),
-                inBucket.GroupBy(e => e.Tier).ToDictionary(g => g.Key.ToString(CultureInfo.InvariantCulture), g => g.Count()),
-                inBucket.Where(e => e.ServedBy is not null).GroupBy(e => e.ServedBy!, StringComparer.OrdinalIgnoreCase)
+            buckets.Add(new ActivityBucket
+            {
+                Start = start,
+                Requests = inBucket.Length,
+                Served = inBucket.Count(e => e.Outcome == "served"),
+                Failed = inBucket.Count(e => e.Outcome == "failed"),
+                ByTier = inBucket.GroupBy(e => e.Tier).ToDictionary(g => g.Key.ToString(CultureInfo.InvariantCulture), g => g.Count()),
+                ByModel = inBucket.Where(e => e.ServedBy is not null).GroupBy(e => e.ServedBy!, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase),
-                Percentile(latencies, 50),
-                Percentile(latencies, 95)));
+                P50Milliseconds = Percentile(latencies, 50),
+                P95Milliseconds = Percentile(latencies, 95),
+            });
         }
 
         double[] all = Latencies(entries);
-        return new ActivitySeries(since, until, bucket, entries.Count, Percentile(all, 50), Percentile(all, 95), Percentile(all, 99), buckets);
+        return new ActivitySeries
+        {
+            Since = since,
+            Until = until,
+            Bucket = bucket,
+            Requests = entries.Count,
+            P50Milliseconds = Percentile(all, 50),
+            P95Milliseconds = Percentile(all, 95),
+            P99Milliseconds = Percentile(all, 99),
+            Buckets = buckets,
+        };
     }
 
     /// <summary>Served requests' total times in milliseconds, ascending.</summary>
@@ -136,11 +148,57 @@ internal static class ActivityReports
 }
 
 /// <summary>Activity over a window.</summary>
-public sealed record ActivitySeries(
-    DateTimeOffset Since, DateTimeOffset Until, TimeSpan Bucket, int Requests, double? P50Milliseconds, double? P95Milliseconds, double? P99Milliseconds,
-    IReadOnlyList<ActivityBucket> Buckets);
+public sealed record ActivitySeries
+{
+    /// <summary>Start of the window (inclusive).</summary>
+    public required DateTimeOffset Since { get; init; }
+
+    /// <summary>End of the window (exclusive).</summary>
+    public required DateTimeOffset Until { get; init; }
+
+    /// <summary>Length of each bucket.</summary>
+    public required TimeSpan Bucket { get; init; }
+
+    /// <summary>Requests in the window.</summary>
+    public required int Requests { get; init; }
+
+    /// <summary>Median total time of the window's served requests, if any.</summary>
+    public double? P50Milliseconds { get; init; }
+
+    /// <summary>95th percentile total time of the served requests, if any.</summary>
+    public double? P95Milliseconds { get; init; }
+
+    /// <summary>99th percentile total time of the served requests, if any.</summary>
+    public double? P99Milliseconds { get; init; }
+
+    /// <summary>The window split into buckets of <see cref="Bucket"/>, oldest first.</summary>
+    public required IReadOnlyList<ActivityBucket> Buckets { get; init; }
+}
 
 /// <summary>One bucket of an <see cref="ActivitySeries"/>.</summary>
-public sealed record ActivityBucket(
-    DateTimeOffset Start, int Requests, int Served, int Failed, IReadOnlyDictionary<string, int> ByTier, IReadOnlyDictionary<string, int> ByModel,
-    double? P50Milliseconds, double? P95Milliseconds);
+public sealed record ActivityBucket
+{
+    /// <summary>Start of the bucket.</summary>
+    public required DateTimeOffset Start { get; init; }
+
+    /// <summary>Requests in the bucket.</summary>
+    public required int Requests { get; init; }
+
+    /// <summary>Requests a model served.</summary>
+    public required int Served { get; init; }
+
+    /// <summary>Requests no model could serve.</summary>
+    public required int Failed { get; init; }
+
+    /// <summary>Requests per required tier.</summary>
+    public required IReadOnlyDictionary<string, int> ByTier { get; init; }
+
+    /// <summary>Served requests per catalog model.</summary>
+    public required IReadOnlyDictionary<string, int> ByModel { get; init; }
+
+    /// <summary>Median total time of the bucket's served requests, if any.</summary>
+    public double? P50Milliseconds { get; init; }
+
+    /// <summary>95th percentile total time of the served requests, if any.</summary>
+    public double? P95Milliseconds { get; init; }
+}

@@ -4,9 +4,14 @@ using System.Text.Json;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>One chat message, flattened to text.</summary>
-/// <param name="Role"><c>system</c>, <c>developer</c>, <c>user</c>, <c>assistant</c> or <c>tool</c>.</param>
-/// <param name="Content">The message's text parts joined with newlines.</param>
-public sealed record ChatMessage(string Role, string Content);
+public sealed record ChatMessage
+{
+    /// <summary><c>system</c>, <c>developer</c>, <c>user</c>, <c>assistant</c> or <c>tool</c>.</summary>
+    public required string Role { get; init; }
+
+    /// <summary>The message's text parts joined with newlines.</summary>
+    public required string Content { get; init; }
+}
 
 /// <summary>
 /// A chat request in a protocol-neutral shape: what the router needs to classify it, and what a connector needs to
@@ -141,11 +146,13 @@ public sealed partial class ChatCompletionRequest
                 var blocks = new List<ContentBlock>();
                 if (role == "tool")
                 {
-                    blocks.Add(new ToolResultBlock(
-                        message.GetString("tool_call_id") ?? string.Empty,
-                        message.TryGetProperty("content", out JsonElement toolContent) ? ReadOpenAIContent(toolContent, null, ref hasImages) : string.Empty,
-                        IsError: false));
-                    turns.Add(new ChatTurn("user", blocks));
+                    blocks.Add(new ToolResultBlock
+                    {
+                        ToolUseId = message.GetString("tool_call_id") ?? string.Empty,
+                        Content = message.TryGetProperty("content", out JsonElement toolContent) ? ReadOpenAIContent(toolContent, null, ref hasImages) : string.Empty,
+                        IsError = false,
+                    });
+                    turns.Add(new ChatTurn { Role = "user", Blocks = blocks });
                     continue;
                 }
 
@@ -159,14 +166,16 @@ public sealed partial class ChatCompletionRequest
                     foreach (JsonElement call in calls.EnumerateArray())
                     {
                         call.TryGetObject("function", out JsonElement function);
-                        blocks.Add(new ToolUseBlock(
-                            call.GetString("id") is { Length: > 0 } id ? id : JsonHelpers.NewToolUseId(),
-                            function.GetString("name") ?? string.Empty,
-                            JsonHelpers.EnsureJsonObject(function.GetString("arguments"))));
+                        blocks.Add(new ToolUseBlock
+                        {
+                            Id = call.GetString("id") is { Length: > 0 } id ? id : JsonHelpers.NewToolUseId(),
+                            Name = function.GetString("name") ?? string.Empty,
+                            InputJson = JsonHelpers.EnsureJsonObject(function.GetString("arguments")),
+                        });
                     }
                 }
 
-                turns.Add(new ChatTurn(role == "developer" ? "system" : role, blocks));
+                turns.Add(new ChatTurn { Role = role == "developer" ? "system" : role, Blocks = blocks });
             }
         }
         else if (root.GetString("prompt") is { } prompt)
@@ -182,10 +191,12 @@ public sealed partial class ChatCompletionRequest
                 JsonElement function = tool.TryGetObject("function", out JsonElement f) ? f : tool;
                 if (function.GetString("name") is { Length: > 0 } name)
                 {
-                    tools.Add(new ToolDefinition(
-                        name,
-                        function.GetString("description"),
-                        function.TryGetObject("parameters", out JsonElement parameters) ? parameters.GetRawText() : """{"type":"object","properties":{}}"""));
+                    tools.Add(new ToolDefinition
+                    {
+                        Name = name,
+                        Description = function.GetString("description"),
+                        InputSchemaJson = function.TryGetObject("parameters", out JsonElement parameters) ? parameters.GetRawText() : """{"type":"object","properties":{}}""",
+                    });
                 }
             }
         }
@@ -195,10 +206,12 @@ public sealed partial class ChatCompletionRequest
             {
                 if (function.GetString("name") is { Length: > 0 } name)
                 {
-                    tools.Add(new ToolDefinition(
-                        name,
-                        function.GetString("description"),
-                        function.TryGetObject("parameters", out JsonElement parameters) ? parameters.GetRawText() : """{"type":"object","properties":{}}"""));
+                    tools.Add(new ToolDefinition
+                    {
+                        Name = name,
+                        Description = function.GetString("description"),
+                        InputSchemaJson = function.TryGetObject("parameters", out JsonElement parameters) ? parameters.GetRawText() : """{"type":"object","properties":{}}""",
+                    });
                 }
             }
         }
@@ -210,12 +223,12 @@ public sealed partial class ChatCompletionRequest
             {
                 JsonValueKind.String => choice.GetString() switch
                 {
-                    "none" => new ToolChoice(ToolChoiceMode.None),
-                    "required" => new ToolChoice(ToolChoiceMode.Required),
+                    "none" => new ToolChoice { Mode = ToolChoiceMode.None },
+                    "required" => new ToolChoice { Mode = ToolChoiceMode.Required },
                     _ => default,
                 },
                 JsonValueKind.Object when choice.TryGetObject("function", out JsonElement fn) && fn.GetString("name") is { } name
-                    => new ToolChoice(ToolChoiceMode.Named, name),
+                    => new ToolChoice { Mode = ToolChoiceMode.Named, Name = name },
                 _ => default,
             };
         }
@@ -245,7 +258,7 @@ public sealed partial class ChatCompletionRequest
         return Finish(new ChatCompletionRequest
         {
             Protocol = ChatProtocol.OpenAI,
-            Reasoning = root.GetString("reasoning_effort") is { } effort ? new ReasoningRequest(effort, null) : null,
+            Reasoning = root.GetString("reasoning_effort") is { } effort ? new ReasoningRequest { Effort = effort } : null,
             ResponseFormat = root.TryGetObject("response_format", out JsonElement format) ? ReadResponseFormat(format, nested: true) : null,
             ParallelToolCalls = root.TryGetProperty("parallel_tool_calls", out JsonElement parallel) && parallel.ValueKind == JsonValueKind.False ? false : null,
             ProtocolOnlyFeatures = protocolOnly,
@@ -280,7 +293,7 @@ public sealed partial class ChatCompletionRequest
             List<ContentBlock> systemBlocks = ReadAnthropicSystem(system);
             if (systemBlocks.Count > 0)
             {
-                turns.Add(new ChatTurn("system", systemBlocks));
+                turns.Add(new ChatTurn { Role = "system", Blocks = systemBlocks });
             }
         }
 
@@ -300,7 +313,7 @@ public sealed partial class ChatCompletionRequest
                     ReadAnthropicContent(content, blocks, ref hasImages);
                 }
 
-                turns.Add(new ChatTurn(role, blocks));
+                turns.Add(new ChatTurn { Role = role, Blocks = blocks });
             }
         }
 
@@ -311,11 +324,11 @@ public sealed partial class ChatCompletionRequest
             {
                 if (tool.GetString("name") is { Length: > 0 } name)
                 {
-                    tools.Add(new ToolDefinition(
-                        name,
-                        tool.GetString("description"),
-                        tool.TryGetObject("input_schema", out JsonElement schema) ? schema.GetRawText() : """{"type":"object","properties":{}}""")
+                    tools.Add(new ToolDefinition
                     {
+                        Name = name,
+                        Description = tool.GetString("description"),
+                        InputSchemaJson = tool.TryGetObject("input_schema", out JsonElement schema) ? schema.GetRawText() : """{"type":"object","properties":{}}""",
                         CacheControl = ReadCacheControl(tool),
                     });
                 }
@@ -329,9 +342,9 @@ public sealed partial class ChatCompletionRequest
             parallelToolCalls = choice.GetBool("disable_parallel_tool_use") ? false : null;
             toolChoice = choice.GetString("type") switch
             {
-                "none" => new ToolChoice(ToolChoiceMode.None),
-                "any" => new ToolChoice(ToolChoiceMode.Required),
-                "tool" => new ToolChoice(ToolChoiceMode.Named, choice.GetString("name")),
+                "none" => new ToolChoice { Mode = ToolChoiceMode.None },
+                "any" => new ToolChoice { Mode = ToolChoiceMode.Required },
+                "tool" => new ToolChoice { Mode = ToolChoiceMode.Named, Name = choice.GetString("name") },
                 _ => default,
             };
         }
@@ -356,7 +369,7 @@ public sealed partial class ChatCompletionRequest
         }
 
         ReasoningRequest? reasoning = root.TryGetObject("thinking", out JsonElement thinking) && thinking.GetString("type") is "enabled" or "adaptive"
-            ? new ReasoningRequest(null, thinking.GetInt("budget_tokens"))
+            ? new ReasoningRequest { BudgetTokens = thinking.GetInt("budget_tokens") }
             : null;
 
         return Finish(new ChatCompletionRequest
@@ -404,7 +417,7 @@ public sealed partial class ChatCompletionRequest
             string text = turn.Text;
             if (text.Length > 0 || turn.Blocks.Count == 0)
             {
-                messages.Add(new ChatMessage(turn.Role, text));
+                messages.Add(new ChatMessage { Role = turn.Role, Content = text });
             }
         }
 
@@ -451,14 +464,16 @@ public sealed partial class ChatCompletionRequest
         switch (format.GetString("type"))
         {
             case "json_object":
-                return new ResponseFormat(ResponseFormatKind.JsonObject);
+                return new ResponseFormat { Kind = ResponseFormatKind.JsonObject };
             case "json_schema":
                 JsonElement holder = nested && format.TryGetObject("json_schema", out JsonElement inner) ? inner : format;
-                return new ResponseFormat(
-                    ResponseFormatKind.JsonSchema,
-                    holder.GetString("name"),
-                    holder.TryGetObject("schema", out JsonElement schema) ? schema.GetRawText() : """{"type":"object"}""",
-                    holder.GetBool("strict"));
+                return new ResponseFormat
+                {
+                    Kind = ResponseFormatKind.JsonSchema,
+                    Name = holder.GetString("name"),
+                    SchemaJson = holder.TryGetObject("schema", out JsonElement schema) ? schema.GetRawText() : """{"type":"object"}""",
+                    Strict = holder.GetBool("strict"),
+                };
             default:
                 return null;
         }
@@ -490,7 +505,7 @@ public sealed partial class ChatCompletionRequest
             string text = content.GetString()!;
             if (text.Length > 0)
             {
-                blocks?.Add(new TextBlock(text));
+                blocks?.Add(new TextBlock { Text = text });
             }
 
             return text;
@@ -507,7 +522,7 @@ public sealed partial class ChatCompletionRequest
             if (part.ValueKind == JsonValueKind.String)
             {
                 Append(builder, part.GetString());
-                blocks?.Add(new TextBlock(part.GetString()!));
+                blocks?.Add(new TextBlock { Text = part.GetString()! });
                 continue;
             }
 
@@ -526,7 +541,7 @@ public sealed partial class ChatCompletionRequest
             else if (part.GetString("text") is { } text)
             {
                 Append(builder, text);
-                blocks?.Add(new TextBlock(text));
+                blocks?.Add(new TextBlock { Text = text });
             }
         }
 
@@ -541,11 +556,11 @@ public sealed partial class ChatCompletionRequest
             int semicolon = url.IndexOf(';', StringComparison.Ordinal);
             if (comma > 0 && semicolon > 5 && semicolon < comma)
             {
-                return new ImageBlock(url[5..semicolon], url[(comma + 1)..], null);
+                return new ImageBlock { MediaType = url[5..semicolon], Data = url[(comma + 1)..] };
             }
         }
 
-        return new ImageBlock(null, null, url);
+        return new ImageBlock { Url = url };
     }
 
     /// <summary>Reads <c>system</c> (a string or text blocks), one block per part so markers keep their place.</summary>
@@ -556,7 +571,7 @@ public sealed partial class ChatCompletionRequest
         {
             if (value.GetString() is { Length: > 0 } text)
             {
-                blocks.Add(new TextBlock(text));
+                blocks.Add(new TextBlock { Text = text });
             }
         }
         else if (value.ValueKind == JsonValueKind.Array)
@@ -565,11 +580,11 @@ public sealed partial class ChatCompletionRequest
             {
                 if (part.ValueKind == JsonValueKind.String && part.GetString() is { Length: > 0 } plain)
                 {
-                    blocks.Add(new TextBlock(plain));
+                    blocks.Add(new TextBlock { Text = plain });
                 }
                 else if (part.GetString("type") == "text" && part.GetString("text") is { Length: > 0 } text)
                 {
-                    blocks.Add(new TextBlock(text) { CacheControl = ReadCacheControl(part) });
+                    blocks.Add(new TextBlock { Text = text, CacheControl = ReadCacheControl(part) });
                 }
             }
         }
@@ -587,7 +602,7 @@ public sealed partial class ChatCompletionRequest
         {
             if (content.GetString() is { Length: > 0 } text)
             {
-                blocks.Add(new TextBlock(text));
+                blocks.Add(new TextBlock { Text = text });
             }
 
             return;
@@ -610,7 +625,7 @@ public sealed partial class ChatCompletionRequest
                 case "text":
                     if (part.GetString("text") is { } text)
                     {
-                        blocks.Add(new TextBlock(text) { CacheControl = ReadCacheControl(part) });
+                        blocks.Add(new TextBlock { Text = text, CacheControl = ReadCacheControl(part) });
                     }
 
                     break;
@@ -619,17 +634,17 @@ public sealed partial class ChatCompletionRequest
                     hasImages = true;
                     part.TryGetObject("source", out JsonElement source);
                     ImageBlock image = source.GetString("type") == "url"
-                        ? new ImageBlock(null, null, source.GetString("url"))
-                        : new ImageBlock(source.GetString("media_type"), source.GetString("data"), null);
+                        ? new ImageBlock { Url = source.GetString("url") }
+                        : new ImageBlock { MediaType = source.GetString("media_type"), Data = source.GetString("data") };
                     blocks.Add(image with { CacheControl = ReadCacheControl(part) });
                     break;
 
                 case "tool_use":
-                    blocks.Add(new ToolUseBlock(
-                        part.GetString("id") is { Length: > 0 } id ? id : JsonHelpers.NewToolUseId(),
-                        part.GetString("name") ?? string.Empty,
-                        part.TryGetObject("input", out JsonElement input) ? input.GetRawText() : "{}")
+                    blocks.Add(new ToolUseBlock
                     {
+                        Id = part.GetString("id") is { Length: > 0 } id ? id : JsonHelpers.NewToolUseId(),
+                        Name = part.GetString("name") ?? string.Empty,
+                        InputJson = part.TryGetObject("input", out JsonElement input) ? input.GetRawText() : "{}",
                         CacheControl = ReadCacheControl(part),
                     });
                     break;
@@ -640,18 +655,21 @@ public sealed partial class ChatCompletionRequest
                         ? ReadToolResultContent(resultContent, ref nestedImages)
                         : string.Empty;
                     hasImages |= nestedImages;
-                    blocks.Add(new ToolResultBlock(part.GetString("tool_use_id") ?? string.Empty, result, part.GetBool("is_error"))
+                    blocks.Add(new ToolResultBlock
                     {
+                        ToolUseId = part.GetString("tool_use_id") ?? string.Empty,
+                        Content = result,
+                        IsError = part.GetBool("is_error"),
                         CacheControl = ReadCacheControl(part),
                     });
                     break;
 
                 case "thinking":
-                    blocks.Add(new ThinkingBlock(part.GetString("thinking") ?? string.Empty, part.GetString("signature")));
+                    blocks.Add(new ThinkingBlock { Text = part.GetString("thinking") ?? string.Empty, Signature = part.GetString("signature") });
                     break;
 
                 case "redacted_thinking":
-                    blocks.Add(new ThinkingBlock(string.Empty, null, part.GetString("data")));
+                    blocks.Add(new ThinkingBlock { Text = string.Empty, RedactedData = part.GetString("data") });
                     break;
 
                 default:

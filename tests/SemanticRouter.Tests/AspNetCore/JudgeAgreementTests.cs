@@ -34,7 +34,7 @@ public sealed class JudgeAgreementTests
         ];
         EvaluationCase[] labels =
         [
-            new("fix the race in the scheduler", 3), new("say hello", 1), new("design the ledger", 4), new("summarize this", 2), new("a cut preview", 1),
+            new EvaluationCase { Prompt = "fix the race in the scheduler", ExpectedTier = 3 }, new EvaluationCase { Prompt = "say hello", ExpectedTier = 1 }, new EvaluationCase { Prompt = "design the ledger", ExpectedTier = 4 }, new EvaluationCase { Prompt = "summarize this", ExpectedTier = 2 }, new EvaluationCase { Prompt = "a cut preview", ExpectedTier = 1 },
         ];
 
         JudgeAgreementReport report = JudgeAgreement.Measure(entries, labels, Models, failingGrade: 2, new TuningOptions { JudgeAgreementPairs = 4 });
@@ -50,7 +50,7 @@ public sealed class JudgeAgreementTests
     public void Too_few_pairs_leave_the_judges_weight_as_configured()
     {
         JudgeAgreementReport report = JudgeAgreement.Measure(
-            [Graded(1, "say hello", "small", 2)], [new EvaluationCase("say hello", 1)], Models, failingGrade: 2, new TuningOptions());
+            [Graded(1, "say hello", "small", 2)], [new EvaluationCase { Prompt = "say hello", ExpectedTier = 1 }], Models, failingGrade: 2, new TuningOptions());
 
         (report.Pairs, report.Agreeing, report.Applied, report.EffectiveWeight).Should().Be((1, 0, false, 0.75));
     }

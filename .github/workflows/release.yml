@@ -791,6 +791,12 @@ jobs:
         shell: pwsh
         run: ./deploy/check-signature-windows.ps1 installers/win-x64 -Required:($env:SIGNING -eq 'signed')
 
+      # A release meant to be signed uploads nothing whose signature does not check out: the installer, and the
+      # programs in the update package it installs (deploy/installer-signature-check.ps1).
+      - name: Check the signatures
+        shell: pwsh
+        run: deploy/installer-signature-check.ps1 -Installers installers/win-x64 -Version ($env:GITHUB_REF_NAME -replace '^v', '')
+
       - name: Attach
         shell: bash
         env:
@@ -863,14 +869,21 @@ jobs:
             PUBLISH_DIR="published/$rid" deploy/package-installer.sh "$rid" "${GITHUB_REF_NAME#v}" "installers/$rid"
           done
 
-      # A release meant to be signed uploads nothing whose signature or notarization ticket does not check out.
-      - name: Check the signature
+      # A release meant to be signed uploads nothing whose signature or notarization ticket does not check out: the
+      # installer, the app in it, and the app in the update package, each signed by this team
+      # (deploy/installer-signature-check.sh).
+      - name: Check the signatures
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           required=()
           if [ "$SIGNING" = signed ]; then
             required=(--required)
           fi
           deploy/check-signature-macos.sh ${required[@]+"${required[@]}"} installers/osx-arm64 installers/osx-x64
+          for rid in osx-arm64 osx-x64; do
+            deploy/installer-signature-check.sh "installers/$rid" "${GITHUB_REF_NAME#v}" "$rid"
+          done
 
       - name: Attach
         env:

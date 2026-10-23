@@ -129,8 +129,9 @@ public static partial class ConnectorProbe
             }
 
             string? state = item.GetString("state");
-            downloaded[id] = new DiscoveredModel(id)
+            downloaded[id] = new DiscoveredModel
             {
+                Id = id,
                 Kind = kind,
                 Listed = listedIds.Contains(id),
                 Loaded = state is null ? null : state.Equals("loaded", StringComparison.OrdinalIgnoreCase),
@@ -217,7 +218,10 @@ public static partial class ConnectorProbe
             }
         }
 
-        DiscoveredModel[] models = listed.Details.Count > 0 ? [.. listed.Details] : sizes.Keys.Select(id => new DiscoveredModel(id)).ToArray();
+        DiscoveredModel[] models = listed.Details.Count > 0 ? [.. listed.Details] : sizes.Keys.Select(id => new DiscoveredModel
+        {
+            Id = id,
+        }).ToArray();
         (string[] Capabilities, int? Context)?[] shown = await Task.WhenAll(models.Take(MaxOllamaShowRequests)
             .Select(m => ShowOllamaModelAsync(client, connector, m.Id, cancellationToken))).ConfigureAwait(false);
 

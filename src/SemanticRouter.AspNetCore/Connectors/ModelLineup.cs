@@ -185,7 +185,7 @@ internal static partial class ModelLineup
                 {
                     Ok = true,
                     Note = found.Count == 0 ? "The provider listed no models." : null,
-                    Entries = Suggest(connector, options, found.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, models, families),
+                    Entries = Suggest(connector, options, found.Select(id => new DiscoveredModel { Id = id }).ToArray(), ModelLoading.Unknown, models, families),
                 };
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or HttpRequestException or TimeoutException or OperationCanceledException
@@ -206,7 +206,7 @@ internal static partial class ModelLineup
                 Note = ids.Count > 0
                     ? "A CLI has no model list to ask; these are the names its preset accepts. Any other model id the CLI knows works too."
                     : "A custom CLI has no model list to ask; add models by the names it accepts.",
-                Entries = Suggest(connector, options, ids.Select(id => new DiscoveredModel(id)).ToArray(), ModelLoading.Unknown, models, families),
+                Entries = Suggest(connector, options, ids.Select(id => new DiscoveredModel { Id = id }).ToArray(), ModelLoading.Unknown, models, families),
             };
         }
 

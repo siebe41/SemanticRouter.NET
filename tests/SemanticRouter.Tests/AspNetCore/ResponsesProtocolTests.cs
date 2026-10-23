@@ -52,14 +52,24 @@ public sealed class ResponsesProtocolTests
         request.Tools[0].Description.Should().Contain("lark grammar");
         request.Tools[2].Namespace.Should().Be("collaboration");
         request.Tools[2].OriginalName.Should().Be("list_agents");
-        request.Reasoning.Should().Be(new ReasoningRequest("low", null));
+        request.Reasoning.Should().Be(new ReasoningRequest { Effort = "low" });
         request.ParallelToolCalls.Should().BeFalse();
         request.HostedTools.Should().BeEmpty();
         request.ProtocolOnlyFeatures.Should().BeEmpty("encrypted reasoning in include is not logprobs");
 
         request.Turns.Select(t => t.Role).Should().Equal("system", "user", "user", "assistant", "user", "assistant", "user");
-        request.Turns[3].Blocks.Should().ContainSingle().Which.Should().Be(new ToolUseBlock("call_la", "collaboration__list_agents", "{}"));
-        request.Turns[5].Blocks.Should().ContainSingle().Which.Should().Be(new ToolUseBlock("call_ex", "exec", """{"input":"console.log(1)"}"""));
+        request.Turns[3].Blocks.Should().ContainSingle().Which.Should().Be(new ToolUseBlock
+        {
+            Id = "call_la",
+            Name = "collaboration__list_agents",
+            InputJson = "{}",
+        });
+        request.Turns[5].Blocks.Should().ContainSingle().Which.Should().Be(new ToolUseBlock
+        {
+            Id = "call_ex",
+            Name = "exec",
+            InputJson = """{"input":"console.log(1)"}""",
+        });
         request.Turns[6].IsToolResultOnly.Should().BeTrue();
         request.IsToolResultContinuation.Should().BeTrue();
         request.AnsweredToolUseIds.Should().Equal("call_ex");
@@ -80,7 +90,13 @@ public sealed class ResponsesProtocolTests
         request.Tools.Should().ContainSingle().Which.Name.Should().Be("f");
         request.ProtocolOnlyFeatures.Should().Equal("logprobs", "previous_response_id");
         request.MaxTokens.Should().Be(50);
-        request.ResponseFormat.Should().Be(new ResponseFormat(ResponseFormatKind.JsonSchema, "answer", """{"type":"object"}""", Strict: true));
+        request.ResponseFormat.Should().Be(new ResponseFormat
+        {
+            Kind = ResponseFormatKind.JsonSchema,
+            Name = "answer",
+            SchemaJson = """{"type":"object"}""",
+            Strict = true,
+        });
     }
 
     [Fact]
@@ -116,7 +132,7 @@ public sealed class ResponsesProtocolTests
         await writer.StartToolCallAsync("call_2", "exec", CancellationToken.None);
         await writer.WriteToolCallArgumentsAsync("""{"input":"console.log(2)"}""", CancellationToken.None);
         await writer.EndToolCallAsync(CancellationToken.None);
-        await writer.CompleteAsync(ChatStopReason.ToolUse, new ChatUsage(10, 4, CacheReadTokens: 6), CancellationToken.None);
+        await writer.CompleteAsync(ChatStopReason.ToolUse, new ChatUsage { InputTokens = 10, OutputTokens = 4, CacheReadTokens = 6 }, CancellationToken.None);
 
         JsonElement json = Json(Encoding.UTF8.GetString(body.ToArray()));
         json.GetProperty("object").GetString().Should().Be("response");
@@ -148,7 +164,7 @@ public sealed class ResponsesProtocolTests
         await writer.WriteToolCallArgumentsAsync("{\"a\":", CancellationToken.None);
         await writer.WriteToolCallArgumentsAsync("1}", CancellationToken.None);
         await writer.EndToolCallAsync(CancellationToken.None);
-        await writer.CompleteAsync(ChatStopReason.ToolUse, new ChatUsage(3, 2), CancellationToken.None);
+        await writer.CompleteAsync(ChatStopReason.ToolUse, new ChatUsage { InputTokens = 3, OutputTokens = 2 }, CancellationToken.None);
 
         context.Response.ContentType.Should().Be("text/event-stream");
         (string Event, JsonElement Data)[] events = [.. Encoding.UTF8.GetString(body.ToArray())

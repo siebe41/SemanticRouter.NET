@@ -7,10 +7,14 @@ using System.Text.Json;
 namespace SemanticRouter;
 
 /// <summary>A labelled prompt: the tier (and optionally the route) a correct configuration routes it to.</summary>
-/// <param name="Prompt">The prompt text, as the classifier sees it (the latest user message).</param>
-/// <param name="ExpectedTier">The tier the prompt should get.</param>
-public sealed record EvaluationCase(string Prompt, int ExpectedTier)
+public sealed record EvaluationCase
 {
+    /// <summary>The prompt text, as the classifier sees it (the latest user message).</summary>
+    public required string Prompt { get; init; }
+
+    /// <summary>The tier the prompt should get.</summary>
+    public required int ExpectedTier { get; init; }
+
     /// <summary>The route the prompt should match, when the label names one.</summary>
     public string? ExpectedRoute { get; init; }
 
@@ -202,6 +206,6 @@ public static class EvaluationSet
             throw new FormatException($"{where} has no valid 'tier'.");
         }
 
-        return new EvaluationCase(prompt, expected) { ExpectedRoute = route, LocalOnly = localOnly, Note = note };
+        return new EvaluationCase { Prompt = prompt, ExpectedTier = expected, ExpectedRoute = route, LocalOnly = localOnly, Note = note };
     }
 }

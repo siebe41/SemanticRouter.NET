@@ -38,7 +38,7 @@ public class ModelReliabilityRoutingTests
             options.Models.Add(model);
         }
 
-        return new PromptRouter(classifier.Object, options, reliability: reliability);
+        return new PromptRouter(classifier.Object, options, new PromptRouterDependencies { Reliability = reliability });
     }
 
     [Fact]

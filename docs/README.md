@@ -18,5 +18,6 @@ These guides are also on the [documentation site](https://siebe41.github.io/Sema
 | [Verifying a release](releases.md) | Verify a download or the container image: provenance attestations, `SHA256SUMS`, the cosign signature, the SBOMs and third-party notices. |
 | [Network traffic](network.md) | See every host the router contacts and when, how to turn each off, and what to put on a firewall allowlist. |
 | [Architecture](architecture.md) | Follow a request through the code, understand hot reload, or find the right extension point. |
+| [Public API](api-surface.md) | See every public type of the library packages and what it is for. |
 | [Roadmap](roadmap.md) | See where the project is going and why in that order. |
 | [Subscription CLI terms](TERMS.md) | Check why the subscription CLI connectors are built the way they are and where the lines are. |

@@ -25,7 +25,7 @@ public class LatencySelectionTests
         }
 
         var source = new Latency(latency);
-        return new PromptRouter(new Mock<IPromptClassifier>().Object, options, new DefaultModelSelector(options.Selection, source), latency: source);
+        return new PromptRouter(new Mock<IPromptClassifier>().Object, options, new PromptRouterDependencies { Selector = new DefaultModelSelector(options.Selection, new DefaultModelSelectorDependencies { Latency = source }), Latency = source });
     }
 
     private static PromptClassificationResult Tier2 => new() { RequiredTier = 2, Reason = RoutingReason.SemanticMatch, Complexity = new ComplexityAnalysis { EstimatedTokens = 10 } };

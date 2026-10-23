@@ -33,18 +33,27 @@ public class ChatProtocolTests
         request.MaxTokens.Should().Be(4096);
         request.Temperature.Should().Be(0.2);
         request.Turns.Should().HaveCount(4);
-        request.Turns[0].Should().BeEquivalentTo(new ChatTurn("system", [new TextBlock("You are Claude Code."), new TextBlock("Be brief.")]));
+        request.Turns[0].Should().BeEquivalentTo(new ChatTurn
+        {
+            Role = "system",
+            Blocks = [new TextBlock { Text = "You are Claude Code." }, new TextBlock { Text = "Be brief." }],
+        });
         request.Turns[0].Text.Should().Be("You are Claude Code.\nBe brief.");
-        request.Turns[2].Blocks.Should().ContainSingle(b => b is ToolUseBlock).Which.Should().BeEquivalentTo(new ToolUseBlock("toolu_1", "Read", """{"path":"README.md"}"""));
+        request.Turns[2].Blocks.Should().ContainSingle(b => b is ToolUseBlock).Which.Should().BeEquivalentTo(new ToolUseBlock
+        {
+            Id = "toolu_1",
+            Name = "Read",
+            InputJson = """{"path":"README.md"}""",
+        });
         request.Turns[3].IsToolResultOnly.Should().BeTrue();
         request.IsToolResultContinuation.Should().BeTrue();
         request.AnsweredToolUseIds.Should().Equal("toolu_1");
         request.Tools.Should().ContainSingle().Which.Name.Should().Be("Read");
         request.HasTools.Should().BeTrue();
         request.Messages.Should().Equal(
-            new ChatMessage("system", "You are Claude Code.\nBe brief."),
-            new ChatMessage("user", "Summarize README.md\n<system-reminder>ignore me</system-reminder>"),
-            new ChatMessage("assistant", "Reading it."));
+            new ChatMessage { Role = "system", Content = "You are Claude Code.\nBe brief." },
+            new ChatMessage { Role = "user", Content = "Summarize README.md\n<system-reminder>ignore me</system-reminder>" },
+            new ChatMessage { Role = "assistant", Content = "Reading it." });
         request.EstimatedInputTokens.Should().BeGreaterThan(30);
     }
 
@@ -60,10 +69,19 @@ public class ChatProtocolTests
              "tool_choice":"required","max_completion_tokens":100,"stop":["END"]}
             """));
 
-        request.Turns[1].Blocks.Should().ContainSingle().Which.Should().BeEquivalentTo(new ToolUseBlock("call_1", "get_weather", """{"city":"Oslo"}"""));
-        request.Turns[2].Should().BeEquivalentTo(new ChatTurn("user", [new ToolResultBlock("call_1", "12°C", false)]));
+        request.Turns[1].Blocks.Should().ContainSingle().Which.Should().BeEquivalentTo(new ToolUseBlock
+        {
+            Id = "call_1",
+            Name = "get_weather",
+            InputJson = """{"city":"Oslo"}""",
+        });
+        request.Turns[2].Should().BeEquivalentTo(new ChatTurn
+        {
+            Role = "user",
+            Blocks = [new ToolResultBlock { ToolUseId = "call_1", Content = "12°C", IsError = false }],
+        });
         request.IsToolResultContinuation.Should().BeTrue();
-        request.ToolChoice.Should().Be(new ToolChoice(ToolChoiceMode.Required));
+        request.ToolChoice.Should().Be(new ToolChoice { Mode = ToolChoiceMode.Required });
         request.MaxTokens.Should().Be(100);
         request.StopSequences.Should().Equal("END");
     }
@@ -139,7 +157,7 @@ public class ChatProtocolTests
         await writer.WriteToolCallArgumentsAsync("""{"path":""", CancellationToken.None);
         await writer.WriteToolCallArgumentsAsync("\"a\"}", CancellationToken.None);
         await writer.EndToolCallAsync(CancellationToken.None);
-        await writer.CompleteAsync(ChatStopReason.ToolUse, new ChatUsage(10, 5), CancellationToken.None);
+        await writer.CompleteAsync(ChatStopReason.ToolUse, new ChatUsage { InputTokens = 10, OutputTokens = 5 }, CancellationToken.None);
 
         context.Response.ContentType.Should().Be("text/event-stream");
         string text = Encoding.UTF8.GetString(body.ToArray());
@@ -160,7 +178,7 @@ public class ChatProtocolTests
         var writer = new AnthropicResponseWriter(context, "m", stream: false);
 
         await writer.WriteTextAsync("Hi", CancellationToken.None);
-        await writer.CompleteAsync(ChatStopReason.EndTurn, new ChatUsage(3, 1, CacheReadTokens: 2), CancellationToken.None);
+        await writer.CompleteAsync(ChatStopReason.EndTurn, new ChatUsage { InputTokens = 3, OutputTokens = 1, CacheReadTokens = 2 }, CancellationToken.None);
 
         JsonElement json = Json(Encoding.UTF8.GetString(body.ToArray()));
         json.GetProperty("type").GetString().Should().Be("message");
@@ -179,7 +197,7 @@ public class ChatProtocolTests
         await writer.StartToolCallAsync("call_1", "f", CancellationToken.None);
         await writer.WriteToolCallArgumentsAsync("{}", CancellationToken.None);
         await writer.EndToolCallAsync(CancellationToken.None);
-        await writer.CompleteAsync(ChatStopReason.ToolUse, new ChatUsage(1, 2), CancellationToken.None);
+        await writer.CompleteAsync(ChatStopReason.ToolUse, new ChatUsage { InputTokens = 1, OutputTokens = 2 }, CancellationToken.None);
 
         JsonElement json = Json(Encoding.UTF8.GetString(body.ToArray()));
         json.GetProperty("choices")[0].GetProperty("finish_reason").GetString().Should().Be("tool_calls");
@@ -336,8 +354,8 @@ public class ChatProtocolTests
     public void Prompted_tool_instructions_list_every_tool_and_the_call_format()
     {
         string text = PromptedToolCalls.RenderInstructions(
-            [new ToolDefinition("Read", "Reads a file", """{"type":"object"}"""), new ToolDefinition("Bash", null, "{}")],
-            new ToolChoice(ToolChoiceMode.Named, "Read"));
+            [new ToolDefinition { Name = "Read", Description = "Reads a file", InputSchemaJson = """{"type":"object"}""" }, new ToolDefinition { Name = "Bash", InputSchemaJson = "{}" }],
+            new ToolChoice { Mode = ToolChoiceMode.Named, Name = "Read" });
 
         text.Should().Contain("### Read").And.Contain("Reads a file").And.Contain("### Bash");
         text.Should().Contain("```tool_call").And.Contain("You must call the tool 'Read'");
@@ -388,7 +406,7 @@ public class ChatProtocolTests
             "{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":" + JsonSerializer.Serialize(pasted) + "}]}," +
             "{\"role\":\"assistant\",\"content\":\"Reading.\"}," +
             "{\"role\":\"user\",\"content\":\"go on\"}]}"));
-        ChatMessage[] plain = [new ChatMessage("user", pasted), new ChatMessage("assistant", "ok"), new ChatMessage("user", "go on")];
+        ChatMessage[] plain = [new ChatMessage { Role = "user", Content = pasted }, new ChatMessage { Role = "assistant", Content = "ok" }, new ChatMessage { Role = "user", Content = "go on" }];
 
         string prompt = ChatTranscript.Render(request).Prompt;
         string plainPrompt = ChatTranscript.Render(plain).Prompt;
@@ -399,7 +417,7 @@ public class ChatProtocolTests
             rendered.Split('\n').Count(l => l is "[user]" or "[assistant]").Should().Be(3, "the three real turns");
         }
 
-        ChatTranscript.Render([new ChatMessage("user", pasted)]).Prompt.Should().Be(pasted, "a lone message has no transcript to pose in");
+        ChatTranscript.Render([new ChatMessage { Role = "user", Content = pasted }]).Prompt.Should().Be(pasted, "a lone message has no transcript to pose in");
     }
 
     [Fact]
@@ -521,7 +539,7 @@ public class ChatProtocolTests
 
         prompt.Should().Be("Summarize README.md", "the latest human ask is what gets routed, not the tool loop or injected reminders");
         JsonPromptExtractor.StripSystemReminders("a <system-reminder>x\ny</system-reminder> b").Should().Be("a  b");
-        new JsonPromptExtractor(stripSystemReminders: false).ExtractPrompt(new DefaultHttpContext(), Json("""{"messages":[{"role":"user","content":"<system-reminder>k</system-reminder>"}]}"""))
+        new JsonPromptExtractor(PromptMessageSelection.LastUserMessage, stripSystemReminders: false).ExtractPrompt(new DefaultHttpContext(), Json("""{"messages":[{"role":"user","content":"<system-reminder>k</system-reminder>"}]}"""))
             .Should().Be("<system-reminder>k</system-reminder>");
     }
 

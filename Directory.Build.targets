@@ -31,6 +31,19 @@
   </PropertyGroup>
 
   <!--
+    The public API files: each library lists its public API in PublicAPI.Shipped.txt (as released) and
+    PublicAPI.Unshipped.txt (changed since), and the analyzer fails the build on a public type or member that is not
+    listed (RS0016) or a listed one that is gone (RS0017). So every change to the surface is a line in the diff of the
+    pull request that makes it, additions included, which package validation does not see. The release moves
+    Unshipped into Shipped (docs/releases.md#after-a-release). CONTRIBUTING.md, Public API and package validation.
+    The package's own build targets add both files as AdditionalFiles; adding them here as well gives each project
+    two copies, which the compiler tolerates but makes `dotnet format` skip the RS0016 code fix.
+  -->
+  <ItemGroup Label="Public API files" Condition="'$(IsPackable)' == 'true' and '$(PackAsTool)' != 'true'">
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!--
     What nuget.org shows on each package's page: the README.md in its project folder (what the package is, how to
     install it, a snippet, links to the docs) and the app icon. Here, not in Directory.Build.props, for the same reason
     as package validation: IsPackable and PackAsTool are set in the project files. A packable project without a
