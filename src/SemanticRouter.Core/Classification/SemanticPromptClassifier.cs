@@ -179,8 +179,10 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
             {
                 if (_indexTask is null || _indexTask.IsFaulted || _indexTask.IsCanceled)
                 {
-                    // Build without the caller's token: one aborted request must not poison the shared index.
-                    _indexTask = BuildIndexAsync();
+                    // Build without the caller's token: one aborted request must not poison the shared index. Off the
+                    // lock: a provider that embeds on the calling thread (ONNX, Hashing) would otherwise build the whole
+                    // index while holding it, and every request arriving meanwhile would block a pool thread on it.
+                    _indexTask = Task.Run(BuildIndexAsync);
                 }
 
                 task = _indexTask;

@@ -211,6 +211,42 @@ public class SemanticPromptClassifierTests
     }
 
     [Fact]
+    public async Task Requests_wait_for_an_index_a_synchronous_provider_is_building_without_blocking_their_thread()
+    {
+        // Like ONNX and Hashing: the embeddings are computed on the calling thread and returned already completed.
+        using var building = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        Mock<IEmbeddingProvider> provider = FromTable(Table);
+        provider.Setup(p => p.GenerateEmbeddingsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                building.Set();
+                release.Wait(TimeSpan.FromSeconds(30));
+                return ValueTask.FromResult<IReadOnlyList<ReadOnlyMemory<float>>>(
+                    [new ReadOnlyMemory<float>(Table["hello"]), new ReadOnlyMemory<float>(Table["design a system"])]);
+            });
+        var classifier = new SemanticPromptClassifier(provider.Object, CreateOptions(), Complexity(0.1).Object);
+
+        Task warmUp = Task.Run(() => classifier.WarmUpAsync().AsTask());
+        building.Wait(TimeSpan.FromSeconds(30)).Should().BeTrue("the warm-up starts embedding");
+        try
+        {
+            ValueTask<PromptClassificationResult> pending = classifier.ClassifyAsync("hi friend");
+
+            pending.IsCompleted.Should().BeFalse("a request waits for the index asynchronously, not by blocking its thread on the build");
+            release.Set();
+            (await pending).RouteName.Should().Be("smalltalk");
+            await warmUp;
+        }
+        finally
+        {
+            release.Set();
+        }
+
+        provider.Verify(p => p.GenerateEmbeddingsAsync(It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public void Invalid_options_are_rejected_at_construction()
     {
         SemanticRouterOptions options = Options(Route("dup", 1, "a"), Route("dup", 2, "b"));
