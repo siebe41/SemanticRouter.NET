@@ -14,7 +14,7 @@
 #
 # Base images are pinned by digest (Dependabot updates them); the runtime is Ubuntu chiseled: no shell or package
 # manager, only what .NET needs. The -extra variant keeps ICU and time zone data, for budgets in a local time zone.
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:0d99ebf1ccad15037b5c98c9fe8979d6b8dbac23812feae2277a0b277b5c5ffa AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:747cbade5bfd918a175ac32f8f1d931edec2c7d0d5397a3de72eaef1ac1f66d2 AS build
 WORKDIR /src
 COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props .editorconfig ./
 COPY src/ src/
