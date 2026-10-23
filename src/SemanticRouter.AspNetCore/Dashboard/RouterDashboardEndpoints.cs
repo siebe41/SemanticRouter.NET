@@ -50,7 +50,7 @@ public static partial class RouterDashboardEndpoints
         var audit = new DashboardAudit(
             auditLog,
             endpoints.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System,
-            endpoints.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("SemanticRouter.Audit"));
+            endpoints.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(DashboardAudit.LogCategory));
         RouteGroupBuilder group = endpoints.MapGroup(prefix);
         var themes = new ThemeCatalog(options.ThemesDirectory ?? (endpoints.ServiceProvider.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store
             ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Location))!, "themes")
@@ -162,7 +162,12 @@ public static partial class RouterDashboardEndpoints
                 StatusResponse status = BuildStatus(
                     provider, health, activity, budgets, factories, rateLimits, services.GetService<ConnectorIncidents>(), services.GetService<EndpointChecks>(),
                     services.GetService<IModelCacheShare>(), Listening(services), options.PublicOrigins);
-                status = status with { Unsaved = provider.Unsaved, Instance = provider.Instance };
+                status = status with
+                {
+                    Unsaved = provider.Unsaved,
+                    Instance = provider.Instance,
+                    ConnectorTypes = InstalledConnectorTypes(services.GetServices<IChatConnectorFactory>()),
+                };
 
                 // State writes that failed after the configuration was applied (a locked or full disk): shown as they happen.
                 if (services.GetService<IStateStorageHealth>()?.Problem is { } state && !status.Warnings.Contains(state))
@@ -409,12 +414,12 @@ public static partial class RouterDashboardEndpoints
             DateTimeOffset end = until ?? DateTimeOffset.UtcNow.AddMinutes(1);
             IReadOnlyList<RoutingActivityEntry> entries = activity.Between(since ?? end.AddDays(-7), end);
             bool includePrompts = prompts ?? false;
-            DashboardAudit.Detail(context, $"{entries.Count} {(entries.Count == 1 ? "entry" : "entries")}, {(includePrompts ? "with" : "without")} prompt previews");
+            DashboardAudit.Detail(context, $"{entries.Count} {(entries.Count == 1 ? "entry" : "entries")}, {(includePrompts ? "with" : "without")} prompt text");
             string stamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture);
             return string.Equals(format, "jsonl", StringComparison.OrdinalIgnoreCase)
                 ? Results.File(System.Text.Encoding.UTF8.GetBytes(ActivityReports.ToJsonLines(entries, includePrompts)), "application/jsonl", $"semantic-router-activity-{stamp}.jsonl")
                 : Results.File(System.Text.Encoding.UTF8.GetBytes(ActivityReports.ToCsv(entries, includePrompts)), "text/csv", $"semantic-router-activity-{stamp}.csv");
-        }).Audited("exported activity");
+        }).WithMetadata(new DashboardPromptExportMetadata("prompts")).Audited("exported activity");
 
         api.MapGet("/usage", (RouterRuntimeProvider provider, IUsageLedger ledger, BudgetGate budgets, string? window, string? by) =>
         {
@@ -1065,6 +1070,7 @@ public static partial class RouterDashboardEndpoints
                     .Where(f => f.Reason is not null)
                     .DistinctBy(f => f.Kind)
                     .ToDictionary(f => f.Kind, f => f.Reason!, StringComparer.Ordinal),
+                RunsInProcess = [.. factories.Where(f => f.RunsInProcess).Select(f => f.Kind.Trim()).Distinct(StringComparer.OrdinalIgnoreCase)],
             },
             config.EffectiveTiers.Select(t => new TierStatus(t.Level, t.Name, t.Description)).ToArray(),
             config.Models.Select(m => new ModelStatus(
@@ -1329,6 +1335,30 @@ public static partial class RouterDashboardEndpoints
         /// instance knows the configuration may have changed even when the version number is the same.
         /// </summary>
         public string? Instance { get; init; }
+
+        /// <summary>The connector types this router can run: the built-in ones, and those installed packages provide.</summary>
+        public ConnectorTypesStatus ConnectorTypes { get; init; } = new([], [], []);
+    }
+
+    /// <summary>
+    /// Connector types: <see cref="SemanticRouter.AspNetCore.ConnectorTypes.BuiltIn"/>, and the types of the registered
+    /// <see cref="IChatConnectorFactory"/>s that are not built in. The dashboard offers both, and treats an installed type
+    /// like the router does (<see cref="ConnectorOptions.RunsProgram"/>): an HTTP connector when it is in
+    /// <paramref name="UsesBaseAddress"/>, otherwise a program.
+    /// </summary>
+    /// <param name="BuiltIn">The router's own types.</param>
+    /// <param name="Installed">The types installed packages provide.</param>
+    /// <param name="UsesBaseAddress">Those of <paramref name="Installed"/> whose factory sets <see cref="IChatConnectorFactory.UsesBaseAddress"/>.</param>
+    internal sealed record ConnectorTypesStatus(IReadOnlyList<string> BuiltIn, IReadOnlyList<string> Installed, IReadOnlyList<string> UsesBaseAddress);
+
+    /// <summary>The connector types for <see cref="StatusResponse.ConnectorTypes"/>: one entry per installed type, sorted.</summary>
+    internal static ConnectorTypesStatus InstalledConnectorTypes(IEnumerable<IChatConnectorFactory> factories)
+    {
+        IChatConnectorFactory[] installed = [.. factories
+            .Where(f => !string.IsNullOrWhiteSpace(f.Type) && !ConnectorTypes.IsBuiltIn(f.Type))
+            .DistinctBy(f => f.Type.Trim(), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(f => f.Type.Trim(), StringComparer.OrdinalIgnoreCase)];
+        return new(ConnectorTypes.BuiltIn, [.. installed.Select(f => f.Type.Trim())], [.. installed.Where(f => f.UsesBaseAddress).Select(f => f.Type.Trim())]);
     }
 
     /// <summary>Embedding provider in use.</summary>
@@ -1338,6 +1368,13 @@ public static partial class RouterDashboardEndpoints
     {
         /// <summary>Provider kinds in <see cref="Available"/> that cannot run on this machine, with why (<see cref="IEmbeddingProviderFactory.Unavailable"/>).</summary>
         public IReadOnlyDictionary<string, string> Unavailable { get; init; } = new Dictionary<string, string>();
+
+        /// <summary>
+        /// Provider kinds in <see cref="Available"/> whose factory runs the model in this process
+        /// (<see cref="IEmbeddingProviderFactory.RunsInProcess"/>). The dashboard offers their models, and the endpoint
+        /// fields for any other packaged kind.
+        /// </summary>
+        public IReadOnlyList<string> RunsInProcess { get; init; } = [];
     }
 
     /// <summary>The route index of the running configuration: utterances embedded and how long the warm-up took.</summary>

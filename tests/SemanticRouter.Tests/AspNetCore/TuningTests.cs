@@ -20,7 +20,7 @@ public sealed class TuningTests : RouterHostTest
     /// Small talk ("hello") uses the default threshold, 0.80; reasoning ("design a system") has its own, 0.90.
     /// Small-talk prompts sit at 0.765 (right from 0.76), reasoning prompts at 0.825 (right from 0.82).
     /// </summary>
-    private async Task<HttpClient> StartTunedAsync(Action<TuningOptions>? tuning = null, int smallTalk = 3, int reasoning = 3)
+    private async Task<HttpClient> StartTunedAsync(Action<TuningOptions>? tuning = null, int smallTalk = 3, int reasoning = 3, bool localSmallTalk = false)
     {
         var cases = new List<EvaluationCase> { new(_embeddings.At("what is the weather in paris", 0, 0.3f), 3) };
         for (int i = 0; i < smallTalk; i++)
@@ -39,7 +39,9 @@ public sealed class TuningTests : RouterHostTest
             {
                 o.DefaultSimilarityThreshold = 0.80f;
                 o.FallbackTier = 3;
-                o.Routes.Add(Route("smalltalk", 1, "hello"));
+                RouteDefinition smallTalkRoute = Route("smalltalk", 1, "hello");
+                smallTalkRoute.LocalOnly = localSmallTalk;
+                o.Routes.Add(smallTalkRoute);
                 RouteDefinition reasoningRoute = Route("reasoning", 4, "design a system");
                 reasoningRoute.SimilarityThreshold = 0.90f;
                 o.Routes.Add(reasoningRoute);
@@ -122,6 +124,24 @@ public sealed class TuningTests : RouterHostTest
         JsonElement done = await RunAsync(client);
         done.GetProperty("changes").GetArrayLength().Should().Be(0);
         done.GetProperty("result").GetString().Should().StartWith("Nothing to change: 7 of 7 prompts");
+    }
+
+    [Fact]
+    public async Task A_change_counts_local_only_prompts_but_does_not_quote_them()
+    {
+        HttpClient client = await StartTunedAsync(smallTalk: 1, reasoning: 0, localSmallTalk: true);
+        IEvaluationSetStore labels = Services.GetRequiredService<IEvaluationSetStore>();
+        const string Secret = "LOCAL-SECRET";
+        labels.Save([.. labels.Load(), .. Enumerable.Range(1, 2).Select(i => new EvaluationCase(_embeddings.At($"{Secret} hi {i}", 0, 0.765f), 1) { ExpectedRoute = "smalltalk", LocalOnly = true })]);
+
+        JsonElement change = Changes(await RunAsync(client)).Single();
+
+        change.GetProperty("why").GetString().Should()
+            .Contain("3 labelled prompts route to the tier they need that do not now (3 from the evaluation set), 2 local-only prompts not quoted, e.g. \"hi there 0\"");
+        change.GetProperty("examples").EnumerateArray().Select(x => x.GetString()).Should().Equal("hi there 0");
+        // The text is never stored, so no role reads it: not the learned list, nor the applied change's history note.
+        (await client.GetStringAsync("/router/api/tuning")).Should().NotContain(Secret);
+        (await client.GetStringAsync("/router/api/config/history")).Should().NotContain(Secret).And.Contain("2 local-only prompts not quoted");
     }
 
     [Fact]

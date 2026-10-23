@@ -317,11 +317,13 @@ internal sealed partial class RouterTuner : IDisposable
         int fromFeedback = step.Fixed.Count - fromSet;
         string where = step.Route is null ? "the default threshold" : $"the threshold of {step.Route}";
         string at = TuningChange.Format(step.Target);
+        int localOnly = step.Fixed.Count(c => c.LocalOnly);
         var why = new List<string>
         {
             $"At {at}, {(step.Fixed.Count == 1 ? "1 labelled prompt routes to the tier it needs that does not" : $"{step.Fixed.Count} labelled prompts route to the tier they need that do not")} now " +
             $"({Sources(fromSet, fromFeedback, step.Fixed.Where(c => !evidence.Confirmed.Contains(c)), evidence)})" +
-            (step.Fixed.Count > 0 ? $", e.g. \"{TuningChange.Preview(step.Fixed[0].Prompt, 60)}\"" : string.Empty),
+            (localOnly > 0 ? $", {Plural(localOnly, "local-only prompt")} not quoted" : string.Empty) +
+            (Quotable(step.Fixed).FirstOrDefault() is { } example ? $", e.g. \"{TuningChange.Preview(example.Prompt, 60)}\"" : string.Empty),
             step.Broken.Count == 0
                 ? "none would route lower than they need"
                 : $"{Plural(step.Broken.Count, "prompt")} would no longer match their label, none of them confirmed prompts routed lower",
@@ -344,9 +346,15 @@ internal sealed partial class RouterTuner : IDisposable
             Fixed = step.Fixed.Count,
             Broken = step.Broken.Count,
             Gain = step.Gain,
-            Examples = step.Fixed.Take(MaxExamples).Select(c => TuningChange.Preview(c.Prompt, 120)).ToArray(),
+            Examples = Quotable(step.Fixed).Take(MaxExamples).Select(c => TuningChange.Preview(c.Prompt, 120)).ToArray(),
         };
     }
+
+    /// <summary>
+    /// The prompts a change may quote as evidence. Not the local-only ones: a change's why and examples are shown to the
+    /// read-only role, and the note of an applied change is kept in the configuration history.
+    /// </summary>
+    private static IEnumerable<EvaluationCase> Quotable(IEnumerable<EvaluationCase> cases) => cases.Where(c => !c.LocalOnly);
 
     /// <summary>"3 from the evaluation set, 6 from feedback: retried, corrected".</summary>
     private static string Sources(int fromSet, int fromFeedback, IEnumerable<EvaluationCase> automatic, Evidence evidence)
@@ -546,7 +554,7 @@ internal sealed partial class RouterTuner : IDisposable
             Fixed = fixedCases.Length,
             Broken = broken,
             Gain = fixedCases.Length - broken,
-            Examples = fixedCases.Take(MaxExamples).Select(c => TuningChange.Preview(c.Prompt, 120)).ToArray(),
+            Examples = Quotable(fixedCases).Take(MaxExamples).Select(c => TuningChange.Preview(c.Prompt, 120)).ToArray(),
         };
     }
 
