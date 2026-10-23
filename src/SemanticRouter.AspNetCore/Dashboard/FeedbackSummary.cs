@@ -1,29 +1,47 @@
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>Feedback per route and per model over a period, against the decisions the router made there.</summary>
-/// <param name="Since">Start of the period.</param>
-/// <param name="Until">End of the period.</param>
-/// <param name="Decisions">Decisions the router made itself (not tool-result turns or explicit choices).</param>
-/// <param name="Feedback">Decisions that received any feedback.</param>
-/// <param name="ByKind">Feedback items of each kind.</param>
-/// <param name="ByRoute">Per route, highest feedback rate first.</param>
-/// <param name="ByModel">Per model that answered, highest feedback rate first.</param>
-public sealed record FeedbackSummary(
-    DateTimeOffset Since,
-    DateTimeOffset Until,
-    int Decisions,
-    int Feedback,
-    IReadOnlyDictionary<FeedbackKind, int> ByKind,
-    IReadOnlyList<FeedbackSummary.Group> ByRoute,
-    IReadOnlyList<FeedbackSummary.Group> ByModel)
+public sealed record FeedbackSummary
 {
+    /// <summary>Start of the period.</summary>
+    public required DateTimeOffset Since { get; init; }
+
+    /// <summary>End of the period.</summary>
+    public required DateTimeOffset Until { get; init; }
+
+    /// <summary>Decisions the router made itself (not tool-result turns or explicit choices).</summary>
+    public required int Decisions { get; init; }
+
+    /// <summary>Decisions that received any feedback.</summary>
+    public required int Feedback { get; init; }
+
+    /// <summary>Feedback items of each kind.</summary>
+    public required IReadOnlyDictionary<FeedbackKind, int> ByKind { get; init; }
+
+    /// <summary>Per route, highest feedback rate first.</summary>
+    public required IReadOnlyList<FeedbackSummary.Group> ByRoute { get; init; }
+
+    /// <summary>Per model that answered, highest feedback rate first.</summary>
+    public required IReadOnlyList<FeedbackSummary.Group> ByModel { get; init; }
+
     /// <summary>One route or model: its decisions, how many got feedback, and of which kinds.</summary>
-    /// <param name="Key">The route or model.</param>
-    /// <param name="Decisions">Decisions the router made there.</param>
-    /// <param name="WithFeedback">Of those, how many received feedback.</param>
-    /// <param name="Rate">Share of its decisions with feedback (0–1).</param>
-    /// <param name="ByKind">Feedback items of each kind.</param>
-    public sealed record Group(string Key, int Decisions, int WithFeedback, double Rate, IReadOnlyDictionary<FeedbackKind, int> ByKind);
+    public sealed record Group
+    {
+        /// <summary>The route or model.</summary>
+        public required string Key { get; init; }
+
+        /// <summary>Decisions the router made there.</summary>
+        public required int Decisions { get; init; }
+
+        /// <summary>Of those, how many received feedback.</summary>
+        public required int WithFeedback { get; init; }
+
+        /// <summary>Share of its decisions with feedback (0–1).</summary>
+        public required double Rate { get; init; }
+
+        /// <summary>Feedback items of each kind.</summary>
+        public required IReadOnlyDictionary<FeedbackKind, int> ByKind { get; init; }
+    }
 
     /// <summary>Builds the summary from the period's activity and feedback.</summary>
     public static FeedbackSummary Build(IReadOnlyList<RoutingActivityEntry> activity, IReadOnlyList<RoutingFeedback> feedback, DateTimeOffset since, DateTimeOffset until)
@@ -43,19 +61,28 @@ public sealed record FeedbackSummary(
                         .Where(f => (feedbackKey(f) ?? "(none)") == g.Key)
                         .GroupBy(f => f.Kind)
                         .ToDictionary(k => k.Key, k => k.Count());
-                    return new Group(g.Key, g.Count(), with, g.Any() ? Math.Round((double)with / g.Count(), 4) : 0, kinds);
+                    return new Group
+                    {
+                        Key = g.Key,
+                        Decisions = g.Count(),
+                        WithFeedback = with,
+                        Rate = g.Any() ? Math.Round((double)with / g.Count(), 4) : 0,
+                        ByKind = kinds,
+                    };
                 })
                 .OrderByDescending(g => g.Rate)
                 .ThenByDescending(g => g.Decisions),
         ];
 
-        return new FeedbackSummary(
-            since,
-            until,
-            decisions.Length,
-            decisions.Count(e => judged.ContainsKey(e.Id)),
-            feedback.GroupBy(f => f.Kind).ToDictionary(g => g.Key, g => g.Count()),
-            GroupBy(e => e.Route, f => f.Route),
-            GroupBy(e => e.ServedBy ?? e.PlannedModel, f => f.Model));
+        return new FeedbackSummary
+        {
+            Since = since,
+            Until = until,
+            Decisions = decisions.Length,
+            Feedback = decisions.Count(e => judged.ContainsKey(e.Id)),
+            ByKind = feedback.GroupBy(f => f.Kind).ToDictionary(g => g.Key, g => g.Count()),
+            ByRoute = GroupBy(e => e.Route, f => f.Route),
+            ByModel = GroupBy(e => e.ServedBy ?? e.PlannedModel, f => f.Model),
+        };
     }
 }

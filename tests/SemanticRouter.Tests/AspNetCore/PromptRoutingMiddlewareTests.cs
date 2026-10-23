@@ -540,6 +540,25 @@ public sealed class DispatchModeTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_failed_cli_runs_scratch_directory_is_deleted_with_what_the_cli_left_in_it()
+    {
+        ClassifyAs(tier: 4);
+        Cli = new FakeCliProcessRunner(invocation =>
+        {
+            // As a CLI that keeps its session next to it would: the prompt, in a file in its working directory.
+            Directory.CreateDirectory(Path.Combine(invocation.WorkingDirectory, ".session"));
+            File.WriteAllText(Path.Combine(invocation.WorkingDirectory, ".session", "transcript.jsonl"), "hello there");
+            return new FakeCliProcess([ClaudeStream.Error("overloaded")], exitCode: 1, stderr: "aborted");
+        });
+        HttpClient client = await StartDispatchAsync(withCli: true);
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        response.Headers.GetValues("X-Prompt-Route-Model").Should().Equal(["cloud"], "the failed CLI falls over to the next model");
+        Directory.Exists(Cli.Invocations.Single().WorkingDirectory).Should().BeFalse("a failed run's scratch directory is deleted too, with its files");
+    }
+
+    [Fact]
     public async Task Cli_connector_streams_server_sent_events()
     {
         ClassifyAs(tier: 4);

@@ -55,7 +55,13 @@ internal sealed class OnnxEmbeddingProviderFactory : IEmbeddingProviderFactory, 
     public string Kind => OnnxEmbeddings.Provider;
 
     public IReadOnlyList<EmbeddingModelChoice> Models { get; } =
-        OnnxEmbeddingModels.Known.Select(m => new EmbeddingModelChoice(m.Name, m.Description, m.SuggestedThreshold, m.ModelBytes)).ToArray();
+        OnnxEmbeddingModels.Known.Select(m => new EmbeddingModelChoice
+        {
+            Name = m.Name,
+            Description = m.Description,
+            SuggestedThreshold = m.SuggestedThreshold,
+            DownloadBytes = m.ModelBytes,
+        }).ToArray();
 
     public string? Unavailable => _unavailable();
 

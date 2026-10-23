@@ -46,14 +46,14 @@ public class CacheAwareCostTests
             RouteName = route,
             Complexity = new ComplexityAnalysis { EstimatedTokens = 10 },
         };
-        var router = new PromptRouter(new Mock<IPromptClassifier>().Object, options, new DefaultModelSelector(options.Selection, latency, cache));
+        var router = new PromptRouter(new Mock<IPromptClassifier>().Object, options, new PromptRouterDependencies { Selector = new DefaultModelSelector(options.Selection, new DefaultModelSelectorDependencies { Latency = latency, CacheShare = cache }) });
         return router.Plan(classification, new PromptRoutingRequest { Prompt = "continue", EstimatedInputTokens = 20_000 });
     }
 
     private static readonly Shares Learned = new(new()
     {
-        [("cached", "agentic")] = new PromptCacheShare(Read: 0.8, Write: 0.05),
-        [("plain", "agentic")] = new PromptCacheShare(Read: 0, Write: 0),
+        [("cached", "agentic")] = new PromptCacheShare { Read = 0.8, Write = 0.05 },
+        [("plain", "agentic")] = new PromptCacheShare { Read = 0, Write = 0 },
     });
 
     [Fact]
@@ -91,9 +91,9 @@ public class CacheAwareCostTests
     public void The_estimate_prices_cached_input_at_the_cache_prices_and_the_rest_at_the_input_price()
     {
         Cached.EstimateCost(1_000_000, 0, null).Should().Be(Cached.EstimateCost(1_000_000, 0));
-        Cached.EstimateCost(1_000_000, 0, new PromptCacheShare(0, 0)).Should().Be(3m);
-        Cached.EstimateCost(1_000_000, 0, new PromptCacheShare(0.5, 0.25)).Should().Be(0.75m + 0.15m + 0.9375m);
-        Cached.EstimateCost(1_000_000, 1_000_000, new PromptCacheShare(1, 0)).Should().Be(0.3m + 15m);
-        Plain.EstimateCost(1_000_000, 0, new PromptCacheShare(0.9, 0.1)).Should().Be(2.5m, "without cache prices, cached input costs the input price");
+        Cached.EstimateCost(1_000_000, 0, new PromptCacheShare { Read = 0, Write = 0 }).Should().Be(3m);
+        Cached.EstimateCost(1_000_000, 0, new PromptCacheShare { Read = 0.5, Write = 0.25 }).Should().Be(0.75m + 0.15m + 0.9375m);
+        Cached.EstimateCost(1_000_000, 1_000_000, new PromptCacheShare { Read = 1, Write = 0 }).Should().Be(0.3m + 15m);
+        Plain.EstimateCost(1_000_000, 0, new PromptCacheShare { Read = 0.9, Write = 0.1 }).Should().Be(2.5m, "without cache prices, cached input costs the input price");
     }
 }

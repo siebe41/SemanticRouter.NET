@@ -121,7 +121,7 @@ for job in "${!publishing[@]}"; do
   done
   for other in "${jobs[@]}"; do
     if [ -z "${publishing[$other]:-}" ] && [ -z "${staging[$other]:-}" ] && [[ "$before" != *" $other "* ]]; then
-      error "$job publishes, but does not wait for $other, which can still fail. Add it to $job's needs, directly or through another job."
+      error "$job publishes, but does not wait for $other, which can still fail. Move the check before publishing and add it to $job's needs, directly or through another job; a check that depends on a publishing job must be redesigned to avoid a dependency cycle."
     fi
   done
 done

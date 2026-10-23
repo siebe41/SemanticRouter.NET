@@ -28,7 +28,7 @@ public class ClassificationCacheTests
         configure?.Invoke(options);
         Mock<IEmbeddingProvider> provider = FromTable(Table);
         var clock = new Clock();
-        return (new SemanticPromptClassifier(provider.Object, options, time: clock), provider, clock);
+        return (new SemanticPromptClassifier(provider.Object, options, new SemanticPromptClassifierDependencies { Time = clock }), provider, clock);
     }
 
     private static int PromptEmbeddings(Mock<IEmbeddingProvider> provider) =>
@@ -48,7 +48,7 @@ public class ClassificationCacheTests
         second.Cached.Should().BeTrue();
         spaced.Cached.Should().BeTrue();
         second.Should().BeEquivalentTo(first, o => o.Excluding(r => r.Cached).Excluding(r => r.Elapsed));
-        classifier.CacheStatistics.Should().Be(new ClassificationCacheStatistics(2, 1, 1, 2048));
+        classifier.CacheStatistics.Should().Be(new ClassificationCacheStatistics { Hits = 2, Misses = 1, Entries = 1, Capacity = 2048 });
         classifier.CacheStatistics!.HitRate.Should().BeApproximately(2 / 3d, 1e-9);
     }
 

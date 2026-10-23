@@ -34,15 +34,20 @@ public sealed class CliProcessIntegrationTests : IDisposable
         var messages = new List<ChatMessage>();
         if (system is not null)
         {
-            messages.Add(new ChatMessage("system", system));
+            messages.Add(new ChatMessage { Role = "system", Content = system });
         }
 
-        messages.Add(new ChatMessage("user", prompt));
+        messages.Add(new ChatMessage { Role = "user", Content = prompt });
         var context = new DefaultHttpContext();
         context.Response.Body = new MemoryStream();
 
         ConnectorResult result = await connector.SendAsync(
-            new ConnectorRequest(new ChatCompletionRequest { Messages = messages, Stream = stream }, Model("m", 1), default),
+            new ConnectorRequest
+            {
+                Chat = new ChatCompletionRequest { Messages = messages, Stream = stream },
+                Model = Model("m", 1),
+                RawBody = default,
+            },
             context,
             CancellationToken.None);
 

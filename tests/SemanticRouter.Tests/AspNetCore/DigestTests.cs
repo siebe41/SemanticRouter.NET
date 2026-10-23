@@ -199,7 +199,19 @@ public sealed class DigestTests : RouterHostTest
         await StartDispatchAsync(s => s.Configure<UsageOptions>(u =>
             u.Budgets.Add(new BudgetDefinition { Name = "cloud-daily", Model = "cloud", MaxTokens = 1000 })));
         IUsageLedger ledger = Services.GetRequiredService<IUsageLedger>();
-        void Spend(DateTimeOffset at) => ledger.Record(new UsageRecord(at, "cloud", "anthropic", null, null, false, 900, 200, 0, 0, 0.01m, 0.01m));
+        void Spend(DateTimeOffset at) => ledger.Record(new UsageRecord
+        {
+            Timestamp = at,
+            Model = "cloud",
+            Connector = "anthropic",
+            IsLocal = false,
+            InputTokens = 900,
+            OutputTokens = 200,
+            CacheReadTokens = 0,
+            CacheWriteTokens = 0,
+            CostUsd = 0.01m,
+            ReferenceCostUsd = 0.01m,
+        });
 
         Spend(_time.GetUtcNow());
         Notices.Current().Should().BeEmpty("spent once is a busy day");

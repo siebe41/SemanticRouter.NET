@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.AspNetCore;
 
@@ -122,7 +123,11 @@ public sealed class MemorySourceTests
     [Fact]
     public void Claude_code_memory_files_named_in_frontmatter_keep_that_name()
     {
-        var document = new MemoryDocument("projects/-home-me-app/memory/prefs.md", "---\nname: Testing preferences\ntype: feedback\n---\nRun the tests.");
+        var document = new MemoryDocument
+        {
+            Path = "projects/-home-me-app/memory/prefs.md",
+            Content = "---\nname: Testing preferences\ntype: feedback\n---\nRun the tests.",
+        };
 
         ClaudeCodeMemorySource.TitleFor(document).Should().Be("Testing preferences");
     }
@@ -248,12 +253,54 @@ public sealed class MemoryMapTests : RouterHostTest, IDisposable
         RoutingActivityEntry entry = Services.GetRequiredService<RoutingActivityLog>().Recent(1).Single();
         entry.SentTo.Should().Equal("cloud");
         MemoryReference alice = entry.Memory.Should().ContainSingle("the shared template line identifies no single note").Subject;
-        alice.Should().Be(new MemoryReference("vault:people/Alice.md", "Alice", "vault", MemoryShareKind.Content, 2, 2));
+        alice.Should().Be(new MemoryReference
+        {
+            Id = "vault:people/Alice.md",
+            Title = "Alice",
+            Source = "vault",
+            Kind = MemoryShareKind.Content,
+            Lines = 2,
+            TotalLines = 2,
+        });
 
         JsonNode exposure = (await MemoryAsync(client))["exposure"]!["vault:people/Alice.md"]!;
         exposure["cloudContent"]!.GetValue<int>().Should().Be(1);
         exposure["localContent"]!.GetValue<int>().Should().Be(0);
         exposure["models"]!["cloud"]!.GetValue<int>().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task The_state_database_names_the_notes_a_request_quoted_but_never_holds_their_text()
+    {
+        using var state = new TempFolder();
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+            },
+            services: s =>
+            {
+                s.Configure<MemoryOptions>(m => m.Sources.Add(new MemorySourceOptions { Name = "vault", Path = _vault.Root }));
+                new SemanticRouterBuilder(s).UseSqliteState(Path.Combine(state.Root, "state.db"));
+                s.Configure<StateOptions>(o => o.StorePrompts = PromptStorage.Off);
+            });
+        await MemoryAsync(client);
+        ClassifyAs(tier: 4);
+
+        await client.PostAsync("/v1/chat/completions", Chat($"Summarize this:\n     1→{AliceLine1}\n     2→{AliceLine2}"));
+        IRoutingActivityStore store = Services.GetRequiredService<IRoutingActivityStore>();
+        for (int i = 0; i < 500 && store.Recent(1).Count == 0; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        store.Recent(1).Should().ContainSingle().Which.Memory.Should().ContainSingle().Which.Id.Should().Be("vault:people/Alice.md");
+        string files = DurableStateHostTests.ReadDatabaseFiles(state.Root, "state.db");
+        files.Should().Contain("vault:people/Alice.md", "the entry names the note it quoted");
+        files.Should().NotContain("async standups").And.NotContain("billing migration", "note text is never stored");
+        await DisposeAsync();
+        SqliteFiles.Release(state.Root);
     }
 
     [Fact]
@@ -265,7 +312,15 @@ public sealed class MemoryMapTests : RouterHostTest, IDisposable
         await client.PostAsync("/v1/chat/completions", Chat("Remember this:\n" + AliceLine2));
 
         Services.GetRequiredService<RoutingActivityLog>().Recent(1).Single().Memory.Should().ContainSingle()
-            .Which.Should().Be(new MemoryReference("vault:people/Alice.md", "Alice", "vault", MemoryShareKind.Content, 1, 2));
+            .Which.Should().Be(new MemoryReference
+            {
+                Id = "vault:people/Alice.md",
+                Title = "Alice",
+                Source = "vault",
+                Kind = MemoryShareKind.Content,
+                Lines = 1,
+                TotalLines = 2,
+            });
     }
 
     [Fact]
@@ -344,7 +399,7 @@ public sealed class MemoryMapTests : RouterHostTest, IDisposable
         var entry = new RoutingActivityEntry
         {
             Id = 7,
-            Memory = [new MemoryReference("vault:a.md", "a", "vault", MemoryShareKind.Content, 2, 3)],
+            Memory = [new MemoryReference { Id = "vault:a.md", Title = "a", Source = "vault", Kind = MemoryShareKind.Content, Lines = 2, TotalLines = 3 }],
         };
         entry.SentTo.Add("cloud");
 

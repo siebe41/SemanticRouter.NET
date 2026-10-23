@@ -28,24 +28,26 @@ internal static class ServiceHealth
         (string state, string? note, IReadOnlyList<string> problems) = State(
             runtime.WarmedUp, runtime.WarmUpError, runtime.Configuration.Embeddings.WarmUpOnStartup, runtime.Warnings, endpoints);
 
-        return new ServiceStatus(
-            Environment.MachineName,
-            Environment.ProcessId,
-            Environment.ProcessPath,
-            ProcessStarted,
-            RuntimeInformation.FrameworkDescription,
-            RuntimeInformation.OSDescription,
-            bound,
-            addresses,
-            addresses.Any(a => !a.Local),
-            runtime.Configuration.Middleware.GatewayKeys.Count > 0 || !runtime.Configuration.Middleware.AllowUnauthenticatedRemoteClients,
-            runtime.Configuration.Middleware.GatewayKeys.Count > 0,
-            state,
-            note,
-            problems,
-            last?.Timestamp,
-            last?.Outcome,
-            recent.Where(e => e.Outcome == "served").Select(e => (DateTimeOffset?)e.Timestamp).Max());
+        return new ServiceStatus
+        {
+            Machine = Environment.MachineName,
+            ProcessId = Environment.ProcessId,
+            Program = Environment.ProcessPath,
+            StartedAt = ProcessStarted,
+            Runtime = RuntimeInformation.FrameworkDescription,
+            OperatingSystem = RuntimeInformation.OSDescription,
+            Listening = bound,
+            Addresses = addresses,
+            Remote = addresses.Any(a => !a.Local),
+            GatewayKeyRequired = runtime.Configuration.Middleware.GatewayKeys.Count > 0 || !runtime.Configuration.Middleware.AllowUnauthenticatedRemoteClients,
+            GatewayKeysConfigured = runtime.Configuration.Middleware.GatewayKeys.Count > 0,
+            State = state,
+            StateNote = note,
+            Problems = problems,
+            LastRequest = last?.Timestamp,
+            LastOutcome = last?.Outcome,
+            LastServed = recent.Where(e => e.Outcome == "served").Select(e => (DateTimeOffset?)e.Timestamp).Max(),
+        };
     }
 
     /// <summary>
@@ -63,7 +65,7 @@ internal static class ServiceHealth
             string url = defaultPort ? $"{scheme}://{authority}" : $"{scheme}://{authority}:{port}";
             if (!result.Any(a => string.Equals(a.Url, url, StringComparison.OrdinalIgnoreCase)))
             {
-                result.Add(new ClientAddress(url, local, local || scheme == Uri.UriSchemeHttps));
+                result.Add(new ClientAddress { Url = url, Local = local, Encrypted = local || scheme == Uri.UriSchemeHttps });
             }
         }
 
@@ -221,31 +223,69 @@ internal static class ServiceHealth
 }
 
 /// <summary>The router itself: where it runs, the addresses clients use, and how it is doing.</summary>
-/// <param name="Machine">The machine's name.</param>
-/// <param name="ProcessId">The router's process id.</param>
-/// <param name="Program">The executable the router runs as.</param>
-/// <param name="StartedAt">When the process started.</param>
-/// <param name="Runtime">The .NET runtime.</param>
-/// <param name="OperatingSystem">The operating system.</param>
-/// <param name="Listening">The addresses the server listens on, as bound (<c>http://[::]:5080</c>).</param>
-/// <param name="Addresses">Base addresses clients point at: on this machine, then from other machines.</param>
-/// <param name="Remote">Whether other machines can reach it.</param>
-/// <param name="GatewayKeyRequired">Whether clients on other machines must send a gateway key (they are refused while none is configured).</param>
-/// <param name="GatewayKeysConfigured">Whether any gateway key is configured.</param>
-/// <param name="State"><c>ok</c>, <c>starting</c>, <c>degraded</c> or <c>failing</c>.</param>
-/// <param name="StateNote">Why, when it is not ok.</param>
-/// <param name="Problems">Everything that needs a look: warm-up, connectors failing or down, configuration warnings.</param>
-/// <param name="LastRequest">The latest routed request.</param>
-/// <param name="LastOutcome">How that one ended (<c>served</c>, <c>failed</c>, …).</param>
-/// <param name="LastServed">The latest request a model answered.</param>
-public sealed record ServiceStatus(
-    string Machine, int ProcessId, string? Program, DateTimeOffset StartedAt, string Runtime, string OperatingSystem,
-    IReadOnlyList<string> Listening, IReadOnlyList<ClientAddress> Addresses, bool Remote, bool GatewayKeyRequired, bool GatewayKeysConfigured,
-    string State, string? StateNote, IReadOnlyList<string> Problems,
-    DateTimeOffset? LastRequest, string? LastOutcome, DateTimeOffset? LastServed);
+public sealed record ServiceStatus
+{
+    /// <summary>The machine's name.</summary>
+    public required string Machine { get; init; }
+
+    /// <summary>The router's process id.</summary>
+    public required int ProcessId { get; init; }
+
+    /// <summary>The executable the router runs as.</summary>
+    public string? Program { get; init; }
+
+    /// <summary>When the process started.</summary>
+    public required DateTimeOffset StartedAt { get; init; }
+
+    /// <summary>The .NET runtime.</summary>
+    public required string Runtime { get; init; }
+
+    /// <summary>The operating system.</summary>
+    public required string OperatingSystem { get; init; }
+
+    /// <summary>The addresses the server listens on, as bound (<c>http://[::]:5080</c>).</summary>
+    public required IReadOnlyList<string> Listening { get; init; }
+
+    /// <summary>Base addresses clients point at: on this machine, then from other machines.</summary>
+    public required IReadOnlyList<ClientAddress> Addresses { get; init; }
+
+    /// <summary>Whether other machines can reach it.</summary>
+    public required bool Remote { get; init; }
+
+    /// <summary>Whether clients on other machines must send a gateway key (they are refused while none is configured).</summary>
+    public required bool GatewayKeyRequired { get; init; }
+
+    /// <summary>Whether any gateway key is configured.</summary>
+    public required bool GatewayKeysConfigured { get; init; }
+
+    /// <summary><c>ok</c>, <c>starting</c>, <c>degraded</c> or <c>failing</c>.</summary>
+    public required string State { get; init; }
+
+    /// <summary>Why, when it is not ok.</summary>
+    public string? StateNote { get; init; }
+
+    /// <summary>Everything that needs a look: warm-up, connectors failing or down, configuration warnings.</summary>
+    public required IReadOnlyList<string> Problems { get; init; }
+
+    /// <summary>The latest routed request.</summary>
+    public DateTimeOffset? LastRequest { get; init; }
+
+    /// <summary>How that one ended (<c>served</c>, <c>failed</c>, …).</summary>
+    public string? LastOutcome { get; init; }
+
+    /// <summary>The latest request a model answered.</summary>
+    public DateTimeOffset? LastServed { get; init; }
+}
 
 /// <summary>A base address clients point at.</summary>
-/// <param name="Url">Scheme, host and port: Anthropic clients use it as is, OpenAI clients add <c>/v1</c>.</param>
-/// <param name="Local">Only reachable from this machine.</param>
-/// <param name="Encrypted">Loopback, or HTTPS.</param>
-public sealed record ClientAddress(string Url, bool Local, bool Encrypted);
+public sealed record ClientAddress
+{
+    /// <summary>Scheme, host and port: Anthropic clients use it as is, OpenAI clients add <c>/v1</c>.</summary>
+    public required string Url { get; init; }
+
+    /// <summary>Only reachable from this machine.</summary>
+    public required bool Local { get; init; }
+
+    /// <summary>Loopback, or HTTPS.</summary>
+    public required bool Encrypted { get; init; }
+}

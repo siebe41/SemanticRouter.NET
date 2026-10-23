@@ -77,10 +77,13 @@ internal sealed class RouterLifecycle
     public void Started(WebApplication app) => StartedWith = app.Configuration[WebHostDefaults.ServerUrlsKey] ?? HostSettings.DefaultUrl;
 
     /// <summary>A restart could not listen where the saved setting says, so the router went back to where it was.</summary>
-    public void KeptListening(IReadOnlyList<string> previous) => LastOutcome = new RouterServiceOutcome(
-        RouterServiceActions.Restart, false,
-        $"Could not listen on {HostListen.NextUrls(this)}: the address is in use. The router listens where it did before ({string.Join(", ", previous)}); free the address or choose another port, then restart.",
-        _time.GetUtcNow());
+    public void KeptListening(IReadOnlyList<string> previous) => LastOutcome = new RouterServiceOutcome
+    {
+        Action = RouterServiceActions.Restart,
+        Succeeded = false,
+        Message = $"Could not listen on {HostListen.NextUrls(this)}: the address is in use. The router listens where it did before ({string.Join(", ", previous)}); free the address or choose another port, then restart.",
+        At = _time.GetUtcNow(),
+    };
 
     /// <summary>Records <paramref name="action"/> to carry out once the router has stopped; false when one is already waiting.</summary>
     public bool TryRequest(string action)
@@ -230,7 +233,7 @@ internal sealed class RouterLifecycle
 
     private bool Done(string action, bool succeeded, string message)
     {
-        LastOutcome = new RouterServiceOutcome(action, succeeded, message, _time.GetUtcNow());
+        LastOutcome = new RouterServiceOutcome { Action = action, Succeeded = succeeded, Message = message, At = _time.GetUtcNow() };
         return true;
     }
 
@@ -252,19 +255,41 @@ internal sealed class RouterServiceControl(RouterLifecycle lifecycle, IHostAppli
         string next = HostListen.NextUrls(lifecycle);
         (string scope, int port) = HostListen.Describe(next);
         string? pinnedBy = PinnedBy();
-        var listen = new RouterListenDescription(
-            scope, port, next, saved, HostListen.FileIn(lifecycle.Settings.ConfigurationDirectory), pinnedBy,
-            Editable: Locked() is null, RestartNeeded: !HostListen.SameAddresses(next, lifecycle.StartedWith));
+        var listen = new RouterListenDescription
+        {
+            Scope = scope,
+            Port = port,
+            Urls = next,
+            Saved = saved,
+            File = HostListen.FileIn(lifecycle.Settings.ConfigurationDirectory),
+            PinnedBy = pinnedBy,
+            Editable = Locked() is null,
+            RestartNeeded = !HostListen.SameAddresses(next, lifecycle.StartedWith),
+        };
 
         RouterBackgroundService? background = null;
         if (lifecycle.Platform is { } platform && !lifecycle.InContainer)
         {
             bool installed = platform.IsInstalled();
-            background = new RouterBackgroundService(
-                platform.Kind, installed, installed ? await platform.StatusAsync().ConfigureAwait(false) : null, platform.Location, platform.LogHint, [.. platform.InstallNotes]);
+            background = new RouterBackgroundService
+            {
+                Kind = platform.Kind,
+                Installed = installed,
+                Status = installed ? await platform.StatusAsync().ConfigureAwait(false) : null,
+                Location = platform.Location,
+                LogHint = platform.LogHint,
+                Notes = [.. platform.InstallNotes],
+            };
         }
 
-        return new RouterServiceDescription(listen, background, lifecycle.RunsAs, [.. RouterServiceActions.All.Where(a => lifecycle.Refusal(a) is null)], lifecycle.LastOutcome);
+        return new RouterServiceDescription
+        {
+            Listen = listen,
+            Background = background,
+            RunsAs = lifecycle.RunsAs,
+            Actions = [.. RouterServiceActions.All.Where(a => lifecycle.Refusal(a) is null)],
+            LastOutcome = lifecycle.LastOutcome,
+        };
     }
 
     public Task<RouterServiceDescription> SetListenAsync(RouterListenChange change, CancellationToken cancellationToken = default)

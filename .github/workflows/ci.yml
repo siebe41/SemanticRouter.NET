@@ -266,6 +266,11 @@ jobs:
           cp installers/SemanticRouter-win-x64-Setup.exe SemanticRouter-1.0.0-Setup.exe
           deploy/package-installer.sh win-x64 1.0.1 installers
 
+      # The release's signature check, on unsigned packages: it must find every file it checks and report them unsigned.
+      - name: Check the signatures (unsigned)
+        shell: pwsh
+        run: deploy/installer-signature-check.ps1 -Installers installers -Version 1.0.1
+
       - name: Install, update and uninstall
         shell: pwsh
         run: tests/installer/windows.ps1 -Setup SemanticRouter-1.0.0-Setup.exe -Feed installers
@@ -318,6 +323,10 @@ jobs:
           deploy/package-installer.sh osx-arm64 1.0.0 installers
           cp installers/SemanticRouter-osx-arm64-Setup.pkg SemanticRouter-1.0.0.pkg
           deploy/package-installer.sh osx-arm64 1.0.1 installers
+
+      # The release's signature check, on unsigned packages: it must find every file it checks and report them unsigned.
+      - name: Check the signatures (unsigned)
+        run: deploy/installer-signature-check.sh installers 1.0.1 osx-arm64
 
       - name: Install, run the service and update
         run: tests/installer/macos.sh SemanticRouter-1.0.0.pkg installers

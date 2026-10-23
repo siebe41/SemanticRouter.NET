@@ -239,8 +239,14 @@ public sealed class WebhookTests : RouterHostTest
     [Fact]
     public async Task An_ntfy_title_outside_ascii_is_encoded_for_its_header()
     {
-        var notice = new RouterNotice("connector:down:café", NoticeKind.ConnectorDown, "Connector café is down", "Every request failed.", "#/connectors", DateTimeOffset.UtcNow)
+        var notice = new RouterNotice
         {
+            Key = "connector:down:café",
+            Kind = NoticeKind.ConnectorDown,
+            Title = "Connector café is down",
+            Detail = "Every request failed.",
+            Link = "#/connectors",
+            Since = DateTimeOffset.UtcNow,
             PlainDetail = "Every request failed.",
         };
 
@@ -278,17 +284,25 @@ public sealed class WebhookTests : RouterHostTest
             State = TuningChangeState.Suggested,
         };
         suggestion.PlainSummary.Should().Be("utterance for code");
-        var notice = new RouterNotice(
-            "down:cli",
-            NoticeKind.ConnectorDown,
-            "cli has been down for 2 hours",
-            "Every request to it has failed (latest: the model wrote ACME-PROJECT). Start it.",
-            "#/connectors",
-            DateTimeOffset.UtcNow)
+        var notice = new RouterNotice
         {
+            Key = "down:cli",
+            Kind = NoticeKind.ConnectorDown,
+            Title = "cli has been down for 2 hours",
+            Detail = "Every request to it has failed (latest: the model wrote ACME-PROJECT). Start it.",
+            Link = "#/connectors",
+            Since = DateTimeOffset.UtcNow,
             PlainDetail = "Every request to it has failed. Start it.",
         };
-        var unwritten = new RouterNotice("x", NoticeKind.ConnectorDown, "x is down", "latest: ACME-PROJECT", "#/connectors", DateTimeOffset.UtcNow);
+        var unwritten = new RouterNotice
+        {
+            Key = "x",
+            Kind = NoticeKind.ConnectorDown,
+            Title = "x is down",
+            Detail = "latest: ACME-PROJECT",
+            Link = "#/connectors",
+            Since = DateTimeOffset.UtcNow,
+        };
         var digest = new DigestResponse(
             DateTimeOffset.UtcNow.AddDays(-7), DateTimeOffset.UtcNow, Prompts: 3, Served: 3, Local: 3, LocalShare: 1, CostUsd: 0, ReferenceCostUsd: 0, SavedUsd: 0,
             ReferenceModel: null, Escalated: 0, HeldByConversation: 0, Degraded: 0, Failed: 0, Signals: 0, new Dictionary<FeedbackKind, int>(),

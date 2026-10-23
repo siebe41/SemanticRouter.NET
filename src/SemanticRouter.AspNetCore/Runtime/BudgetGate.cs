@@ -5,20 +5,44 @@ using Microsoft.Extensions.Logging;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>Where a budget stands in its current period.</summary>
-public sealed record BudgetStatus(
-    string Name,
-    string Covers,
-    BudgetPeriod Period,
-    DateTimeOffset PeriodStart,
-    DateTimeOffset PeriodEnd,
-    long TokensUsed,
-    long? MaxTokens,
-    decimal CostUsedUsd,
-    decimal? MaxCostUsd,
-    int Percent,
-    bool Exceeded,
-    bool Warning)
+public sealed record BudgetStatus
 {
+    /// <summary>The budget's name (<see cref="BudgetDefinition.Name"/>).</summary>
+    public required string Name { get; init; }
+
+    /// <summary>What it covers, e.g. <c>model gpt-4o</c> or <c>connector openai</c>.</summary>
+    public required string Covers { get; init; }
+
+    /// <summary>The budget period.</summary>
+    public required BudgetPeriod Period { get; init; }
+
+    /// <summary>Start of the current period.</summary>
+    public required DateTimeOffset PeriodStart { get; init; }
+
+    /// <summary>End of the current period.</summary>
+    public required DateTimeOffset PeriodEnd { get; init; }
+
+    /// <summary>Tokens used in the period.</summary>
+    public required long TokensUsed { get; init; }
+
+    /// <summary>The token limit, if any.</summary>
+    public long? MaxTokens { get; init; }
+
+    /// <summary>Spend in the period, at the models' current prices.</summary>
+    public required decimal CostUsedUsd { get; init; }
+
+    /// <summary>The spend limit, if any.</summary>
+    public decimal? MaxCostUsd { get; init; }
+
+    /// <summary>How much of the budget is used, by the nearer of the two limits, rounded down.</summary>
+    public required int Percent { get; init; }
+
+    /// <summary>Whether a limit is reached, so the budget's models are not tried until the period ends.</summary>
+    public required bool Exceeded { get; init; }
+
+    /// <summary>Whether the budget is past <see cref="UsageOptions.WarnAtPercent"/> but not exceeded.</summary>
+    public required bool Warning { get; init; }
+
     /// <summary>"12,400 of 10,000 tokens" / "$4.10 of $5.00", for messages.</summary>
     public string Describe()
     {
@@ -121,9 +145,21 @@ internal sealed partial class BudgetGate(IUsageLedger ledger, TimeProvider time,
         bool exceeded = Exceeded(budget, spent);
         int percent = (int)Math.Floor(Math.Max(tokenShare, costShare) * 100);
         bool warning = !exceeded && percent >= usage.WarnAtPercent;
-        var status = new BudgetStatus(
-            budget.Name, budget.Model is { Length: > 0 } m ? $"model {m}" : budget.Connector is { Length: > 0 } c ? $"connector {c}" : $"profile {budget.Profile}", budget.Period, start, end,
-            spent.TotalTokens, budget.MaxTokens, spent.CostUsd, budget.MaxCostUsd, percent, exceeded, warning);
+        var status = new BudgetStatus
+        {
+            Name = budget.Name,
+            Covers = budget.Model is { Length: > 0 } m ? $"model {m}" : budget.Connector is { Length: > 0 } c ? $"connector {c}" : $"profile {budget.Profile}",
+            Period = budget.Period,
+            PeriodStart = start,
+            PeriodEnd = end,
+            TokensUsed = spent.TotalTokens,
+            MaxTokens = budget.MaxTokens,
+            CostUsedUsd = spent.CostUsd,
+            MaxCostUsd = budget.MaxCostUsd,
+            Percent = percent,
+            Exceeded = exceeded,
+            Warning = warning,
+        };
 
         string key = budget.Name + (exceeded ? ":spent" : ":warn");
         if ((warning || exceeded) && (!_warned.TryGetValue(key, out DateTimeOffset warnedFor) || warnedFor != start))

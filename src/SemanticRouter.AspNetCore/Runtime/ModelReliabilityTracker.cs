@@ -3,29 +3,41 @@ using Microsoft.Extensions.DependencyInjection;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>How one model has done on one kind of work: a route, or turns with tools.</summary>
-/// <param name="Model">The model that answered.</param>
-/// <param name="Route">The route, for route work.</param>
-/// <param name="Capability">The capability (<c>tools</c>), for capability work.</param>
-/// <param name="Turns">Turns it answered in the window (since it was last left out or reset).</param>
-/// <param name="Failures">Of those, turns that drew feedback (retried, corrected, tool errors, empty reply).</param>
-/// <param name="Rate">Failures / turns.</param>
-/// <param name="PeerRate">The same share for the other models with enough turns on this work, when there are any.</param>
-/// <param name="ByKind">Feedback of each kind on its turns.</param>
-/// <param name="ExcludedSince">When it stopped being offered for this work, while it is left out.</param>
-/// <param name="ExcludedUntil">When it will be offered again.</param>
-/// <param name="Detail">Why, e.g. "7 of 20 turns drew feedback (5 tool errors, 2 retried); other models 10%".</param>
-public sealed record ModelReliability(
-    string Model,
-    string? Route,
-    string? Capability,
-    int Turns,
-    int Failures,
-    double Rate,
-    double? PeerRate,
-    IReadOnlyDictionary<FeedbackKind, int> ByKind,
-    DateTimeOffset? ExcludedSince,
-    DateTimeOffset? ExcludedUntil,
-    string? Detail);
+public sealed record ModelReliability
+{
+    /// <summary>The model that answered.</summary>
+    public required string Model { get; init; }
+
+    /// <summary>The route, for route work.</summary>
+    public string? Route { get; init; }
+
+    /// <summary>The capability (<c>tools</c>), for capability work.</summary>
+    public string? Capability { get; init; }
+
+    /// <summary>Turns it answered in the window (since it was last left out or reset).</summary>
+    public required int Turns { get; init; }
+
+    /// <summary>Of those, turns that drew feedback (retried, corrected, tool errors, empty reply).</summary>
+    public required int Failures { get; init; }
+
+    /// <summary>Failures / turns.</summary>
+    public required double Rate { get; init; }
+
+    /// <summary>The same share for the other models with enough turns on this work, when there are any.</summary>
+    public double? PeerRate { get; init; }
+
+    /// <summary>Feedback of each kind on its turns.</summary>
+    public required IReadOnlyDictionary<FeedbackKind, int> ByKind { get; init; }
+
+    /// <summary>When it stopped being offered for this work, while it is left out.</summary>
+    public DateTimeOffset? ExcludedSince { get; init; }
+
+    /// <summary>When it will be offered again.</summary>
+    public DateTimeOffset? ExcludedUntil { get; init; }
+
+    /// <summary>Why, e.g. "7 of 20 turns drew feedback (5 tool errors, 2 retried); other models 10%".</summary>
+    public string? Detail { get; init; }
+}
 
 /// <summary>
 /// The router's <see cref="IModelReliability"/> (<see cref="ReliabilityOptions"/>): from the activity log and its
@@ -256,18 +268,20 @@ internal sealed class ModelReliabilityTracker : IModelReliability
             && !_exclusions.ContainsKey(Key(model.Name, RouteWork(r.Name))));
     }
 
-    private static ModelReliability Result(Tally tally, double rate, double? peerRate, Exclusion? left, string? detail) => new(
-        tally.Model,
-        tally.Work.StartsWith("route:", StringComparison.Ordinal) ? tally.Work["route:".Length..] : null,
-        tally.Work.StartsWith("route:", StringComparison.Ordinal) ? null : tally.Work,
-        tally.Turns,
-        tally.Failures,
-        Math.Round(rate, 4),
-        peerRate is { } peers ? Math.Round(peers, 4) : null,
-        new Dictionary<FeedbackKind, int>(tally.ByKind),
-        left?.Since,
-        left?.Until,
-        detail);
+    private static ModelReliability Result(Tally tally, double rate, double? peerRate, Exclusion? left, string? detail) => new ModelReliability
+    {
+        Model = tally.Model,
+        Route = tally.Work.StartsWith("route:", StringComparison.Ordinal) ? tally.Work["route:".Length..] : null,
+        Capability = tally.Work.StartsWith("route:", StringComparison.Ordinal) ? null : tally.Work,
+        Turns = tally.Turns,
+        Failures = tally.Failures,
+        Rate = Math.Round(rate, 4),
+        PeerRate = peerRate is { } peers ? Math.Round(peers, 4) : null,
+        ByKind = new Dictionary<FeedbackKind, int>(tally.ByKind),
+        ExcludedSince = left?.Since,
+        ExcludedUntil = left?.Until,
+        Detail = detail,
+    };
 
     /// <summary>"7 of 20 turns drew feedback (5 tool errors, 2 retried); other models 10%".</summary>
     private static string Describe(Tally tally, double? peerRate)

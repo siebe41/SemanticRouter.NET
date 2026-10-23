@@ -33,7 +33,7 @@ Signing is required. The release's first job checks, for each platform, whether 
 
 | Each platform's settings | What the release does |
 |---|---|
-| All set | Signs that platform's installers, and checks the signature (and on macOS the notarization ticket) before uploading them. A signature that does not check out fails the release while it is still a draft, with nothing published ([When a release fails](releases.md#when-a-release-fails)). |
+| All set | Signs that platform's installers, and checks the signatures of the installers and of the programs in them and in the update package (and on macOS the notarization ticket) before uploading them ([what is checked](releases.md#code-signing)). A signature that does not check out fails the release while it is still a draft, with nothing published ([When a release fails](releases.md#when-a-release-fails)). |
 | None set, and the variable `ALLOW_UNSIGNED_RELEASE` is `true` (spaces and capitals are ignored); "Cut a release" also needs its **Allow unsigned installers** box ticked | Publishes that platform's installers unsigned, with a warning. |
 | None set, `ALLOW_UNSIGNED_RELEASE` not set (or anything but `true`) | Fails before anything is published, naming the platform. |
 | Some set, some not | Fails before anything is published, naming the missing settings. `ALLOW_UNSIGNED_RELEASE` does not change this. |

@@ -35,11 +35,13 @@ internal sealed class UsageCapture
 
         lock (_gate)
         {
-            _usage = new ChatUsage(
-                usage.InputTokens ?? _usage.InputTokens,
-                usage.OutputTokens ?? _usage.OutputTokens,
-                usage.CacheReadTokens ?? _usage.CacheReadTokens,
-                usage.CacheCreationTokens ?? _usage.CacheCreationTokens);
+            _usage = new ChatUsage
+            {
+                InputTokens = usage.InputTokens ?? _usage.InputTokens,
+                OutputTokens = usage.OutputTokens ?? _usage.OutputTokens,
+                CacheReadTokens = usage.CacheReadTokens ?? _usage.CacheReadTokens,
+                CacheCreationTokens = usage.CacheCreationTokens ?? _usage.CacheCreationTokens,
+            };
             _seen = true;
         }
     }
@@ -51,13 +53,22 @@ internal sealed class UsageCapture
     {
         int? cached = usage.TryGetObject("prompt_tokens_details", out JsonElement details) ? details.GetInt("cached_tokens") : null;
         int? prompt = usage.GetInt("prompt_tokens");
-        return new ChatUsage(prompt is { } p && cached is { } c ? p - c : prompt, usage.GetInt("completion_tokens"), cached);
+        return new ChatUsage
+        {
+            InputTokens = prompt is { } p && cached is { } c ? p - c : prompt,
+            OutputTokens = usage.GetInt("completion_tokens"),
+            CacheReadTokens = cached,
+        };
     }
 
     /// <summary>Reads an Anthropic <c>usage</c> object.</summary>
-    public static ChatUsage FromAnthropic(JsonElement usage) => new(
-        usage.GetInt("input_tokens"), usage.GetInt("output_tokens"),
-        usage.GetInt("cache_read_input_tokens"), usage.GetInt("cache_creation_input_tokens"));
+    public static ChatUsage FromAnthropic(JsonElement usage) => new ChatUsage
+    {
+        InputTokens = usage.GetInt("input_tokens"),
+        OutputTokens = usage.GetInt("output_tokens"),
+        CacheReadTokens = usage.GetInt("cache_read_input_tokens"),
+        CacheCreationTokens = usage.GetInt("cache_creation_input_tokens"),
+    };
 
     /// <summary>Finds usage in one response document or stream event of <paramref name="protocol"/>.</summary>
     public static ChatUsage? Find(JsonElement root, ChatProtocol protocol)

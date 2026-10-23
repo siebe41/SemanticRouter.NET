@@ -34,6 +34,8 @@
     <None Include="..\fixtures\upgrade\*.zip" Link="fixtures\upgrade\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <!-- The desktop app's tray icons, for DesktopTests. -->
     <None Include="..\..\src\SemanticRouter.Desktop\Assets\tray*" Link="tray-icons\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The intended public API of the library packages, for ApiSurfaceDocumentationTests. -->
+    <None Include="..\..\docs\api-surface.md" Link="docs\api-surface.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

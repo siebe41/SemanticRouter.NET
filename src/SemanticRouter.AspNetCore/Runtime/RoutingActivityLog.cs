@@ -238,7 +238,7 @@ public interface IRoutingActivityStore
     /// As <see cref="Purge"/>, and says whether the entries are gone from the store's files too. A store that does not
     /// implement it reports what <see cref="Purge"/> removed as complete.
     /// </summary>
-    ActivityPurgeResult PurgeWithResult(DateTimeOffset since, DateTimeOffset until) => new(Purge(since, until));
+    ActivityPurgeResult PurgeWithResult(DateTimeOffset since, DateTimeOffset until) => new ActivityPurgeResult { Removed = Purge(since, until) };
 
     /// <summary>
     /// The ids of every stored entry with <paramref name="since"/> ≤ timestamp &lt; <paramref name="until"/>, including
@@ -248,13 +248,23 @@ public interface IRoutingActivityStore
 }
 
 /// <summary>What a purge of activity did.</summary>
-/// <param name="Removed">How many entries were deleted.</param>
-/// <param name="Complete">
-/// Whether they are gone from the store's files too. <see langword="false"/> when another connection (a second router
-/// sharing the file, a dashboard read) kept reading until the busy timeout, so the write-ahead log still holds them
-/// until a later checkpoint.
-/// </param>
-public readonly record struct ActivityPurgeResult(int Removed, bool Complete = true);
+public readonly record struct ActivityPurgeResult
+{
+    /// <summary>Creates an instance with the defaults.</summary>
+    public ActivityPurgeResult()
+    {
+    }
+
+    /// <summary>How many entries were deleted.</summary>
+    public required int Removed { get; init; }
+
+    /// <summary>
+    /// Whether they are gone from the store's files too. <see langword="false"/> when another connection (a second router
+    /// sharing the file, a dashboard read) kept reading until the busy timeout, so the write-ahead log still holds them
+    /// until a later checkpoint.
+    /// </summary>
+    public bool Complete { get; init; } = true;
+}
 
 /// <summary>
 /// A bounded in-memory log of recent routing decisions, optionally backed by an <see cref="IRoutingActivityStore"/>
@@ -266,6 +276,7 @@ public sealed class RoutingActivityLog
     // for half a second at a few thousand requests a second: the next block is asked for halfway through this one, and
     // a reservation can wait for another writer of the file. A restart leaves at most two blocks unused.
     internal const int IdBlock = 1024;
+    private const int DefaultCapacity = 500;
     private readonly RoutingActivityEntry?[] _entries;
     private readonly IRoutingActivityStore? _store;
     private readonly Lock _gate = new();
@@ -277,8 +288,26 @@ public sealed class RoutingActivityLog
     private Task<long>? _nextBlock;
     private long _added;
 
+    /// <summary>Creates an in-memory log keeping the latest 500 entries.</summary>
+    public RoutingActivityLog()
+        : this(DefaultCapacity, null)
+    {
+    }
+
+    /// <summary>Creates an in-memory log keeping the latest <paramref name="capacity"/> entries.</summary>
+    public RoutingActivityLog(int capacity)
+        : this(capacity, null)
+    {
+    }
+
+    /// <summary>Creates a log keeping the latest 500 entries, seeded from <paramref name="store"/>.</summary>
+    public RoutingActivityLog(IRoutingActivityStore? store)
+        : this(DefaultCapacity, store)
+    {
+    }
+
     /// <summary>Creates a log keeping the latest <paramref name="capacity"/> entries, seeded from <paramref name="store"/>.</summary>
-    public RoutingActivityLog(int capacity = 500, IRoutingActivityStore? store = null)
+    public RoutingActivityLog(int capacity, IRoutingActivityStore? store)
     {
         _entries = new RoutingActivityEntry?[Math.Max(10, capacity)];
         _store = store;
@@ -409,7 +438,7 @@ public sealed class RoutingActivityLog
         }
 
         beforeStore?.Invoke(ids);
-        return _store?.PurgeWithResult(since, until) ?? new ActivityPurgeResult(inMemory);
+        return _store?.PurgeWithResult(since, until) ?? new ActivityPurgeResult { Removed = inMemory };
     }
 
     /// <summary>Whether <paramref name="entry"/> was deleted by a purge (it was added before the purge and is in its range).</summary>

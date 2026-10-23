@@ -1,5 +1,7 @@
 /* Semantic Router dashboard: form fields the settings pages share: numbers and durations whose default shows as a
-   placeholder, pickers (checkboxes and chips) instead of comma lists, the time zone list, and Basic/Advanced sections. */
+   placeholder, pickers (checkboxes and chips) instead of comma lists, the time zone list, and Basic/Advanced sections.
+   The helpers escape values and binding paths (a path can hold a connector or profile name); label, hint and summary
+   are HTML, so callers pass constants or escaped text. */
 import { h, state } from './core.js';
 import { DURATION_PATTERN, duration } from './labels.js';
 import { pageActions } from './page-actions.js';
@@ -12,7 +14,7 @@ import { pageActions } from './page-actions.js';
 export function numField({ bind, value, def, label, hint, min, max, step, float, nullable, placeholder, cls }) {
   const shown = value == null || (def != null && value === def) ? '' : value;
   const ph = placeholder || (def != null ? `${def} (default)` : '');
-  return `<label class="field${cls ? ' ' + cls : ''}"><span class="name">${label}</span><input type="number" data-bind="${bind}" data-kind="${float ? 'float' : 'number'}" ${nullable ? 'data-nullable="1"' : 'data-empty="drop"'}
+  return `<label class="field${cls ? ' ' + cls : ''}"><span class="name">${label}</span><input type="number" data-bind="${h(bind)}" data-kind="${float ? 'float' : 'number'}" ${nullable ? 'data-nullable="1"' : 'data-empty="drop"'}
     ${min != null ? `min="${min}"` : ''} ${max != null ? `max="${max}"` : ''} ${step != null ? `step="${step}"` : ''} value="${h(shown)}" placeholder="${h(ph)}">${hint ? `<span class="hint">${hint}</span>` : ''}</label>`;
 }
 
@@ -25,7 +27,7 @@ export function durationField({ bind, value, def, label, hint, zeroMeansDefault,
   const unset = value == null || value === '' || value === def || (zeroMeansDefault && /^0+:00:00$/.test(value));
   const shown = unset ? '' : value;
   const fallback = shownDefault || def || '';
-  return `<label class="field"><span class="name">${label}</span><input type="text" data-bind="${bind}" data-empty="drop" data-duration="${h(fallback)}" pattern="${DURATION_PATTERN}" inputmode="numeric" spellcheck="false"
+  return `<label class="field"><span class="name">${label}</span><input type="text" data-bind="${h(bind)}" data-empty="drop" data-duration="${h(fallback)}" pattern="${DURATION_PATTERN}" inputmode="numeric" spellcheck="false"
       value="${h(shown)}" placeholder="${h(fallback ? `${fallback} (default)` : 'hh:mm:ss')}" title="hh:mm:ss, e.g. 00:15:00">
     <span class="hint"><span class="duration-words">${shown ? duration(shown) : fallback ? `${duration(fallback)} by default` : ''}</span><span class="duration-bad">Use hh:mm:ss, e.g. 00:15:00 for 15 minutes.</span>${hint ? ' ' + hint : ''}</span></label>`;
 }
@@ -40,7 +42,7 @@ export function pickList({ bind, values, known, label, hint, otherLabel, otherPl
   const others = list.filter((v) => !lower.includes(String(v).toLowerCase()));
   const id = 'pick-' + bind.replace(/[^A-Za-z0-9]/g, '-');
   return `<fieldset class="field pick${chips ? ' chips-pick' : ''}" data-pick="${h(bind)}"><legend class="name">${label}</legend>
-    <input type="hidden" data-bind="${bind}" data-kind="csv" value="${h(list.join(', '))}">
+    <input type="hidden" data-bind="${h(bind)}" data-kind="csv" value="${h(list.join(', '))}">
     <div class="pick-options">${known.map((k) => `<label class="${chips ? 'chip' : 'check'}"><input type="checkbox" data-pick-value="${h(k)}" ${list.some((v) => String(v).toLowerCase() === k.toLowerCase()) ? 'checked' : ''}> ${h(k)}</label>`).join('') || '<span class="faint small">none yet</span>'}</div>
     <input type="text" id="${id}" data-pick-other aria-label="${h(otherLabel || label + ': others')}" value="${h(others.join(', '))}" placeholder="${h(otherPlaceholder || 'others, comma-separated')}">
     ${hint ? `<span class="hint">${hint}</span>` : ''}</fieldset>`;

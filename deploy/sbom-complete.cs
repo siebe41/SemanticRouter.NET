@@ -9,7 +9,7 @@
 //   - the runtime packs' real package ids: Syft names them runtimepack.<id>, which no advisory database knows;
 //   - the components that are not NuGet packages, from deploy/third-party/extra.json, as THIRD-PARTY-NOTICES.txt lists them:
 //     the embedded fonts and, with --installer, what vpk adds to the installers and update packages (Velopack's native
-//     binaries, the AppImage runtime and what it links).
+//     binaries, Rust's standard library, the AppImage runtime and what it links).
 //
 //   dotnet run --file deploy/sbom-complete.cs -- <sbom.cdx.json> --type <type> --name <name> --version <version>
 //       --purl <purl> [--description <text>] [--contents <directory>]... [--installer]

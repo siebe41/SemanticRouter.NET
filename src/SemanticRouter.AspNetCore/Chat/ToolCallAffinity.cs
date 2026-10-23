@@ -22,8 +22,14 @@ public sealed class ToolCallAffinity : IToolCallAffinity
     private readonly ConcurrentQueue<string> _order = new();
     private readonly int _capacity;
 
+    /// <summary>Creates a cache that keeps the latest 4096 tool-call ids.</summary>
+    public ToolCallAffinity()
+        : this(4096)
+    {
+    }
+
     /// <summary>Creates a cache that keeps the latest <paramref name="capacity"/> tool-call ids.</summary>
-    public ToolCallAffinity(int capacity = 4096)
+    public ToolCallAffinity(int capacity)
     {
         _capacity = Math.Max(16, capacity);
     }

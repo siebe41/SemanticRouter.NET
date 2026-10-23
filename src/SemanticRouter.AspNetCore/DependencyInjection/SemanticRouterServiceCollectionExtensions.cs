@@ -64,8 +64,11 @@ public static class SemanticRouterServiceCollectionExtensions
         // Long-lived state shared across configuration reloads.
         services.TryAddSingleton<IModelHealth>(sp => new ModelHealthTracker(
             sp.GetRequiredService<IOptions<SemanticRouterOptions>>().Value.Selection,
-            sp.GetService<TimeProvider>() ?? TimeProvider.System,
-            sp.GetService<ICooldownStore>()));
+            new ModelHealthTrackerDependencies
+            {
+                Time = sp.GetService<TimeProvider>() ?? TimeProvider.System,
+                Store = sp.GetService<ICooldownStore>(),
+            }));
         services.TryAddSingleton<IRouterConfigurationHistory>(_ => new InMemoryRouterConfigurationHistory());
         services.TryAddSingleton<IUsageLedger, InMemoryUsageLedger>();
         services.TryAddSingleton<IAuditLog>(_ => new InMemoryAuditLog());
@@ -76,7 +79,7 @@ public static class SemanticRouterServiceCollectionExtensions
         services.TryAddSingleton<IToolCallAffinity, ToolCallAffinity>();
         services.TryAddSingleton<IWarmCacheStore>(sp => new WarmCacheStore(sp.GetService<TimeProvider>()));
         services.TryAddSingleton(sp => new GatewayKeyThrottle(sp.GetService<TimeProvider>() ?? TimeProvider.System));
-        services.TryAddSingleton<RoutingActivityLog>();
+        services.TryAddSingleton(sp => new RoutingActivityLog(sp.GetService<IRoutingActivityStore>()));
         services.TryAddSingleton(sp => new GatewayGuard(
             sp.GetService<IOptions<RouterDashboardOptions>>()?.Value.PublicOrigins ?? []));
         services.TryAddSingleton<RoutingFeedbackLog>();

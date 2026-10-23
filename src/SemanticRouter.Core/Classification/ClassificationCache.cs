@@ -17,12 +17,20 @@ public sealed class ClassificationCacheOptions
 }
 
 /// <summary>How the classification cache is doing.</summary>
-/// <param name="Hits">Prompts answered from the cache.</param>
-/// <param name="Misses">Prompts classified (embedded) because they were not cached.</param>
-/// <param name="Entries">Decisions currently kept.</param>
-/// <param name="Capacity">Most decisions kept.</param>
-public sealed record ClassificationCacheStatistics(long Hits, long Misses, int Entries, int Capacity)
+public sealed record ClassificationCacheStatistics
 {
+    /// <summary>Prompts answered from the cache.</summary>
+    public required long Hits { get; init; }
+
+    /// <summary>Prompts classified (embedded) because they were not cached.</summary>
+    public required long Misses { get; init; }
+
+    /// <summary>Decisions currently kept.</summary>
+    public required int Entries { get; init; }
+
+    /// <summary>Most decisions kept.</summary>
+    public required int Capacity { get; init; }
+
     /// <summary><see cref="Hits"/> / (<see cref="Hits"/> + <see cref="Misses"/>).</summary>
     public double HitRate => Hits + Misses == 0 ? 0 : (double)Hits / (Hits + Misses);
 }
@@ -56,7 +64,7 @@ internal sealed class ClassificationCache
         {
             lock (_gate)
             {
-                return new ClassificationCacheStatistics(_hits, _misses, _entries.Count, _capacity);
+                return new ClassificationCacheStatistics { Hits = _hits, Misses = _misses, Entries = _entries.Count, Capacity = _capacity };
             }
         }
     }

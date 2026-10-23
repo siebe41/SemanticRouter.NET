@@ -88,7 +88,7 @@ The SBOMs are [CycloneDX](https://cyclonedx.org/) JSON, generated with [Syft](ht
 - **The subject.** `metadata.component` names what the SBOM describes, with the release version and a purl: `pkg:github/siebe41/semanticrouter.net@v<version>` for the packages, `pkg:docker/siebe41/semantic-router@<version>?repository_url=ghcr.io` for the image, and `pkg:generic/SemanticRouter-<platform>[-installer]@<version>?download_url=…` for the desktop app, naming the asset it was made from.
 - **A licence for every NuGet component**: the SPDX expression in the package's `.nuspec`, or for a package that names a licence file instead, the one in [`deploy/third-party/extra.json`](../deploy/third-party/extra.json) (as for the notices); this repository's projects get their package licence. Packages carry their NuGet version, not their assembly's (`0.6.0`, not `0.6.0.0`), and the tool is `pkg:nuget/SemanticRouter.Host`. The desktop app's own assembly is not a NuGet package, so it has no purl.
 - **The .NET runtime under its package id.** Syft names the runtime the desktop app bundles `runtimepack.Microsoft.NETCore.App.Runtime.<rid>` (and the same for ASP.NET Core), which no advisory matches; the SBOMs name `Microsoft.NETCore.App.Runtime.<rid>`.
-- **What no scanner finds**, as `THIRD-PARTY-NOTICES.txt` lists it: the dashboard's fonts and, in the installer SBOMs, Velopack's native binaries (at the Velopack version) and the AppImage runtime with the libraries linked into it.
+- **What no scanner finds**, as `THIRD-PARTY-NOTICES.txt` lists it: the dashboard's fonts and, in the installer SBOMs, Velopack's native binaries (at the Velopack version), Rust's standard library, and the AppImage runtime with the libraries linked into it.
 
 A NuGet component whose licence cannot be found fails the release. CI makes the packages', the image's and the Linux, Windows (win-x64) and macOS (osx-arm64) installers' SBOMs on every pull request, so a new package without one usually fails there first; it does not make the archives' SBOMs or the osx-x64 installer's, so a package that only win-arm64, osx-x64 or linux-arm64 restores can still first fail at a tag. [`deploy/sbom-check.sh`](../deploy/sbom-check.sh) checks each SBOM independently of the generator.
 
@@ -191,13 +191,31 @@ Open the run under **Actions > Release** and read the failed job's log. The usua
 1. Set `PackageValidationBaselineVersion` in [`Directory.Build.targets`](../Directory.Build.targets) to the version just released. Restore downloads it from nuget.org, so wait until nuget.org lists the packages.
 2. Set `VersionPrefix` in [`Directory.Build.props`](../Directory.Build.props) to the next version: `0.7.0` after `0.6.0`, or `1.0.0` when that is next. CI packs without a version, so its packages carry `VersionPrefix`, which must be above the baseline: below it, every pack fails with CP0003.
 3. Delete every `src/*/CompatibilitySuppressions.xml`. The breaks they approved are in the new baseline, and a suppression that no longer matches anything fails the pack ("Unnecessary suppressions found").
-4. Run `dotnet pack -c Release`; it must pass with no CP diagnostic. CI runs the same pack on the pull request.
+4. In each `src/*/PublicAPI.Unshipped.txt`, move the lines to the project's `PublicAPI.Shipped.txt`: add each new line to it, and for each `*REMOVED*` line delete the line it names from it. Leave `PublicAPI.Unshipped.txt` with only its first line, `#nullable enable` ([CONTRIBUTING.md](../CONTRIBUTING.md#public-api-and-package-validation)).
+5. Run `dotnet build -c Release` and `dotnet pack -c Release`; both must pass, with no RS or CP diagnostic. CI runs the same on the pull request.
 
 ## Code signing
 
 Windows SmartScreen and macOS Gatekeeper check a publisher's code signature, not these attestations. Provenance shows where a file came from; it does not stop the warnings on first start.
 
 The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([Signing the desktop app](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true` and, when cutting the release, ticked **Allow unsigned installers** ("Cut a release" asks for both; a tag pushed by hand needs only the variable). Until the signing certificates exist, that is what lets a release through, and those installers are unsigned. A signature, notarization or check that fails stops the release while it is still a draft, before anything is published ([When a release fails](#when-a-release-fails)). The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before anything is uploaded.
+
+
+What is checked covers the code that ends up running, not just the installer, and the update package the installed app updates to (the `-full.nupkg` on the release):
+
+| Platform | Checked | How |
+| --- | --- | --- |
+| Windows | `SemanticRouter-win-x64-Setup.exe` | `Get-AuthenticodeSignature`: `Valid`. Its signer is taken as the publisher for the rows below: that certificate, or any with the same subject, since Azure Trusted Signing renews its short-lived certificates often |
+| Windows | `SemanticRouter.exe`, `Squirrel.exe` (Velopack's updater) and `SemanticRouter_ExecutionStub.exe` in the update package's `lib/app/`, and the app's own `SemanticRouter.*` files there | `Get-AuthenticodeSignature`: `Valid`, signed by the publisher |
+| Windows | every other executable file in `lib/app/` (a program or library, by its `MZ` header) | `Get-AuthenticodeSignature`: `Valid`, signed by the publisher or by Microsoft |
+| macOS | `SemanticRouter-<rid>-Setup.pkg` | `pkgutil --check-signature`, signed by the team, and `xcrun stapler validate` for the notarization ticket |
+| macOS | the `.app` inside the `.pkg` (`pkgutil --expand-full`) | `codesign --verify --deep --strict` with the team's Developer ID signature, and `spctl --assess` (Gatekeeper) reporting `source=Notarized Developer ID` |
+| macOS | the `.app` in the update package | `codesign --verify --deep --strict` with the team's Developer ID signature |
+
+These are the signature rules the desktop app applies to an update when `Updates:Publisher` is set ([UpdatePublisher](../src/SemanticRouter.Desktop/UpdatePublisher.cs)), with the publisher taken from the release itself: the installer's signer on Windows, the repository's Apple team ID (`APPLE_TEAM_ID`) on macOS. The app's check also refuses .NET host files (`*.runtimeconfig.json`, `*.deps.json`) that point outside the package; the release does not check those.
+
+The checks are [`deploy/installer-signature-check.ps1`](../deploy/installer-signature-check.ps1) and [`deploy/installer-signature-check.sh`](../deploy/installer-signature-check.sh). On a platform that is meant to be signed, any check that does not pass fails the release; otherwise each line in the summary says **unsigned**. A file that is missing fails either way. CI runs both on its unsigned installer builds, so a change in what Velopack puts where is caught before a release.
+
 
 To check an installer you downloaded:
 
