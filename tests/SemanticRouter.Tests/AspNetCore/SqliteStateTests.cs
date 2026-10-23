@@ -512,11 +512,50 @@ public sealed class SqliteStateTests : IDisposable
             history.List().Should().HaveCount(2);
             stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2.5), "the configuration is applied under the runtime's lock");
             history.GetVersion(id).Should().NotBeNull("the version is saved even though the log could not be emptied");
+            DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().Contain("7c4a", "the reader must actually pin the deleted version in the log");
             read.Commit();
         }
 
         history.List().Should().HaveCount(2);
         DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("7c4a", "the checkpoint owed is made after the next operation");
+    }
+
+    [Fact]
+    public async Task The_hourly_prune_waits_for_a_short_reader_to_release_deleted_audit_data()
+    {
+        SqliteRouterDatabase database = Open(o => o.AuditRetention = TimeSpan.FromDays(30));
+        var audit = new SqliteAuditLog(database);
+        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "short-reader 3a8f", null, "PUT", "/router/api/config", null, 200, "changed"));
+        _time.Advance(TimeSpan.FromDays(40));
+        using var reader = new SqliteConnection($"Data Source={DbPath};Pooling=False");
+        reader.Open();
+        using SqliteTransaction read = reader.BeginTransaction(deferred: true);
+        using (SqliteCommand count = reader.CreateCommand())
+        {
+            count.Transaction = read;
+            count.CommandText = "SELECT count(*) FROM audit;";
+            count.ExecuteScalar().Should().Be(1L);
+        }
+
+        Task<int> prune = Task.Run(database.Prune);
+        // Wait until the delete has reached the file while this snapshot still pins it.
+        using (var observer = new SqliteConnection($"Data Source={DbPath};Pooling=False"))
+        {
+            observer.Open();
+            using SqliteCommand count = observer.CreateCommand();
+            count.CommandText = "SELECT count(*) FROM audit;";
+            for (int attempt = 0; (long)count.ExecuteScalar()! != 0 && attempt < 100; attempt++)
+            {
+                await Task.Delay(10);
+            }
+
+            ((long)count.ExecuteScalar()!).Should().Be(0);
+        }
+
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().Contain("3a8f");
+        read.Commit();
+        (await prune.WaitAsync(TimeSpan.FromSeconds(6))).Should().BeGreaterThan(0);
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("3a8f");
     }
 
     [Fact]

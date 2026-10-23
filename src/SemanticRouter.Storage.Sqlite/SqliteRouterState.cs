@@ -255,7 +255,9 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         int deleted = (int)(TotalChanges(connection) - before);
         if (deleted > 0)
         {
-            EmptyLog(connection);
+            // The timer prune runs outside the runtime lock. Let short reads finish
+            // so deleted data does not remain in the log until the next hourly prune.
+            EmptyLog(connection, Options.BusyTimeout);
         }
 
         return deleted;
@@ -557,7 +559,8 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
             int attempts = Volatile.Read(ref _logAttempts);
             T result = operation(connection);
 
-            // Not when the operation has just tried itself (a capped history): the reader that kept it is still there.
+            // Optimisation: skip a redundant settle if any thread has just tried a checkpoint.
+            // A concurrent writer attempt can also skip this settle; _logOwed keeps the later retry.
             if (settleLog && _logOwed && Volatile.Read(ref _logAttempts) == attempts)
             {
                 try
