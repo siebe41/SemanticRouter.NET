@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
+using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.AspNetCore;
 
@@ -266,6 +267,40 @@ public sealed class MemoryMapTests : RouterHostTest, IDisposable
         exposure["cloudContent"]!.GetValue<int>().Should().Be(1);
         exposure["localContent"]!.GetValue<int>().Should().Be(0);
         exposure["models"]!["cloud"]!.GetValue<int>().Should().Be(1);
+    }
+
+    [Fact]
+    public async Task The_state_database_names_the_notes_a_request_quoted_but_never_holds_their_text()
+    {
+        using var state = new TempFolder();
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+            },
+            services: s =>
+            {
+                s.Configure<MemoryOptions>(m => m.Sources.Add(new MemorySourceOptions { Name = "vault", Path = _vault.Root }));
+                new SemanticRouterBuilder(s).UseSqliteState(Path.Combine(state.Root, "state.db"));
+                s.Configure<StateOptions>(o => o.StorePrompts = PromptStorage.Off);
+            });
+        await MemoryAsync(client);
+        ClassifyAs(tier: 4);
+
+        await client.PostAsync("/v1/chat/completions", Chat($"Summarize this:\n     1→{AliceLine1}\n     2→{AliceLine2}"));
+        IRoutingActivityStore store = Services.GetRequiredService<IRoutingActivityStore>();
+        for (int i = 0; i < 500 && store.Recent(1).Count == 0; i++)
+        {
+            await Task.Delay(10);
+        }
+
+        store.Recent(1).Should().ContainSingle().Which.Memory.Should().ContainSingle().Which.Id.Should().Be("vault:people/Alice.md");
+        string files = DurableStateHostTests.ReadDatabaseFiles(state.Root, "state.db");
+        files.Should().Contain("vault:people/Alice.md", "the entry names the note it quoted");
+        files.Should().NotContain("async standups").And.NotContain("billing migration", "note text is never stored");
+        await DisposeAsync();
+        SqliteFiles.Release(state.Root);
     }
 
     [Fact]

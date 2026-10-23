@@ -342,6 +342,22 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void Activity_past_the_count_cap_on_a_running_router_leaves_the_files_too()
+    {
+        // Under the cap the running router prunes every 100th entry, without a restart or the hourly prune.
+        var store = new SqliteActivityStore(Open(o => o.ActivityMaxEntries = 5));
+        for (int i = 1; i <= 100; i++)
+        {
+            store.Append(new RoutingActivityEntry { Id = i, Timestamp = _time.GetUtcNow(), PromptPreview = i <= 5 ? "capped-out 1d3e " + i : "kept " + i });
+        }
+
+        Settle();
+
+        store.Recent(1000).Should().HaveCount(5);
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("capped-out 1d3e");
+    }
+
+    [Fact]
     public async Task A_purge_empties_the_log_once_a_reader_that_held_it_has_finished()
     {
         var store = new SqliteActivityStore(Open());
@@ -1231,6 +1247,39 @@ public sealed class DurableStateHostTests : RouterHostTest
         JsonNode.Parse(await purge.Content.ReadAsStringAsync())!["removed"]!.GetValue<int>().Should().Be(2);
         JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray().Should().BeEmpty();
         DatabaseFiles().Should().NotContain("purge-me 7a1c");
+        foreach (string format in new[] { "jsonl", "csv" })
+        {
+            (await client.GetStringAsync($"/router/api/activity/export?format={format}&prompts=true&since=2000-01-01T00:00:00Z"))
+                .Should().NotContain("purge-me 7a1c", $"the {format} export reads the purged store");
+        }
+    }
+
+    [Fact]
+    public async Task The_routers_log_holds_no_prompt_text_even_when_previews_are_stored()
+    {
+        // The local backend fails with an error that quotes the prompt, as some servers do; the cloud model answers.
+        LocalHttp = new StubHttpMessageHandler((_, body) => new HttpResponseMessage(HttpStatusCode.InternalServerError)
+        {
+            Content = new StringContent(new JsonObject { ["error"] = new JsonObject { ["message"] = "could not continue: " + body } }.ToJsonString(), Encoding.UTF8, "application/json"),
+        });
+        var logs = new CapturingLoggerProvider();
+        HttpClient client = await StartDurableAsync(
+            o => o.StorePrompts = PromptStorage.On,
+            services: s =>
+            {
+                s.AddSingleton<ILoggerProvider>(logs);
+                s.Configure<LoggerFilterOptions>(o => o.MinLevel = LogLevel.Trace);
+            });
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Chat("logmarker 6d2a: the severance terms for the Leeds office"));
+        await client.PostAsync("/semantic-router/classify", JsonBody(new JsonObject { ["prompt"] = "logmarker 6d2a: and the second office" }));
+        await WaitForStoredActivityAsync(1);
+
+        response.Headers.GetValues("X-Prompt-Route-Model").Should().Equal("cloud");
+        LocalHttp.Requests.Should().ContainSingle().Which.Body.Should().Contain("logmarker 6d2a");
+        DatabaseFiles().Should().Contain("logmarker 6d2a", "StorePrompts: On keeps the preview");
+        logs.Messages.Should().NotBeEmpty();
+        logs.All.Should().NotContain("logmarker 6d2a", "the log names decisions and errors, never the prompt (docs/host.md)");
     }
 
     [Fact]
