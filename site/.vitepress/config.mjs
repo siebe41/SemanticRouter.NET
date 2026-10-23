@@ -165,6 +165,7 @@ export default defineConfig({
           page('Machine-wide policy', 'docs/enterprise.md'),
           page('Verifying a release', 'docs/releases.md'),
           page('Architecture', 'docs/architecture.md'),
+          page('Public API', 'docs/api-surface.md'),
         ],
       },
       {

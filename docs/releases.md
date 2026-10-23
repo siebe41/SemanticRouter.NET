@@ -155,7 +155,8 @@ Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag st
 1. Set `PackageValidationBaselineVersion` in [`Directory.Build.targets`](../Directory.Build.targets) to the version just released. Restore downloads it from nuget.org, so wait until nuget.org lists the packages.
 2. Set `VersionPrefix` in [`Directory.Build.props`](../Directory.Build.props) to the next version: `0.7.0` after `0.6.0`, or `1.0.0` when that is next. CI packs without a version, so its packages carry `VersionPrefix`, which must be above the baseline: below it, every pack fails with CP0003.
 3. Delete every `src/*/CompatibilitySuppressions.xml`. The breaks they approved are in the new baseline, and a suppression that no longer matches anything fails the pack ("Unnecessary suppressions found").
-4. Run `dotnet pack -c Release`; it must pass with no CP diagnostic. CI runs the same pack on the pull request.
+4. In each `src/*/PublicAPI.Unshipped.txt`, move the lines to the project's `PublicAPI.Shipped.txt`: add each new line to it, and for each `*REMOVED*` line delete the line it names from it. Leave `PublicAPI.Unshipped.txt` with only its first line, `#nullable enable` ([CONTRIBUTING.md](../CONTRIBUTING.md#public-api-and-package-validation)).
+5. Run `dotnet build -c Release` and `dotnet pack -c Release`; both must pass, with no RS or CP diagnostic. CI runs the same on the pull request.
 
 ## Code signing
 
