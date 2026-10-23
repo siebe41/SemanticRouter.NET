@@ -9,7 +9,8 @@ public class ModelHealthTrackerTests
     private readonly ModelDefinition _model = Model("claude-cli", 4);
 
     private ModelHealthTracker Create() => new(
-        new ModelSelectionOptions { QuotaCooldown = TimeSpan.FromMinutes(15), FailureCooldown = TimeSpan.FromSeconds(30) }, _time);
+        new ModelSelectionOptions { QuotaCooldown = TimeSpan.FromMinutes(15), FailureCooldown = TimeSpan.FromSeconds(30) },
+        new ModelHealthTrackerDependencies { Time = _time });
 
     [Fact]
     public void Models_start_available()
@@ -50,7 +51,7 @@ public class ModelHealthTrackerTests
     [Fact]
     public void Zero_cooldown_disables_tracking()
     {
-        var health = new ModelHealthTracker(new ModelSelectionOptions { FailureCooldown = TimeSpan.Zero }, _time);
+        var health = new ModelHealthTracker(new ModelSelectionOptions { FailureCooldown = TimeSpan.Zero }, new ModelHealthTrackerDependencies { Time = _time });
 
         health.ReportFailure(_model, ModelFailureKind.Unavailable);
 

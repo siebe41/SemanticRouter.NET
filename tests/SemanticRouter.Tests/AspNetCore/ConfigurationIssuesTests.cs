@@ -123,7 +123,7 @@ public sealed class ConfigurationIssuesTests
 
         ConfigurationIssue issue = ConfigurationIssues.FromJsonException(exception, JsonNode.Parse(json));
 
-        issue.Should().Be(new ConfigurationIssue(path, message));
+        issue.Should().Be(new ConfigurationIssue { Path = path, Message = message });
     }
 
     [Fact]

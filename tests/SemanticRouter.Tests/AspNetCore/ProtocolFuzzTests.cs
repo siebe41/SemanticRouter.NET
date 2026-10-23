@@ -70,7 +70,7 @@ public sealed partial class ProtocolFuzzTests(ITestOutputHelper output)
     public async Task Replies_translate_into_every_protocol_without_crashing(ChatProtocol upstream)
     {
         var fuzz = new JsonFuzzer(Seed + 10 + (int)upstream);
-        IReadOnlyList<ToolDefinition> tools = [new ToolDefinition("Read", "Reads a file", """{"type":"object"}""")];
+        IReadOnlyList<ToolDefinition> tools = [new ToolDefinition { Name = "Read", Description = "Reads a file", InputSchemaJson = """{"type":"object"}""" }];
         await RunAsync(upstream, i =>
         {
             bool sse = fuzz.Chance(0.5);

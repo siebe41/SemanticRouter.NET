@@ -155,13 +155,29 @@ Otherwise it creates the tag `v<version>` on `main`'s latest commit. That tag st
 1. Set `PackageValidationBaselineVersion` in [`Directory.Build.targets`](../Directory.Build.targets) to the version just released. Restore downloads it from nuget.org, so wait until nuget.org lists the packages.
 2. Set `VersionPrefix` in [`Directory.Build.props`](../Directory.Build.props) to the next version: `0.7.0` after `0.6.0`, or `1.0.0` when that is next. CI packs without a version, so its packages carry `VersionPrefix`, which must be above the baseline: below it, every pack fails with CP0003.
 3. Delete every `src/*/CompatibilitySuppressions.xml`. The breaks they approved are in the new baseline, and a suppression that no longer matches anything fails the pack ("Unnecessary suppressions found").
-4. Run `dotnet pack -c Release`; it must pass with no CP diagnostic. CI runs the same pack on the pull request.
+4. In each `src/*/PublicAPI.Unshipped.txt`, move the lines to the project's `PublicAPI.Shipped.txt`: add each new line to it, and for each `*REMOVED*` line delete the line it names from it. Leave `PublicAPI.Unshipped.txt` with only its first line, `#nullable enable` ([CONTRIBUTING.md](../CONTRIBUTING.md#public-api-and-package-validation)).
+5. Run `dotnet build -c Release` and `dotnet pack -c Release`; both must pass, with no RS or CP diagnostic. CI runs the same on the pull request.
 
 ## Code signing
 
 Windows SmartScreen and macOS Gatekeeper check a publisher's code signature, not these attestations. Provenance shows where a file came from; it does not stop the warnings on first start.
 
-The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([Signing the desktop app](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true`; until the signing certificates exist, that variable is what lets a release through, and those installers are unsigned. The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before anything is uploaded.
+The release workflow signs the Windows installer with Azure Trusted Signing and signs and notarizes the macOS installers ([Signing the desktop app](desktop.md#signing)). A release fails, before anything is published, when a platform's signing is not set up, unless the maintainer has set the repository variable `ALLOW_UNSIGNED_RELEASE` to `true`; until the signing certificates exist, that variable is what lets a release through, and those installers are unsigned. The workflow run's summary says, per installer, whether it was signed, and a platform that is meant to be signed has each signature checked before that platform's job uploads anything.
+
+What is checked covers the code that ends up running, not just the installer, and the update package the installed app updates to (the `-full.nupkg` on the release):
+
+| Platform | Checked | How |
+| --- | --- | --- |
+| Windows | `SemanticRouter-win-x64-Setup.exe` | `Get-AuthenticodeSignature`: `Valid`. Its signer is taken as the publisher for the rows below: that certificate, or any with the same subject, since Azure Trusted Signing renews its short-lived certificates often |
+| Windows | `SemanticRouter.exe`, `Squirrel.exe` (Velopack's updater) and `SemanticRouter_ExecutionStub.exe` in the update package's `lib/app/`, and the app's own `SemanticRouter.*` files there | `Get-AuthenticodeSignature`: `Valid`, signed by the publisher |
+| Windows | every other executable file in `lib/app/` (a program or library, by its `MZ` header) | `Get-AuthenticodeSignature`: `Valid`, signed by the publisher or by Microsoft |
+| macOS | `SemanticRouter-<rid>-Setup.pkg` | `pkgutil --check-signature`, signed by the team, and `xcrun stapler validate` for the notarization ticket |
+| macOS | the `.app` inside the `.pkg` (`pkgutil --expand-full`) | `codesign --verify --deep --strict` with the team's Developer ID signature, and `spctl --assess` (Gatekeeper) reporting `source=Notarized Developer ID` |
+| macOS | the `.app` in the update package | `codesign --verify --deep --strict` with the team's Developer ID signature |
+
+These are the signature rules the desktop app applies to an update when `Updates:Publisher` is set ([UpdatePublisher](../src/SemanticRouter.Desktop/UpdatePublisher.cs)), with the publisher taken from the release itself: the installer's signer on Windows, the repository's Apple team ID (`APPLE_TEAM_ID`) on macOS. The app's check also refuses .NET host files (`*.runtimeconfig.json`, `*.deps.json`) that point outside the package; the release does not check those.
+
+The checks are [`deploy/installer-signature-check.ps1`](../deploy/installer-signature-check.ps1) and [`deploy/installer-signature-check.sh`](../deploy/installer-signature-check.sh). On a platform that is meant to be signed, any check that does not pass fails the release; otherwise each line in the summary says **unsigned**. A file that is missing fails either way. CI runs both on its unsigned installer builds, so a change in what Velopack puts where is caught before a release.
 
 To check an installer you downloaded:
 

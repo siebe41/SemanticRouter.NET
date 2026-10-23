@@ -9,7 +9,11 @@ namespace SemanticRouter.Host;
 /// The router running on a configuration directory: written to <c>semantic-router.instance.json</c> once it listens and
 /// removed when it stops, so <c>semantic-router service status</c> can say where it answers and Windows can stop it.
 /// </summary>
-internal sealed record RouterInstance(int ProcessId, IReadOnlyList<string> Urls, DateTimeOffset StartedAt, string Version)
+/// <param name="StopEvent">
+/// The event that stops this router on Windows (<see cref="NewStopEventName"/>). Records from earlier releases have none:
+/// those routers listen only on <see cref="StopEventName"/>.
+/// </param>
+internal sealed record RouterInstance(int ProcessId, IReadOnlyList<string> Urls, DateTimeOffset StartedAt, string Version, string? StopEvent = null)
 {
     public const string FileName = "semantic-router.instance.json";
 
@@ -91,24 +95,40 @@ internal sealed record RouterInstance(int ProcessId, IReadOnlyList<string> Urls,
         }
     }
 
-    /// <summary>The name of the event a Windows router waits on; setting it shuts that router down cleanly.</summary>
+    /// <summary>
+    /// The event every Windows router of a process waits on, and the one earlier releases' <c>service stop</c> sets.
+    /// Setting it wakes one waiting router, so with several in one process (tests) it may stop the wrong one.
+    /// </summary>
     public static string StopEventName(int processId) => $@"Local\semantic-router-stop-{processId}";
 
-    /// <summary>Shuts the router down when <see cref="StopEventName"/> is set (Windows has no SIGTERM to send).</summary>
+    /// <summary>An event name for one router alone, for <see cref="StopEvent"/>.</summary>
+    public static string NewStopEventName() => $"{StopEventName(Environment.ProcessId)}-{Guid.NewGuid():N}";
+
+    /// <summary>
+    /// Shuts the router down when its <see cref="StopEvent"/> is set (Windows has no SIGTERM to send), or the process's
+    /// <see cref="StopEventName"/>, which earlier releases set.
+    /// </summary>
     [SupportedOSPlatform("windows")]
-    public static IDisposable ListenForStop(IHostApplicationLifetime lifetime)
+    public IDisposable ListenForStop(IHostApplicationLifetime lifetime)
     {
-        var signal = new EventWaitHandle(false, EventResetMode.AutoReset, StopEventName(Environment.ProcessId));
-        RegisteredWaitHandle registration = ThreadPool.RegisterWaitForSingleObject(
-            signal, (_, _) => lifetime.StopApplication(), null, Timeout.Infinite, executeOnlyOnce: true);
-        return new StopListener(signal, registration);
+        string[] names = StopEvent is null ? [StopEventName(ProcessId)] : [StopEvent, StopEventName(ProcessId)];
+        var listeners = new StopListener[names.Length];
+        for (int i = 0; i < names.Length; i++)
+        {
+            var signal = new EventWaitHandle(false, EventResetMode.AutoReset, names[i]);
+            RegisteredWaitHandle registration = ThreadPool.RegisterWaitForSingleObject(
+                signal, (_, _) => lifetime.StopApplication(), null, Timeout.Infinite, executeOnlyOnce: true);
+            listeners[i] = new StopListener(signal, registration);
+        }
+
+        return new StopListeners(listeners);
     }
 
     /// <summary>Asks a Windows router to shut down; <see langword="false"/> when it does not listen for the request.</summary>
     [SupportedOSPlatform("windows")]
     public bool RequestStop()
     {
-        if (!EventWaitHandle.TryOpenExisting(StopEventName(ProcessId), out EventWaitHandle? signal))
+        if (!EventWaitHandle.TryOpenExisting(StopEvent ?? StopEventName(ProcessId), out EventWaitHandle? signal))
         {
             return false;
         }
@@ -125,6 +145,17 @@ internal sealed record RouterInstance(int ProcessId, IReadOnlyList<string> Urls,
         {
             registration.Unregister(null);
             signal.Dispose();
+        }
+    }
+
+    private sealed class StopListeners(StopListener[] listeners) : IDisposable
+    {
+        public void Dispose()
+        {
+            foreach (StopListener listener in listeners)
+            {
+                listener.Dispose();
+            }
         }
     }
 }

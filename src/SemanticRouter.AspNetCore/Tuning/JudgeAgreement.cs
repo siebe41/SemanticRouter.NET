@@ -6,31 +6,66 @@ using System.Text.RegularExpressions;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>A graded answer whose prompt is also labelled by hand, and whether the two agree.</summary>
-/// <param name="EntryId">The activity entry.</param>
-/// <param name="Timestamp">When it was answered.</param>
-/// <param name="Model">The model that answered.</param>
-/// <param name="Grade">The judge's grade (1 to 5).</param>
-/// <param name="AnsweredTier">The tier of the model that answered.</param>
-/// <param name="LabelTier">The tier the hand label says the prompt needs.</param>
-/// <param name="Agrees">A low grade with a label above the answered tier, or a good grade with a label at or below it.</param>
-public sealed record JudgeAgreementPair(long EntryId, DateTimeOffset Timestamp, string? Model, int Grade, int AnsweredTier, int LabelTier, bool Agrees);
+public sealed record JudgeAgreementPair
+{
+    /// <summary>The activity entry.</summary>
+    public required long EntryId { get; init; }
+
+    /// <summary>When it was answered.</summary>
+    public required DateTimeOffset Timestamp { get; init; }
+
+    /// <summary>The model that answered.</summary>
+    public string? Model { get; init; }
+
+    /// <summary>The judge's grade (1 to 5).</summary>
+    public required int Grade { get; init; }
+
+    /// <summary>The tier of the model that answered.</summary>
+    public required int AnsweredTier { get; init; }
+
+    /// <summary>The tier the hand label says the prompt needs.</summary>
+    public required int LabelTier { get; init; }
+
+    /// <summary>A low grade with a label above the answered tier, or a good grade with a label at or below it.</summary>
+    public required bool Agrees { get; init; }
+}
 
 /// <summary>How often the judge's grades agree with the evaluation set's hand labels (<c>GET api/judge/agreement</c>).</summary>
-/// <param name="Pairs">Graded answers with a hand label.</param>
-/// <param name="Agreeing">How many of them agree.</param>
-/// <param name="Rate">The share that agree; <see langword="null"/> without pairs.</param>
-/// <param name="LowGrades">Pairs with a failing grade.</param>
-/// <param name="LowAgreeing">How many of those the label confirms (it is above the answered tier).</param>
-/// <param name="GoodGrades">Pairs with a passing grade.</param>
-/// <param name="GoodAgreeing">How many of those the label confirms (it is at or below the answered tier).</param>
-/// <param name="MinimumPairs">Pairs needed before the agreement scales the judge's weight (<see cref="TuningOptions.JudgeAgreementPairs"/>).</param>
-/// <param name="ConfiguredWeight">The judge's weight as configured (<see cref="TuningOptions.JudgeWeight"/>).</param>
-/// <param name="EffectiveWeight">The weight tuning gives judge labels: the configured weight times the agreement, once there are enough pairs.</param>
-/// <param name="Recent">The latest pairs, newest first.</param>
-public sealed record JudgeAgreementReport(
-    int Pairs, int Agreeing, double? Rate, int LowGrades, int LowAgreeing, int GoodGrades, int GoodAgreeing,
-    int MinimumPairs, double ConfiguredWeight, double EffectiveWeight, IReadOnlyList<JudgeAgreementPair> Recent)
+public sealed record JudgeAgreementReport
 {
+    /// <summary>Graded answers with a hand label.</summary>
+    public required int Pairs { get; init; }
+
+    /// <summary>How many of them agree.</summary>
+    public required int Agreeing { get; init; }
+
+    /// <summary>The share that agree; <see langword="null"/> without pairs.</summary>
+    public double? Rate { get; init; }
+
+    /// <summary>Pairs with a failing grade.</summary>
+    public required int LowGrades { get; init; }
+
+    /// <summary>How many of those the label confirms (it is above the answered tier).</summary>
+    public required int LowAgreeing { get; init; }
+
+    /// <summary>Pairs with a passing grade.</summary>
+    public required int GoodGrades { get; init; }
+
+    /// <summary>How many of those the label confirms (it is at or below the answered tier).</summary>
+    public required int GoodAgreeing { get; init; }
+
+    /// <summary>Pairs needed before the agreement scales the judge's weight (<see cref="TuningOptions.JudgeAgreementPairs"/>).</summary>
+    public required int MinimumPairs { get; init; }
+
+    /// <summary>The judge's weight as configured (<see cref="TuningOptions.JudgeWeight"/>).</summary>
+    public required double ConfiguredWeight { get; init; }
+
+    /// <summary>The weight tuning gives judge labels: the configured weight times the agreement, once there are enough pairs.</summary>
+    public required double EffectiveWeight { get; init; }
+
+    /// <summary>The latest pairs, newest first.</summary>
+    public required IReadOnlyList<JudgeAgreementPair> Recent { get; init; }
+
     /// <summary>Whether there are enough pairs for the agreement to scale the judge's weight.</summary>
     public bool Applied => Pairs >= MinimumPairs;
 
@@ -90,26 +125,36 @@ internal static partial class JudgeAgreement
 
             int answered = models.FirstOrDefault(m => string.Equals(m.Name, entry.ServedBy, StringComparison.OrdinalIgnoreCase))?.Tier ?? entry.Tier;
             bool low = grade <= failingGrade;
-            pairs.Add(new JudgeAgreementPair(
-                entry.Id, entry.Timestamp, entry.ServedBy, grade, answered, label.ExpectedTier, low ? label.ExpectedTier > answered : label.ExpectedTier <= answered));
+            pairs.Add(new JudgeAgreementPair
+            {
+                EntryId = entry.Id,
+                Timestamp = entry.Timestamp,
+                Model = entry.ServedBy,
+                Grade = grade,
+                AnsweredTier = answered,
+                LabelTier = label.ExpectedTier,
+                Agrees = low ? label.ExpectedTier > answered : label.ExpectedTier <= answered,
+            });
         }
 
         int agreeing = pairs.Count(p => p.Agrees);
         double? rate = pairs.Count > 0 ? (double)agreeing / pairs.Count : null;
         int minimum = tuning.JudgeAgreementPairs;
         double effective = rate is { } r && pairs.Count >= minimum ? tuning.JudgeWeight * r : tuning.JudgeWeight;
-        return new JudgeAgreementReport(
-            pairs.Count,
-            agreeing,
-            rate,
-            pairs.Count(p => p.Grade <= failingGrade),
-            pairs.Count(p => p.Grade <= failingGrade && p.Agrees),
-            pairs.Count(p => p.Grade > failingGrade),
-            pairs.Count(p => p.Grade > failingGrade && p.Agrees),
-            minimum,
-            tuning.JudgeWeight,
-            effective,
-            [.. pairs.OrderByDescending(p => p.Timestamp).ThenByDescending(p => p.EntryId).Take(RecentPairs)]);
+        return new JudgeAgreementReport
+        {
+            Pairs = pairs.Count,
+            Agreeing = agreeing,
+            Rate = rate,
+            LowGrades = pairs.Count(p => p.Grade <= failingGrade),
+            LowAgreeing = pairs.Count(p => p.Grade <= failingGrade && p.Agrees),
+            GoodGrades = pairs.Count(p => p.Grade > failingGrade),
+            GoodAgreeing = pairs.Count(p => p.Grade > failingGrade && p.Agrees),
+            MinimumPairs = minimum,
+            ConfiguredWeight = tuning.JudgeWeight,
+            EffectiveWeight = effective,
+            Recent = [.. pairs.OrderByDescending(p => p.Timestamp).ThenByDescending(p => p.EntryId).Take(RecentPairs)],
+        };
     }
 
     /// <summary>The agreement over the feedback window (<see cref="TuningOptions.FeedbackDays"/>) of <paramref name="activity"/>.</summary>

@@ -164,6 +164,23 @@ public sealed class CalloutTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_property_named_twice_does_not_stop_the_callout_being_removed()
+    {
+        HttpClient client = await StartDispatchAsync();
+
+        // Fuzz seed 3 (20000 iterations) found the router answering 500 here: the edited tree threw on the repeated name.
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", new StringContent("""
+            {"model":"auto","messages":[{"role":"user","name":"a","name":"b","content":"@opus why does this deadlock?"}]}
+            """, Encoding.UTF8, "application/json"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        Header(response, "Callout").Should().Be("@opus");
+        string forwarded = _sentToCloud.Should().ContainSingle().Subject;
+        forwarded.Should().NotContain("@opus").And.Contain("why does this deadlock?");
+        forwarded.Should().Contain("\"name\":\"b\"", "the last value wins, as the router's own reading of the body does").And.NotContain("\"name\":\"a\"");
+    }
+
+    [Fact]
     public async Task Only_a_leading_known_tag_counts_and_unknown_tags_are_left_alone()
     {
         HttpClient client = await StartDispatchAsync();

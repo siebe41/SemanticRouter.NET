@@ -23,10 +23,14 @@ public interface IMemorySource
 }
 
 /// <summary>A note as a source returns it. Links, tags and aliases are parsed from <see cref="Content"/> as Markdown.</summary>
-/// <param name="Path">The note's path within its source, with <c>/</c> separators (e.g. <c>projects/router.md</c>). Unique per source.</param>
-/// <param name="Content">The note's text.</param>
-public sealed record MemoryDocument(string Path, string Content)
+public sealed record MemoryDocument
 {
+    /// <summary>The note's path within its source, with <c>/</c> separators (e.g. <c>projects/router.md</c>). Unique per source.</summary>
+    public required string Path { get; init; }
+
+    /// <summary>The note's text.</summary>
+    public required string Content { get; init; }
+
     /// <summary>The title; defaults to the file name without its extension (Obsidian's rule).</summary>
     public string? Title { get; init; }
 
@@ -55,10 +59,23 @@ public enum MemoryShareKind
 }
 
 /// <summary>A note found in a routed request.</summary>
-/// <param name="Id">The note's id in the memory map (<c>{source}:{path}</c>).</param>
-/// <param name="Title">The note's title.</param>
-/// <param name="Source">The memory source's name.</param>
-/// <param name="Kind">Whether the note's text was sent, or only mentioned.</param>
-/// <param name="Lines">Distinctive lines of the note found in the request.</param>
-/// <param name="TotalLines">Distinctive lines the note has.</param>
-public sealed record MemoryReference(string Id, string Title, string Source, MemoryShareKind Kind, int Lines, int TotalLines);
+public sealed record MemoryReference
+{
+    /// <summary>The note's id in the memory map (<c>{source}:{path}</c>).</summary>
+    public required string Id { get; init; }
+
+    /// <summary>The note's title.</summary>
+    public required string Title { get; init; }
+
+    /// <summary>The memory source's name.</summary>
+    public required string Source { get; init; }
+
+    /// <summary>Whether the note's text was sent, or only mentioned.</summary>
+    public required MemoryShareKind Kind { get; init; }
+
+    /// <summary>Distinctive lines of the note found in the request.</summary>
+    public int Lines { get; init; }
+
+    /// <summary>Distinctive lines the note has.</summary>
+    public int TotalLines { get; init; }
+}

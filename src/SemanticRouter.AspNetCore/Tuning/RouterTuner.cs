@@ -4,12 +4,23 @@ using Microsoft.Extensions.Logging;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>What one tuning run did.</summary>
-/// <param name="At">When it ran.</param>
-/// <param name="Result">What it did, in a sentence.</param>
-/// <param name="Changes">The changes it applied or suggested.</param>
-/// <param name="Before">The evaluation set before the run (<see langword="null"/> when it did not get that far).</param>
-/// <param name="After">The evaluation set after the threshold changes.</param>
-public sealed record TuningRun(DateTimeOffset At, string Result, IReadOnlyList<TuningChange> Changes, TuningScore? Before, TuningScore? After);
+public sealed record TuningRun
+{
+    /// <summary>When it ran.</summary>
+    public required DateTimeOffset At { get; init; }
+
+    /// <summary>What it did, in a sentence.</summary>
+    public required string Result { get; init; }
+
+    /// <summary>The changes it applied or suggested.</summary>
+    public required IReadOnlyList<TuningChange> Changes { get; init; }
+
+    /// <summary>The evaluation set before the run (<see langword="null"/> when it did not get that far).</summary>
+    public TuningScore? Before { get; init; }
+
+    /// <summary>The evaluation set after the threshold changes.</summary>
+    public TuningScore? After { get; init; }
+}
 
 /// <summary>Why a request about a learned change could not be carried out.</summary>
 internal sealed class TuningConflictException(string message, bool notFound = false) : InvalidOperationException(message)
@@ -249,7 +260,7 @@ internal sealed partial class RouterTuner : IDisposable
     {
         _store.SaveState(State with { LastRun = now, LastLabelCount = labelCount, LastResult = result });
         LogRun(_logger, result);
-        return new TuningRun(now, result, made, before, after);
+        return new TuningRun { At = now, Result = result, Changes = made, Before = before, After = after };
     }
 
     /// <summary>
@@ -296,7 +307,7 @@ internal sealed partial class RouterTuner : IDisposable
             (kinds.TryGetValue(prompt, out HashSet<FeedbackKind>? set) ? set : kinds[prompt] = []).Add(item.Kind);
         }
 
-        return (needed.Select(n => new EvaluationCase(n.Key, n.Value.Tier) { LocalOnly = n.Value.LocalOnly, Note = "from feedback" }).ToArray(), kinds);
+        return (needed.Select(n => new EvaluationCase { Prompt = n.Key, ExpectedTier = n.Value.Tier, LocalOnly = n.Value.LocalOnly, Note = "from feedback" }).ToArray(), kinds);
     }
 
     /// <summary>

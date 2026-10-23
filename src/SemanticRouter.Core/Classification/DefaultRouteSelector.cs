@@ -45,8 +45,8 @@ public sealed class DefaultRouteSelector : IRouteSelector
         {
             float? bestSimilarity = rankedScores.Count > 0 ? rankedScores[0].Similarity : null;
             return complexityTier > _options.FallbackTier
-                ? new RouteDecision(complexityTier, RoutingReason.ComplexityEscalation, Similarity: bestSimilarity)
-                : new RouteDecision(_options.FallbackTier, RoutingReason.NoMatchFallback, Similarity: bestSimilarity);
+                ? new RouteDecision { RequiredTier = complexityTier, Reason = RoutingReason.ComplexityEscalation, Similarity = bestSimilarity }
+                : new RouteDecision { RequiredTier = _options.FallbackTier, Reason = RoutingReason.NoMatchFallback, Similarity = bestSimilarity };
         }
 
         RouteScore best = rankedScores[0];
@@ -80,8 +80,12 @@ public sealed class DefaultRouteSelector : IRouteSelector
             reason = RoutingReason.ComplexityEscalation;
         }
 
-        return new RouteDecision(tier, reason, best.Route, best.Similarity)
+        return new RouteDecision
         {
+            RequiredTier = tier,
+            Reason = reason,
+            Route = best.Route,
+            Similarity = best.Similarity,
             RequiredCapabilities = capabilities.ToArray(),
             LocalOnly = localOnly,
         };

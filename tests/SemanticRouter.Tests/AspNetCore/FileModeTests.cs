@@ -27,7 +27,7 @@ public sealed class FileModeTests : IDisposable
         string config = Path.Combine(_directory, "semantic-router.json");
         new JsonFileRouterConfigurationStore(config).Save(new RouterConfiguration());
         string evaluation = Path.Combine(_directory, "semantic-router.evaluation.jsonl");
-        new JsonLinesEvaluationSetStore(evaluation).Save([new EvaluationCase("look up the customer record", 1)]);
+        new JsonLinesEvaluationSetStore(evaluation).Save([new EvaluationCase { Prompt = "look up the customer record", ExpectedTier = 1 }]);
         string state = Path.Combine(_directory, "semantic-router.db");
         _ = new SqliteRouterDatabase(
             Microsoft.Extensions.Options.Options.Create(new SqliteStateOptions { Path = state }), NullLogger<SqliteRouterDatabase>.Instance);

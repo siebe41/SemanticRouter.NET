@@ -19,6 +19,27 @@ public sealed class JsonPromptExtractor : IPromptExtractor
     private readonly bool _stripSystemReminders;
     private readonly string[] _injectedTags;
 
+    /// <summary>Creates an extractor that reads the last user message, without the context blocks clients inject.</summary>
+    public JsonPromptExtractor()
+        : this(PromptMessageSelection.LastUserMessage)
+    {
+    }
+
+    /// <summary>Creates an extractor that removes the context blocks clients inject.</summary>
+    /// <param name="selection">Which messages contribute.</param>
+    public JsonPromptExtractor(PromptMessageSelection selection)
+        : this(selection, true)
+    {
+    }
+
+    /// <summary>Creates an extractor.</summary>
+    /// <param name="selection">Which messages contribute.</param>
+    /// <param name="stripSystemReminders">Remove the context blocks agentic clients inject into user messages.</param>
+    public JsonPromptExtractor(PromptMessageSelection selection, bool stripSystemReminders)
+        : this(selection, stripSystemReminders, null)
+    {
+    }
+
     /// <summary>Creates an extractor.</summary>
     /// <param name="selection">Which messages contribute.</param>
     /// <param name="stripSystemReminders">
@@ -28,8 +49,12 @@ public sealed class JsonPromptExtractor : IPromptExtractor
     /// person asked.
     /// </param>
     /// <param name="injectedTags">More tags whose blocks are removed, besides the built-in ones.</param>
-    public JsonPromptExtractor(
-        PromptMessageSelection selection = PromptMessageSelection.LastUserMessage, bool stripSystemReminders = true, IEnumerable<string>? injectedTags = null)
+    /// <remarks>
+    /// In 0.5.0 these parameters were optional. A call that named only <paramref name="injectedTags"/> or
+    /// <paramref name="stripSystemReminders"/> now passes every argument before it too:
+    /// <c>new JsonPromptExtractor(PromptMessageSelection.LastUserMessage, true, tags)</c> keeps the other defaults.
+    /// </remarks>
+    public JsonPromptExtractor(PromptMessageSelection selection, bool stripSystemReminders, IEnumerable<string>? injectedTags)
     {
         _selection = selection;
         _stripSystemReminders = stripSystemReminders;
