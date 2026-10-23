@@ -54,6 +54,20 @@ public interface ICooldownStore
 }
 
 /// <summary>
+/// The collaborators of a <see cref="ModelHealthTracker"/> that have a default. One left <see langword="null"/> gets
+/// its default.
+/// </summary>
+/// <remarks>A new collaborator becomes a property here, so code that creates a tracker keeps working.</remarks>
+public sealed class ModelHealthTrackerDependencies
+{
+    /// <summary>The clock cooldowns are measured with. Defaults to the system clock.</summary>
+    public TimeProvider? Time { get; init; }
+
+    /// <summary>Where cooldowns are written through to and loaded from. None by default: they live in memory only.</summary>
+    public ICooldownStore? Store { get; init; }
+}
+
+/// <summary>
 /// <see cref="IModelHealth"/> with time-based cooldowns. This is what makes "my subscription hit its limit" fall
 /// through to the next model automatically. Cooldowns live in memory and, when an <see cref="ICooldownStore"/> is
 /// given, are written through to it and loaded from it on start, so a restart does not forget a weekly limit. When
@@ -68,12 +82,28 @@ public sealed class ModelHealthTracker : IModelHealth
     private volatile ModelSelectionOptions _options;
     private long _lastRefreshTicks;
 
-    /// <summary>Creates a tracker.</summary>
-    public ModelHealthTracker(ModelSelectionOptions? options = null, TimeProvider? timeProvider = null, ICooldownStore? store = null)
+    /// <summary>Creates a tracker with the default cooldowns, in memory only.</summary>
+    public ModelHealthTracker()
+        : this(null, new ModelHealthTrackerDependencies())
     {
+    }
+
+    /// <summary>Creates a tracker that keeps cooldowns in memory only.</summary>
+    /// <param name="options">The cooldown durations, or <see langword="null"/> for the defaults.</param>
+    public ModelHealthTracker(ModelSelectionOptions? options)
+        : this(options, new ModelHealthTrackerDependencies())
+    {
+    }
+
+    /// <summary>Creates a tracker.</summary>
+    /// <param name="options">The cooldown durations, or <see langword="null"/> for the defaults.</param>
+    /// <param name="dependencies">The clock and the store for cooldowns, or <see langword="null"/> for the defaults.</param>
+    public ModelHealthTracker(ModelSelectionOptions? options, ModelHealthTrackerDependencies? dependencies)
+    {
+        dependencies ??= new();
         _options = options ?? new ModelSelectionOptions();
-        _time = timeProvider ?? TimeProvider.System;
-        _store = store;
+        _time = dependencies.Time ?? TimeProvider.System;
+        _store = dependencies.Store;
         Refresh();
     }
 

@@ -1202,7 +1202,12 @@ internal sealed class SqliteWarmCaches(SqliteRouterDatabase database) : IWarmCac
             var caches = new List<WarmCache>();
             while (reader.Read())
             {
-                caches.Add(new WarmCache(reader.GetString(0), reader.GetInt32(1), new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero)));
+                caches.Add(new WarmCache
+                {
+                    Model = reader.GetString(0),
+                    CachedTokens = reader.GetInt32(1),
+                    ExpiresAt = new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero),
+                });
             }
 
             return caches;

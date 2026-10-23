@@ -388,6 +388,8 @@ RoutingPlan plan = await router.RouteAsync(new PromptRoutingRequest { Prompt = "
 // plan.Classification.RequiredTier == 1, plan.Candidates[0].Model.Name == "local"
 ```
 
+Collaborators with a default, such as a cooldown tracker shared between routers or a clock, go in a dependencies object: `new PromptRouter(classifier, options, new PromptRouterDependencies { Health = health, Time = clock })`.
+
 ## Configuration reference
 
 Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/appsettings.json` is a complete annotated example.

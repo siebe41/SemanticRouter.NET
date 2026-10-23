@@ -31,8 +31,14 @@ public sealed class HashingEmbeddingProvider : IEmbeddingProvider
         "me", "my", "of", "on", "or", "please", "that", "the", "this", "to", "was", "what", "with", "you", "your",
     };
 
+    /// <summary>Creates a provider producing vectors of <see cref="DefaultDimensions"/> floats.</summary>
+    public HashingEmbeddingProvider()
+        : this(DefaultDimensions)
+    {
+    }
+
     /// <summary>Creates a provider producing vectors of <paramref name="dimensions"/> floats.</summary>
-    public HashingEmbeddingProvider(int dimensions = DefaultDimensions)
+    public HashingEmbeddingProvider(int dimensions)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(dimensions, 8);
         Dimensions = dimensions;

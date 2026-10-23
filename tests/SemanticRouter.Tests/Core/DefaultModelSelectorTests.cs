@@ -28,10 +28,10 @@ public class DefaultModelSelectorTests
     {
         var residency = new Residency(LocalSmall);
 
-        new DefaultModelSelector(residency: residency).RankCandidates(new ModelRequirements { RequiredTier = 1 }, Catalog)
+        new DefaultModelSelector(null, new DefaultModelSelectorDependencies { Residency = residency }).RankCandidates(new ModelRequirements { RequiredTier = 1 }, Catalog)
             .Select(c => c.Model.Name).Should().StartWith(["local-small", "local-coder"]);
         residency.Loaded.Add(LocalCoder);
-        new DefaultModelSelector(residency: residency).RankCandidates(new ModelRequirements { RequiredTier = 1 }, Catalog)
+        new DefaultModelSelector(null, new DefaultModelSelectorDependencies { Residency = residency }).RankCandidates(new ModelRequirements { RequiredTier = 1 }, Catalog)
             .Select(c => c.Model.Name).Should().StartWith(["local-coder", "local-small"], "both are loaded, so the more capable one wins");
     }
 
@@ -152,7 +152,7 @@ public class DefaultModelSelectorTests
         IReadOnlyList<ModelCandidate> candidates = new DefaultModelSelector(new ModelSelectionOptions { EstimatedOutputTokens = 1_000 })
             .RankCandidates(new ModelRequirements { RequiredTier = 5, EstimatedInputTokens = 1_000 }, [ApiFrontier, ApiMini]);
 
-        candidates[0].Should().Be(new ModelCandidate(ApiFrontier, 0.03m, true));
-        candidates[1].Should().Be(new ModelCandidate(ApiMini, 0.001m, false));
+        candidates[0].Should().Be(new ModelCandidate { Model = ApiFrontier, EstimatedCost = 0.03m, MeetsRequiredTier = true });
+        candidates[1].Should().Be(new ModelCandidate { Model = ApiMini, EstimatedCost = 0.001m, MeetsRequiredTier = false });
     }
 }

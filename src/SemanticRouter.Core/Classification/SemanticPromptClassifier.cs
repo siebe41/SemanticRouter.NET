@@ -25,31 +25,39 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
     private Task<SemanticRouteIndex>? _indexTask;
     private RouteIndexStatistics? _indexStatistics;
 
+    /// <summary>Creates a classifier with the default collaborators.</summary>
+    /// <param name="embeddingProvider">Embeds utterances and prompts.</param>
+    /// <param name="options">Routes and thresholds. Validated eagerly.</param>
+    /// <exception cref="InvalidOperationException"><paramref name="options"/> is invalid.</exception>
+    public SemanticPromptClassifier(IEmbeddingProvider embeddingProvider, SemanticRouterOptions options)
+        : this(embeddingProvider, options, new SemanticPromptClassifierDependencies())
+    {
+    }
+
     /// <summary>Creates a classifier.</summary>
     /// <param name="embeddingProvider">Embeds utterances and prompts.</param>
     /// <param name="options">Routes and thresholds. Validated eagerly.</param>
-    /// <param name="complexityAnalyzer">Defaults to <see cref="HeuristicComplexityAnalyzer"/>.</param>
-    /// <param name="routeSelector">Defaults to <see cref="DefaultRouteSelector"/>.</param>
-    /// <param name="time">Clock for the classification cache. Defaults to the system clock.</param>
+    /// <param name="dependencies">Collaborators that replace the defaults; <see langword="null"/> keeps them all.</param>
     /// <exception cref="InvalidOperationException"><paramref name="options"/> is invalid.</exception>
     public SemanticPromptClassifier(
         IEmbeddingProvider embeddingProvider,
         SemanticRouterOptions options,
-        IComplexityAnalyzer? complexityAnalyzer = null,
-        IRouteSelector? routeSelector = null,
-        TimeProvider? time = null)
+        SemanticPromptClassifierDependencies? dependencies)
     {
         ArgumentNullException.ThrowIfNull(embeddingProvider);
         ArgumentNullException.ThrowIfNull(options);
+        dependencies ??= new();
         options.Validate();
 
         _embeddingProvider = embeddingProvider;
         _options = options;
-        _complexityAnalyzer = complexityAnalyzer ?? new HeuristicComplexityAnalyzer(options.Complexity);
-        _routeSelector = routeSelector ?? new DefaultRouteSelector(options);
+        _complexityAnalyzer = dependencies.ComplexityAnalyzer ?? new HeuristicComplexityAnalyzer(options.Complexity);
+        _routeSelector = dependencies.RouteSelector ?? new DefaultRouteSelector(options);
         _routes = options.Routes.ToArray();
         _hasLocalOnlyRoutes = _routes.Any(r => r.LocalOnly);
-        _cache = options.ClassificationCache.Enabled ? new ClassificationCache(options.ClassificationCache, time ?? TimeProvider.System) : null;
+        _cache = options.ClassificationCache.Enabled
+            ? new ClassificationCache(options.ClassificationCache, dependencies.Time ?? TimeProvider.System)
+            : null;
     }
 
     /// <summary>Hits and misses of the classification cache, or <see langword="null"/> when it is off.</summary>
@@ -187,14 +195,42 @@ public sealed class SemanticPromptClassifier : IPromptClassifier
         long started = Stopwatch.GetTimestamp();
         SemanticRouteIndex index = await SemanticRouteIndex.BuildAsync(
             _routes, _embeddingProvider, _options.ScoringStrategy, CancellationToken.None).ConfigureAwait(false);
-        Volatile.Write(ref _indexStatistics, new RouteIndexStatistics(
-            _routes.Sum(r => r.Utterances.Count(u => !string.IsNullOrWhiteSpace(u))), index.Dimensions, Stopwatch.GetElapsedTime(started)));
+        Volatile.Write(ref _indexStatistics, new RouteIndexStatistics
+        {
+            Utterances = _routes.Sum(r => r.Utterances.Count(u => !string.IsNullOrWhiteSpace(u))),
+            Dimensions = index.Dimensions,
+            BuildTime = Stopwatch.GetElapsedTime(started),
+        });
         return index;
     }
 }
 
+/// <summary>
+/// The collaborators of a <see cref="SemanticPromptClassifier"/> that have a default. One left <see langword="null"/>
+/// gets its default.
+/// </summary>
+/// <remarks>A new collaborator becomes a property here, so code that creates a classifier keeps working.</remarks>
+public sealed class SemanticPromptClassifierDependencies
+{
+    /// <summary>Scores how hard a prompt is. Defaults to a <see cref="HeuristicComplexityAnalyzer"/> with <see cref="SemanticRouterOptions.Complexity"/>.</summary>
+    public IComplexityAnalyzer? ComplexityAnalyzer { get; init; }
+
+    /// <summary>Turns route scores into a decision. Defaults to <see cref="DefaultRouteSelector"/>.</summary>
+    public IRouteSelector? RouteSelector { get; init; }
+
+    /// <summary>The clock for the classification cache. Defaults to the system clock.</summary>
+    public TimeProvider? Time { get; init; }
+}
+
 /// <summary>The route index of a <see cref="SemanticPromptClassifier"/>.</summary>
-/// <param name="Utterances">Utterances embedded.</param>
-/// <param name="Dimensions">Size of the vectors.</param>
-/// <param name="BuildTime">How long embedding the utterances took.</param>
-public sealed record RouteIndexStatistics(int Utterances, int Dimensions, TimeSpan BuildTime);
+public sealed record RouteIndexStatistics
+{
+    /// <summary>Utterances embedded.</summary>
+    public required int Utterances { get; init; }
+
+    /// <summary>Size of the vectors.</summary>
+    public required int Dimensions { get; init; }
+
+    /// <summary>How long embedding the utterances took.</summary>
+    public required TimeSpan BuildTime { get; init; }
+}

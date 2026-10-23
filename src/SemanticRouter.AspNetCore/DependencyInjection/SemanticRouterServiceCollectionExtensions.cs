@@ -64,8 +64,11 @@ public static class SemanticRouterServiceCollectionExtensions
         // Long-lived state shared across configuration reloads.
         services.TryAddSingleton<IModelHealth>(sp => new ModelHealthTracker(
             sp.GetRequiredService<IOptions<SemanticRouterOptions>>().Value.Selection,
-            sp.GetService<TimeProvider>() ?? TimeProvider.System,
-            sp.GetService<ICooldownStore>()));
+            new ModelHealthTrackerDependencies
+            {
+                Time = sp.GetService<TimeProvider>() ?? TimeProvider.System,
+                Store = sp.GetService<ICooldownStore>(),
+            }));
         services.TryAddSingleton<IRouterConfigurationHistory>(_ => new InMemoryRouterConfigurationHistory());
         services.TryAddSingleton<IUsageLedger, InMemoryUsageLedger>();
         services.TryAddSingleton<IAuditLog>(_ => new InMemoryAuditLog());

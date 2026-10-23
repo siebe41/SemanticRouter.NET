@@ -26,8 +26,20 @@ public sealed class OnnxEmbeddingTests : IDisposable
 
     private static string Sha(string content) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
 
-    private static OnnxModelInfo Fake(string model, string vocab) => new(
-        "fake", "test/fake", "abc", "onnx/model.onnx", Sha(model), model.Length, Sha(vocab), EmbeddingPooling.Mean, 4, 0.5f, "fake");
+    private static OnnxModelInfo Fake(string model, string vocab) => new OnnxModelInfo
+    {
+        Name = "fake",
+        Repository = "test/fake",
+        Revision = "abc",
+        ModelFile = "onnx/model.onnx",
+        ModelSha256 = Sha(model),
+        ModelBytes = model.Length,
+        VocabSha256 = Sha(vocab),
+        Pooling = EmbeddingPooling.Mean,
+        Dimensions = 4,
+        SuggestedThreshold = 0.5f,
+        Description = "fake",
+    };
 
     private static StubHttpMessageHandler Serving(string model, string vocab) => new((request, _) => new HttpResponseMessage(HttpStatusCode.OK)
     {

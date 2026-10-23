@@ -130,7 +130,7 @@ public class PromptProseTests
         options.FallbackTier = 3;
         var evaluator = new RoutingEvaluator(new HashingEmbeddingProvider(512), options);
 
-        EvaluationReport report = await evaluator.EvaluateAsync([new EvaluationCase($"write a unit test for this function\n```python\n{Function}\n```", 2)]);
+        EvaluationReport report = await evaluator.EvaluateAsync([new EvaluationCase { Prompt = $"write a unit test for this function\n```python\n{Function}\n```", ExpectedTier = 2 }]);
 
         report.Correct.Should().Be(1);
     }
@@ -187,7 +187,7 @@ public class PromptProseTests
     {
         var evaluator = new RoutingEvaluator(new HashingEmbeddingProvider(512), WithInternalRecords());
 
-        EvaluationReport report = await evaluator.EvaluateAsync([new EvaluationCase($"summarize these lines for me\n{Records}", 1) { LocalOnly = true }]);
+        EvaluationReport report = await evaluator.EvaluateAsync([new EvaluationCase { Prompt = $"summarize these lines for me\n{Records}", ExpectedTier = 1, LocalOnly = true }]);
 
         report.LocalOnlyMissed.Should().Be(0);
         report.Results.Single().LocalOnly.Should().BeTrue();
