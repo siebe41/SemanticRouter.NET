@@ -11,6 +11,11 @@ updates:
       - dependency-name: FluentAssertions
         versions: [ ">= 8.0.0" ]
     groups:
+      # Its own pull request: a Velopack bump also needs the vpk pins in the workflows and
+      # deploy/third-party/velopack-crates.json updated by hand (docs/releases.md), which deploy/velopack-version-check.sh
+      # enforces, so it would hold every other update back. A dependency goes to the first group that matches it.
+      velopack:
+        patterns: [ "Velopack" ]
       nuget-minor-and-patch:
         patterns: [ "*" ]
         update-types: [ minor, patch ]

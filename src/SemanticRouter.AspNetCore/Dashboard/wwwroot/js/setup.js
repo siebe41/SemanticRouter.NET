@@ -1,7 +1,7 @@
 /* Semantic Router dashboard: first run. The "Set up SemanticRouter" card on the Overview, the connector presets (also
    behind Add connector), and discovering a connector's models from the draft. */
 import { lineupPanel } from './config.js';
-import { $, api, h, isDirty, lineupFor, readOnly, state, toast } from './core.js';
+import { $, api, h, isDirty, lineupFor, readOnly, runsProgram, state, toast } from './core.js';
 import { advanced, closeSection, openAttr } from './fields.js';
 import { plural } from './labels.js';
 import { applyPrice, describePrice, lookUpPrices } from './prices.js';
@@ -61,7 +61,7 @@ export function setupShowing() {
 /* ---------------------------------------------------------------------------------------------
    Presets and detected tools
    --------------------------------------------------------------------------------------------- */
-const KIND = { cli: 'your sign-in', local: 'this machine', cloud: 'cloud API', copilot: 'your sign-in' };
+const KIND = { cli: 'your sign-in', local: 'this machine', cloud: 'cloud API' };
 
 /* One detected tool or preset, with what enabling it means. */
 function choice(c, detected) {
@@ -169,7 +169,7 @@ async function pricesFor(connector, settings, lineup) {
     if (!p) return;
     applyPrice(e.suggestion, p, settings);
     const kept = String(e.reason || '').replace(/\.$/, '').split('; ').filter((r) => r && !/^(set its prices|Anthropic list price|its use valued at)/.test(r));
-    const whose = settings && (settings.Type === 'Cli' || settings.Type === 'Copilot') ? 'its use valued at the API price' : 'list price';
+    const whose = runsProgram(settings) ? 'its use valued at the API price' : 'list price';
     kept.push(`${whose} ${describePrice(p)} from ${found.source}${p.sameProvider ? '' : ` (${p.id}; ${connector} may charge differently)`}`);
     e.reason = kept.join('; ') + '.';
   });

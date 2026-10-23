@@ -9,7 +9,8 @@
     "texts of its own gets the standard text of each licence in its expression from deploy/third-party/licences.",
     "deploy/sbom-complete.cs reads both too. It takes an id ending in '*' in licences for every package id that starts",
     "with the rest: the container's shared frameworks, which come with the base image, not from a restore. It adds a",
-    "component with 'addedBy': 'vpk' only to the SBOMs of the installers and update packages, where vpk adds it."
+    "component with 'addedBy': 'vpk' only to the SBOMs of the installers and update packages, where vpk adds it.",
+    "The Rust crates in Velopack's native binaries are in velopack-crates.json, written by velopack-crates.py."
   ],
   "licences": {
     "Avalonia.Angle.Windows.Natives": "BSD-3-Clause",
@@ -40,10 +41,19 @@
     {
       "name": "Velopack native binaries",
       "version": "{Velopack}",
-      "description": "the updater (Squirrel.exe on Windows, UpdateMac, UpdateNix), Setup.exe and the execution stub, which vpk adds to the installers and update packages",
+      "description": "the updater (Squirrel.exe on Windows, UpdateMac, UpdateNix), Setup.exe and the execution stub, which vpk adds to the installers and update packages; they statically link Rust's standard library and the Rust crates listed at the end",
       "licence": "MIT",
       "copyright": "Copyright (c) 2021 Caelan Sayler, Copyright (c) 2024 Velopack Ltd.",
       "project": "https://github.com/velopack/velopack",
+      "with": "Velopack",
+      "addedBy": "vpk"
+    },
+    {
+      "name": "Rust standard library",
+      "description": "std, core and alloc and the crates they are built from, statically linked into Velopack's native binaries",
+      "licence": "MIT OR Apache-2.0",
+      "copyright": "Copyright (c) The Rust Project Contributors",
+      "project": "https://github.com/rust-lang/rust",
       "with": "Velopack",
       "addedBy": "vpk"
     },
@@ -60,7 +70,7 @@
     },
     {
       "name": "musl libc",
-      "description": "statically linked into the AppImage runtime",
+      "description": "statically linked into the AppImage runtime and into UpdateNix, Velopack's updater on Linux",
       "licence": "MIT",
       "copyright": "Copyright (c) 2005-2020 Rich Felker, et al.",
       "project": "https://musl.libc.org",

@@ -92,6 +92,15 @@ internal sealed record DashboardAuditMetadata(string Summary);
 /// </summary>
 internal sealed partial class DashboardAudit(IAuditLog log, TimeProvider time, ILogger logger)
 {
+    /// <summary>The log category of audit entries.</summary>
+    public const string LogCategory = "SemanticRouter.Audit";
+
+    /// <summary>The event id of an audit entry in the logs.</summary>
+    public const int AuditEventId = 1;
+
+    /// <summary>The event name of an audit entry in the logs.</summary>
+    public const string AuditEventName = "AuditEntry";
+
     private const string SummaryKey = "SemanticRouter.AuditSummary";
     private const string DetailKey = "SemanticRouter.AuditDetail";
     private const int MaxText = 300;
@@ -188,7 +197,8 @@ internal sealed partial class DashboardAudit(IAuditLog log, TimeProvider time, I
         return lines.ToString();
     }
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "Audit: {Actor} from {Client}: {Method} {Path} -> {Status}: {Summary}")]
+    // SIEM rules match on the category, this id and name, and the field names (docs/dashboard.md#audit-log): keep them.
+    [LoggerMessage(EventId = AuditEventId, EventName = AuditEventName, Level = LogLevel.Information, Message = "Audit: {Actor} from {Client}: {Method} {Path} -> {Status}: {Summary}")]
     private static partial void LogEntry(ILogger logger, string actor, string client, string method, string path, int status, string summary);
 }
 

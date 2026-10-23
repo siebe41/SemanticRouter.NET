@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Whether a THIRD-PARTY-NOTICES.txt written by deploy/third-party-notices.cs is complete, for CI and the release
 # (docs/releases.md): every package and component in it has a licence that starts with an SPDX id and at least one
-# licence text, and each component named on the command line is listed.
+# licence text, each component named on the command line is listed, and Velopack's native binaries come with the Rust
+# crates linked into them.
 #
 #   deploy/third-party-notices-check.sh <notices file> [component]...
 #   deploy/third-party-notices-check.sh notices/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)"
@@ -24,10 +25,15 @@ problems="$(awk '
   /^\[[0-9]+\] / { exit }
   /^=+$/ { started = 1; next }
   !started || /^$/ || /^Components that are not NuGet packages$/ { next }
-  /^[^ ]/ { check(); title = $0; licence = ""; texts = 0; count++; next }
+  /^Rust crates in Velopack.s native binaries/ { inCrates = 1; next }
+  /^[^ ]/ { check(); title = $0; licence = ""; texts = 0; count++; crates += inCrates; velopack += /^Velopack native binaries/; next }
   /^  Licence:   / { licence = substr($0, 14) }
   /^  Texts:     / { texts = 1 }
-  END { check(); if (count == 0) print "no packages or components listed" }
+  END {
+    check()
+    if (count == 0) print "no packages or components listed"
+    if (velopack && !crates) print "Velopack native binaries: the Rust crates statically linked into them are not listed"
+  }
 ' "$file")"
 
 if [ -n "$problems" ]; then

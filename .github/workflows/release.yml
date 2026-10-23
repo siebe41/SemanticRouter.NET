@@ -122,6 +122,11 @@ jobs:
       - name: Test
         run: dotnet test --configuration Release
 
+      # The vpk the installer jobs install is the Velopack package's version, whose native binaries and Rust crates the
+      # desktop notices list.
+      - name: Velopack versions
+        run: deploy/velopack-version-check.sh
+
       # The tool package carries the licences and notices of the packages it ships, and of the fonts.
       - name: Third-party notices
         run: |
@@ -535,7 +540,8 @@ jobs:
           mkdir -p tool && unzip -q packages/SemanticRouter.Host.*.nupkg -d tool
           dotnet restore src/SemanticRouter.Host/SemanticRouter.Host.csproj --locked-mode
           dotnet run --file deploy/third-party-notices.cs -- artifacts/THIRD-PARTY-NOTICES.txt sbom tool
-          deploy/third-party-notices-check.sh artifacts/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)"             "Velopack native binaries" "AppImage type2-runtime"
+          deploy/third-party-notices-check.sh artifacts/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)" \
+            "Velopack native binaries" "Rust standard library" "AppImage type2-runtime"
 
       - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         id: syft
