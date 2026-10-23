@@ -66,6 +66,10 @@
             "integration_id": 15368
           },
           {
+            "context": "installer SBOMs",
+            "integration_id": 15368
+          },
+          {
             "context": "container image",
             "integration_id": 15368
           },

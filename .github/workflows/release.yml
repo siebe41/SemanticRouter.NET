@@ -330,7 +330,7 @@ jobs:
         with:
           name: image-syft
           path: SemanticRouter-${{ env.VERSION }}-image.cdx.json
-          retention-days: 1
+          retention-days: 7
 
   # The image's SBOM gets its subject (the image and its version), its NuGet packages' licences from a restore of the
   # tool's packages, and the fonts, as the tool package's deps.json says (the image is the tool's build;
