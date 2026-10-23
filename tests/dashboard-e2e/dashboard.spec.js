@@ -324,6 +324,93 @@ test('an Anthropic connector\'s prompt caching settings are saved', async ({ pag
   expect(config.Connectors.local).toMatchObject({ Type: 'Anthropic', PromptCaching: 'Off', CacheTtl: '1h' });
 });
 
+test("an installed package's connector type is offered and shown by its settings", async ({ page, request }) => {
+  // The host has the Copilot package, so api/status lists its type after the built-in ones; the page names none of them.
+  const { connectorTypes } = await (await request.get('/router/api/status')).json();
+  expect(connectorTypes.installed).toContain('Copilot');
+  await open(page, 'connectors');
+  await page.locator('.item-head', { hasText: 'local' }).first().click();
+  const type = page.locator('.item.open select[data-bind="Connectors.local.Type"]');
+  await expect(type.locator('option')).toHaveText([...connectorTypes.builtIn, ...connectorTypes.installed]);
+  await type.selectOption('Copilot');
+  // The Copilot package does not call a base address (its factory leaves UsesBaseAddress off), so it gets the fields of
+  // a program, not the HTTP ones, although the connector still has the stub's address.
+  expect(connectorTypes.usesBaseAddress).not.toContain('Copilot');
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.Executable"]')).toBeVisible();
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.HomeDirectory"]')).toBeVisible();
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.RequestPath"]')).toHaveCount(0);
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.BaseAddress"]')).toHaveCount(0);
+});
+
+test("a packaged connector type that calls its base address gets the HTTP fields", async ({ page }) => {
+  // The host has no such package, so api/status is given one: "LocalGateway", whose factory sets UsesBaseAddress.
+  await page.route('**/router/api/status', async (route) => {
+    const res = await route.fetch();
+    const json = await res.json();
+    json.connectorTypes.installed.push('LocalGateway');
+    json.connectorTypes.usesBaseAddress.push('LocalGateway');
+    await route.fulfill({ response: res, json });
+  });
+  await open(page, 'connectors');
+  await page.locator('.item-head', { hasText: 'local' }).first().click();
+  await page.locator('.item.open select[data-bind="Connectors.local.Type"]').selectOption('LocalGateway');
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.BaseAddress"]')).toBeVisible();
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.ApiKey"]')).toBeVisible();
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.Executable"]')).toHaveCount(0);
+  await expect(page.locator('.item.open input[data-bind="Connectors.local.AllowRemoteClients"]')).toHaveCount(0);
+});
+
+test("a packaged embedding provider that does not run in this process gets the endpoint fields", async ({ page }) => {
+  // "HostedEmbeddings" stands for a package that calls a vendor's API: its factory leaves RunsInProcess off.
+  await page.route('**/router/api/status', async (route) => {
+    const res = await route.fetch();
+    const json = await res.json();
+    json.embeddings.available.push('HostedEmbeddings');
+    json.embeddings.models.push({ provider: 'HostedEmbeddings', name: 'hosted-small', description: 'A hosted model.', suggestedThreshold: 0.5, downloadBytes: 0 });
+    await route.fulfill({ response: res, json });
+  });
+  await open(page, 'embeddings');
+  await page.locator('select[data-bind="Embeddings.Provider"]').selectOption('HostedEmbeddings');
+  await expect(page.locator('input[data-bind="Embeddings.Endpoint"]')).toBeVisible();
+  await expect(page.locator('input[data-bind="Embeddings.ApiKey"]')).toBeVisible();
+  await expect(page.locator('input[data-bind="Embeddings.ModelPath"]')).toHaveCount(0);
+  await expect(page.locator('select[data-bind="Embeddings.Model"]')).toHaveCount(0);
+});
+
+test("a connector type in the draft is matched however it is spelled", async ({ page }) => {
+  // Use JSON puts the parsed text into the draft as it is: "cli" in lower case, or the old enum number.
+  await open(page, 'json');
+  const editor = page.locator('#json-editor');
+  const config = JSON.parse(await editor.inputValue());
+  config.Connectors.lower = { Type: 'cli', Preset: 'Codex' };
+  config.Connectors.number = { Type: 1 };
+  await editor.fill(JSON.stringify(config, null, 2));
+  await page.locator('[data-action="json-use"]').click();
+  await open(page, 'models');
+  await expect(page.locator('#view')).not.toContainText('Could not render');
+  await open(page, 'connectors');
+  await page.locator('.item-head', { hasText: 'lower' }).click();
+  await expect(page.locator('.item.open select[data-bind="Connectors.lower.Type"]')).toHaveValue('Cli');
+  await expect(page.locator('.item.open select[data-bind="Connectors.lower.Preset"]')).toBeVisible();
+  await expect(page.locator('.item.open select[data-bind="Connectors.lower.ToolCalling"]')).toBeVisible();
+  await page.locator('.item-head', { hasText: 'number' }).click();
+  await expect(page.locator('.item.open select[data-bind="Connectors.number.Type"]')).toHaveValue('1');
+  await expect(page.locator('.item-head', { hasText: 'number' }).locator('.badge.danger', { hasText: 'not installed' })).toBeVisible();
+});
+
+test("an installed package's embedding provider offers its models", async ({ page, request }) => {
+  const { embeddings } = await (await request.get('/router/api/status')).json();
+  const kind = embeddings.runsInProcess.find((k) => !embeddings.unavailable[k]);
+  test.skip(!kind, 'no installed in-process embedding provider can run on this machine');
+  const models = embeddings.models.filter((m) => m.provider === kind);
+  await open(page, 'embeddings');
+  await page.locator('select[data-bind="Embeddings.Provider"]').selectOption(kind);
+  const model = page.locator('select[data-bind="Embeddings.Model"]');
+  await expect(model.locator('option')).toHaveCount(models.length);
+  await expect(model).toHaveValue(models[0].name);
+  await expect(page.locator('input[data-bind="Embeddings.ModelPath"]')).toBeVisible();
+});
+
 test('validation lists problems and discard restores the configuration', async ({ page }) => {
   await open(page, 'routes');
   await page.locator('.item-head', { hasText: 'architecture' }).click();

@@ -128,12 +128,24 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release --logger "trx" --collect:"XPlat Code Coverage"
 
+      # The vpk every workflow installs builds the installers with its own native binaries, which the notices name by
+      # the Velopack package's version and list the Rust crates of (deploy/third-party/velopack-crates.json).
+      - name: Velopack versions
+        if: runner.os == 'Linux'
+        run: deploy/velopack-version-check.sh
+
       # As in a release, the tool package carries the licences and notices of the packages it ships, and of the fonts.
+      # The desktop app's also list Velopack's native binaries and the Rust crates they link, which fail the generator
+      # when one lacks a copyright line its licence asks for.
       - name: Third-party notices
         if: runner.os == 'Linux'
         run: |
           dotnet run --file deploy/third-party-notices.cs -- notices/THIRD-PARTY-NOTICES.txt src/SemanticRouter.Host/bin/Release/net10.0
           deploy/third-party-notices-check.sh notices/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)"
+          dotnet run --file deploy/third-party-notices.cs -- notices/desktop/THIRD-PARTY-NOTICES.txt \
+            src/SemanticRouter.Desktop/bin/Release/net10.0/SemanticRouter.deps.json
+          deploy/third-party-notices-check.sh notices/desktop/THIRD-PARTY-NOTICES.txt \
+            "Velopack native binaries" "Rust standard library" "AppImage type2-runtime"
 
       # Package validation (Directory.Build.targets) fails the pack when a library package's public API breaks the last
       # release on nuget.org; restore downloaded that release.
@@ -296,6 +308,10 @@ jobs:
         run: |
           dotnet tool install -g vpk --version 1.2.161
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      # The entitlements the release signs the app with: only the documented ones (docs/desktop.md#signing).
+      - name: Check the entitlements
+        run: deploy/macos-entitlements-check.sh
 
       - name: Package 1.0.0 and 1.0.1
         run: |

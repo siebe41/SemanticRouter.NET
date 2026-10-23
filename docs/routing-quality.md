@@ -38,7 +38,7 @@ A JSON array of the same objects works too, as does `{"cases": [...]}`. Use the 
 
 - **Where it lives.** `semantic-router init` writes a sample set for the starting routes as `semantic-router.evaluation.jsonl` next to `semantic-router.json`. A library host keeps the set next to its configuration file (`UseConfigurationFile`), or wherever `UseEvaluationSetFile(path)` says. Without either, the set lives in memory.
 - **Growing it from real traffic.** On the **Activity** page, **Label** opens a form for any entry. Pick the tier the prompt should have had (and optionally its route). Then add it to the set, add it as an utterance to a route (an existing one, or a new one created with that tier), or both. Adding an utterance applies a new configuration version immediately, so the next prompt like it routes differently without a restart.
-- **Privacy.** Labels keep the local-only flag of the activity entry. **Download** (`GET api/evaluation/set/export`) leaves local-only prompts out unless you add `?localOnly=true`. The activity log keeps only the first 160 characters of a prompt, so check the text in the label form.
+- **Privacy.** Labels keep the local-only flag of the activity entry. **Download** (`GET api/evaluation/set/export`) leaves local-only prompts out unless you add `?localOnly=true`, which needs the admin role; other roles do not see them on the Evaluate page either. The activity log keeps only the first 160 characters of a prompt, so check the text in the label form.
 
 ## Running a set
 
@@ -174,7 +174,7 @@ A route's tier picks its model, but the work some routes see is easier than thei
 
 - **Router learned** (its own dashboard page, and a card on the Overview) lists each change with:
   - what changed: the setting, the route, and the old and new value or the utterance;
-  - why: for example "At 0.48, 9 labelled prompts route to the tier they need that do not now (3 from the evaluation set, 6 from feedback: retried, corrected)";
+  - why: for example "At 0.48, 9 labelled prompts route to the tier they need that do not now (3 from the evaluation set, 6 from feedback: retried, corrected)", with up to three of those prompts as examples. A prompt labelled local-only is counted but never quoted ("2 local-only prompts not quoted"), here or in the configuration history's note;
   - when, and the configuration version that applied it;
   - its effect since: the share of decisions on what it touches that received feedback, before and after, and how many decisions it routed differently.
 - **On a decision:** an Activity entry that a learned threshold routed differently (it matched only because the threshold was lowered, or the reverse) carries a **learned** badge, with "learned 3 Oct: threshold of complex-code 0.52 → 0.48" in its tooltip. The API has it as `learned` and `learnedNote`.
@@ -237,10 +237,10 @@ It is off by default: a client that legitimately repeats a prompt (a "regenerate
 
 | Method and path | Purpose |
 |---|---|
-| `GET api/evaluation/set` | The stored set: `location`, `count`, `cases`. |
+| `GET api/evaluation/set` | The stored set: `location`, `count`, `cases`. Local-only prompts are only in it for the admin role; for others `localOnlyWithheld` counts them. |
 | `PUT api/evaluation/set` | Replace the set. Body: an array of cases, JSON Lines, or `{"text": "…"}`. |
 | `POST api/evaluation/cases` | Add a case (`{prompt, tier, route?, localOnly?, note?}`). A prompt labelled again replaces its earlier label. |
-| `GET api/evaluation/set/export?localOnly=false` | Download the set as JSON Lines, without local-only prompts unless asked. |
+| `GET api/evaluation/set/export?localOnly=false` | Download the set as JSON Lines, without local-only prompts unless asked (`localOnly=true`, admin role only). |
 | `POST api/evaluate?calibrate=true` | Evaluate the body's set, or the stored set when the body is empty. |
 | `POST api/evaluate/compare` | `{"embeddings": {provider settings}, "text": optional set}`: both providers' reports and calibrations. |
 | `GET api/routes/health` | Findings and route pairs. |

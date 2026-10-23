@@ -16,7 +16,8 @@ export const API = PREFIX + '/api';
 export const CAPABILITY_HINTS = ['chat', 'code', 'tools', 'vision', 'reasoning'];
 export const STRATEGIES = ['CheapestCapable', 'MostCapable', 'Priority', 'Fastest', 'Balanced'];
 export const SCORING = ['MaxSimilarity', 'Centroid'];
-export const CONNECTOR_TYPES = ['OpenAICompatible', 'Anthropic', 'Responses', 'Cli', 'Copilot'];
+// The router's own connector types, until api/status says which it has; installed packages add more (api/status).
+const BUILT_IN_CONNECTOR_TYPES = ['OpenAICompatible', 'Anthropic', 'Responses', 'Cli'];
 export const PRESETS = ['ClaudeCode', 'GitHubCopilot', 'Codex', 'Custom'];
 export const MESSAGE_SELECTION = ['LastUserMessage', 'AllUserMessages', 'AllMessages'];
 
@@ -119,6 +120,26 @@ export const tierName = (level) => {
 };
 export const tiers = () => (state.config && state.config.Tiers && state.config.Tiers.length ? state.config.Tiers : (state.status ? state.status.tiers.map((t) => ({ Level: t.level, Name: t.name, Description: t.description })) : []));
 export const connectorNames = () => Object.keys((state.config && state.config.Connectors) || {});
+/**
+ * A connector type as the router reads it: a name, OpenAICompatible when there is none. A draft edited as JSON may hold
+ * any spelling or value (`"cli"`, `1`), so types are compared with sameType, never with ===.
+ */
+export const typeName = (type) => (type == null || String(type).trim() === '' ? 'OpenAICompatible' : String(type).trim());
+/** Whether two connector types name the same type: case-insensitively, without surrounding spaces, as the router matches them. */
+export const sameType = (a, b) => typeName(a).toLowerCase() === typeName(b).toLowerCase();
+const builtInConnectorTypes = () => (state.status && state.status.connectorTypes && state.status.connectorTypes.builtIn.length ? state.status.connectorTypes.builtIn : BUILT_IN_CONNECTOR_TYPES);
+/** The connector types to offer: the built-in ones, then those installed packages provide. */
+export const connectorTypes = () => [...builtInConnectorTypes(), ...((state.status && state.status.connectorTypes && state.status.connectorTypes.installed) || [])];
+export const isBuiltInConnectorType = (type) => builtInConnectorTypes().some((t) => sameType(t, type));
+export const isInstalledConnectorType = (type) => connectorTypes().some((t) => sameType(t, type));
+const usesBaseAddress = (type) => ((state.status && state.status.connectorTypes && state.status.connectorTypes.usesBaseAddress) || []).some((t) => sameType(t, type));
+/**
+ * Whether a connector (its configuration) reaches its vendor by its own means rather than calling its base address, as
+ * the router decides (ConnectorOptions.RunsProgram): a Cli connector, or one of an installed type whose package does not
+ * say it calls the address (IChatConnectorFactory.UsesBaseAddress). Its models are subscriptions: free per request,
+ * valued at the API price.
+ */
+export const runsProgram = (conn) => !!conn && (sameType(conn.Type, 'Cli') || (!isBuiltInConnectorType(conn.Type) && !usesBaseAddress(conn.Type)));
 export const lines = (arr) => (arr || []).join('\n');
 export const fromLines = (text) => text.split('\n').map((s) => s.trim()).filter(Boolean);
 export const csv = (arr) => (arr || []).join(', ');
