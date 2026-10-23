@@ -31,7 +31,7 @@ RUN dotnet run --file deploy/third-party-notices.cs -- /app/THIRD-PARTY-NOTICES.
 # The runtime image has no shell to create the data directory, so it is made here and copied over.
 RUN mkdir -p /data
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra@sha256:3ed6558056b54d5c9dfefb7ff473728e022ff2bf1d976cbf8ee07b05ec594374
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled-extra@sha256:9e3919aff68057f3e45125c5255a71d3b5f40364e45ede883348688851b9f0df
 ARG VERSION=
 ARG REVISION=
 LABEL org.opencontainers.image.title="semantic-router" \
