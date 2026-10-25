@@ -512,6 +512,105 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void A_configuration_version_past_the_cap_leaves_the_files_too()
+    {
+        var history = new SqliteConfigurationHistory(Open(o => o.HistoryMaxEntries = 2));
+        history.Record(new RouterConfiguration { FallbackTier = 1 }, "admin API", "capped-actor 0b5e", "capped-note 0b5e");
+        history.Record(new RouterConfiguration { FallbackTier = 2 }, "admin API");
+        history.Record(new RouterConfiguration { FallbackTier = 3 }, "admin API");
+        Settle();
+
+        history.List().Should().HaveCount(2);
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("0b5e", "the write-ahead log is emptied after the cap deletes a version");
+    }
+
+    [Fact]
+    public void A_capped_version_does_not_wait_for_a_reader_and_leaves_the_files_once_it_has_finished()
+    {
+        // The default busy timeout (5 s): a checkpoint that waited for the reader would take it, or twice it.
+        var history = new SqliteConfigurationHistory(Open(o => o.HistoryMaxEntries = 2));
+        history.Record(new RouterConfiguration { FallbackTier = 1 }, "admin API", "read-held-actor 7c4a");
+        history.Record(new RouterConfiguration { FallbackTier = 2 }, "admin API");
+        using (var reader = new SqliteConnection($"Data Source={DbPath};Pooling=False"))
+        {
+            reader.Open();
+            using SqliteTransaction read = reader.BeginTransaction(deferred: true);
+            using (SqliteCommand count = reader.CreateCommand())
+            {
+                count.Transaction = read;
+                count.CommandText = "SELECT count(*) FROM config_history;";
+                count.ExecuteScalar();
+            }
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            long id = history.Record(new RouterConfiguration { FallbackTier = 3 }, "admin API");
+            history.List().Should().HaveCount(2);
+            stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2.5), "the configuration is applied under the runtime's lock");
+            history.GetVersion(id).Should().NotBeNull("the version is saved even though the log could not be emptied");
+            DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().Contain("7c4a", "the reader must actually pin the deleted version in the log");
+            read.Commit();
+        }
+
+        history.List().Should().HaveCount(2);
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("7c4a", "the checkpoint owed is made after the next operation");
+    }
+
+    [Fact]
+    public async Task The_hourly_prune_waits_for_a_short_reader_to_release_deleted_audit_data()
+    {
+        SqliteRouterDatabase database = Open(o => o.AuditRetention = TimeSpan.FromDays(30));
+        var audit = new SqliteAuditLog(database);
+        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "short-reader 3a8f", null, "PUT", "/router/api/config", null, 200, "changed"));
+        _time.Advance(TimeSpan.FromDays(40));
+        using var reader = new SqliteConnection($"Data Source={DbPath};Pooling=False");
+        reader.Open();
+        using SqliteTransaction read = reader.BeginTransaction(deferred: true);
+        using (SqliteCommand count = reader.CreateCommand())
+        {
+            count.Transaction = read;
+            count.CommandText = "SELECT count(*) FROM audit;";
+            count.ExecuteScalar().Should().Be(1L);
+        }
+
+        Task<int> prune = Task.Run(database.Prune);
+        // Wait until the delete has reached the file while this snapshot still pins it.
+        using (var observer = new SqliteConnection($"Data Source={DbPath};Pooling=False"))
+        {
+            observer.Open();
+            using SqliteCommand count = observer.CreateCommand();
+            count.CommandText = "SELECT count(*) FROM audit;";
+            for (int attempt = 0; (long)count.ExecuteScalar()! != 0 && attempt < 100; attempt++)
+            {
+                await Task.Delay(10);
+            }
+
+            ((long)count.ExecuteScalar()!).Should().Be(0);
+        }
+
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().Contain("3a8f");
+        read.Commit();
+        (await prune.WaitAsync(TimeSpan.FromSeconds(6))).Should().BeGreaterThan(0);
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("3a8f");
+    }
+
+    [Fact]
+    public void An_audit_entry_past_retention_leaves_the_files_when_the_next_one_is_written()
+    {
+        SqliteRouterDatabase database = Open(o => o.AuditRetention = TimeSpan.FromDays(30));
+        var audit = new SqliteAuditLog(database);
+        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "aged-auditor 9d1f", null, "PUT", "/router/api/config", null, 200, "changed"));
+        database.Run("emptying the log", connection => SqliteRouterDatabase.TruncateLog(connection));
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().Contain("aged-auditor 9d1f", "the entry is in state.db now");
+
+        // Past retention, then another entry: its insert deletes the aged one, so a later prune finds nothing to delete.
+        _time.Advance(TimeSpan.FromDays(40));
+        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "fresh-auditor", null, "PUT", "/router/api/config", null, 200, "changed"));
+
+        audit.Query(null, null, 10).Should().ContainSingle(e => e.Actor == "fresh-auditor");
+        DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("aged-auditor 9d1f", "the write-ahead log is emptied after the age cap deletes an entry");
+    }
+
+    [Fact]
     public async Task Concurrent_writers_on_one_file_lose_nothing()
     {
         var a = new SqliteToolCallAffinity(Open());
