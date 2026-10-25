@@ -7,25 +7,40 @@ name: Release
 #
 # Every release can be verified (docs/releases.md): the image is signed with keyless cosign and carries provenance and
 # SBOM attestations; every release asset, the NuGet packages included, has a build provenance attestation and a line in
-# SHA256SUMS; CycloneDX SBOMs and THIRD-PARTY-NOTICES.txt are attached. Signatures and attestations use short-lived
-# Sigstore certificates issued to this workflow (GitHub OIDC), so no signing key is stored anywhere. The jobs that hold
-# the OIDC token build nothing; they sign and attest what the build jobs produced, after any code signing.
+# SHA256SUMS; CycloneDX SBOMs (the packages, the image, and each platform's archive and installer, each naming what it
+# describes and every package's licence) and THIRD-PARTY-NOTICES.txt are attached. Signatures and attestations use
+# short-lived Sigstore certificates issued to this workflow (GitHub OIDC), so no signing key is stored anywhere. The
+# jobs that hold the OIDC token build nothing; they sign and attest what the build jobs produced, after any code
+# signing.
+#
+# Nothing is public until everything is ready (docs/releases.md#the-order-of-a-release). Everything is built, signed,
+# checked and attached to a draft GitHub release first, which nobody but the maintainers sees and which the desktop
+# app's updater does not read. SHA256SUMS and the provenance attestation are added to the draft too. Only then, one
+# after another, the image is pushed and signed, the NuGet packages are pushed, and the draft is published. So a
+# failure in a build, installer or signing job leaves a draft (and, after checksums, its public attestation) and nothing
+# else: no package on nuget.org, no new image tag and no public release. deploy/release-order-check.sh, which CI runs,
+# keeps this order.
 #
 # A tag with a suffix (v1.0.0-rc.1) is a prerelease: the GitHub release is marked as one, so the desktop app's updater
 # (which skips prereleases) never offers it, and the image gets its version tag but not :latest. NuGet treats the
 # suffix as a prerelease by itself. "Cut a release" makes stable releases only; push such a tag by hand for a candidate.
 #
 # The Windows and macOS installers must be code-signed: a release fails at its first job when a platform's signing
-# secrets are missing, unless the variable ALLOW_UNSIGNED_RELEASE is `true` (docs/releases.md#code-signing).
+# secrets are missing, unless the variable ALLOW_UNSIGNED_RELEASE is `true` (docs/releases.md#code-signing). "Cut a
+# release" also asks for its "Allow unsigned installers" box to be ticked before it tags such a release.
 on:
   push:
     tags: [ 'v*' ]
 
-# Read-only by default; each job that publishes, signs or attests asks for the extra permissions it needs (id-token and
-# attestations only in image-sign and checksums, the jobs that build nothing). Every publishing job runs in the `release`
-# environment, so the repository owner can require an approval under Settings > Environments (and restrict it to `main`
-# and v* tags: cut-release.yml runs there from main). Publishing to nuget.org needs the `NUGET_USER` variable there (see
-# the nuget job).
+# Read-only by default; each job that publishes, signs or attests asks for the extra permissions it needs (id-token only
+# in nuget, image-sign, installer-windows and checksums, and attestations only in image-sign and checksums, all jobs that
+# build nothing). Each secret, the workflow's token included, goes to the steps that use it rather than to a whole job,
+# and no job that builds holds one (deploy/workflow-secrets-check.sh, which CI runs). Every publishing job runs in the
+# `release` environment, so the repository owner can require an approval under Settings > Environments (and restrict it
+# to `main` and v* tags: cut-release.yml runs there from main). Publishing to nuget.org needs the `NUGET_USER` variable
+# there (see the nuget job). installer-windows runs in an environment of its own, `windows-signing`, because the OIDC
+# token of a job there is what Azure accepts for signing: the other id-token jobs, in `release`, cannot sign
+# (docs/desktop.md#signing-in-to-azure).
 permissions:
   contents: read
 
@@ -78,7 +93,6 @@ jobs:
           WINDOWS: >-
             AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID != '' }}
             AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID != '' }}
-            AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET != '' }}
             AZURE_SIGNING_ENDPOINT=${{ vars.AZURE_SIGNING_ENDPOINT != '' }}
             AZURE_SIGNING_ACCOUNT=${{ vars.AZURE_SIGNING_ACCOUNT != '' }}
             AZURE_SIGNING_PROFILE=${{ vars.AZURE_SIGNING_PROFILE != '' }}
@@ -130,7 +144,8 @@ jobs:
         run: deploy/package-contents-check.sh artifacts
 
       # A CycloneDX SBOM of the NuGet packages, read from their contents: the tool's deps.json and each package's
-      # assemblies.
+      # assemblies. deploy/sbom-complete.cs then names the release as its subject, gives every package its licence (from
+      # the nuspecs restore put in the NuGet cache) and adds the fonts, which Syft cannot see (docs/releases.md).
       - name: SBOM input
         run: |
           for package in artifacts/*.nupkg; do
@@ -145,6 +160,14 @@ jobs:
           output-file: SemanticRouter-${{ env.VERSION }}-packages.cdx.json
           upload-artifact: false
           upload-release-assets: false
+
+      - name: Complete the SBOM
+        run: |
+          sbom="SemanticRouter-$VERSION-packages.cdx.json"
+          dotnet run --file deploy/sbom-complete.cs -- "$sbom" --type library --name SemanticRouter.NET --version "$VERSION" \
+            --purl "pkg:github/${GITHUB_REPOSITORY,,}@v$VERSION" \
+            --description "The SemanticRouter NuGet packages and the semantic-router tool" --contents sbom
+          deploy/sbom-check.sh "$sbom" SemanticRouter.NET "$VERSION" "Inter (font)" "Fira Sans (font)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -161,9 +184,11 @@ jobs:
   # NuGet Trusted Publishing: no NuGet key is stored anywhere. This job exchanges its GitHub OIDC token for an API key
   # that nuget.org issues for one hour, under the policy on the nuget.org account (repository, release.yml, environment
   # `release`). It runs nothing but the push, so restore, build and test code in the job above never sees the token.
-  # A release fails here rather than skipping the push: the README tells people to install from nuget.org.
+  # A release fails here rather than skipping the push: the README tells people to install from nuget.org. A version on
+  # nuget.org can never be used again, so the push comes after everything else is signed, attached and checked and the
+  # image is out; only publishing the draft release comes after it.
   nuget:
-    needs: packages
+    needs: [ packages, image-sign ]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -244,12 +269,14 @@ jobs:
           echo "id=$(docker image inspect "$IMAGE:$VERSION" --format '{{.Id}}')" >> "$GITHUB_OUTPUT"
           docker save "$IMAGE:$VERSION" "$IMAGE:latest" -o image.tar
 
+      # Kept for a week, like the installers' full packages below: the push waits for the installers, and a failed
+      # release is finished by re-running its failed jobs, which reuse these (docs/releases.md#when-a-release-fails).
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image
           path: image.tar
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   # No permission, so the job's token can do nothing, and no cache, so a cache entry written elsewhere cannot change
   # the scanner or its database.
@@ -279,7 +306,8 @@ jobs:
           exit-code: '1'
           cache: 'false'
 
-      # The image's CycloneDX SBOM: attached to the release, and to the image as an attestation (image-sign).
+      # The image's CycloneDX SBOM: completed in image-sbom, then attached to the release, and to the image as an
+      # attestation (image-sign).
       - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           image: ${{ env.IMAGE }}:latest
@@ -300,11 +328,59 @@ jobs:
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          name: image-syft
+          path: SemanticRouter-${{ env.VERSION }}-image.cdx.json
+          retention-days: 7
+
+  # The image's SBOM gets its subject (the image and its version), its NuGet packages' licences from a restore of the
+  # tool's packages, and the fonts, as the tool package's deps.json says (the image is the tool's build;
+  # deploy/sbom-complete.cs). Here rather than in image-scan, which holds no permission and checks nothing out; before
+  # the push, so no image is published without its completed SBOM.
+  image-sbom:
+    needs: [ image-build, image-scan ]
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+      IMAGE: ${{ needs.image-build.outputs.image }}
+      VERSION: ${{ needs.image-build.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: image-syft
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: packages
+
+      - name: Complete the SBOM
+        run: |
+          dotnet restore src/SemanticRouter.Host/SemanticRouter.Host.csproj --locked-mode
+          mkdir -p tool && unzip -q packages/SemanticRouter.Host.*.nupkg -d tool
+          sbom="SemanticRouter-$VERSION-image.cdx.json"
+          dotnet run --file deploy/sbom-complete.cs -- "$sbom" --type container --name "$IMAGE" --version "$VERSION" \
+            --purl "pkg:docker/${IMAGE#ghcr.io/}@$VERSION?repository_url=ghcr.io" --description "The semantic-router container image" \
+            --contents tool
+          deploy/sbom-check.sh "$sbom" "$IMAGE" "$VERSION" "Inter (font)" "Fira Sans (font)"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
           name: sbom-image
           path: SemanticRouter-${{ env.VERSION }}-image.cdx.json
 
+  # The image is pushed, as :VERSION and :latest, only once the draft release is complete: every installer signed and
+  # checked, SHA256SUMS and the attestation attached (checksums). A failed installer or signing job leaves no new tag.
   image:
-    needs: [ image-build, image-scan ]
+    needs: [ image-build, image-scan, image-sbom, checksums ]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -450,7 +526,7 @@ jobs:
 
       # The release's own THIRD-PARTY-NOTICES.txt covers all it ships: the desktop app for every platform and the tool
       # (whose packages are also the image's). Each archive, installer, the tool package and the image carry their own
-      # copy. The desktop SBOM is read from the archives' contents.
+      # copy. The SBOMs are read from the archives' contents.
       - name: Notices and SBOM input
         run: |
           for archive in artifacts/*.zip artifacts/*.tar.gz; do
@@ -467,13 +543,25 @@ jobs:
           deploy/third-party-notices-check.sh artifacts/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)" \
             "Velopack native binaries" "Rust standard library" "AppImage type2-runtime"
 
-      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
-        with:
-          path: sbom
-          format: cyclonedx-json
-          output-file: artifacts/SemanticRouter-${{ env.VERSION }}-desktop.cdx.json
-          upload-artifact: false
-          upload-release-assets: false
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+
+      # One SBOM per platform, SemanticRouter-<version>-<rid>.cdx.json, named after the archive it describes and
+      # completed with its packages' licences and the fonts (deploy/sbom-complete.cs). The installers' are made later,
+      # from what vpk built (installer-sbom).
+      - name: SBOMs
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          for archive in artifacts/*.zip artifacts/*.tar.gz; do
+            file="$(basename "$archive")" && name="${file%.zip}" && name="${name%.tar.gz}" && rid="${name#"SemanticRouter-$VERSION-"}"
+            sbom="artifacts/$name.cdx.json"
+            "$SYFT" scan "dir:sbom/$name" -q -o "cyclonedx-json=$sbom"
+            dotnet run --file deploy/sbom-complete.cs -- "$sbom" --type application --name "SemanticRouter-$rid" --version "$VERSION" \
+              --purl "pkg:generic/SemanticRouter-$rid@$VERSION?download_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$file" \
+              --description "The desktop app for $rid, as in $file" --contents "sbom/$name"
+            deploy/sbom-check.sh "$sbom" "SemanticRouter-$rid" "$VERSION" "Inter (font)" "Fira Sans (font)"
+          done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -486,8 +574,6 @@ jobs:
     environment: release
     permissions:
       contents: write
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -497,6 +583,8 @@ jobs:
       # The release notes are the version's section of CHANGELOG.md at the tag (or its Unreleased section, when that was
       # not renamed before the release), followed by GitHub's list of merged pull requests.
       - name: Release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           gh api -H "Accept: application/vnd.github.raw" "repos/$GITHUB_REPOSITORY/contents/CHANGELOG.md?ref=$GITHUB_REF_NAME" > CHANGELOG.md \
@@ -510,8 +598,12 @@ jobs:
           fi
           printf '%s\n' "$notes" > notes.md
 
-      # A version with a suffix (1.0.0-rc.1) is created as a prerelease: the desktop app's updater skips those.
-      - name: Attach to the release
+      # The release is created as a draft, which only the publish job makes public, once everything else is done. A
+      # version with a suffix (1.0.0-rc.1) is created as a prerelease: the desktop app's updater skips those. On a
+      # re-run, gh finds the draft by its tag and the archives replace the ones there.
+      - name: Attach to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           prerelease=()
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
@@ -519,7 +611,7 @@ jobs:
           fi
           gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
-              --notes-file notes.md --generate-notes --verify-tag "${prerelease[@]}"
+              --notes-file notes.md --generate-notes --verify-tag --draft "${prerelease[@]}"
           gh release upload "$GITHUB_REF_NAME" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
 
   # The app each installer packages, published on the installer's own OS (as before the split), without secrets. Tar
@@ -562,7 +654,14 @@ jobs:
   # fetched for a delta update. These jobs only pack, sign and upload what installer-build published (PUBLISH_DIR);
   # vpk, the packaging and signing tool itself, is the one tool installed. The Windows and macOS jobs sign when the
   # packages job found their platform's signing set up, and then check the signature before anything is uploaded
-  # (docs/desktop.md#signing).
+  # (docs/desktop.md#signing). vpk uploads into the draft release (--merge) and leaves it a draft: without --publish,
+  # the update feeds are public only when the publish job publishes the release. Each secret goes to the steps that use
+  # it, not to the job (deploy/workflow-secrets-check.sh): the token to the steps that fetch the previous release and
+  # upload, the signing credentials to the signing setup. vpk is installed before either, so its restore never runs
+  # next to them. Windows signs with an Azure login by OIDC, so no Azure secret is stored; but id-token: write is
+  # job-wide, so every step of installer-windows, the vpk install included, could ask for the token that signs. That
+  # job therefore runs only vpk, pinned actions and this repository's scripts, in the windows-signing environment that
+  # no other job uses, and logs out of Azure as soon as it has signed.
   installers:
     needs: [ desktop, installer-build ]
     runs-on: ubuntu-latest
@@ -572,7 +671,6 @@ jobs:
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
       # A version with a suffix (1.0.0-rc.1) goes into a prerelease, which the desktop app's updater does not take.
       VPK_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
@@ -594,35 +692,42 @@ jobs:
           sudo apt-get install -y --no-install-recommends squashfs-tools zstd
           dotnet tool install -g vpk --version 1.2.161
 
+      # The token fetches the previous release's package (for the delta) and uploads.
       - name: Package and attach
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p published && tar -C published -xzf publish-linux-x64.tar.gz
           PUBLISH_DIR=published deploy/package-installer.sh linux-x64 "${GITHUB_REF_NAME#v}" installers/linux-x64
           vpk upload github --outputDir installers/linux-x64 --channel linux-x64 \
-            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish $VPK_PRE
+            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $VPK_PRE
+
+      # For installer-sbom (with the previous release's full package, when one was downloaded for the delta).
+      # Kept 7 days, so a failed installer-sbom can be re-run after the day the release was cut.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-linux-x64
+          path: installers/linux-x64/*-full.nupkg
+          if-no-files-found: error
+          retention-days: 7
 
   installer-windows:
     needs: [ packages, desktop, installer-build ]
-    environment: release
+    # Not `release`: the federated credential trusts this environment's OIDC token only (docs/desktop.md#signing-in-to-azure).
+    environment: windows-signing
     runs-on: windows-latest
     permissions:
       contents: write
+      # For the Azure login: the job's GitHub OIDC token, which Azure exchanges for a short-lived access token under the
+      # app registration's federated credential (docs/desktop.md#signing). Every step of the job can ask for it.
+      id-token: write
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
       # A version with a suffix (1.0.0-rc.1) goes into a prerelease, which the desktop app's updater does not take.
       VPK_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
       SIGNING: ${{ needs.packages.outputs.windows-signing }}
-      # Azure Trusted Signing: the credentials (DefaultAzureCredential reads them from the environment) and the
-      # account's endpoint, name and certificate profile (repository variables).
-      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-      SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-      SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-      SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -642,19 +747,49 @@ jobs:
           dotnet tool install -g vpk --version 1.2.161
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
+      # The signing setup and the signature check are scripts that the signing dry run (signing-dry-run.yml) runs too.
+      # Azure Trusted Signing: the app registration that may sign (its ids are secrets) and the account's endpoint, name
+      # and certificate profile (variables). The setup names any that are missing.
       - name: Signing metadata
         if: env.SIGNING == 'signed'
         shell: bash
-        run: |
-          printf '{"Endpoint":"%s","CodeSigningAccountName":"%s","CertificateProfileName":"%s"}' \
-            "$SIGNING_ENDPOINT" "$SIGNING_ACCOUNT" "$SIGNING_PROFILE" > "$RUNNER_TEMP/metadata.json"
-          echo "AZURE_SIGN_METADATA=$RUNNER_TEMP/metadata.json" >> "$GITHUB_ENV"
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        run: deploy/signing-setup.sh windows
 
+      # OIDC: no client secret is stored anywhere. vpk's signing (DefaultAzureCredential) uses this Azure CLI login, and
+      # the action logs out again when the job ends.
+      - name: Azure login
+        if: env.SIGNING == 'signed'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      # The token fetches the previous release's package, for the delta.
       - name: Package
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p published && tar -C published -xzf publish-win-x64.tar.gz
           PUBLISH_DIR=published deploy/package-installer.sh win-x64 "${GITHUB_REF_NAME#v}" installers/win-x64
+
+      # Signed: nothing after this needs the Azure login, so it ends here, not at the end of the job.
+      - name: Azure logout
+        if: always() && env.SIGNING == 'signed'
+        shell: bash
+        run: az logout || az account clear
+
+      # A release meant to be signed uploads nothing whose signature does not check out.
+      - name: Check the signature
+        shell: pwsh
+        run: ./deploy/check-signature-windows.ps1 installers/win-x64 -Required:($env:SIGNING -eq 'signed')
 
       # A release meant to be signed uploads nothing whose signature does not check out: the installer, and the
       # programs in the update package it installs (deploy/installer-signature-check.ps1).
@@ -664,9 +799,18 @@ jobs:
 
       - name: Attach
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           vpk upload github --outputDir installers/win-x64 --channel win-x64 \
-            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish $VPK_PRE
+            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $VPK_PRE
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-win-x64
+          path: installers/win-x64/*-full.nupkg
+          if-no-files-found: error
+          retention-days: 7
 
   installer-macos:
     needs: [ packages, desktop, installer-build ]
@@ -677,21 +821,10 @@ jobs:
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
       # A version with a suffix (1.0.0-rc.1) goes into a prerelease, which the desktop app's updater does not take.
       VPK_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
       SIGNING: ${{ needs.packages.outputs.macos-signing }}
-      # Signing and notarization (an Apple Developer account): the two Developer ID certificates as base64 .p12 files,
-      # their password, the identities, and the Apple ID that notarizes.
-      BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_BUILD_CERTIFICATE_BASE64 }}
-      INSTALLER_CERTIFICATE_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_BASE64 }}
-      P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-      APPLE_TEAM: ${{ secrets.APPLE_TEAM_ID }}
-      APP_IDENTITY: ${{ vars.APPLE_SIGN_APP_IDENTITY }}
-      INSTALL_IDENTITY: ${{ vars.APPLE_SIGN_INSTALL_IDENTITY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -709,30 +842,27 @@ jobs:
       - name: Install vpk
         run: dotnet tool install -g vpk --version 1.2.161
 
-      # A throw-away keychain with both certificates, and the notarytool profile vpk uses.
+      # A throw-away keychain with both certificates, and the notarytool profile vpk uses. The signing setup and the
+      # signature check are scripts that the signing dry run (signing-dry-run.yml) runs too. Signing and notarization
+      # (an Apple Developer account): the two Developer ID certificates as base64 .p12 files, their password, the
+      # identities, and the Apple ID that notarizes. Only this step sees them; later steps use the keychain.
       - name: Signing keychain
         if: env.SIGNING == 'signed'
-        run: |
-          keychain="$RUNNER_TEMP/signing.keychain-db"
-          password="$(uuidgen)"
-          echo "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/build.p12"
-          echo "$INSTALLER_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/installer.p12"
-          security create-keychain -p "$password" "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          security import "$RUNNER_TEMP/build.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
-          security import "$RUNNER_TEMP/installer.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
-          security list-keychain -d user -s "$keychain"
-          xcrun notarytool store-credentials --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM" --password "$APPLE_PASSWORD" \
-            --keychain "$keychain" semantic-router-notary
-          {
-            echo "APPLE_SIGN_APP_IDENTITY=$APP_IDENTITY"
-            echo "APPLE_SIGN_INSTALL_IDENTITY=$INSTALL_IDENTITY"
-            echo "APPLE_NOTARY_PROFILE=semantic-router-notary"
-            echo "APPLE_KEYCHAIN=$keychain"
-          } >> "$GITHUB_ENV"
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_BUILD_CERTIFICATE_BASE64 }}
+          INSTALLER_CERTIFICATE_BASE64: ${{ secrets.APPLE_INSTALLER_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_P12_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          APP_IDENTITY: ${{ vars.APPLE_SIGN_APP_IDENTITY }}
+          INSTALL_IDENTITY: ${{ vars.APPLE_SIGN_INSTALL_IDENTITY }}
+        run: deploy/signing-setup.sh macos
 
+      # The token fetches the previous release's packages, for the deltas.
       - name: Package
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for rid in osx-arm64 osx-x64; do
             mkdir -p "published/$rid" && tar -C "published/$rid" -xzf "publish-$rid.tar.gz"
@@ -746,23 +876,91 @@ jobs:
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          required=()
+          if [ "$SIGNING" = signed ]; then
+            required=(--required)
+          fi
+          deploy/check-signature-macos.sh ${required[@]+"${required[@]}"} installers/osx-arm64 installers/osx-x64
           for rid in osx-arm64 osx-x64; do
             deploy/installer-signature-check.sh "installers/$rid" "${GITHUB_REF_NAME#v}" "$rid"
           done
 
       - name: Attach
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for rid in osx-arm64 osx-x64; do
             vpk upload github --outputDir "installers/$rid" --channel "$rid" \
-              --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge --publish $VPK_PRE
+              --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $VPK_PRE
           done
 
-  # Last, once every asset is signed and attached: SHA256SUMS over all the release's assets; the NuGet and symbol
-  # packages (as pushed to nuget.org, before nuget.org adds its repository signature) and the packages' and image's SBOMs
-  # attached; and one build provenance attestation covering every asset and SHA256SUMS, for `gh attestation verify`. The
-  # job downloads, hashes and uploads; it builds and runs nothing from the repository.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-osx
+          path: installers/osx-*/*-full.nupkg
+          if-no-files-found: error
+          retention-days: 7
+
+  # The installers' and update packages' SBOMs, one per platform, SemanticRouter-<version>-<rid>-installer.cdx.json,
+  # read from the full update package each installer job built (deploy/installer-sbom.sh): the app as installed, plus
+  # what vpk adds, Velopack's native binaries and, on Linux, the AppImage runtime. In a job of its own, so that Syft and
+  # the restore never run next to the signing secrets or a token that can write.
+  installer-sbom:
+    needs: [ installers, installer-windows, installer-macos ]
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installer-*
+          path: installers
+
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+
+      - name: SBOMs
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          dotnet restore src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj --locked-mode
+          mkdir -p sboms
+          for rid in linux-x64 win-x64 osx-arm64 osx-x64; do
+            file="SemanticRouter-$version-$rid-full.nupkg"
+            package="$(find installers -name "$file" | head -n 1)"
+            if [ -z "$package" ]; then
+              echo "::error::No $file from the installer jobs."
+              exit 1
+            fi
+            deploy/installer-sbom.sh "$rid" "$version" "$package" "sboms/SemanticRouter-$version-$rid-installer.cdx.json" \
+              "pkg:generic/SemanticRouter-$rid-installer@$version?download_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$file"
+          done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-installers
+          path: sboms/*.cdx.json
+
+  # Once every asset is signed and attached to the draft release: SHA256SUMS over all its assets; the NuGet and symbol
+  # packages (as nuget.org will get them, before nuget.org adds its repository signature) and the packages', image's
+  # and installers' SBOMs attached (the archives' came with them); and one build provenance attestation covering every
+  # asset and SHA256SUMS, for `gh attestation verify`. The job downloads, hashes and uploads; it builds and runs nothing
+  # from the repository. It first checks that the draft has every channel's update feed and the notices. Nothing has
+  # been pushed or published yet (the image, NuGet and publish jobs come after this one), but the attestation is
+  # public: it goes to the public Sigstore log and the repository's attestations, and stays there if the version is
+  # given up.
   checksums:
-    needs: [ packages, image, desktop, installers, installer-windows, installer-macos ]
+    needs: [ packages, image-sbom, desktop, installers, installer-windows, installer-macos, installer-sbom ]
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -770,7 +968,6 @@ jobs:
       id-token: write
       attestations: write
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       LC_ALL: C
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -785,6 +982,8 @@ jobs:
           path: attach
 
       - name: Checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir release --clobber
           cp attach/* release/
@@ -792,10 +991,71 @@ jobs:
           (cd release && sha256sum -- * > SHA256SUMS)
           cat release/SHA256SUMS
 
+      # The check publish makes again, here before anything irreversible: the image push and nuget come after this job.
+      - name: The draft is complete
+        run: |
+          missing=()
+          for asset in THIRD-PARTY-NOTICES.txt \
+            releases.linux-x64.json releases.win-x64.json releases.osx-arm64.json releases.osx-x64.json; do
+            [ -f "release/$asset" ] || missing+=("$asset")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::The draft release $GITHUB_REF_NAME has no ${missing[*]}; nothing is published."
+            exit 1
+          fi
+
       - name: Provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: release/*
 
       - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" attach/* release/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+
+  # Last: the draft becomes the public release, and with it the desktop app's update feeds, which the updater reads
+  # from published releases only. It runs only when everything else succeeded: every installer signed and checked, the
+  # checksums and attestation attached, the image pushed and signed, and the NuGet packages pushed. It first checks
+  # that the draft has every channel's update feed, the notices and SHA256SUMS.
+  publish:
+    needs: [ packages, checksums, image-sign, nuget ]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    env:
+      WINDOWS_SIGNING: ${{ needs.packages.outputs.windows-signing }}
+      MACOS_SIGNING: ${{ needs.packages.outputs.macos-signing }}
+    steps:
+      - name: The draft is complete
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          assets="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          missing=()
+          for asset in SHA256SUMS THIRD-PARTY-NOTICES.txt \
+            releases.linux-x64.json releases.win-x64.json releases.osx-arm64.json releases.osx-x64.json; do
+            grep -qxF "$asset" <<<"$assets" || missing+=("$asset")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::The draft release $GITHUB_REF_NAME has no ${missing[*]}, so it is not published."
+            exit 1
+          fi
+
+      # A stable release becomes the repository's latest release, as a release created published did; a prerelease
+      # (1.0.0-rc.1, created as one) cannot be.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          latest=()
+          if [[ "$GITHUB_REF_NAME" != *-* ]]; then
+            latest=(--latest)
+          fi
+          gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false "${latest[@]}"
+          {
+            echo "Published $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/tag/$GITHUB_REF_NAME"
+            echo
+            echo "Windows installers: $WINDOWS_SIGNING. macOS installers: $MACOS_SIGNING."
+          } >> "$GITHUB_STEP_SUMMARY"

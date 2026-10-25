@@ -17,16 +17,16 @@ internal static class TuningApi
 
     public static void Map(RouteGroupBuilder api, JsonSerializerOptions json, Func<HttpContext, string> actor)
     {
-        api.MapGet("/tuning", (RouterTuner tuner, RouterRuntimeProvider provider, RoutingActivityLog activity, RoutingFeedbackLog feedback, int? limit) =>
-            Results.Json(Status(tuner, provider, activity, feedback, limit), json));
+        api.MapGet("/tuning", (HttpContext context, RouterTuner tuner, RouterRuntimeProvider provider, RoutingActivityLog activity, RoutingFeedbackLog feedback, int? limit) =>
+            Results.Json(Status(tuner, provider, activity, feedback, limit, Now(context)), json));
 
-        api.MapGet("/tuning/changes", (RouterTuner tuner, RouterRuntimeProvider provider, RoutingActivityLog activity, RoutingFeedbackLog feedback, int? limit) =>
-            Results.Json(Status(tuner, provider, activity, feedback, limit).Changes, json));
+        api.MapGet("/tuning/changes", (HttpContext context, RouterTuner tuner, RouterRuntimeProvider provider, RoutingActivityLog activity, RoutingFeedbackLog feedback, int? limit) =>
+            Results.Json(Status(tuner, provider, activity, feedback, limit, Now(context)).Changes, json));
 
         // How often the judge's grades agree with the hand labels, and what weight that gives its labels in tuning.
         api.MapGet("/judge/agreement", (HttpContext context, RouterRuntimeProvider provider, RoutingActivityLog activity, IEvaluationSetStore labels) =>
             Results.Json(
-                JudgeAgreement.Measure(provider.Current, activity, labels, (context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow()),
+                JudgeAgreement.Measure(provider.Current, activity, labels, Now(context)),
                 json));
 
         api.MapPost("/tuning/run", async (RouterTuner tuner, RouterRuntimeProvider provider, CancellationToken cancellationToken) =>
@@ -92,9 +92,12 @@ internal static class TuningApi
         }
     }
 
-    private static TuningResponse Status(RouterTuner tuner, RouterRuntimeProvider provider, RoutingActivityLog activity, RoutingFeedbackLog feedback, int? limit)
+    /// <summary>The router's clock, the one <see cref="RouterTuner"/> stamps its changes with.</summary>
+    private static DateTimeOffset Now(HttpContext context) =>
+        (context.RequestServices.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow();
+
+    private static TuningResponse Status(RouterTuner tuner, RouterRuntimeProvider provider, RoutingActivityLog activity, RoutingFeedbackLog feedback, int? limit, DateTimeOffset now)
     {
-        DateTimeOffset now = DateTimeOffset.UtcNow;
         TuningChange[] changes = [.. tuner.Changes().Take(Math.Clamp(limit ?? 100, 1, MaxChanges))];
         TuningChange[] measured = [.. changes.Where(c => c.State is TuningChangeState.Applied or TuningChangeState.Undone && now - c.Timestamp >= TimeSpan.FromHours(1))];
         Func<TuningChange, Effect?> effect = _ => null;

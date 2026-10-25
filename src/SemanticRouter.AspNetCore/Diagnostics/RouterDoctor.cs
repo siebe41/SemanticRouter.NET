@@ -90,6 +90,14 @@ internal static class RouterDoctor
     {
         RouterConfiguration resolved = runtime.Resolved;
         ConnectorOptions connector = resolved.Connectors[name];
+
+        // Offline mode or the machine policy keeps the router from contacting it (its models are turned off): so does the
+        // check, which would send the connector's credentials to a host doctor's egress list says is never contacted.
+        if (services.GetRequiredService<RouterRuntimeProvider>().Policy.Blocks(connector) is { } blocked)
+        {
+            return [new RouterCheck($"connector {name}", RouterCheckStatus.Ok, $"not checked: {blocked}.")];
+        }
+
         IHttpClientFactory http = services.GetRequiredService<IHttpClientFactory>();
         ModelDefinition[] models = resolved.Models
             .Where(m => m.Enabled && string.Equals(m.Connector, name, StringComparison.OrdinalIgnoreCase))
