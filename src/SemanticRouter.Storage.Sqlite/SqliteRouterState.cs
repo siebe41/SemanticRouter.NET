@@ -91,6 +91,9 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     // operation, so what was deleted does not wait for the next prune to leave the log.
     private volatile bool _logOwed;
 
+    // Checkpoints tried, so an operation that tried one itself is not followed by another against the same reader.
+    private int _logAttempts;
+
     public SqliteRouterDatabase(IOptions<SqliteStateOptions> options, ILogger<SqliteRouterDatabase> logger, TimeProvider? time = null)
     {
         Options = options.Value;
@@ -252,7 +255,9 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         int deleted = (int)(TotalChanges(connection) - before);
         if (deleted > 0)
         {
-            EmptyLog(connection);
+            // The timer prune runs outside the runtime lock. Let short reads finish
+            // so deleted data does not remain in the log until the next hourly prune.
+            EmptyLog(connection, Options.BusyTimeout);
         }
 
         return deleted;
@@ -551,8 +556,12 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         try
         {
             using SqliteConnection connection = Open();
+            int attempts = Volatile.Read(ref _logAttempts);
             T result = operation(connection);
-            if (settleLog && _logOwed)
+
+            // Optimisation: skip a redundant settle if any thread has just tried a checkpoint.
+            // A concurrent writer attempt can also skip this settle; _logOwed keeps the later retry.
+            if (settleLog && _logOwed && Volatile.Read(ref _logAttempts) == attempts)
             {
                 try
                 {
@@ -593,43 +602,94 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
 
     /// <summary>
     /// Checkpoints the write-ahead log into the database and truncates it. While another connection is still reading,
-    /// its snapshot pins the log and SQLite gives up at once (it reports busy rather than waiting): with
-    /// <paramref name="wait"/>, the checkpoint is tried again until the log is empty or that time has passed. Returns
-    /// whether the log was emptied.
+    /// its snapshot pins the log. SQLite would then wait the connection's busy timeout before reporting busy, so the
+    /// busy timeout is off for the checkpoint and it gives up at once: with <paramref name="wait"/>, it is tried again
+    /// until the log is empty or that time has passed. Returns whether the log was emptied.
     /// </summary>
     public static bool TruncateLog(SqliteConnection connection, TimeSpan wait = default)
     {
-        long started = System.Diagnostics.Stopwatch.GetTimestamp();
-        while (true)
+        long busyTimeout;
+        using (SqliteCommand current = Command(connection, "PRAGMA busy_timeout;"))
         {
-            using (SqliteCommand checkpoint = Command(connection, "PRAGMA wal_checkpoint(TRUNCATE);"))
-            using (SqliteDataReader result = checkpoint.ExecuteReader())
+            busyTimeout = (long)current.ExecuteScalar()!;
+        }
+
+        using (SqliteCommand off = Command(connection, "PRAGMA busy_timeout=0;"))
+        {
+            off.ExecuteNonQuery();
+        }
+
+        try
+        {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            while (true)
             {
-                // One row: busy (1 when a reader or writer kept it from completing), then the log's frame counts.
-                if (!result.Read() || result.GetInt64(0) == 0)
+                using (SqliteCommand checkpoint = Command(connection, "PRAGMA wal_checkpoint(TRUNCATE);"))
+                using (SqliteDataReader result = checkpoint.ExecuteReader())
                 {
-                    return true;
+                    // One row: busy (1 when a reader or writer kept it from completing), then the log's frame counts.
+                    if (!result.Read() || result.GetInt64(0) == 0)
+                    {
+                        return true;
+                    }
                 }
-            }
 
-            if (System.Diagnostics.Stopwatch.GetElapsedTime(started) >= wait)
-            {
-                return false;
-            }
+                if (System.Diagnostics.Stopwatch.GetElapsedTime(started) >= wait)
+                {
+                    return false;
+                }
 
-            Thread.Sleep(20);
+                Thread.Sleep(20);
+            }
+        }
+        finally
+        {
+            using SqliteCommand restore = Command(
+                connection, "PRAGMA busy_timeout=" + busyTimeout.ToString(CultureInfo.InvariantCulture) + ";");
+            restore.ExecuteNonQuery();
         }
     }
 
     /// <summary>
-    /// Empties the write-ahead log after rows were deleted, without waiting. When another connection keeps it, it is
-    /// tried again after the next operation. Returns whether the log was emptied.
+    /// Empties the write-ahead log after rows were deleted, without waiting. When another connection keeps it, or the
+    /// checkpoint fails, it is tried again after the next operation. Returns whether the log was emptied.
     /// </summary>
     public bool EmptyLog(SqliteConnection connection, TimeSpan wait = default)
     {
-        bool emptied = TruncateLog(connection, wait);
-        _logOwed = !emptied;
-        return emptied;
+        Interlocked.Increment(ref _logAttempts);
+        try
+        {
+            bool emptied = TruncateLog(connection, wait);
+            _logOwed = !emptied;
+            return emptied;
+        }
+        catch (SqliteException)
+        {
+            _logOwed = true;
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Empties the write-ahead log, without waiting, when an operation that has already saved its own row also deleted
+    /// <paramref name="deleted"/> old ones. A failed checkpoint must not fail the operation (its row is saved): it is
+    /// tried again after the next operation.
+    /// </summary>
+    public void EmptyLogAfterDelete(SqliteConnection connection, long deleted)
+    {
+        if (deleted <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            EmptyLog(connection);
+        }
+        catch (SqliteException)
+        {
+            // EmptyLog left the checkpoint owed.
+        }
     }
 
     /// <summary>
@@ -1589,10 +1649,20 @@ internal sealed class SqliteConfigurationHistory(SqliteRouterDatabase database) 
                 connection,
                 "INSERT INTO config_history (timestamp_ticks, source, actor, note, document) VALUES ($ts, $source, $actor, $note, $document);" +
                 "DELETE FROM config_history WHERE id NOT IN (SELECT id FROM config_history ORDER BY id DESC LIMIT $max);" +
-                "SELECT last_insert_rowid();",
+                "SELECT last_insert_rowid(), changes();",
                 ("$ts", database.Time.GetUtcNow().UtcTicks), ("$source", source), ("$actor", actor), ("$note", note),
                 ("$document", document.ToJson()), ("$max", database.HistoryMaxEntries));
-            return (long)command.ExecuteScalar()!;
+            long recorded;
+            long capped;
+            using (SqliteDataReader reader = command.ExecuteReader())
+            {
+                reader.Read();
+                (recorded, capped) = (reader.GetInt64(0), reader.GetInt64(1));
+            }
+
+            // A version past the cap is still in the write-ahead log, as it was written: empty the log, as a prune does.
+            database.EmptyLogAfterDelete(connection, capped);
+            return recorded;
         });
 
         return id >= 0 ? id : _fallback.Record(document, source, actor, note);
@@ -2109,11 +2179,21 @@ internal sealed class SqliteAuditLog(SqliteRouterDatabase database) : IAuditLog
                 "INSERT INTO audit (timestamp_ticks, actor, client, method, path, route, status, summary) " +
                 "VALUES ($ts, $actor, $client, $method, $path, $route, $status, $summary);" +
                 "DELETE FROM audit WHERE timestamp_ticks < $oldest;" +
-                "SELECT last_insert_rowid();",
+                "SELECT last_insert_rowid(), changes();",
                 ("$ts", entry.Timestamp.UtcTicks), ("$actor", entry.Actor), ("$client", entry.Client), ("$method", entry.Method),
                 ("$path", entry.Path), ("$route", entry.Route), ("$status", entry.Status), ("$summary", entry.Summary),
                 ("$oldest", (database.Time.GetUtcNow() - database.AuditRetention).UtcTicks));
-            return (long)command.ExecuteScalar()!;
+            long appended;
+            long aged;
+            using (SqliteDataReader reader = command.ExecuteReader())
+            {
+                reader.Read();
+                (appended, aged) = (reader.GetInt64(0), reader.GetInt64(1));
+            }
+
+            // An entry past retention is still in the write-ahead log, and the hourly prune finds nothing left to delete.
+            database.EmptyLogAfterDelete(connection, aged);
+            return appended;
         });
 
         return id >= 0 ? entry with { Id = id } : _fallback.Append(entry);

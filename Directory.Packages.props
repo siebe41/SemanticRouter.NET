@@ -26,7 +26,7 @@
       not assumed to work. Raise the bound after testing the connector against it (CONTRIBUTING.md, Package versions
       and dependencies).
     -->
-    <PackageVersion Include="GitHub.Copilot.SDK" Version="[1.0.23, 1.1.0)" />
+    <PackageVersion Include="GitHub.Copilot.SDK" Version="[1.0.26, 1.1.0)" />
   </ItemGroup>
   <ItemGroup>
     <!-- SemanticRouter.Desktop only: the tray icon and the dashboard window (the platform's own web view). -->

@@ -116,6 +116,23 @@ jobs:
         if: runner.os == 'Linux'
         run: dotnet format --verify-no-changes --no-restore
 
+      # The release publishes nothing until every installer is signed and attached to its draft: no job that pushes to
+      # nuget.org or the registry, or publishes the release, may run before one that can still fail (docs/releases.md).
+      - name: Release order
+        if: runner.os == 'Linux'
+        run: deploy/release-order-check.sh .github/workflows/release.yml
+
+      # The signing dry run signs with the release's own scripts and uploads nothing (docs/releases.md#code-signing).
+      - name: Signing dry run
+        if: runner.os == 'Linux'
+        run: deploy/signing-dry-run-check.sh .github/workflows/signing-dry-run.yml .github/workflows/release.yml
+
+      # Every workflow gives each secret to the steps that use it, and no job that builds holds one
+      # (docs/releases.md#where-the-secrets-are).
+      - name: Workflow secrets
+        if: runner.os == 'Linux'
+        run: deploy/workflow-secrets-check.sh
+
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
@@ -157,6 +174,27 @@ jobs:
       - name: Package contents
         if: runner.os == 'Linux'
         run: deploy/package-contents-check.sh artifacts
+
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        if: runner.os == 'Linux'
+        id: syft
+
+      # As in a release: the packages' SBOM names its subject, a licence for every package and the fonts, so a package
+      # whose licence cannot be found fails here rather than in a release (deploy/sbom-complete.cs).
+      - name: SBOM
+        if: runner.os == 'Linux'
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          for package in artifacts/*.nupkg; do
+            name="$(basename "$package" .nupkg)"
+            mkdir -p "sbom/$name" && unzip -q "$package" -d "sbom/$name"
+          done
+          version="$(basename artifacts/SemanticRouter.Core.*.nupkg .nupkg)" && version="${version#SemanticRouter.Core.}"
+          "$SYFT" scan dir:sbom -q -o cyclonedx-json=packages.cdx.json
+          dotnet run --file deploy/sbom-complete.cs -- packages.cdx.json --type library --name SemanticRouter.NET \
+            --version "$version" --purl "pkg:github/${GITHUB_REPOSITORY,,}@v$version" --contents sbom
+          deploy/sbom-check.sh packages.cdx.json SemanticRouter.NET "$version" "Inter (font)" "Fira Sans (font)"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: runner.os == 'Linux'
@@ -254,6 +292,14 @@ jobs:
         shell: pwsh
         run: tests/installer/windows.ps1 -Setup SemanticRouter-1.0.0-Setup.exe -Feed installers
 
+      # For installer-sbom, as in a release.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-win-x64
+          path: installers/SemanticRouter-1.0.1-win-x64-full.nupkg
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Logs on failure
         if: failure()
         shell: pwsh
@@ -302,6 +348,14 @@ jobs:
       - name: Install, run the service and update
         run: tests/installer/macos.sh SemanticRouter-1.0.0.pkg installers
 
+      # For installer-sbom, as in a release.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-osx-arm64
+          path: installers/SemanticRouter-1.0.1-osx-arm64-full.nupkg
+          if-no-files-found: error
+          retention-days: 1
+
   # The Linux AppImage: runs 1.0.0 and updates it to 1.0.1 from a local feed (tests/installer/linux.sh).
   installer-linux:
     name: installer (linux)
@@ -331,6 +385,54 @@ jobs:
       - name: Run and update
         run: tests/installer/linux.sh SemanticRouter-1.0.0.AppImage installers
 
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+
+      # As in a release: the installer's SBOM, from the AppImage inside the update package, lists the app, Velopack's
+      # binaries and the AppImage runtime.
+      - name: SBOM
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          deploy/installer-sbom.sh linux-x64 1.0.1 installers/SemanticRouter-1.0.1-linux-x64-full.nupkg \
+            installer.cdx.json pkg:generic/SemanticRouter-linux-x64-installer@1.0.1
+
+  # As in a release's installer-sbom job: the Windows and macOS installers' SBOMs, read on Linux from the full update
+  # packages those jobs built, so a package without a licence or a step that only fails off Linux shows here, not at a
+  # tag (installer-linux makes the Linux one).
+  installer-sbom:
+    name: installer SBOMs
+    needs: [ installer-windows, installer-macos ]
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: installer-*
+          path: installers
+          merge-multiple: true
+
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+
+      - name: SBOMs
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          dotnet restore src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj --locked-mode
+          for rid in win-x64 osx-arm64; do
+            deploy/installer-sbom.sh "$rid" 1.0.1 "installers/SemanticRouter-1.0.1-$rid-full.nupkg" "installer-$rid.cdx.json" \
+              "pkg:generic/SemanticRouter-$rid-installer@1.0.1"
+          done
+
   container:
     name: container image
     runs-on: ubuntu-latest
@@ -345,6 +447,26 @@ jobs:
 
       - name: The image reports the version it was built as
         run: deploy/image-version-check.sh semantic-router:ci "0.0.0-ci.$GITHUB_RUN_NUMBER" "$GITHUB_SHA"
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+
+      # As in a release: the image's SBOM names the image and a licence for every NuGet package, the base image's .NET
+      # runtime included (the release also passes the tool package, for the fonts).
+      - name: SBOM
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          version="0.0.0-ci.$GITHUB_RUN_NUMBER"
+          "$SYFT" scan docker:semantic-router:ci -q -o cyclonedx-json=image.cdx.json
+          dotnet restore src/SemanticRouter.Host/SemanticRouter.Host.csproj --locked-mode
+          dotnet run --file deploy/sbom-complete.cs -- image.cdx.json --type container --name semantic-router \
+            --version "$version" --purl "pkg:docker/semantic-router@$version"
+          deploy/sbom-check.sh image.cdx.json semantic-router "$version"
 
       # The router turns ONNX Runtime's telemetry off itself (the tool's test checks that with a recording proxy); the
       # image also starts it with the variable set.

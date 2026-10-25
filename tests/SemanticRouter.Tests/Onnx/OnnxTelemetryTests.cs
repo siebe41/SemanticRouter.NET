@@ -1,6 +1,4 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
@@ -11,6 +9,7 @@ using Microsoft.Extensions.Options;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Embeddings.Onnx;
 using SemanticRouter.Host;
+using SemanticRouter.Tests.Support;
 
 namespace SemanticRouter.Tests.Onnx;
 
@@ -165,66 +164,4 @@ public sealed class OnnxTelemetryTests : IDisposable
     [DllImport("libc", EntryPoint = "getenv")]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     private static extern IntPtr GetEnv(byte[] name);
-
-    /// <summary>A proxy that answers nothing: it records the first line of each connection (<c>CONNECT host:443 HTTP/1.1</c>).</summary>
-    private sealed class RecordingProxy : IDisposable
-    {
-        private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
-        private readonly CancellationTokenSource _stop = new();
-
-        public RecordingProxy()
-        {
-            _listener.Start();
-            _ = AcceptAsync();
-        }
-
-        public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
-
-        public ConcurrentQueue<string> Requests { get; } = new();
-
-        public void Dispose()
-        {
-            _stop.Cancel();
-            _listener.Stop();
-            _stop.Dispose();
-        }
-
-        private async Task AcceptAsync()
-        {
-            while (!_stop.IsCancellationRequested)
-            {
-                TcpClient client;
-                try
-                {
-                    client = await _listener.AcceptTcpClientAsync(_stop.Token);
-                }
-                catch (Exception ex) when (ex is OperationCanceledException or SocketException or ObjectDisposedException)
-                {
-                    return;
-                }
-
-                _ = RecordAsync(client, DateTime.UtcNow.ToString("HH:mm:ss", CultureInfo.InvariantCulture));
-            }
-        }
-
-        private async Task RecordAsync(TcpClient client, string at)
-        {
-            using (client)
-            {
-                string? line = null;
-                try
-                {
-                    using var reader = new StreamReader(client.GetStream(), Encoding.ASCII);
-                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                    line = await reader.ReadLineAsync(timeout.Token);
-                }
-                catch (Exception ex) when (ex is IOException or OperationCanceledException or ObjectDisposedException)
-                {
-                    // The connection is what counts.
-                }
-
-                Requests.Enqueue($"{at} {line ?? "(connected without a request line)"}");
-            }
-        }
-    }
 }

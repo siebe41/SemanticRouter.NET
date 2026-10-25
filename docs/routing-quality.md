@@ -255,7 +255,7 @@ It is off by default: a client that legitimately repeats a prompt (a "regenerate
 | `GET api/reliability` | Each model's turns and share with feedback per route and with tools, the share of the other models on the same work, and the models left out (`excludedSince`, `excludedUntil`, `detail`). |
 | `POST api/reliability/reset` | `{"model": "…", "route": "…"}` (or `"capability": "tools"`, or neither for everything): offer the model again with a fresh count. |
 
-Changing the set, adding utterances, evaluating and comparing providers (which embed every prompt in the set) and every tuning action (run, undo, apply, dismiss, pause) need the admin role. Route health and reading what tuning learned are open to the read-only role.
+Changing the set, adding utterances, evaluating and comparing providers (which embed every prompt in the set), route health (which embeds every utterance) every tuning action (run, undo, apply, dismiss, pause) and resetting a model's reliability count need the admin role. Reading what tuning learned and the reliability figures is open to the read-only role.
 
 From code, the same pieces are in `SemanticRouter.Core`: `EvaluationSet.Parse`, `RoutingEvaluator` (`PrepareAsync`, `Evaluate`, `Calibrate`), `ThresholdTuner` (the bounded, guarded steps automatic tuning takes) and `RouteHealthAnalyzer`.
 
