@@ -35,6 +35,9 @@ dotnet run --file "$root/deploy/sbom-complete.cs" -- "$sbom" --type application 
   --purl "$purl" --description "The desktop app's installer and update package for $rid" --contents "$work/contents" --installer
 
 expected=("Inter (font)" "Fira Sans (font)" "Velopack native binaries")
+if [[ "$rid" == win-* ]]; then
+  expected+=("SemanticRouter.Files")
+fi
 if [[ "$rid" == linux-* ]]; then
   expected+=("AppImage type2-runtime")
 fi

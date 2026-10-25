@@ -107,6 +107,12 @@ jobs:
             APPLE_SIGN_INSTALL_IDENTITY=${{ vars.APPLE_SIGN_INSTALL_IDENTITY != '' }}
         run: deploy/release-signing-check.sh
 
+      # The installed apps check each update against its attestation from the checksums job below, with the Sigstore
+      # trust root they carry: this release must attest its update packages that way, and carry Sigstore's current
+      # trust root so that it can check the releases after it (docs/releases.md#update-attestations).
+      - name: Update attestation
+        run: deploy/update-attestation-check.sh --online
+
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           global-json-file: global.json

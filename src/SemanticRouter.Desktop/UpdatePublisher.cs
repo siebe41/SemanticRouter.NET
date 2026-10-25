@@ -16,9 +16,10 @@ namespace SemanticRouter.Desktop;
 /// <list type="bullet">
 /// <item>Windows: every executable image in the package (whatever its extension) must have a valid Authenticode
 /// signature (<c>WinVerifyTrust</c>); the main executable and the app's own assemblies (<c>SemanticRouter.*</c>) must be
-/// signed by the publisher, and the rest by the publisher or Microsoft. The .NET host's unsigned files
+/// signed by the publisher, and the rest by the publisher or Microsoft. Every other file of the app must be as the
+/// publisher's signed list of files says (<see cref="UpdateFileList"/>), and the .NET host's files
 /// (<c>*.runtimeconfig.json</c>, <c>*.deps.json</c>) may not point it at code outside the package
-/// (<see cref="HostFileRefuses"/>). Other data files are not covered: that needs a manifest signed with the release.</item>
+/// (<see cref="HostFileRefuses"/>).</item>
 /// <item>macOS: the app bundle must pass <c>codesign --verify --deep --strict</c> with a Developer ID signature, and its
 /// team ID must be the publisher.</item>
 /// <item>Linux: the packages carry no signature, so every update is refused.</item>
@@ -101,15 +102,23 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
 
     private string? RefusesWindows(ZipArchive zip, string id, string mainExe, string folder)
     {
+        ZipArchiveEntry[] files = [.. zip.Entries.Where(e => e.FullName.StartsWith(AppFolder, StringComparison.Ordinal) && !e.FullName.EndsWith('/'))];
+        if (files.GroupBy(e => e.FullName, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1) is { } twice)
+        {
+            // Which of the two would be checked and which installed is up to the zip readers.
+            return $"{twice.Key[AppFolder.Length..]} is in its package twice";
+        }
+
         // Every Windows executable image, whatever its name: a library renamed to .bin is loaded just the same once
         // SemanticRouter.deps.json names it, and that file carries no signature of its own.
-        ZipArchiveEntry[] code = [.. zip.Entries.Where(e => e.FullName.StartsWith(AppFolder, StringComparison.Ordinal) && !e.FullName.EndsWith('/') && IsExecutableImage(e))];
+        ZipArchiveEntry[] code = [.. files.Where(IsExecutableImage)];
         if (!code.Any(e => e.FullName == AppFolder + mainExe))
         {
             return $"its package has no {mainExe}";
         }
 
         // The main executable first, so the reason given is about the app when it is the one that is wrong.
+        string? list = null;
         foreach (ZipArchiveEntry entry in code.OrderBy(e => e.FullName == AppFolder + mainExe ? 0 : 1))
         {
             string relative = entry.FullName[AppFolder.Length..];
@@ -120,18 +129,34 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
                 return $"{relative} {problem}";
             }
 
-            // The app's own code must be the publisher's. The rest is the publisher's too (vpk signs every unsigned
-            // file with the release's certificate) or Microsoft's (the .NET runtime, ONNX Runtime): a valid signature
-            // from anyone else is not enough, or a cheap code-signing certificate would let a tampered package through.
-            bool own = relative == mainExe || Path.GetFileName(relative).StartsWith(id + ".", StringComparison.OrdinalIgnoreCase);
+            // The app's own code must be the publisher's, and so must the list of its files. The rest is the
+            // publisher's too (vpk signs every unsigned file with the release's certificate) or Microsoft's (the .NET
+            // runtime, ONNX Runtime): a valid signature from anyone else is not enough, or a cheap code-signing
+            // certificate would let a tampered package through.
+            bool own = relative == mainExe || relative == UpdateFileList.FileName || Path.GetFileName(relative).StartsWith(id + ".", StringComparison.OrdinalIgnoreCase);
             if (!Matches(signature) && (own || signature.Signer is not { } signer || !IsMicrosoft(signer)))
             {
                 return $"{relative} is signed by {Describe(signature)}, not by {publisher}{(own ? string.Empty : " or Microsoft")}";
             }
+
+            list = relative == UpdateFileList.FileName ? file : list;
         }
 
-        // The .NET host's own files carry no signature, but decide where code is loaded from.
-        foreach (ZipArchiveEntry entry in zip.Entries.Where(e => e.FullName.StartsWith(AppFolder, StringComparison.Ordinal) && !e.FullName.EndsWith('/')))
+        // Every other file is covered by its SHA-256 in the signed list: the .NET host's runtimeconfig.json and
+        // deps.json, which decide what is loaded and how, and the rest.
+        if (list is null)
+        {
+            return $"its package has no {UpdateFileList.FileName}, the list of the files its signature covers";
+        }
+
+        if (UpdateFileList.Refuses(list, files.Except(code).Select(e => (e.FullName[AppFolder.Length..], e)), Nuspec(zip)) is { } changed)
+        {
+            return changed;
+        }
+
+        // Where the host files point is checked too: a build whose own runtimeconfig.json or deps.json loads code from
+        // outside the package is refused even though it is the one the publisher signed.
+        foreach (ZipArchiveEntry entry in files)
         {
             if (HostFileRefuses(entry.FullName[AppFolder.Length..], entry) is { } refused)
             {
@@ -355,9 +380,7 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
     /// <summary>The package's id and main executable, from its <c>.nuspec</c>.</summary>
     private static (string Id, string MainExe) Manifest(ZipArchive zip)
     {
-        ZipArchiveEntry nuspec = zip.Entries.FirstOrDefault(e => !e.FullName.Contains('/', StringComparison.Ordinal) && e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidDataException("it has no .nuspec");
-        using Stream stream = nuspec.Open();
+        using Stream stream = Nuspec(zip).Open();
         XElement? metadata = XDocument.Load(stream).Root?.Elements().FirstOrDefault(e => e.Name.LocalName == "metadata");
         string? id = metadata?.Elements().FirstOrDefault(e => e.Name.LocalName == "id")?.Value.Trim();
         string? mainExe = metadata?.Elements().FirstOrDefault(e => e.Name.LocalName == "mainExe")?.Value.Trim();
@@ -368,6 +391,10 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
 
         return (id, mainExe);
     }
+
+    private static ZipArchiveEntry Nuspec(ZipArchive zip) =>
+        zip.Entries.FirstOrDefault(e => !e.FullName.Contains('/', StringComparison.Ordinal) && e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase))
+        ?? throw new InvalidDataException("it has no .nuspec");
 
     /// <summary>Writes <paramref name="entry"/> to <paramref name="relative"/> under <paramref name="root"/>, never outside it.</summary>
     private static string Extract(ZipArchiveEntry entry, string root, string relative)

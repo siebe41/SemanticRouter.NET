@@ -560,7 +560,16 @@ public sealed class SqliteStateTests : IDisposable
     {
         SqliteRouterDatabase database = Open(o => o.AuditRetention = TimeSpan.FromDays(30));
         var audit = new SqliteAuditLog(database);
-        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "short-reader 3a8f", null, "PUT", "/router/api/config", null, 200, "changed"));
+        audit.Append(new AuditEntry
+        {
+            Id = 0,
+            Timestamp = _time.GetUtcNow(),
+            Actor = "short-reader 3a8f",
+            Method = "PUT",
+            Path = "/router/api/config",
+            Status = 200,
+            Summary = "changed",
+        });
         _time.Advance(TimeSpan.FromDays(40));
         using var reader = new SqliteConnection($"Data Source={DbPath};Pooling=False");
         reader.Open();
@@ -598,13 +607,31 @@ public sealed class SqliteStateTests : IDisposable
     {
         SqliteRouterDatabase database = Open(o => o.AuditRetention = TimeSpan.FromDays(30));
         var audit = new SqliteAuditLog(database);
-        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "aged-auditor 9d1f", null, "PUT", "/router/api/config", null, 200, "changed"));
+        audit.Append(new AuditEntry
+        {
+            Id = 0,
+            Timestamp = _time.GetUtcNow(),
+            Actor = "aged-auditor 9d1f",
+            Method = "PUT",
+            Path = "/router/api/config",
+            Status = 200,
+            Summary = "changed",
+        });
         database.Run("emptying the log", connection => SqliteRouterDatabase.TruncateLog(connection));
         DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().Contain("aged-auditor 9d1f", "the entry is in state.db now");
 
         // Past retention, then another entry: its insert deletes the aged one, so a later prune finds nothing to delete.
         _time.Advance(TimeSpan.FromDays(40));
-        audit.Append(new AuditEntry(0, _time.GetUtcNow(), "fresh-auditor", null, "PUT", "/router/api/config", null, 200, "changed"));
+        audit.Append(new AuditEntry
+        {
+            Id = 0,
+            Timestamp = _time.GetUtcNow(),
+            Actor = "fresh-auditor",
+            Method = "PUT",
+            Path = "/router/api/config",
+            Status = 200,
+            Summary = "changed",
+        });
 
         audit.Query(null, null, 10).Should().ContainSingle(e => e.Actor == "fresh-auditor");
         DurableStateHostTests.ReadDatabaseFiles(_directory, "state.db").Should().NotContain("aged-auditor 9d1f", "the write-ahead log is emptied after the age cap deletes an entry");

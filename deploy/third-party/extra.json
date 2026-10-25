@@ -39,6 +39,14 @@
       "texts": [ "src/SemanticRouter.AspNetCore/Dashboard/wwwroot/fonts/FiraSans-OFL.txt" ]
     },
     {
+      "name": "Sigstore public-good trust root",
+      "description": "targets/trusted_root.json, embedded in SemanticRouter.dll (the desktop app), which checks the attestations of its updates against it",
+      "licence": "Apache-2.0",
+      "copyright": "Copyright The Sigstore Authors",
+      "project": "https://github.com/sigstore/root-signing",
+      "with": "SemanticRouter"
+    },
+    {
       "name": "Velopack native binaries",
       "version": "{Velopack}",
       "description": "the updater (Squirrel.exe on Windows, UpdateMac, UpdateNix), Setup.exe and the execution stub, which vpk adds to the installers and update packages; they statically link Rust's standard library and the Rust crates listed at the end",
