@@ -399,6 +399,9 @@ internal sealed partial class PromptRoutingMiddleware
             Memory = memory,
             Trial = trial,
             Selection = plan.SelectionNote,
+            Context = runtime.Configuration.Usage.Context.Enabled
+                ? ContextAnalyzer.Analyze(chat, runtime.Configuration.Usage.Context, options.InjectedTags).Breakdown
+                : null,
         });
 
         if (feedback)
@@ -504,6 +507,13 @@ internal sealed partial class PromptRoutingMiddleware
         {
             // Admission charged the estimate; charge the rest now that the real usage is known.
             _rateLimiter!.Charge(rateClient, (long)(entry.InputTokens ?? chat.EstimatedInputTokens) + (entry.OutputTokens ?? 0) - chat.EstimatedInputTokens);
+        }
+
+        if (entry.Context is { } breakdown && answeredBy is not null)
+        {
+            // The usage the backend reported prices the context, and says whether its prompt cache was used.
+            ModelDefinition? answeringModel = runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, answeredBy, StringComparison.OrdinalIgnoreCase));
+            entry.Context = ContextAnalyzer.Complete(breakdown, entry, answeringModel, runtime.Configuration.Usage.Context);
         }
 
         RecordMemoryExposure(runtime, entry);

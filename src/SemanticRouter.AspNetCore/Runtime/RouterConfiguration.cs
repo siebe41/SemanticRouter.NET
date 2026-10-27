@@ -417,6 +417,26 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             errors.Add("Usage:WarnAtPercent must be between 1 and 100.");
         }
 
+        if (Usage.Context is null)
+        {
+            errors.Add("Usage:Context must not be null.");
+        }
+        else
+        {
+            ContextCostOptions context = Usage.Context;
+            if (context.LargeSystemPromptTokens < 0 || context.LargeToolDefinitionTokens < 0 || context.LargeToolResultTokens < 0
+                || context.InjectedContextTokens < 0 || context.RepeatedContentTokens < 0 || context.LongHistoryTokens < 0
+                || context.FixedOverheadTokens < 0 || context.UncachedTokens < 0)
+            {
+                errors.Add("Usage:Context thresholds must not be negative.");
+            }
+
+            if (context.ContextWindowShare is <= 0 or > 1 || double.IsNaN(context.ContextWindowShare))
+            {
+                errors.Add("Usage:Context:ContextWindowShare must be greater than 0 and at most 1.");
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(Usage.ReferenceModel) && !Models.Any(m => string.Equals(m.Name, Usage.ReferenceModel, StringComparison.OrdinalIgnoreCase)))
         {
             errors.Add($"Usage:ReferenceModel '{Usage.ReferenceModel}' is not in the catalog (it may be disabled, but it must be listed).");

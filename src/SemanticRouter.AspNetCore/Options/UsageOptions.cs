@@ -65,4 +65,7 @@ public sealed class UsageOptions
 
     /// <summary>Spending limits.</summary>
     public IList<BudgetDefinition> Budgets { get; } = new List<BudgetDefinition>();
+
+    /// <summary>Context cost analysis: where each request's input tokens go, and what to trim.</summary>
+    public ContextCostOptions Context { get; set; } = new();
 }

@@ -1115,6 +1115,9 @@ const SemanticRouter.AspNetCore.RouterServiceActions.Restart = "restart" -> stri
 const SemanticRouter.AspNetCore.RouterServiceActions.Stop = "stop" -> string!
 const SemanticRouter.AspNetCore.RouterServiceActions.Uninstall = "uninstall" -> string!
 override SemanticRouter.AspNetCore.ActivityPurgeResult.GetHashCode() -> int
+override SemanticRouter.AspNetCore.ContextBreakdown.Equals(object? obj) -> bool
+override SemanticRouter.AspNetCore.ContextBreakdown.GetHashCode() -> int
+override SemanticRouter.AspNetCore.ContextBreakdown.ToString() -> string!
 override SemanticRouter.AspNetCore.ModelPrice.Equals(object? obj) -> bool
 override SemanticRouter.AspNetCore.ModelPrice.GetHashCode() -> int
 override SemanticRouter.AspNetCore.ModelPrice.ToString() -> string!
@@ -1162,6 +1165,62 @@ SemanticRouter.AspNetCore.ConnectorOptions.Type.get -> string!
 SemanticRouter.AspNetCore.ConnectorProbeResult.ConnectorProbeResult() -> void
 SemanticRouter.AspNetCore.ConnectorRequest.ConnectorRequest() -> void
 SemanticRouter.AspNetCore.ConnectorTypes
+SemanticRouter.AspNetCore.ContextBreakdown
+SemanticRouter.AspNetCore.ContextBreakdown.<Clone>$() -> SemanticRouter.AspNetCore.ContextBreakdown!
+SemanticRouter.AspNetCore.ContextBreakdown.ContextBreakdown() -> void
+SemanticRouter.AspNetCore.ContextBreakdown.Equals(SemanticRouter.AspNetCore.ContextBreakdown? other) -> bool
+SemanticRouter.AspNetCore.ContextBreakdown.Findings.get -> System.Collections.Generic.IReadOnlyList<string!>!
+SemanticRouter.AspNetCore.ContextBreakdown.Findings.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.HistoryTokens.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.HistoryTokens.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.ImageTokens.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.ImageTokens.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.InjectedTokens.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.InjectedTokens.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.InputApiValueUsd.get -> decimal?
+SemanticRouter.AspNetCore.ContextBreakdown.InputApiValueUsd.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.InputCostUsd.get -> decimal?
+SemanticRouter.AspNetCore.ContextBreakdown.InputCostUsd.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.PromptTokens.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.PromptTokens.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.RepeatedTokens.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.RepeatedTokens.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.SystemTokens.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.SystemTokens.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.ToolCount.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.ToolCount.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.ToolDefinitionTokens.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.ToolDefinitionTokens.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.ToolResultTokens.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.ToolResultTokens.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.TotalTokens.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.TotalTokens.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.Turns.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.Turns.init -> void
+SemanticRouter.AspNetCore.ContextBreakdown.UnusedToolDefinitionTokens.get -> int
+SemanticRouter.AspNetCore.ContextBreakdown.UnusedToolDefinitionTokens.init -> void
+SemanticRouter.AspNetCore.ContextCostOptions
+SemanticRouter.AspNetCore.ContextCostOptions.ContextCostOptions() -> void
+SemanticRouter.AspNetCore.ContextCostOptions.ContextWindowShare.get -> double
+SemanticRouter.AspNetCore.ContextCostOptions.ContextWindowShare.set -> void
+SemanticRouter.AspNetCore.ContextCostOptions.Enabled.get -> bool
+SemanticRouter.AspNetCore.ContextCostOptions.Enabled.set -> void
+SemanticRouter.AspNetCore.ContextCostOptions.FixedOverheadTokens.get -> int
+SemanticRouter.AspNetCore.ContextCostOptions.FixedOverheadTokens.set -> void
+SemanticRouter.AspNetCore.ContextCostOptions.InjectedContextTokens.get -> int
+SemanticRouter.AspNetCore.ContextCostOptions.InjectedContextTokens.set -> void
+SemanticRouter.AspNetCore.ContextCostOptions.LargeSystemPromptTokens.get -> int
+SemanticRouter.AspNetCore.ContextCostOptions.LargeSystemPromptTokens.set -> void
+SemanticRouter.AspNetCore.ContextCostOptions.LargeToolDefinitionTokens.get -> int
+SemanticRouter.AspNetCore.ContextCostOptions.LargeToolDefinitionTokens.set -> void
+SemanticRouter.AspNetCore.ContextCostOptions.LargeToolResultTokens.get -> int
+SemanticRouter.AspNetCore.ContextCostOptions.LargeToolResultTokens.set -> void
+SemanticRouter.AspNetCore.ContextCostOptions.LongHistoryTokens.get -> int
+SemanticRouter.AspNetCore.ContextCostOptions.LongHistoryTokens.set -> void
+SemanticRouter.AspNetCore.ContextCostOptions.RepeatedContentTokens.get -> int
+SemanticRouter.AspNetCore.ContextCostOptions.RepeatedContentTokens.set -> void
+SemanticRouter.AspNetCore.ContextCostOptions.UncachedTokens.get -> int
+SemanticRouter.AspNetCore.ContextCostOptions.UncachedTokens.set -> void
 SemanticRouter.AspNetCore.DiscoveredModel.DiscoveredModel() -> void
 SemanticRouter.AspNetCore.EmbeddingModelChoice.EmbeddingModelChoice() -> void
 SemanticRouter.AspNetCore.EmbeddingProviderKinds
@@ -1345,6 +1404,8 @@ SemanticRouter.AspNetCore.RouterServiceOutcome.Message.init -> void
 SemanticRouter.AspNetCore.RouterServiceOutcome.RouterServiceOutcome() -> void
 SemanticRouter.AspNetCore.RouterServiceOutcome.Succeeded.get -> bool
 SemanticRouter.AspNetCore.RouterServiceOutcome.Succeeded.init -> void
+SemanticRouter.AspNetCore.RoutingActivityEntry.Context.get -> SemanticRouter.AspNetCore.ContextBreakdown?
+SemanticRouter.AspNetCore.RoutingActivityEntry.Context.set -> void
 SemanticRouter.AspNetCore.RoutingActivityLog.IsPurged(SemanticRouter.AspNetCore.RoutingActivityEntry! entry) -> bool
 SemanticRouter.AspNetCore.RoutingActivityLog.PurgeWithResult(System.DateTimeOffset since, System.DateTimeOffset until) -> SemanticRouter.AspNetCore.ActivityPurgeResult
 SemanticRouter.AspNetCore.RoutingActivityLog.RoutingActivityLog() -> void
@@ -1376,6 +1437,8 @@ SemanticRouter.AspNetCore.UsageModelTotals.Model.init -> void
 SemanticRouter.AspNetCore.UsageModelTotals.Totals.get -> SemanticRouter.AspNetCore.UsageTotals!
 SemanticRouter.AspNetCore.UsageModelTotals.Totals.init -> void
 SemanticRouter.AspNetCore.UsageModelTotals.UsageModelTotals() -> void
+SemanticRouter.AspNetCore.UsageOptions.Context.get -> SemanticRouter.AspNetCore.ContextCostOptions!
+SemanticRouter.AspNetCore.UsageOptions.Context.set -> void
 SemanticRouter.AspNetCore.UsagePricing
 SemanticRouter.AspNetCore.UsageRecord.UsageRecord() -> void
 SemanticRouter.AspNetCore.UsageTotals.Add(SemanticRouter.AspNetCore.UsageTotals! other) -> SemanticRouter.AspNetCore.UsageTotals!
@@ -1390,6 +1453,8 @@ static SemanticRouter.AspNetCore.ActivityPurgeResult.operator ==(SemanticRouter.
 static SemanticRouter.AspNetCore.CliExecutableLocator.NativeWindowsInstall(string! name) -> string?
 static SemanticRouter.AspNetCore.ConnectorTypes.BuiltIn.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static SemanticRouter.AspNetCore.ConnectorTypes.IsBuiltIn(string? type) -> bool
+static SemanticRouter.AspNetCore.ContextBreakdown.operator !=(SemanticRouter.AspNetCore.ContextBreakdown? left, SemanticRouter.AspNetCore.ContextBreakdown? right) -> bool
+static SemanticRouter.AspNetCore.ContextBreakdown.operator ==(SemanticRouter.AspNetCore.ContextBreakdown? left, SemanticRouter.AspNetCore.ContextBreakdown? right) -> bool
 static SemanticRouter.AspNetCore.EmbeddingProviderKinds.BuiltIn.get -> System.Collections.Generic.IReadOnlyList<string!>!
 static SemanticRouter.AspNetCore.EmbeddingProviderKinds.IsBuiltIn(string? kind) -> bool
 static SemanticRouter.AspNetCore.ModelPrice.operator !=(SemanticRouter.AspNetCore.ModelPrice? left, SemanticRouter.AspNetCore.ModelPrice? right) -> bool

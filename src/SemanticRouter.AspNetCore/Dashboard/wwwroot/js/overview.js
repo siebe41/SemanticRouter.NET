@@ -1,6 +1,7 @@
 /* Semantic Router dashboard: Overview and Activity pages, the prompt tester result, the decision detail and the label form. */
 import { fmtMs, trendsCard } from './charts.js';
 import { tierOptions } from './config.js';
+import { WARNING_FINDINGS, contextDetail, findingBadge } from './context.js';
 import { $, adminOnly, h, metricsOnly, num, readOnly, state, views } from './core.js';
 import { digestCard, noticesCard } from './digest.js';
 import { endpointsCard } from './endpoints.js';
@@ -176,7 +177,7 @@ export function renderActivityTable(entries, actions) {
     <tr><th>Time</th><th>Prompt</th><th>Tier</th><th>Reason</th><th>Route</th><th>Served by</th><th class="num">ms</th>${actions ? '<th><span class="sr-only">Actions</span></th>' : ''}</tr>
     ${entries.map((e) => `<tr title="${h(e.detail || '')}"${actions ? ` data-entry-id="${e.id}" tabindex="0" class="clickable${state.activityDetail === e.id ? ' selected' : ''}"` : ''}>
       <td class="nowrap small">${h(stamp(e.timestamp))}</td>
-      <td class="prompt-cell"><span class="small">${e.promptPreview ? h(e.promptPreview) : '<span class="faint">prompt not stored</span>'}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${count(e.estimatedInputTokens)} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${count(e.inputTokens)} in / ${count(e.outputTokens)} out` : ''}${e.cacheReadTokens ? ` · <span title="Prompt tokens served from the backend's prompt cache">${count(e.cacheReadTokens)} cached</span>` : ''}${e.cacheCreationTokens ? ` · <span title="Prompt tokens written to the backend's prompt cache">${count(e.cacheCreationTokens)} to cache</span>` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}${e.profile ? ' · <span class="badge accent" title="Routing profile">' + h(e.profile) + '</span>' : ''}${e.project ? ' · <span class="mono project" title="' + h('Project: ' + e.project) + '">' + h(e.project) + '</span>' : ''}${e.signals ? ' · <span class="badge warn" title="Kept local because the conversation contains this">local: ' + h(e.signals) + '</span>' : ''}${e.promptedToolCalls ? ` · <span class="badge" title="Tool calls read out of the model's text (prompted tool calling), not returned by a native tool API">${plural(e.promptedToolCalls, 'prompted call')}</span>` : ''}${e.notes ? ' · <span class="badge ' + (/malformed/.test(e.notes) ? 'warn' : 'info') + '" title="Noted by the connector">' + h(e.notes) + '</span>' : ''}${memoryBadge(e)}</div></td>
+      <td class="prompt-cell"><span class="small">${e.promptPreview ? h(e.promptPreview) : '<span class="faint">prompt not stored</span>'}</span><div class="faint small">${e.client ? '<span class="badge info">' + h(e.client) + '</span> ' : ''}${h(e.protocol)} ${h(e.requestedModel || '')}${e.hasTools ? ' · tools' : ''}${e.toolContinuation ? ' · tool result' : ''}${e.localOnly ? ' · local only' : ''} · ~${count(e.estimatedInputTokens)} tok${e.inputTokens != null || e.outputTokens != null ? ` · ${count(e.inputTokens)} in / ${count(e.outputTokens)} out` : ''}${e.cacheReadTokens ? ` · <span title="Prompt tokens served from the backend's prompt cache">${count(e.cacheReadTokens)} cached</span>` : ''}${e.cacheCreationTokens ? ` · <span title="Prompt tokens written to the backend's prompt cache">${count(e.cacheCreationTokens)} to cache</span>` : ''}${e.costUsd ? ' · ' + usd(e.costUsd) : ''}${e.budget ? ' · <span class="badge warn">budget ' + h(e.budget) + '</span>' : ''}${e.dropped ? ' · <span class="badge warn" title="Not carried to the serving backend">dropped ' + h(e.dropped) + '</span>' : ''}${e.profile ? ' · <span class="badge accent" title="Routing profile">' + h(e.profile) + '</span>' : ''}${e.project ? ' · <span class="mono project" title="' + h('Project: ' + e.project) + '">' + h(e.project) + '</span>' : ''}${e.signals ? ' · <span class="badge warn" title="Kept local because the conversation contains this">local: ' + h(e.signals) + '</span>' : ''}${e.promptedToolCalls ? ` · <span class="badge" title="Tool calls read out of the model's text (prompted tool calling), not returned by a native tool API">${plural(e.promptedToolCalls, 'prompted call')}</span>` : ''}${e.notes ? ' · <span class="badge ' + (/malformed/.test(e.notes) ? 'warn' : 'info') + '" title="Noted by the connector">' + h(e.notes) + '</span>' : ''}${memoryBadge(e)}${contextBadges(e)}</div></td>
       <td>${tierChip(e.tier)}</td>
       <td class="small">${reasonHtml(e.reason)}${e.cached ? ' <span class="badge" title="Reused a recent decision: no embedding call">cached</span>' : ''}${learnedBadge(e)}</td>
       <td class="small">${routeCell(e)}</td>
@@ -260,6 +261,9 @@ views.activity = () => {
     ${q && !entries.length ? `<div class="muted small">Nothing in the last ${plural(state.activity.length, 'request')} matches “${h(state.activitySearch.trim())}”.</div>` : renderActivityTable(entries, true)}`;
 };
 
+/* The context warnings (overhead, a nearly full window, no cache hits) on an activity row; the rest are in the detail. */
+const contextBadges = (e) => ((e.context && e.context.findings) || []).filter((f) => WARNING_FINDINGS.includes(f)).map((f) => ' · ' + findingBadge(f)).join('');
+
 /* The whole decision for one request: what was asked, how it was classified, which model answered and what followed. */
 function decisionDetail(e) {
   const row = (label, value) => (value === '' || value == null ? '' : `<tr><th>${label}</th><td>${value}</td></tr>`);
@@ -277,6 +281,7 @@ function decisionDetail(e) {
         ${row('Profile', e.profile ? `<span class="badge accent">${h(e.profile)}</span>` : '')}
         ${row('Tokens', tokens)}
         ${row('Cost', e.costUsd ? usd(e.costUsd, true) : '')}
+        ${row('Context', contextDetail(e.context))}
         ${row('Memory', memoryBadge(e))}
       </table>
       <table class="kv"><tr><th colspan="2" class="group">Decision</th></tr>

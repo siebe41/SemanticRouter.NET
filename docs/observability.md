@@ -48,6 +48,59 @@ Prices come from the catalog: `InputCostPerMillionTokens` and `OutputCostPerMill
 }
 ```
 
+## Context cost
+
+Every request sends its whole context again: the system prompt, the tool definitions, the blocks the client injects, the conversation so far and every tool result in it. In an agentic session most of what a turn costs is that context, not what was asked. The router breaks each request's input down (estimated tokens, from the request it received) and flags what makes it large, so you can see why the input is expensive and what to trim.
+
+| Part | What it counts |
+|---|---|
+| System prompt | System and developer messages (`system`, `instructions`) |
+| Tool definitions | Every tool offered: name, description and schema. Tools the conversation has not called after three assistant turns are counted as unused too |
+| Injected blocks | `<system-reminder>` and the other blocks a client injects into user messages (the [built-in tags and `Middleware:InjectedTags`](../README.md#configuration-reference)) |
+| History | Earlier turns: their text, tool calls and thinking |
+| Tool results | Every tool result, in every turn |
+| Images | Each image, counted as 1,000 tokens |
+| New ask | The latest user message's own text |
+
+Content sent more than once in the same request (a file read twice, the same reminder in several turns) is counted as repeated, besides its part.
+
+**Findings.** A request at or above a threshold under `Usage:Context` is flagged, with what to do about it:
+
+| Finding | When (default) | What to do |
+|---|---|---|
+| `fixed-overhead` | System prompt + tools + injected blocks ≥ `FixedOverheadTokens` (20,000) | Trim the largest of the three; on a paid API, cache the stable prefix |
+| `large-system-prompt` | System prompt ≥ `LargeSystemPromptTokens` (8,000) | Shorten CLAUDE.md, AGENTS.md, output styles and examples; move rarely needed guidance into files read on demand |
+| `large-tool-definitions` | Tool definitions ≥ `LargeToolDefinitionTokens` (10,000) | Turn off MCP servers and tools the project does not use |
+| `injected-context` | Injected blocks ≥ `InjectedContextTokens` (4,000) | Check what the client attaches (files, memory, todo lists, editor state) |
+| `large-tool-result` | One tool result ≥ `LargeToolResultTokens` (10,000) | Read files in ranges, filter command output, ask for summaries |
+| `repeated-content` | Repeated content ≥ `RepeatedContentTokens` (2,000) | Compact, or refer back instead of reading again |
+| `long-history` | History + tool results ≥ `LongHistoryTokens` (60,000) | Compact (`/compact` in Claude Code) or start a new conversation for a new task |
+| `near-context-window` | The request fills ≥ `ContextWindowShare` (0.8) of the answering model's `ContextWindow` | Compact before the client has to |
+| `uncached` | The backend billed ≥ `UncachedTokens` (20,000) input tokens at the full price with nothing read from or written to its cache, on a model whose cache reads are cheaper | Keep the prefix stable, mark it with `cache_control` on Anthropic, keep the conversation on one model |
+
+**Where it shows.** The activity entry's `context` has the breakdown, its findings and, once the backend reported usage, `inputCostUsd` (the input at the answering model's prices) or, for a subscription, `inputApiValueUsd` (at its API prices). The Activity page's request detail shows it, and a row carries the warnings (`fixed-overhead`, `near-context-window`, `uncached`). The Usage page's **Context** card adds up its window: tokens per request in each part, each part's share of the input cost (every request's input cost split by the size of its parts), how often each finding came up and what those requests cost, and the largest requests. `GET {dashboard}/api/context/summary?days=7` is the endpoint behind it.
+
+**Analyze a request.** Paste a request body in any protocol (chat completions, Messages or Responses) into **Analyze a request** on the Usage page, or send it to `POST {dashboard}/api/context/analyze` (`?protocol=openai|anthropic|responses`, detected when left out). It returns the breakdown, the findings with this request's numbers, the largest tools, the tools never called and the largest tool results, and what each enabled catalog model would charge for the input: at the full price, with everything before the latest turn read from the prompt cache, and the share of its context window it fills. Nothing is sent to a model and nothing is recorded.
+
+```jsonc
+"Usage": {
+  "Context": {
+    "Enabled": true,                 // analyze every routed request; token counts only, never text
+    "LargeSystemPromptTokens": 8000,
+    "LargeToolDefinitionTokens": 10000,
+    "LargeToolResultTokens": 10000,
+    "InjectedContextTokens": 4000,
+    "RepeatedContentTokens": 2000,
+    "LongHistoryTokens": 60000,
+    "FixedOverheadTokens": 20000,
+    "UncachedTokens": 20000,
+    "ContextWindowShare": 0.8
+  }
+}
+```
+
+The breakdown holds token counts and tool counts, never text, so it is kept whatever `State:StorePrompts` says. The counts are estimates (the same estimator the router uses for context-window checks), close to a tokenizer's but not equal to it; the costs come from the usage the backend reported.
+
 ## Budgets
 
 A budget covers one model, every model on one connector, or every request under one [routing profile](routing-profiles.md#budgets-per-profile), per `Day`, `Week` (from Monday) or `Month`, in tokens, dollars or both.

@@ -247,6 +247,8 @@ The router as ASP.NET Core middleware: connectors, the three chat protocols, the
 - `ModelPrice`: a cloud model's list prices, in USD per million tokens.
 - `ModelPriceList`: cloud providers' list prices, from OpenRouter's public model list.
 - `ModelPriceMatch`: a price the list has for a catalog model.
+- `ContextCostOptions`: context cost analysis and its thresholds (`SemanticRouter:Usage:Context`).
+- `ContextBreakdown`: what one request's input is made of, in estimated tokens, and the signs that it carries more context than it needs.
 
 ### Activity, state and feedback
 

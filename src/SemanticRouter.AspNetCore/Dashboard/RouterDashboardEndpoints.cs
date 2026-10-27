@@ -373,6 +373,58 @@ public static partial class RouterDashboardEndpoints
             return Results.Json(FeedbackSummary.Build(activity.Between(since, until), feedback.Between(since, until), since, until), ApiJson);
         }).WithMetadata(DashboardMetricsMetadata.Instance);
 
+        // Where the input tokens of recent requests went, what that context cost, and what made it large.
+        api.MapGet("/context/summary", (RoutingActivityLog activity, int? days) =>
+        {
+            DateTimeOffset until = DateTimeOffset.UtcNow, since = until.AddDays(-Math.Clamp(days ?? 7, 1, 90));
+            return Results.Json(ContextSummary.Build(activity.Between(since, until), since, until), ApiJson);
+        });
+
+        // Breaks down a request body pasted from a client (any of the three protocols): nothing is sent anywhere.
+        api.MapPost("/context/analyze", async (HttpContext context, RouterRuntimeProvider provider, string? protocol) =>
+        {
+            RouterRuntime runtime = provider.Current;
+            long limit = runtime.Configuration.Middleware.MaxRequestBodyBytes;
+            if (context.Request.ContentLength > limit)
+            {
+                return Results.Problem($"The request is larger than {limit} bytes (Middleware:MaxRequestBodyBytes).", statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
+
+            JsonDocument document;
+            try
+            {
+                document = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted).ConfigureAwait(false);
+            }
+            catch (JsonException ex)
+            {
+                return Results.Problem($"The body is not a JSON request: {ex.Message}", statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            using (document)
+            {
+                JsonElement root = document.RootElement;
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    return Results.Problem("The body must be a JSON object: a chat-completions, Messages or Responses request.", statusCode: StatusCodes.Status400BadRequest);
+                }
+
+                ChatProtocol kind;
+                if (string.IsNullOrEmpty(protocol))
+                {
+                    kind = ContextProtocol.Detect(root);
+                }
+                else if (!ContextProtocol.TryParse(protocol, out kind))
+                {
+                    return Results.Problem("'protocol' must be openai, anthropic or responses.", statusCode: StatusCodes.Status400BadRequest);
+                }
+
+                ContextCostOptions options = runtime.Configuration.Usage.Context;
+                ChatCompletionRequest chat = ChatCompletionRequest.Parse(root, kind);
+                ContextReport report = ContextAnalyzer.Price(ContextAnalyzer.Analyze(chat, options, runtime.Configuration.Middleware.InjectedTags), runtime.Configuration.Models, options);
+                return Results.Json(new { protocol = kind.ToString(), report }, ApiJson);
+            }
+        });
+
         api.MapGet("/events", StreamEventsAsync);
 
         api.MapGet("/memory", async (RouterRuntimeProvider provider, MemoryIndex memory, MemoryExposureLog exposure, CancellationToken cancellationToken) =>

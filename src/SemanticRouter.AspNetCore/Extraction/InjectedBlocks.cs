@@ -29,6 +29,10 @@ internal static class InjectedBlocks
         return any.IsMatch(text) ? any.Replace(text, string.Empty) : text;
     }
 
+    /// <summary>Where the injected blocks in <paramref name="text"/> are, tags included; a block that is never closed runs to the end.</summary>
+    public static IReadOnlyList<Range> Find(string text, IEnumerable<string>? extra = null) =>
+        text.IndexOf('<') < 0 ? [] : [.. For(extra).Any.Matches(text).Select(m => new Range(m.Index, m.Index + m.Length))];
+
     /// <summary>
     /// Where the person's text starts: the index after leading whitespace and injected blocks, or -1 when a leading
     /// block is never closed (the message is all injected context).
@@ -66,7 +70,8 @@ internal static class InjectedBlocks
         string alternation = string.Join("|", names.Distinct(StringComparer.OrdinalIgnoreCase).Select(Regex.Escape));
         return Patterns.GetOrAdd(alternation, static a =>
         {
-            const RegexOptions Options = RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant;
+            // Compiled: every routed request runs them over its user messages, which can be long (context analysis reads them all).
+            const RegexOptions Options = RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.Compiled;
             string block = $@"<(?<tag>{a})(?:\s[^<>]*)?>.*?(?:(?<closed></\k<tag>\s*>)|\z)";
             return (new Regex(block, Options), new Regex(@"\G\s*" + block, Options));
         });
