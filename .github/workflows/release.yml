@@ -679,7 +679,8 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
       # A version with a suffix (1.0.0-rc.1) goes into a prerelease, which the desktop app's updater does not take.
-      VPK_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
+      # Not VPK_PRE: vpk reads VPK_<option> variables as its own options, and an empty VPK_PRE is not a boolean.
+      RELEASE_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -706,7 +707,7 @@ jobs:
           mkdir -p published && tar -C published -xzf publish-linux-x64.tar.gz
           PUBLISH_DIR=published deploy/package-installer.sh linux-x64 "${GITHUB_REF_NAME#v}" installers/linux-x64
           vpk upload github --outputDir installers/linux-x64 --channel linux-x64 \
-            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $VPK_PRE
+            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $RELEASE_PRE
 
       # For installer-sbom (with the previous release's full package, when one was downloaded for the delta).
       # Kept 7 days, so a failed installer-sbom can be re-run after the day the release was cut.
@@ -732,7 +733,8 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
       # A version with a suffix (1.0.0-rc.1) goes into a prerelease, which the desktop app's updater does not take.
-      VPK_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
+      # Not VPK_PRE: vpk reads VPK_<option> variables as its own options, and an empty VPK_PRE is not a boolean.
+      RELEASE_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
       SIGNING: ${{ needs.packages.outputs.windows-signing }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -809,7 +811,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           vpk upload github --outputDir installers/win-x64 --channel win-x64 \
-            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $VPK_PRE
+            --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $RELEASE_PRE
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -829,7 +831,8 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       VPK_PREVIOUS_FROM: ${{ github.server_url }}/${{ github.repository }}
       # A version with a suffix (1.0.0-rc.1) goes into a prerelease, which the desktop app's updater does not take.
-      VPK_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
+      # Not VPK_PRE: vpk reads VPK_<option> variables as its own options, and an empty VPK_PRE is not a boolean.
+      RELEASE_PRE: ${{ contains(github.ref_name, '-') && '--pre' || '' }}
       SIGNING: ${{ needs.packages.outputs.macos-signing }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -897,7 +900,7 @@ jobs:
         run: |
           for rid in osx-arm64 osx-x64; do
             vpk upload github --outputDir "installers/$rid" --channel "$rid" \
-              --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $VPK_PRE
+              --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $RELEASE_PRE
           done
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
