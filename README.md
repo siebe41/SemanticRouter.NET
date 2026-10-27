@@ -526,6 +526,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:FailOpen` | `true` | Route with `FallbackTier` if classification fails. |
 | `Middleware:MessageSelection` | `LastUserMessage` | Which messages are classified. |
 | `Usage:ReferenceModel`, `Usage:TimeZone`, `Usage:WarnAtPercent` | –, local, `80` | Yardstick for "saved by routing", the zone budget periods follow, and when to warn. |
+| `Usage:Context:*` | on, see [Context cost](docs/observability.md#context-cost) | Break each request's input down (system prompt, tools, injected blocks, history, tool results) and flag what makes it large. `Enabled`, and the thresholds in tokens. |
 | `Usage:Budgets[]` | `[]` | `{ Name, Model or Connector or Profile, Period (Day/Week/Month), MaxTokens, MaxCostUsd }`. A spent budget's models are not tried until the period ends; a spent profile budget stops that profile's paid models only. |
 | `Middleware:GatewayKeys` | `{}` | Client keys by name (`"laptop": "${env:ROUTER_KEY_LAPTOP}"`). Remote clients must send one as `Authorization: Bearer` or `x-api-key`, and are refused while none is set; the name is recorded in Activity. Never forwarded. |
 | `Middleware:AllowUnauthenticatedRemoteClients` | `false` | Serve remote clients without a key while `GatewayKeys` is empty. Only behind a proxy that authenticates callers. |
@@ -603,6 +604,7 @@ The benchmark always runs with Hashing embeddings, so these rows include no embe
 - **Resilience.** HTTP connectors use the named clients `SemanticRouter.Connector.{name}`, and embeddings use `SemanticRouter.Embeddings`. You can add `Microsoft.Extensions.Http.Resilience` handlers to them.
 - **Telemetry.** The `SemanticRouter` activity source traces each request (route, classify, select, one span per attempt, `traceparent` to HTTP backends). The `SemanticRouter` meter publishes decisions, latency, time to first byte, tokens, cost, cooldowns, failovers, budget skips and CLI queue depth. Every decision is also logged with its tier, route, similarity, complexity and first-choice model, under a `RouteRequestId` scope that matches the `X-Prompt-Route-Id` response header. No prompt text appears in spans or metrics. See [Usage, budgets and observability](docs/observability.md).
 - **Usage and budgets.** Tokens and cost per request, the dashboard's Usage page, "saved by routing" against a reference model, and per-model or per-connector budgets that stop a model before a limit is hit. See [Budgets](docs/observability.md#budgets).
+- **Context cost.** Where each request's input tokens go (system prompt, tool definitions, injected reminders, history, tool results) and what makes them expensive: a long system prompt, tools that are never called, large tool results, repeated content, a cache that is not used. See [Context cost](docs/observability.md#context-cost).
 
 ### Known limitations
 

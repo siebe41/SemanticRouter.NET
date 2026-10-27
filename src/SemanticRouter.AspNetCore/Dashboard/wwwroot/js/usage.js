@@ -1,4 +1,5 @@
 /* Semantic Router dashboard: Usage page: tokens and cost by model, connector, route, client or profile, and budgets. */
+import { contextCard } from './context.js';
 import { api, connectorNames, h, metricsOnly, state, views } from './core.js';
 import { pct } from './evaluate.js';
 import { numField, timeZoneList } from './fields.js';
@@ -16,12 +17,14 @@ export async function loadUsage(auto) {
   state.usage.again = false;
   const days = { day: 1, week: 7, month: 30, '7d': 7, '30d': 30 }[state.usage.window] || 7;
   try {
-    const [usage, feedback] = await Promise.all([
+    const [usage, feedback, context] = await Promise.all([
       api('GET', `/usage?window=${state.usage.window}&by=${state.usage.by}`),
       api('GET', `/feedback/summary?days=${days}`).catch(() => null),
+      metricsOnly() ? null : api('GET', `/context/summary?days=${days}`).catch(() => null),
     ]);
     state.usage.data = usage;
     state.usage.feedback = feedback;
+    state.usage.context = context;
     state.usage.error = null; state.usage.backoff = 0;
   } catch (e) {
     state.usage.backoff = Math.min(300000, (state.usage.backoff || 5000) * 2);
@@ -114,6 +117,7 @@ views.usage = () => {
       <div class="card stat"><span class="value">${d.referenceModel ? usd(t.referenceCostUsd - t.costUsd) : '–'}</span><span class="label">${d.referenceModel ? 'saved compared with sending everything to ' + h(d.referenceModel) : `${reference} to see what routing saved`}</span></div>
     </div>
     ${feedbackCard(u.feedback)}
+    ${metricsOnly() ? '' : contextCard(u.context)}
     ${d.budgets.length ? `<div class="card section"><div class="card-head"><h2>Budgets</h2><span class="muted small">A spent budget's models are not tried until it resets.</span></div><div class="table-wrap"><table>${d.budgets.map(budgetRow).join('')}</table></div></div>` : ''}
     <div class="card section"><div class="card-head"><h2>By ${h((BY[u.by] || u.by).toLowerCase())}</h2><span class="spacer"></span>${seg('by', Object.entries(BY), 'Group by')}</div>
       <div class="table-wrap"><table class="wrap-head usage-table"><tr><th>${h(BY[u.by] || u.by)}</th><th class="num">Requests</th><th class="num">Input</th><th class="num">Output</th><th class="num">Cache read</th><th class="num">Cache write</th><th class="num" title="Prompt tokens served from a prompt cache">Cache hits</th><th class="num">Cost</th><th class="num" title="Subscription use at API prices: not spent">At API prices</th><th class="share"><span class="sr-only">Share</span></th></tr>

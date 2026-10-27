@@ -195,6 +195,12 @@ public sealed class RoutingActivityEntry
 
     /// <summary>The memory notes found in the request (titles and ids, never their text), when memory sources are configured.</summary>
     public IReadOnlyList<MemoryReference> Memory { get; init; } = [];
+
+    /// <summary>
+    /// What the request's input is made of and the signs that it carries more context than it needs, when context
+    /// analysis is on (<see cref="ContextCostOptions.Enabled"/>). Token counts only, never text.
+    /// </summary>
+    public ContextBreakdown? Context { get; set; }
 }
 
 /// <summary>
