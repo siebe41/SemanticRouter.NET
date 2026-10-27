@@ -41,9 +41,15 @@ jobs:
           # Syft names the self-contained .NET runtime `pkg:nuget/runtimepack.Microsoft.NETCore.App.Runtime.<rid>` (and the
           # same for ASP.NET Core); the advisories name the package without the prefix, so the scan would never match them.
           # The release renames them (deploy/sbom-complete.cs); this is for the releases from before it did.
+          # Syft writes CycloneDX 1.7, which Trivy refuses to read ("invalid specification version"), so the scan failed
+          # and asked for a patch release without having scanned anything (#345). Labelled 1.6, Trivy reads the same
+          # components, which is all a vulnerability scan uses.
           for sbom in sboms/*.cdx.json; do
             jq '(.components[]? | select((.purl // "") | startswith("pkg:nuget/runtimepack.")))
-              |= (.name |= ltrimstr("runtimepack.") | .purl |= sub("^pkg:nuget/runtimepack\\."; "pkg:nuget/"))' \
+              |= (.name |= ltrimstr("runtimepack.") | .purl |= sub("^pkg:nuget/runtimepack\\."; "pkg:nuget/"))
+              | if .specVersion == "1.7"
+                then .specVersion = "1.6" | ."$schema" = "http://cyclonedx.org/schema/bom-1.6.schema.json"
+                else . end' \
               "$sbom" > "$sbom.tmp"
             mv "$sbom.tmp" "$sbom"
           done
