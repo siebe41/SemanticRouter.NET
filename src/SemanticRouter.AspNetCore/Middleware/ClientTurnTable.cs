@@ -128,8 +128,14 @@ internal sealed class ClientTurnTable
         var entries = new List<(ClientTurnPattern, Regex?)>();
         var problems = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (ClientTurnPattern entry in document.Turns)
+        foreach (ClientTurnPattern? entry in document.Turns ?? [])
         {
+            if (entry is null)
+            {
+                problems.Add("an empty entry; skipped");
+                continue;
+            }
+
             string id = string.IsNullOrWhiteSpace(entry.Id) ? "(no id)" : entry.Id;
             if (string.IsNullOrWhiteSpace(entry.Id) || !seen.Add(entry.Id))
             {

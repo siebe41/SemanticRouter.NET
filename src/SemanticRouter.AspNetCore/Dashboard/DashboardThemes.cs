@@ -260,6 +260,6 @@ internal sealed partial class ThemeCatalog(string? directory)
     [GeneratedRegex("^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")]
     private static partial Regex HexColor();
 
-    [GeneratedRegex(@"^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$")]
+    [GeneratedRegex(@"^rgba?\(\s*(\d+(?:\.\d+)?|\.\d+)\s*,\s*(\d+(?:\.\d+)?|\.\d+)\s*,\s*(\d+(?:\.\d+)?|\.\d+)\s*(?:,\s*(\d+(?:\.\d+)?|\.\d+)\s*)?\)$")]
     private static partial Regex RgbColor();
 }

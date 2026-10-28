@@ -115,7 +115,8 @@ public sealed class OpenAICompatibleEmbeddingProvider : IEmbeddingProvider
         var vectors = new float[input.Length][];
         foreach (EmbeddingData item in data)
         {
-            if ((uint)item.Index >= (uint)vectors.Length || item.Embedding is not { Length: > 0 })
+            // As many items as inputs, so an index given twice also means one left out.
+            if ((uint)item.Index >= (uint)vectors.Length || item.Embedding is not { Length: > 0 } || vectors[item.Index] is not null)
             {
                 throw new InvalidOperationException("Embeddings endpoint returned a malformed vector.");
             }

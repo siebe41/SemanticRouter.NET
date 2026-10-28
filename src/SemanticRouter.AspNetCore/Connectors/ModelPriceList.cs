@@ -208,7 +208,8 @@ public sealed partial class ModelPriceList
             return own is null ? null : new ModelPriceMatch { Price = own, SameProvider = true };
         }
 
-        ModelPrice best = candidates.OrderBy(p => Rank(p.Id[..p.Id.IndexOf('/', StringComparison.Ordinal)])).First();
+        // An id without a vendor ("gpt-x") ranks last.
+        ModelPrice best = candidates.OrderBy(p => Rank(p.Id.Split('/')[0])).First();
 
         // A subscription (a CLI, Copilot) is valued at the model maker's own price; a gateway may charge differently.
         return new ModelPriceMatch { Price = best, SameProvider = connector.RunsProgram };
