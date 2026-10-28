@@ -96,14 +96,14 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Fixed
 
-- A request with tools, a forced `tool_choice` (`required` or a named tool) and reasoning goes to an Anthropic model without `thinking`, which Anthropic refuses alongside a forced tool, and the dropped reasoning is reported. It used to send both and fail. (#PRNUM)
-- Reasoning effort `xhigh` or `max` goes to an OpenAI Responses (`/v1/responses`) model as `high`, as it already did to chat completions. It used to be sent unchanged and refused. (#PRNUM)
-- `POST /semantic-router/classify` reads the model as the gateway does: `auto@profile` and virtual models pick their profile, and model aliases apply. It used to ask for a model named `auto@private`. (#PRNUM)
-- Both classify endpoints find a callout (`@opus …`) after a block whose tag is in `InjectedTags`, as the gateway does. (#PRNUM)
-- A conversation that comes back after `IdleTimeout` starts afresh: its earlier callout, last decision and tier floor no longer return once the new turn is recorded. (#PRNUM)
-- Under `Centroid` route scoring, a route without utterances ranks last, as under `MaxSimilarity`. It used to score 0 and could beat every real route on an unrelated prompt. (#PRNUM)
-- A blank last user message no longer hides the message before it from classification, and `JsonPromptExtractor.StripSystemReminders` always trims, as documented. (#PRNUM)
-- A model name with spaces around it matches an anchored model alias pattern such as `claude-*`. (#PRNUM)
+- A request with tools, a forced `tool_choice` (`required` or a named tool) and reasoning goes to an Anthropic model without `thinking`, which Anthropic refuses alongside a forced tool, and the dropped reasoning is reported. It used to send both and fail. (#353)
+- Reasoning effort `xhigh` or `max` goes to an OpenAI Responses (`/v1/responses`) model as `high`, as it already did to chat completions. It used to be sent unchanged and refused. (#353)
+- `POST /semantic-router/classify` reads the model as the gateway does: `auto@profile` and virtual models pick their profile, and model aliases apply. It used to ask for a model named `auto@private`. (#353)
+- Both classify endpoints find a callout (`@opus …`) after a block whose tag is in `InjectedTags`, as the gateway does. (#353)
+- A conversation that comes back after `IdleTimeout` starts afresh: its earlier callout, last decision and tier floor no longer return once the new turn is recorded. (#353)
+- Under `Centroid` route scoring, a route without utterances ranks last, as under `MaxSimilarity`. It used to score 0 and could beat every real route on an unrelated prompt. (#353)
+- A blank last user message no longer hides the message before it from classification, and `JsonPromptExtractor.StripSystemReminders` always trims, as documented. (#353)
+- A model name with spaces around it matches an anchored model alias pattern such as `claude-*`. (#353)
 - `semantic-router service start` with the router already running says so and exits 0 at once. It used to wait 30 seconds for a new router, then fail. (#352)
 - `doctor` and the dashboard's setup read `claude auth status` when the CLI writes a warning after its JSON. Such a warning used to hide an API-key sign-in (billed per token) behind "signed in". (#352)
 - The dashboard's setup shows why a CLI it found cannot be enabled as installed (on Windows, an npm `.cmd` wrapper) and what to install instead, rather than offering to enable it. (#352)
