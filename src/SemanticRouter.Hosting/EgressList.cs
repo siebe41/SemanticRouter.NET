@@ -69,6 +69,7 @@ internal static class EgressList
         lines.Add(Line(policy.Refuses(prices) is { } noPrices
             ? $"price list: {prices.Host} (never contacted: {noPrices})."
             : $"price list: {prices.Host}, only when the dashboard looks up cloud models' prices (Look up prices, Discover models); nothing but the request for the list is sent."));
+        lines.Add(Line(SetupScan(policy)));
 
         // The desktop app follows the machine policy only, not this host's own Network:Offline.
         lines.Add(Line(Updates(services.GetService<MachinePolicy>() ?? MachinePolicy.None)));
@@ -119,6 +120,26 @@ internal static class EgressList
             : "; applied only when the release workflow attested it";
         string custom = updates.AllowCustomFeed && updates.Mode != UpdateMode.Feed ? "; SEMANTICROUTER_UPDATE_SOURCE may name another feed" : string.Empty;
         return $"desktop app updates: {from} (only the installed desktop app{applied}{signed}{custom}; untick Check for updates automatically in its tray menu to turn this off).";
+    }
+
+    /// <summary>
+    /// The dashboard setup's look for models on this machine (<c>GET api/setup</c>): the vendor CLIs it starts, even when
+    /// no connector uses them, and which may contact their vendor while they report their version and sign-in.
+    /// (<c>init</c> only looks them up on PATH.)
+    /// </summary>
+    internal static string SetupScan(MachinePolicy policy)
+    {
+        string[] started = [.. new[] { ("claude", CliPreset.ClaudeCode), ("codex", CliPreset.Codex), ("copilot", CliPreset.GitHubCopilot) }
+            .Where(cli => policy.Blocks(new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = cli.Item2 }) is null)
+            .Select(cli => $"{cli.Item1} ({Vendor(cli.Item2)})")];
+        if (started.Length == 0)
+        {
+            return "setup scan: starts no CLI (offline mode or your organization's policy turns them off); LM Studio and Ollama are looked for on this machine only.";
+        }
+
+        string clis = started.Length == 1 ? started[0] : $"{string.Join(", ", started[..^1])} or {started[^1]}";
+        return $"setup scan: when the dashboard's setup looks for models on this machine, it starts any {clis} CLI on PATH to read its version and sign-in, " +
+               "even when no connector uses it, and that CLI may contact its vendor; LM Studio and Ollama are looked for on this machine only.";
     }
 
     private static string Vendor(CliPreset preset) => preset switch
