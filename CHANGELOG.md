@@ -96,7 +96,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Fixed
 
-- Malformed input no longer throws, hangs or breaks something unrelated. A file someone edited, a server's reply or a command line is now refused or skipped instead. (#NEWPR)
+- Malformed input no longer throws, hangs or breaks something unrelated. A file someone edited, a server's reply or a command line is now refused or skipped instead. (#350)
   - A theme file with an unreadable colour (`rgb(1..2, 0, 0)`) no longer makes `GET api/themes` fail for every theme.
   - A `client-turns.json` with `"turns": null` or a `null` entry falls back to the built-in patterns with a warning; before, every request failed.
   - Forgetting a conversation's last warm cache no longer makes every later request fail once the router tracks more than 4,096 conversations.
