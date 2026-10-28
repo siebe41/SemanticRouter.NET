@@ -55,6 +55,15 @@ internal static partial class ServiceCommand
                     return 1;
                 }
 
+                // A router already running stays as it is: the service manager would start nothing, and the wait below
+                // only accepts a router started after now.
+                if (settings.ServiceAction == "start" && RouterInstance.ReadRunning(settings.ConfigurationDirectory) is { } running)
+                {
+                    await output.WriteLineAsync("Already running.").ConfigureAwait(false);
+                    await WriteRunningAsync(output, running).ConfigureAwait(false);
+                    return 0;
+                }
+
                 DateTimeOffset requested = DateTimeOffset.UtcNow;
                 ServiceOutcome outcome = settings.ServiceAction switch
                 {
@@ -94,7 +103,9 @@ internal static partial class ServiceCommand
         }
 
         await output.WriteLineAsync($"Installed a {platform.Kind}: {platform.Location}").ConfigureAwait(false);
-        await output.WriteLineAsync($"It runs `{definition.CommandLine}` whenever you sign in, and restarts it if it fails.").ConfigureAwait(false);
+        await output.WriteLineAsync(platform.RestartsOnFailure
+            ? $"It runs `{definition.CommandLine}` whenever you sign in, and restarts it if it fails."
+            : $"It runs `{definition.CommandLine}` whenever you sign in. Nothing restarts it if it stops: run `semantic-router service start` again.").ConfigureAwait(false);
         foreach (string note in platform.InstallNotes)
         {
             await output.WriteLineAsync(note).ConfigureAwait(false);
@@ -314,6 +325,9 @@ internal abstract class ServicePlatform
 
     /// <summary>Where to read what the router logged.</summary>
     public abstract string LogHint { get; }
+
+    /// <summary>Whether the service manager starts the router again when it fails (systemd, launchd; not the Windows sign-in entry).</summary>
+    public virtual bool RestartsOnFailure => true;
 
     /// <summary>When a stopped service starts again.</summary>
     public virtual string StartsAgain => "It starts again when you next sign in, or with `semantic-router service start`.";

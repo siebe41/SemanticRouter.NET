@@ -1314,6 +1314,8 @@ SemanticRouter.AspNetCore.RouterBackgroundService.LogHint.get -> string!
 SemanticRouter.AspNetCore.RouterBackgroundService.LogHint.init -> void
 SemanticRouter.AspNetCore.RouterBackgroundService.Notes.get -> System.Collections.Generic.IReadOnlyList<string!>!
 SemanticRouter.AspNetCore.RouterBackgroundService.Notes.init -> void
+SemanticRouter.AspNetCore.RouterBackgroundService.RestartsOnFailure.get -> bool
+SemanticRouter.AspNetCore.RouterBackgroundService.RestartsOnFailure.init -> void
 SemanticRouter.AspNetCore.RouterBackgroundService.RouterBackgroundService() -> void
 SemanticRouter.AspNetCore.RouterBackgroundService.Status.get -> string?
 SemanticRouter.AspNetCore.RouterBackgroundService.Status.init -> void

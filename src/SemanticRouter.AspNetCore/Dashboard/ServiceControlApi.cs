@@ -123,6 +123,9 @@ public sealed record RouterBackgroundService
     /// <summary>How to read what it logs.</summary>
     public required string LogHint { get; init; }
 
+    /// <summary>Whether the service manager starts the router again when it fails (systemd, launchd; not the Windows sign-in entry).</summary>
+    public bool RestartsOnFailure { get; init; }
+
     /// <summary>What to know before installing it.</summary>
     public required IReadOnlyList<string> Notes { get; init; }
 }

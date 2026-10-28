@@ -67,10 +67,11 @@ static string Help() => $"""
       semantic-router init [--force] [--yes | --enable-cli <names> | --no-cli]
                                         Write a starting configuration with the models found on this machine
                                         (LM Studio, Ollama, and the claude / codex / copilot CLIs on PATH).
-                                        It asks before enabling each subscription CLI, since that CLI answers
+                                        It asks before enabling claude or codex, since that CLI answers
                                         on whatever account it is signed in to (at work, see
                                         {SiteLinks.WorkUse}); without a terminal they are added
-                                        disabled unless --yes or --enable-cli says otherwise. A file that still
+                                        disabled unless --yes or --enable-cli says otherwise. copilot is
+                                        added disabled unless --enable-cli names it. A file that still
                                         holds the built-in template is replaced without --force.
       semantic-router doctor            Check every connector, model and the embeddings, and list every host the
                                         router will contact. Exit code 1 on failure.

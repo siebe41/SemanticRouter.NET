@@ -56,7 +56,7 @@ internal sealed class SettingsWindow : Window
         // The status and a problem change while the window is open: screen readers say so; a problem more urgently.
         AutomationProperties.SetLiveSetting(_status, AutomationLiveSetting.Polite);
         AutomationProperties.SetLiveSetting(_problem, AutomationLiveSetting.Assertive);
-        AutomationProperties.SetHelpText(_background, "The router then starts when you sign in, restarts if it fails, and keeps answering when this app is closed.");
+        AutomationProperties.SetHelpText(_background, RouterService.KeepRunningHelp);
         _restart.Click += (_, _) => RestartRequested?.Invoke();
         _background.Click += (_, _) => BackgroundChanged?.Invoke(_background.IsChecked == true);
         _signIn.Click += (_, _) => SignInChanged?.Invoke(_signIn.IsChecked == true);

@@ -403,11 +403,13 @@ internal sealed class LaunchAgentService(string agentsDirectory, string logDirec
 /// <summary>
 /// Windows: a value under <c>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</c> (listed in Task Manager's Startup
 /// apps) that runs <c>semantic-router service start</c> at sign-in. That starts the router without a console window and
-/// returns; the router logs to <c>logs\semantic-router.log</c> in the configuration directory. What to run is kept in
-/// <c>semantic-router.service.json</c>, so the registry value stays short.
+/// returns; the router logs to <c>logs\semantic-router.log</c> in the local data directory. What to run is kept in
+/// <c>semantic-router.service.json</c>, so the registry value stays short. Nothing restarts the router when it exits.
 /// </summary>
 internal sealed class WindowsSignInService : ServicePlatform
 {
+    public override bool RestartsOnFailure => false;
+
     /// <summary>Set on the router started in the background; it then logs to a file instead of the console it lacks.</summary>
     public const string DetachedVariable = "SEMANTIC_ROUTER_DETACHED";
 

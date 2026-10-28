@@ -541,6 +541,27 @@ public sealed class DashboardSetupTests : RouterHostTest, IDisposable
     }
 
     [Fact]
+    public async Task Setup_says_why_a_detected_cli_cannot_be_enabled()
+    {
+        // #312: the problem (an npm .cmd shim the router will not start) was left out, so the page offered to enable it.
+        var detector = new FixedDetector(new SetupDetection
+        {
+            Id = "codex",
+            Title = "Codex",
+            Kind = "cli",
+            ConnectorName = "codex-cli",
+            Connector = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.Codex },
+            Detail = @"Found C:\Users\ada\AppData\Roaming\npm\codex.cmd",
+            Problem = "only a script wrapper was found; install codex.exe",
+        });
+        HttpClient client = await StartDispatchAsync(services: s => s.AddSingleton<IRouterSetupDetector>(detector));
+
+        JsonNode setup = await NodeAsync(await client.GetAsync("/router/api/setup"));
+
+        ((string?)setup["detected"]![0]!["problem"]).Should().Be("only a script wrapper was found; install codex.exe");
+    }
+
+    [Fact]
     public async Task Without_a_detector_setup_offers_the_presets()
     {
         HttpClient client = await StartDispatchAsync();

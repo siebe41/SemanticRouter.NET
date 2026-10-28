@@ -226,7 +226,7 @@ async function runAction(action, el) {
   const texts = {
     restart: ['Restart the router?', `<p>Requests in flight finish first (up to 30 seconds); new ones are refused until it is back, usually within seconds. Unapplied changes in the draft are kept.</p>${moving}${lockout}`, 'Restart', 'primary'],
     stop: ['Stop the router?', `<p>Clients get no answers until it starts again, and this dashboard stops working. ${startAgain(sv)}</p>`, 'Stop the router', 'danger'],
-    install: [`Run the router as a ${bg.kind}?`, `<p>It starts the router whenever you sign in and restarts it if it fails. This router stops and hands over to it; the page reconnects once the service's router listens.</p>${moving}${lockout}`, 'Install and hand over', 'primary'],
+    install: [`Run the router as a ${bg.kind}?`, `<p>It starts the router whenever you sign in${bg.restartsOnFailure ? ' and restarts it if it fails' : ''}. This router stops and hands over to it; the page reconnects once the service's router listens.</p>${moving}${lockout}`, 'Install and hand over', 'primary'],
     reinstall: [`Write the ${bg.kind} again?`, `<p>It then runs this program with the saved settings, and the router restarts.</p>${moving}${lockout}`, 'Reinstall', 'primary'],
     uninstall: [`Remove the ${bg.kind}?`, sv.runsAs === 'service'
       ? `<p>This router is the service's: it stops now and no longer starts when you sign in. Start it again with <span class="mono">semantic-router</span> in a terminal, or install the service again from there.</p>`
@@ -325,7 +325,8 @@ function listenCard(data) {
 function backgroundCard(data) {
   const sv = data.service;
   const bg = sv.background;
-  const head = '<div class="card-head"><h2>Background service</h2><span class="muted small">Runs the router whenever you sign in, without a terminal, and restarts it if it fails. Per user: no administrator rights.</span></div>';
+  const restarts = bg && bg.restartsOnFailure ? ', and restarts it if it fails' : '';
+  const head = `<div class="card-head"><h2>Background service</h2><span class="muted small">Runs the router whenever you sign in, without a terminal${restarts}. Per user: no administrator rights.</span></div>`;
   if (sv.runsAs === 'container') return `<div class="card section">${head}<p class="small muted">In a container, the container runtime runs and restarts the router.</p></div>`;
   if (!bg) return `<div class="card section">${head}<p class="small muted">This operating system has no service manager the router can use. Start <span class="mono">semantic-router</span> with your own supervisor.</p></div>`;
   return `<div class="card section">${head}
