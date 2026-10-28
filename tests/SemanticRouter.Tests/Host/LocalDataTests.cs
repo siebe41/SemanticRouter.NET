@@ -73,6 +73,36 @@ public sealed class LocalDataTests : IDisposable
     }
 
     [Fact]
+    public void A_backup_or_log_already_in_local_data_is_kept_when_the_move_cannot_take_its_place()
+    {
+        // #272: a failed move used to delete the file already at the target.
+        HostSettings settings = Separate();
+        string from = settings.ConfigurationDirectory;
+        File.WriteAllText(Path.Combine(from, "semantic-router.db"), "db");
+        File.WriteAllText(Path.Combine(from, "semantic-router.db.v2.bak"), "old backup");
+        Directory.CreateDirectory(settings.LocalDataDirectory);
+        File.WriteAllText(Path.Combine(settings.LocalDataDirectory, "semantic-router.db.v2.bak"), "kept backup");
+
+        LocalData.MoveFromConfigurationDirectory(settings).Should().Equal("semantic-router.db");
+
+        File.ReadAllText(Path.Combine(settings.LocalDataDirectory, "semantic-router.db.v2.bak")).Should().Be("kept backup");
+        File.ReadAllText(Path.Combine(from, "semantic-router.db.v2.bak")).Should().Be("old backup", "left where it was, rather than lost");
+
+        HostSettings other = new()
+        {
+            ConfigurationDirectory = Directory.CreateDirectory(Path.Combine(_directory, "Roaming2")).FullName,
+            LocalDataDirectory = Directory.CreateDirectory(Path.Combine(_directory, "Local2")).FullName,
+        };
+        File.WriteAllText(Path.Combine(other.ConfigurationDirectory, "semantic-router.db"), "db");
+        File.WriteAllText(Path.Combine(other.ConfigurationDirectory, "semantic-router.db-wal"), "wal");
+        File.WriteAllText(Path.Combine(other.LocalDataDirectory, "semantic-router.db-wal"), "stale wal");
+
+        LocalData.MoveFromConfigurationDirectory(other).Should().BeEmpty("the log cannot go with its database");
+        File.ReadAllText(Path.Combine(other.LocalDataDirectory, "semantic-router.db-wal")).Should().Be("stale wal");
+        File.ReadAllText(Path.Combine(other.ConfigurationDirectory, "semantic-router.db-wal")).Should().Be("wal");
+    }
+
+    [Fact]
     public void A_database_already_in_local_data_wins_and_an_unmoved_one_is_still_used()
     {
         HostSettings settings = Separate();

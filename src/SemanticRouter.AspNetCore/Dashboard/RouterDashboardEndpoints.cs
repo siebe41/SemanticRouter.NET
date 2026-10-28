@@ -327,7 +327,9 @@ public static partial class RouterDashboardEndpoints
 
             // The history keeps no secrets: they come from the running configuration.
             document.UnmaskFrom(provider.Current.Configuration);
-            IReadOnlyList<string> errors = provider.ValidateChange(document);
+
+            // The same checks as PUT config: an older version may run another program or read other files than this one.
+            IReadOnlyList<string> errors = [.. provider.ValidateChange(document), .. ProcessSettingErrors(document, provider, options), .. document.ReferenceErrors(provider.Current.Configuration, DashboardAccess.IsLocal(context))];
             if (errors.Count > 0)
             {
                 return Results.Json(Validation(errors, document), ApiJson, statusCode: StatusCodes.Status400BadRequest);

@@ -240,10 +240,12 @@ public sealed class PromptRouter : IPromptRouter
         ArgumentNullException.ThrowIfNull(request);
         RoutingProfile? profile = ProfileOf(request);
 
-        // Naming a cloud model, or a client's own request decided by its wording, skips classification, but not the
-        // local-only routes: a prompt one of them covers stays on this machine whichever way it arrives.
+        // Naming a cloud model, continuing a conversation on one, or a client's own request decided by its wording, skips
+        // classification, but not the local-only routes: a prompt one of them covers stays on this machine whichever way it arrives.
         if (_localOnlyRoutes && !request.LocalOnly && profile?.LocalOnly != true
-            && (request.Classification is not null || Named(request.RequestedModel) is { IsLocal: false })
+            && (request.Classification is not null
+                || Named(request.RequestedModel) is { IsLocal: false }
+                || Named(request.AffinityModel) is { IsLocal: false })
             && (await _classifier.ClassifyAsync(request.Prompt, cancellationToken).ConfigureAwait(false)).LocalOnly)
         {
             request = request with { LocalOnly = true };

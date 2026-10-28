@@ -62,12 +62,32 @@ public sealed record ConnectorProbeResult
 }
 
 /// <summary>
-/// Checks an HTTP connector without calling a model: asks <c>GET /v1/models</c> with the connector's credentials and
+/// Checks an HTTP connector without calling a model: asks <c>GET /v1/models</c> (beside its request path) with the connector's credentials and
 /// headers. Used by the dashboard's Discover button and by start-up checks; a 401 or 403 is reported as an
 /// authentication problem that names the configuration key, not as "unreachable".
 /// </summary>
 public static partial class ConnectorProbe
 {
+    /// <summary>
+    /// Where the connector's server lists its models: <c>models</c> beside the request path's endpoint
+    /// (<c>/api/v1/chat/completions</c> gives <c>/api/v1/models</c>), or <c>/v1/models</c> for a path that names none.
+    /// </summary>
+    internal static string ModelsPath(ConnectorOptions connector)
+    {
+        string path = connector.EffectiveRequestPath;
+        int query = path.IndexOf('?', StringComparison.Ordinal);
+        path = query >= 0 ? path[..query] : path;
+        foreach (string endpoint in (ReadOnlySpan<string>)["/chat/completions", "/messages", "/responses"])
+        {
+            if (path.EndsWith(endpoint, StringComparison.OrdinalIgnoreCase))
+            {
+                return path[..^endpoint.Length] + "/models";
+            }
+        }
+
+        return "/v1/models";
+    }
+
     /// <summary>Lists the models an HTTP connector's server offers.</summary>
     /// <param name="name">The connector name, used in messages (<c>SemanticRouter:Connectors:{name}:ApiKey</c>).</param>
     /// <param name="connector">The connector's settings, with secret references already resolved.</param>
@@ -90,7 +110,7 @@ public static partial class ConnectorProbe
             };
         }
 
-        var uri = new Uri(baseAddress, "/v1/models");
+        var uri = new Uri(baseAddress, ModelsPath(connector));
         string shown = AddressDisplay.Show(uri)!;
         bool hasKey = !string.IsNullOrEmpty(connector.ApiKey);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, uri, connector);
