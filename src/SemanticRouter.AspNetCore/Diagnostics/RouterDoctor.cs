@@ -452,7 +452,9 @@ internal static class RouterDoctor
 
         try
         {
-            using JsonDocument json = JsonDocument.Parse(output[start..]);
+            // The first JSON value only: what follows it (a warning on stderr, which is appended) is not part of it.
+            var reader = new Utf8JsonReader(System.Text.Encoding.UTF8.GetBytes(output[start..]));
+            using JsonDocument json = JsonDocument.ParseValue(ref reader);
             JsonElement root = json.RootElement;
             bool? loggedIn = root.TryGetProperty("loggedIn", out JsonElement l) && l.ValueKind is JsonValueKind.True or JsonValueKind.False
                 ? l.GetBoolean()

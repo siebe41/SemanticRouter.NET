@@ -20,6 +20,17 @@ public sealed class SetupDetectorTests : IDisposable
         Directory.Delete(_directory, recursive: true);
     }
 
+    [Theory]
+    [InlineData("""{"loggedIn":true,"authMethod":"api_key"}""" + "\nWarning: a newer version is available\n", true, "api_key")]
+    [InlineData("Checking…\n{\"loggedIn\":false}\n{\"extra\":1}", false, null)]
+    [InlineData("not json at all", null, null)]
+    public void Claude_auth_status_is_read_although_the_cli_writes_more_after_it(string output, bool? loggedIn, string? method)
+    {
+        // #283: the JSON was parsed through to the end of the output, so a warning after it (stderr is appended) made the
+        // check report "signed in" for an API key that bills per token.
+        RouterDoctor.ReadClaudeAuthStatus(output).Should().Be((loggedIn, method));
+    }
+
     [Fact]
     public async Task On_windows_a_cli_installed_only_as_an_npm_shim_is_shown_with_what_to_do()
     {

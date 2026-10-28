@@ -4,12 +4,17 @@ namespace SemanticRouter.Desktop;
 
 /// <summary>
 /// The background service, as the app manages it. On: the operating system's service manager runs
-/// <c>SemanticRouter --headless</c> (this same program) at sign-in and restarts it if it fails, and the app only shows
-/// that router; quitting the app leaves it running. Off: the app runs the router itself. Switching hands the port
-/// from one to the other.
+/// <c>SemanticRouter --headless</c> (this same program) at sign-in, and on macOS and Linux restarts it if it fails (the
+/// Windows sign-in entry does not), and the app only shows that router; quitting the app leaves it running. Off: the app
+/// runs the router itself. Switching hands the port from one to the other.
 /// </summary>
 internal sealed class RouterService(ServicePlatform? platform, HostSettings settings, string executable, Func<string, string?> environment)
 {
+    /// <summary>What keeping the router running in the background means here, for the welcome and settings windows.</summary>
+    internal static string KeepRunningHelp => OperatingSystem.IsWindows()
+        ? "The router then starts when you sign in and keeps answering when this app is closed."
+        : "The router then starts when you sign in, restarts if it fails, and keeps answering when this app is closed.";
+
     /// <summary>How long to wait for the service's router to listen after starting it.</summary>
     internal TimeSpan StartTimeout { get; init; } = TimeSpan.FromSeconds(30);
 

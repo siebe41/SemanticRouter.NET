@@ -103,6 +103,9 @@ internal static partial class SetupApi
                     string name = FreeName(config, detection.ConnectorName, detection.Connector);
                     JsonObject entry = Entry(detection.Id, detection.Title, detection.Detail, detection.Kind, name, detection.Connector, detection.Models);
                     entry["consent"] = detection.Consent;
+
+                    // Why it cannot be enabled as found (a CLI installed only as a script wrapper): the page shows it instead.
+                    entry["problem"] = detection.Problem;
                     entry["aliases"] = new JsonObject(detection.Aliases.Select(a => KeyValuePair.Create(a.Key, (JsonNode?)a.Value)));
                     detected.Add(entry);
                 }

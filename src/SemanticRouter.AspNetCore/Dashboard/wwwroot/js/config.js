@@ -477,7 +477,7 @@ views.clients = () => {
     ${s.gateway.mode !== 'Dispatch' ? '<div class="banner danger" style="margin-bottom:14px;border-radius:8px">The gateway is in <b>Annotate</b> mode: it only attaches routing information for your own endpoint. Switch to <b>Dispatch</b> under Gateway for the router to answer clients itself.</div>' : ''}
     ${snippet('Claude Code', `# Anthropic Messages API on ${origin}${anth}
 export ANTHROPIC_BASE_URL=${origin}
-export ANTHROPIC_AUTH_TOKEN=semantic-router   # any value: the router ignores it and never forwards it
+export ANTHROPIC_AUTH_TOKEN=semantic-router   # any value from this machine; with gateway keys set, send yours (required from other machines). Never forwarded
 ${context ? `export CLAUDE_CODE_MAX_CONTEXT_TOKENS=${context}   # the smallest context window among your tool-capable models
 ` : ''}export CLAUDE_CODE_AUTO_MODE_SERVER=0
 claude --model semantic-router

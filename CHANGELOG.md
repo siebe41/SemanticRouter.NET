@@ -96,6 +96,10 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Fixed
 
+- `semantic-router service start` with the router already running says so and exits 0 at once. It used to wait 30 seconds for a new router, then fail. (#352)
+- `doctor` and the dashboard's setup read `claude auth status` when the CLI writes a warning after its JSON. Such a warning used to hide an API-key sign-in (billed per token) behind "signed in". (#352)
+- The dashboard's setup shows why a CLI it found cannot be enabled as installed (on Windows, an npm `.cmd` wrapper) and what to install instead, rather than offering to enable it. (#352)
+- Text that said the background service restarts the router when it fails (`service install`, the desktop app, the dashboard's Background service card) says so only on Linux and macOS: the Windows sign-in entry does not restart it. The dashboard's Claude Code snippet says what the gateway token is for, and `init --help` says copilot is added disabled unless `--enable-cli` names it. (#352)
 - `doctor`'s egress list and [docs/network.md](docs/network.md) now say that the dashboard's setup scan starts any `claude`, `codex` or `copilot` CLI it finds on PATH, even when no connector uses it, to read its version and sign-in, and that the CLI may contact its vendor then. Offline mode and a machine policy that turns a CLI off still keep it from being started. (#351)
 - Malformed input no longer throws, hangs or breaks something unrelated. A file someone edited, a server's reply or a command line is now refused or skipped instead. (#350)
   - A theme file with an unreadable colour (`rgb(1..2, 0, 0)`) no longer makes `GET api/themes` fail for every theme.

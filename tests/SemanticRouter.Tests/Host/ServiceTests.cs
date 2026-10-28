@@ -321,6 +321,39 @@ public sealed class ServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Start_reports_a_router_that_is_already_running_without_waiting()
+    {
+        // #279: start waited for a router started after the request, which an already running one never is, then failed.
+        Directory.CreateDirectory(ConfigurationDirectory);
+        var platform = new FakePlatform(onStart: () => { }) { Installed = true };
+        new RouterInstance(Environment.ProcessId, ["http://localhost:6000"], DateTimeOffset.UtcNow.AddHours(-1), "1.2.3").Write(ConfigurationDirectory);
+        var output = new StringWriter();
+
+        int exit = await ServiceCommand.RunAsync(Settings("start"), output, platform, Definition(), TimeSpan.FromSeconds(30));
+
+        exit.Should().Be(0, output.ToString());
+        output.ToString().Should().Contain("Already running").And.Contain($"Router     running (pid {Environment.ProcessId}) on http://localhost:6000");
+        platform.Starts.Should().Be(0, "nothing is started twice");
+    }
+
+    [Theory]
+    [InlineData(true, "whenever you sign in, and restarts it if it fails.")]
+    [InlineData(false, "whenever you sign in. Nothing restarts it if it stops: run `semantic-router service start` again.")]
+    public async Task Install_says_whether_the_service_manager_restarts_the_router(bool restarts, string expected)
+    {
+        // #339: every platform said it restarts the router, though the Windows sign-in entry does not.
+        Directory.CreateDirectory(ConfigurationDirectory);
+        var platform = new FakePlatform(onStart: () =>
+            new RouterInstance(Environment.ProcessId, ["http://localhost:6000"], DateTimeOffset.UtcNow, "1.2.3").Write(ConfigurationDirectory))
+        { Restarts = restarts };
+        var output = new StringWriter();
+
+        (await ServiceCommand.RunAsync(Settings("install"), output, platform, Definition())).Should().Be(0, output.ToString());
+
+        output.ToString().Should().Contain(expected);
+    }
+
+    [Fact]
     public async Task The_router_records_itself_while_it_runs_and_reports_an_address_in_use()
     {
         HostSettings settings = HostSettings.Parse(["--config-dir", ConfigurationDirectory, "--urls", $"http://127.0.0.1:{FreePort()}", "--SemanticRouter:Embeddings:Provider=Hashing"], _ => null);
@@ -502,8 +535,15 @@ public sealed class ServiceTests : IDisposable
 
         public override Task<ServiceOutcome> UninstallAsync() => Task.FromResult(ServiceOutcome.Ok());
 
+        public bool Restarts { get; init; } = true;
+
+        public int Starts { get; private set; }
+
+        public override bool RestartsOnFailure => Restarts;
+
         public override Task<ServiceOutcome> StartAsync()
         {
+            Starts++;
             onStart();
             return Task.FromResult(ServiceOutcome.Ok());
         }

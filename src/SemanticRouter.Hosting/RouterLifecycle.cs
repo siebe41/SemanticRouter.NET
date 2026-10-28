@@ -278,6 +278,7 @@ internal sealed class RouterServiceControl(RouterLifecycle lifecycle, IHostAppli
                 Status = installed ? await platform.StatusAsync().ConfigureAwait(false) : null,
                 Location = platform.Location,
                 LogHint = platform.LogHint,
+                RestartsOnFailure = platform.RestartsOnFailure,
                 Notes = [.. platform.InstallNotes],
             };
         }

@@ -36,7 +36,6 @@ internal sealed class WelcomeWindow : Window
             }
         };
 
-        const string KeepRunningHelp = "The router then starts when you sign in, restarts if it fails, and keeps answering when this app is closed.";
         var keepRunning = new CheckBox
         {
             Content = new TextBlock
@@ -57,7 +56,7 @@ internal sealed class WelcomeWindow : Window
         };
 
         // The explanation under each box is read with it, not skipped when tabbing from box to box.
-        AutomationProperties.SetHelpText(keepRunning, serviceAvailable ? KeepRunningHelp : "This system has no service manager the app can use.");
+        AutomationProperties.SetHelpText(keepRunning, serviceAvailable ? RouterService.KeepRunningHelp : "This system has no service manager the app can use.");
         AutomationProperties.SetHelpText(signIn, signInAvailable ? "The tray icon comes back after you sign in; quitting it does not stop a background router." : "Not available on this system.");
         var start = new Button { Content = "Get started", HorizontalAlignment = HorizontalAlignment.Right, IsDefault = true };
         start.Click += (_, _) =>
@@ -91,7 +90,7 @@ internal sealed class WelcomeWindow : Window
                 keepRunning,
                 new TextBlock
                 {
-                    Text = KeepRunningHelp,
+                    Text = RouterService.KeepRunningHelp,
                     TextWrapping = TextWrapping.Wrap,
                     FontSize = 12,
                     Opacity = Accessible.SecondaryOpacity,
