@@ -117,6 +117,21 @@ public sealed class ResponsesProtocolTests
         items.Should().ContainInOrder("function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output");
     }
 
+    [Theory]
+    [InlineData("max", "high")]
+    [InlineData("xhigh", "high")]
+    [InlineData("low", "low")]
+    public void An_effort_beyond_high_is_sent_to_responses_as_high(string effort, string sent)
+    {
+        ChatCompletionRequest request = ChatCompletionRequest.Parse(Json($$"""
+            {"model":"auto","reasoning_effort":"{{effort}}","messages":[{"role":"user","content":"think hard"}]}
+            """));
+
+        JsonElement body = Json(Encoding.UTF8.GetString(ResponsesRequestBuilder.Build(request, "gpt-x", reasoning: true).Span));
+
+        body.GetProperty("reasoning").GetProperty("effort").GetString().Should().Be(sent, "the chat-completions builder sends the same");
+    }
+
     [Fact]
     public async Task Writer_produces_a_response_object_with_namespaced_and_custom_tool_calls()
     {

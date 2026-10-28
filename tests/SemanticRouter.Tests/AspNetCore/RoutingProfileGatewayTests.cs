@@ -80,6 +80,21 @@ public sealed class RoutingProfileGatewayTests : RouterHostTest
         activity.Select(e => e.Profile).Should().Equal("private", "private", "private", null);
     }
 
+    [Theory]
+    [InlineData("auto@private")]
+    [InlineData("private")]
+    public async Task Classifying_takes_the_profile_from_the_model_name_as_the_gateway_does(string model)
+    {
+        HttpClient client = await StartProfilesAsync();
+
+        HttpResponseMessage response = await client.PostAsJsonAsync("/semantic-router/classify", new { prompt = "design a platform", model });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        JsonElement plan = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        (plan.GetProperty("profile").GetString(), plan.GetProperty("localOnly").GetBoolean(), plan.GetProperty("models")[0].GetProperty("model").GetString())
+            .Should().Be(("private", true, "local"));
+    }
+
     [Fact]
     public async Task An_unknown_profile_is_refused_in_the_clients_format()
     {

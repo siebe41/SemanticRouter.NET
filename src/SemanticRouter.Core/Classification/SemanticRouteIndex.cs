@@ -28,7 +28,7 @@ public sealed class SemanticRouteIndex
     /// <summary>Embedding dimensionality, or 0 for an empty index.</summary>
     public int Dimensions { get; }
 
-    /// <summary>Number of stored vectors (utterances, or routes when using centroids).</summary>
+    /// <summary>Number of stored vectors (utterances, or routes with utterances when using centroids).</summary>
     public int VectorCount => _rowToRoute.Length;
 
     /// <summary>Embeds every route utterance (in one batch) and builds an index.</summary>
@@ -96,11 +96,19 @@ public sealed class SemanticRouteIndex
             return new SemanticRouteIndex(routeArray, rows, owners.ToArray(), dimensions);
         }
 
-        // Centroid: average the unit vectors of each route, then re-normalize.
-        var centroids = new float[routeArray.Length * dimensions];
+        // Centroid: average the unit vectors of each route, then re-normalize. A route without utterances gets no row,
+        // so it keeps the -1 floor as under MaxSimilarity (an all-zero row would score 0 and could beat real routes).
+        int[] rowToRoute = [.. owners.Distinct()];
+        var rowOf = new int[routeArray.Length];
+        for (int row = 0; row < rowToRoute.Length; row++)
+        {
+            rowOf[rowToRoute[row]] = row;
+        }
+
+        var centroids = new float[rowToRoute.Length * dimensions];
         for (int i = 0; i < owners.Count; i++)
         {
-            Span<float> centroid = centroids.AsSpan(owners[i] * dimensions, dimensions);
+            Span<float> centroid = centroids.AsSpan(rowOf[owners[i]] * dimensions, dimensions);
             ReadOnlySpan<float> row = rows.AsSpan(i * dimensions, dimensions);
             for (int d = 0; d < dimensions; d++)
             {
@@ -108,12 +116,12 @@ public sealed class SemanticRouteIndex
             }
         }
 
-        for (int r = 0; r < routeArray.Length; r++)
+        for (int row = 0; row < rowToRoute.Length; row++)
         {
-            VectorMath.Normalize(centroids.AsSpan(r * dimensions, dimensions));
+            VectorMath.Normalize(centroids.AsSpan(row * dimensions, dimensions));
         }
 
-        return new SemanticRouteIndex(routeArray, centroids, Enumerable.Range(0, routeArray.Length).ToArray(), dimensions);
+        return new SemanticRouteIndex(routeArray, centroids, rowToRoute, dimensions);
     }
 
     /// <summary>

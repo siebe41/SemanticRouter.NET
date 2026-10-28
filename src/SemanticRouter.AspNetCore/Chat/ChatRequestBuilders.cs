@@ -113,7 +113,7 @@ internal static class OpenAIRequestBuilder
 
             if (reasoning && request.Reasoning is { } effort)
             {
-                writer.WriteString("reasoning_effort", effort.EffectiveEffort is "xhigh" or "max" ? "high" : effort.EffectiveEffort);
+                writer.WriteString("reasoning_effort", Effort(effort));
             }
 
             if (request.Tools.Count > 0 && request.ParallelToolCalls == false)
@@ -231,6 +231,9 @@ internal static class OpenAIRequestBuilder
         writer.WriteEndObject();
     }
 
+    /// <summary>The effort as OpenAI takes it: <c>xhigh</c> and <c>max</c> (Anthropic's) become <c>high</c>.</summary>
+    internal static string Effort(ReasoningRequest effort) => effort.EffectiveEffort is "xhigh" or "max" ? "high" : effort.EffectiveEffort;
+
     internal static void WriteRaw(Utf8JsonWriter writer, string json)
     {
         try
@@ -265,10 +268,12 @@ internal static class AnthropicRequestBuilder
 
     /// <summary>
     /// Whether a reasoning request can become <c>thinking</c>: it needs a budget of at least 1,024 below
-    /// <c>max_tokens</c>, and cannot be combined with the forced structured-output tool.
+    /// <c>max_tokens</c>, and cannot be combined with a forced tool (the structured-output tool, or the client's
+    /// <c>tool_choice</c> of <c>any</c> or a named tool): with thinking, Anthropic takes only <c>auto</c> or <c>none</c>.
     /// </summary>
     public static bool CarriesThinking(ChatCompletionRequest request) =>
-        request.Reasoning is not null && !UsesStructuredOutputTool(request) && (request.MaxTokens ?? DefaultMaxTokens) > 1024;
+        request.Reasoning is not null && !UsesStructuredOutputTool(request) && (request.MaxTokens ?? DefaultMaxTokens) > 1024
+        && !(request.Tools.Count > 0 && request.ToolChoice.Mode is ToolChoiceMode.Required or ToolChoiceMode.Named);
 
     /// <summary>
     /// The shortest prefix, in estimated tokens, that <paramref name="model"/> caches: 4,096 on Opus 4.5 and 4.6 and
@@ -726,7 +731,7 @@ internal static class ResponsesRequestBuilder
             if (reasoning && request.Reasoning is { } effort)
             {
                 writer.WriteStartObject("reasoning");
-                writer.WriteString("effort", effort.EffectiveEffort);
+                writer.WriteString("effort", OpenAIRequestBuilder.Effort(effort));
                 writer.WriteString("summary", "auto");
                 writer.WriteEndObject();
             }
