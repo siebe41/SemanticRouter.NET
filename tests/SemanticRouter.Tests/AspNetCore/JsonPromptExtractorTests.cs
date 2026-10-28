@@ -81,6 +81,18 @@ public class JsonPromptExtractorTests
         Extract(json, PromptMessageSelection.AllMessages).Should().Be("You are Copilot.\n\ntell me a joke");
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void A_blank_last_user_message_does_not_hide_the_one_before(bool stripSystemReminders)
+    {
+        using JsonDocument document = JsonDocument.Parse("""{"messages":[{"role":"user","content":"hello"},{"role":"user","content":"  "}]}""");
+
+        new JsonPromptExtractor(PromptMessageSelection.LastUserMessage, stripSystemReminders).ExtractPrompt(new DefaultHttpContext(), document.RootElement)
+            .Should().Be("hello");
+        JsonPromptExtractor.StripSystemReminders("  hello \n").Should().Be("hello", "the result is trimmed, as documented");
+    }
+
     [Fact]
     public void Configured_tags_are_ignored_too()
     {

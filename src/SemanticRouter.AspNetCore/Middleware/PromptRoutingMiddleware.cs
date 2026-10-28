@@ -260,7 +260,7 @@ internal sealed partial class PromptRoutingMiddleware
         {
             if (callout is not null)
             {
-                _conversations!.Choose(conversationKey, callout.Clear ? null : callout);
+                _conversations!.Choose(conversationKey, callout.Clear ? null : callout, conversation);
             }
             else if (_conversations!.Choice(conversationKey, conversation) is { } earlier)
             {
@@ -470,7 +470,7 @@ internal sealed partial class PromptRoutingMiddleware
 
         if (conversationKey is not null && answeredBy is not null && !chat.IsToolResultContinuation)
         {
-            _conversations!.Decided(conversationKey, new DecisionRecord(entry.Id, result.RequiredTier, result.RouteName, answeredBy, automatic));
+            _conversations!.Decided(conversationKey, new DecisionRecord(entry.Id, result.RequiredTier, result.RouteName, answeredBy, automatic), conversation);
         }
 
         if (feedback && automatic && entry.Outcome == "served" && entry.OutputTokens == 0)
@@ -672,7 +672,7 @@ internal sealed partial class PromptRoutingMiddleware
 
         foreach ((string pattern, string target) in runtime.ModelAliases)
         {
-            if (GlobMatches(pattern, model))
+            if (GlobMatches(pattern, trimmed))
             {
                 return target;
             }

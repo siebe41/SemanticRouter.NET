@@ -44,6 +44,24 @@ public class SemanticRouteIndexTests
     }
 
     [Fact]
+    public async Task Centroid_ranks_a_route_without_utterances_last_as_MaxSimilarity_does()
+    {
+        var table = new Dictionary<string, float[]> { ["write python code"] = [1f, 0f] };
+        RouteDefinition real = Route("real", 4, "write python code");
+        RouteDefinition empty = Route("empty", 1);
+
+        foreach (RouteScoringStrategy strategy in new[] { RouteScoringStrategy.MaxSimilarity, RouteScoringStrategy.Centroid })
+        {
+            SemanticRouteIndex index = await SemanticRouteIndex.BuildAsync([real, empty], FromTable(table).Object, strategy);
+
+            RouteScore[] scores = index.Score([-0.2f, 1f]);
+
+            scores.Select(s => s.Route.Name).Should().Equal(["real", "empty"], $"{strategy}: a route with nothing to match scores the floor");
+            scores[1].Similarity.Should().Be(-1f);
+        }
+    }
+
+    [Fact]
     public async Task Query_magnitude_does_not_affect_scores()
     {
         SemanticRouteIndex index = await SemanticRouteIndex.BuildAsync([Greetings, Code], FromTable(Table).Object);

@@ -39,17 +39,19 @@ internal sealed record Callout(string Tag, string? Model = null, SelectionStrate
 internal static partial class Callouts
 {
     /// <summary>
-    /// The <c>@tag</c> a message starts with (after whitespace and any injected context blocks such as <c>&lt;system-reminder&gt;</c>),
-    /// without the <c>@</c>; <see langword="null"/> when it does not start with one.
+    /// The <c>@tag</c> a message starts with (after whitespace and any injected context blocks such as <c>&lt;system-reminder&gt;</c>,
+    /// and <paramref name="injectedTags"/>), without the <c>@</c>; <see langword="null"/> when it does not start with one.
     /// </summary>
-    public static string? LeadingTag(string text) => Leading(text) is { } found ? found.Tag : null;
+    public static string? LeadingTag(string text, IEnumerable<string>? injectedTags = null) => Leading(text, injectedTags) is { } found ? found.Tag : null;
 
     /// <summary>
     /// The callout <paramref name="prompt"/> starts with, or <see langword="null"/> when callouts are off or it starts
-    /// with none (or with a tag that is not a callout).
+    /// with none (or with a tag that is not a callout). The configured injected tags are skipped, as stripping skips them.
     /// </summary>
     public static Callout? Find(string prompt, RouterRuntime runtime) =>
-        runtime.Configuration.Middleware.Callouts.Enabled && LeadingTag(prompt) is { } tag ? Resolve(tag, runtime) : null;
+        runtime.Configuration.Middleware.Callouts.Enabled && LeadingTag(prompt, runtime.Configuration.Middleware.InjectedTags) is { } tag
+            ? Resolve(tag, runtime)
+            : null;
 
     /// <summary>
     /// Routes a prompt the way the gateway routes the first turn of a conversation that sends it: its leading callout

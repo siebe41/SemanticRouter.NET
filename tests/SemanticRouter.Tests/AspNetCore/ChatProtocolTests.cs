@@ -159,6 +159,24 @@ public class ChatProtocolTests
         body.GetProperty("tools")[0].GetProperty("input_schema").GetProperty("type").GetString().Should().Be("object");
     }
 
+    [Theory]
+    [InlineData("\"required\"", "any")]
+    [InlineData("""{"type":"function","function":{"name":"f"}}""", "tool")]
+    public void A_forced_tool_choice_goes_to_anthropic_without_thinking(string toolChoice, string anthropicChoice)
+    {
+        ChatCompletionRequest request = ChatCompletionRequest.Parse(Json($$"""
+            {"model":"auto","reasoning_effort":"high","messages":[{"role":"user","content":"look it up"}],
+             "tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"} } }],
+             "tool_choice":{{toolChoice}} }
+            """));
+
+        JsonElement body = Json(Encoding.UTF8.GetString(AnthropicRequestBuilder.Build(request, "claude-opus-5-5", reasoning: true).Span));
+
+        body.GetProperty("tool_choice").GetProperty("type").GetString().Should().Be(anthropicChoice);
+        body.TryGetProperty("thinking", out _).Should().BeFalse("Anthropic takes thinking only with tool_choice auto or none");
+        AnthropicRequestBuilder.CarriesThinking(request).Should().BeFalse("so the dropped reasoning is reported");
+    }
+
     private static (DefaultHttpContext Context, MemoryStream Body) NewContext()
     {
         var context = new DefaultHttpContext();

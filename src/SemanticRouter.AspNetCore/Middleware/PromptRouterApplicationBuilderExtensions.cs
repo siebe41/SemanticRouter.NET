@@ -37,8 +37,21 @@ public static class PromptRouterApplicationBuilderExtensions
                     return Results.Problem("'prompt' is required.", statusCode: StatusCodes.Status400BadRequest);
                 }
 
-                (SelectionStrategy? strategy, string? requestedModel) = ModelAliases.Resolve(request.Model);
-                string? profile = request.Profile is { Length: > 0 } named ? named : null;
+                // The model as the gateway reads it ("name@profile", virtual models, aliases) when the runtime is there.
+                RouterRuntimeProvider? runtime = context.RequestServices.GetService<RouterRuntimeProvider>();
+                SelectionStrategy? strategy;
+                string? requestedModel;
+                string? modelProfile = null;
+                if (runtime is not null)
+                {
+                    (strategy, requestedModel, modelProfile) = ProfileSelection.ResolveModel(runtime.Current, request.Model);
+                }
+                else
+                {
+                    (strategy, requestedModel) = ModelAliases.Resolve(request.Model);
+                }
+
+                string? profile = request.Profile is { Length: > 0 } named ? named : modelProfile;
                 if (profile is not null && !router.Profiles.ContainsKey(profile))
                 {
                     return Results.Problem($"Unknown routing profile '{profile}'.", statusCode: StatusCodes.Status400BadRequest);
@@ -52,7 +65,7 @@ public static class PromptRouterApplicationBuilderExtensions
 
                 // As the gateway routes a first turn: a leading callout ("@opus …") applies and is not classified.
                 var routing = new PromptRoutingRequest { Prompt = request.Prompt, Strategy = strategy, RequestedModel = requestedModel, Profile = profile };
-                (RoutingPlan plan, string? callout) = context.RequestServices.GetService<RouterRuntimeProvider>() is { } runtime
+                (RoutingPlan plan, string? callout) = runtime is not null
                     ? await Callouts.RouteAsync(runtime.Current, router, routing, context.RequestAborted).ConfigureAwait(false)
                     : (await router.RouteAsync(routing, context.RequestAborted).ConfigureAwait(false), null);
 

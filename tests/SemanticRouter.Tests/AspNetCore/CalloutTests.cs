@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Tests.Support;
@@ -276,6 +277,28 @@ public sealed class CalloutTests : RouterHostTest
         (plain.GetProperty("requiredTier").GetInt32(), plain.GetProperty("callout").ValueKind).Should().Be((2, JsonValueKind.Null));
         Classifier.Verify(c => c.ClassifyAsync("summarize the incident report", It.IsAny<CancellationToken>()), Times.Once(), "the tag is not part of what is classified");
         Classifier.Verify(c => c.ClassifyAsync(It.Is<string>(p => p.Contains('@')), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Theory]
+    [InlineData("/router/api/classify")]
+    [InlineData("/semantic-router/classify")]
+    public async Task Classifying_finds_a_callout_after_a_configured_injected_block(string endpoint)
+    {
+        HttpClient client = await StartDispatchAsync(o => o.InjectedTags.Add("ide-context"));
+
+        JsonElement opus = await ClassifyAsync(client, endpoint, "<ide-context>open file: a.cs</ide-context>\n@opus fix this");
+
+        (opus.GetProperty("callout").GetString(), opus.GetProperty("models")[0].GetProperty("model").GetString())
+            .Should().Be(("@opus", "claude-opus"), "the gateway skips the configured block before looking for the tag, so the tester does too");
+    }
+
+    [Fact]
+    public async Task A_model_name_with_spaces_around_it_matches_an_alias_pattern()
+    {
+        await StartDispatchAsync(o => o.ModelAliases["gpt-*"] = "auto:best");
+        RouterRuntime runtime = Services.GetRequiredService<RouterRuntimeProvider>().Current;
+
+        PromptRoutingMiddleware.MapModel(runtime, " gpt-4o ").Should().Be("auto:best");
     }
 
     [Fact]

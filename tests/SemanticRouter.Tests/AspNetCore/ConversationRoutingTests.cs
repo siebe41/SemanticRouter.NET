@@ -419,6 +419,29 @@ public sealed class ConversationRoutingTests : RouterHostTest
         tracker.Lookup("c", "looks good, commit it", options).Should().Be(new ConversationContext(4, "cloud", FollowUp: true));
     }
 
+    [Fact]
+    public void An_idle_conversation_starts_afresh_whichever_write_comes_first()
+    {
+        var time = new ManualTimeProvider();
+        var tracker = new ConversationTracker(time);
+        var options = new ConversationRoutingOptions();
+        tracker.Choose("c", new Callout("opus", Model: "claude-opus"), options);
+        tracker.Decided("c", new DecisionRecord(1, 4, "design", "cloud", Automatic: true), options);
+        tracker.Record("c", 4, raisedByFloor: false, followUp: false, "cloud", options);
+        tracker.Choose("d", new Callout("opus", Model: "claude-opus"), options);
+
+        time.Advance(options.IdleTimeout + TimeSpan.FromMinutes(1));
+        // A turn as the gateway records it: the decision first, then the tier it needed.
+        tracker.Decided("c", new DecisionRecord(2, 1, "chat", "local", Automatic: true), options);
+        tracker.Record("c", 1, raisedByFloor: false, followUp: false, "local", options);
+        tracker.Record("d", 1, raisedByFloor: false, followUp: false, "local", options);
+
+        tracker.Choice("c", options).Should().BeNull("the callout expired with the idle conversation");
+        tracker.Choice("d", options).Should().BeNull();
+        tracker.Lookup("c", "now design the payments platform end to end, with the ledger, the API and the fraud checks", options)
+            .Should().Be(new ConversationContext(1, "local", FollowUp: false), "the old tier-4 floor expired too");
+    }
+
     private const string Customer = "look up the customer record for account 4471";
 
     private void CustomersStayLocal(SemanticRouterOptions o)

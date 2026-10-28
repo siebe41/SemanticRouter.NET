@@ -107,11 +107,15 @@ public sealed class JsonPromptExtractor : IPromptExtractor
             return text;
         }
 
-        string stripped = InjectedBlocks.Remove(text, extraTags);
-        return ReferenceEquals(stripped, text) ? text : stripped.Trim();
+        return InjectedBlocks.Remove(text, extraTags).Trim();
     }
 
-    private string? Clean(string? text) => _stripSystemReminders ? StripInjectedBlocks(text, _injectedTags) : text;
+    /// <summary>The text to classify, or <see langword="null"/> for a blank one, which never hides the message before it.</summary>
+    private string? Clean(string? text)
+    {
+        string? cleaned = _stripSystemReminders ? StripInjectedBlocks(text, _injectedTags) : text;
+        return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
+    }
 
     /// <summary>
     /// The text of the selected messages, each cleaned on its own: a user message that is nothing but injected context

@@ -132,11 +132,7 @@ internal sealed class ConversationTracker
         State state = _conversations.GetOrAdd(key, _ => new State { Peak = requiredTier, At = now });
         lock (state)
         {
-            if (now - state.At > options.IdleTimeout)
-            {
-                (state.Peak, state.TurnsBelow) = (requiredTier, 0);
-            }
-            else if (!raisedByFloor && requiredTier >= state.Peak)
+            if (Expire(state, now, options) || (!raisedByFloor && requiredTier >= state.Peak))
             {
                 (state.Peak, state.TurnsBelow) = (requiredTier, 0);
             }
@@ -170,12 +166,13 @@ internal sealed class ConversationTracker
     }
 
     /// <summary>Remembers (or, with <see langword="null"/>, clears) the conversation's callout for its next turns.</summary>
-    public void Choose(string key, Callout? choice)
+    public void Choose(string key, Callout? choice, ConversationRoutingOptions options)
     {
         DateTimeOffset now = _time.GetUtcNow();
         State state = _conversations.GetOrAdd(key, _ => new State { At = now });
         lock (state)
         {
+            Expire(state, now, options);
             state.Choice = choice;
             state.At = now;
         }
@@ -196,12 +193,13 @@ internal sealed class ConversationTracker
     }
 
     /// <summary>Remembers the conversation's latest decision (a classified or explicit turn).</summary>
-    public void Decided(string key, DecisionRecord decision)
+    public void Decided(string key, DecisionRecord decision, ConversationRoutingOptions options)
     {
         DateTimeOffset now = _time.GetUtcNow();
         State state = _conversations.GetOrAdd(key, _ => new State { At = now });
         lock (state)
         {
+            Expire(state, now, options);
             (state.Last, state.ToolErrorTurns, state.At) = (decision, 0, now);
         }
     }
@@ -234,12 +232,29 @@ internal sealed class ConversationTracker
 
         lock (state)
         {
+            DateTimeOffset now = _time.GetUtcNow();
+            Expire(state, now, options);
             state.Model = model ?? state.Model;
-            state.At = _time.GetUtcNow();
+            state.At = now;
         }
 
         // Decided and Choose add conversations too, and a conversation of explicit models only ever comes here.
         _conversationPruning.Written(_conversations, LastActive, options.IdleTimeout);
+    }
+
+    /// <summary>
+    /// Starts a conversation that has been idle too long afresh, before a write refreshes its time: nothing it chose,
+    /// decided, peaked at or stuck to before holds any more. Returns whether it did. Call it holding the state's lock.
+    /// </summary>
+    private static bool Expire(State state, DateTimeOffset now, ConversationRoutingOptions options)
+    {
+        if (now - state.At <= options.IdleTimeout)
+        {
+            return false;
+        }
+
+        (state.Peak, state.TurnsBelow, state.Model, state.Choice, state.Last, state.ToolErrorTurns) = (0, 0, null, null, null, 0);
+        return true;
     }
 
     private static DateTimeOffset LastActive(State state)
