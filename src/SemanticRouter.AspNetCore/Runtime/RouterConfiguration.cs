@@ -808,11 +808,12 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 continue;
             }
 
-            string[] parts = slot.Setting.Split(':');
-            bool added = parts[0] == "Connectors" && !current.Connectors.ContainsKey(parts[1]);
-            bool moved = parts[0] switch
+            // The section is the setting's first part; a connector's name is taken from the slot, since it may itself hold a ':'.
+            string section = slot.Setting[..slot.Setting.IndexOf(':', StringComparison.Ordinal)];
+            bool added = slot.Connector is { } name && !current.Connectors.ContainsKey(name);
+            bool moved = section switch
             {
-                "Connectors" => current.Connectors.TryGetValue(parts[1], out ConnectorOptions? existing) && !SameDestination(Connectors[parts[1]], existing),
+                "Connectors" => current.Connectors.TryGetValue(slot.Connector!, out ConnectorOptions? existing) && !SameDestination(Connectors[slot.Connector!], existing),
                 "Embeddings" => Embeddings.Provider != current.Embeddings.Provider || !Equals(Embeddings.Endpoint, current.Embeddings.Endpoint),
                 _ => false,
             };
@@ -825,15 +826,15 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
 
             // A gateway key is only compared with what clients send; it goes nowhere, so naming a variable for it reveals nothing.
-            if (fromThisMachine || parts[0] == "Middleware")
+            if (fromThisMachine || section == "Middleware")
             {
                 continue;
             }
 
             HashSet<string> had = [.. SecretReference.References(before.GetValueOrDefault(slot.Setting)).Where(r => r.Scheme == "env").Select(r => r.Name)];
-            Uri? destination = parts[0] switch
+            Uri? destination = section switch
             {
-                "Connectors" => Connectors[parts[1]].BaseAddress,
+                "Connectors" => Connectors[slot.Connector!].BaseAddress,
                 "Embeddings" => Embeddings.Endpoint,
                 _ => null,
             };
@@ -883,7 +884,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         var slots = new List<SecretSlot>();
         foreach ((string name, ConnectorOptions connector) in Connectors)
         {
-            slots.Add(new SecretSlot($"Connectors:{name}:ApiKey", $"connectors/{name}/ApiKey", true, () => connector.ApiKey, v => connector.ApiKey = v));
+            slots.Add(new SecretSlot($"Connectors:{name}:ApiKey", $"connectors/{name}/ApiKey", true, () => connector.ApiKey, v => connector.ApiKey = v, name));
             foreach (string header in connector.Headers.Keys.ToArray())
             {
                 bool secret = IsSecretHeader(header);
@@ -891,7 +892,7 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 {
                     slots.Add(new SecretSlot(
                         $"Connectors:{name}:Headers:{header}", $"connectors/{name}/headers/{header}", secret,
-                        () => connector.Headers.TryGetValue(header, out string? v) ? v : null, v => connector.Headers[header] = v ?? string.Empty));
+                        () => connector.Headers.TryGetValue(header, out string? v) ? v : null, v => connector.Headers[header] = v ?? string.Empty, name));
                 }
             }
 
@@ -901,7 +902,8 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 slots.Add(new SecretSlot(
                     $"Connectors:{name}:EnvironmentVariables:{variable}", $"connectors/{name}/env/{variable}", true,
                     () => connector.EnvironmentVariables.TryGetValue(variable, out string? v) ? v : null,
-                    v => connector.EnvironmentVariables[variable] = v ?? string.Empty));
+                    v => connector.EnvironmentVariables[variable] = v ?? string.Empty,
+                    name));
             }
         }
 
@@ -921,7 +923,8 @@ public sealed class RouterConfiguration : SemanticRouterOptions
         return slots;
     }
 
-    private sealed record SecretSlot(string Setting, string StoreName, bool IsSecret, Func<string?> Get, Action<string?> Set);
+    // Connector: the connector a Connectors: setting belongs to (its name may itself hold a ':').
+    private sealed record SecretSlot(string Setting, string StoreName, bool IsSecret, Func<string?> Get, Action<string?> Set, string? Connector = null);
 
     private static readonly string[] SecretHeaderWords = ["key", "token", "secret", "auth", "cookie", "password", "credential", "session", "signature"];
 

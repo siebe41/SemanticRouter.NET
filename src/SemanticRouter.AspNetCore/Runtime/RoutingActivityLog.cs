@@ -498,7 +498,7 @@ public sealed class RoutingActivityLog
     {
         lock (_gate)
         {
-            var result = new List<RoutingActivityEntry>(Math.Min(limit, _entries.Length));
+            var result = new List<RoutingActivityEntry>(Math.Clamp(limit, 0, _entries.Length));
             for (long i = _added - 1; i >= 0 && i >= _added - _entries.Length && result.Count < limit; i--)
             {
                 // Never filled, purged, or not newer: concurrent requests can be added out of id order, so read on.

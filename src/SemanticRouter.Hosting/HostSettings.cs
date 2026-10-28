@@ -188,6 +188,13 @@ internal sealed record HostSettings
                 : $"Unknown service action '{serviceAction}'. Use {string.Join(", ", ServiceActions)}.";
         }
 
+        // "--config-dir=" or an empty argument names no directory (Path.GetFullPath would throw on it).
+        if (directory is not null && string.IsNullOrWhiteSpace(directory))
+        {
+            error ??= "--config-dir needs a directory.";
+            directory = null;
+        }
+
         string configuration = Path.GetFullPath(directory ?? DefaultConfigurationDirectory(environment, OperatingSystem.IsWindows(), OperatingSystem.IsMacOS()));
         return new HostSettings
         {

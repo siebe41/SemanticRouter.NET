@@ -87,6 +87,29 @@ public class ChatProtocolTests
     }
 
     [Fact]
+    public void Parallel_openai_tool_results_answer_every_call()
+    {
+        // #276: each tool message became its own turn, so only the last call counted as answered.
+        ChatCompletionRequest request = ChatCompletionRequest.Parse(Json("""
+            {"model":"auto","messages":[
+              {"role":"user","content":"weather in Oslo and Bergen?"},
+              {"role":"assistant","content":null,"tool_calls":[
+                {"id":"call_a","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Oslo\"}"}},
+                {"id":"call_b","type":"function","function":{"name":"get_weather","arguments":"{\"city\":\"Bergen\"}"}}]},
+              {"role":"tool","tool_call_id":"call_a","content":"12°C"},
+              {"role":"tool","tool_call_id":"call_b","content":"9°C"}],
+             "tools":[{"type":"function","function":{"name":"get_weather","parameters":{"type":"object"}}}]}
+            """));
+
+        request.Turns.Should().HaveCount(3, "the tool results are one user turn, as in the Anthropic protocol");
+        request.IsToolResultContinuation.Should().BeTrue();
+        request.AnsweredToolUseIds.Should().Equal("call_a", "call_b");
+
+        JsonElement body = Json(Encoding.UTF8.GetString(OpenAIRequestBuilder.Build(request, "gpt-x").Span));
+        body.GetProperty("messages").EnumerateArray().Select(m => m.GetProperty("role").GetString()).Should().Equal("user", "assistant", "tool", "tool");
+    }
+
+    [Fact]
     public void Translates_an_anthropic_request_to_openai()
     {
         ChatCompletionRequest request = ChatCompletionRequest.ParseAnthropic(Json(AnthropicAgenticBody));

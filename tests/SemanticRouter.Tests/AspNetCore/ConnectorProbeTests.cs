@@ -23,6 +23,23 @@ public sealed class ConnectorProbeTests
         handler.Requests.Single().Request.Headers.Authorization!.ToString().Should().Be("Bearer lm-token-123");
     }
 
+    [Theory]
+    [InlineData("https://openrouter.ai", "/api/v1/chat/completions", null, "https://openrouter.ai/api/v1/models")]
+    [InlineData("https://generativelanguage.googleapis.com", "/v1beta/openai/chat/completions", null, "https://generativelanguage.googleapis.com/v1beta/openai/models")]
+    [InlineData("https://api.anthropic.com", "/v1/chat/completions", ConnectorTypes.Anthropic, "https://api.anthropic.com/v1/models")]
+    [InlineData("https://api.openai.com", "/v1/chat/completions", ConnectorTypes.Responses, "https://api.openai.com/v1/models")]
+    [InlineData("http://localhost:8080", "/generate", null, "http://localhost:8080/v1/models")]
+    public async Task The_model_list_is_asked_for_beside_the_connectors_request_path(string baseAddress, string requestPath, string? type, string expected)
+    {
+        // #275: the probe always asked for /v1/models, so the OpenRouter and Gemini presets probed the wrong address.
+        var handler = StubHttpMessageHandler.Json("""{"data":[{"id":"m"}]}""");
+        var connector = new ConnectorOptions { BaseAddress = new Uri(baseAddress), RequestPath = requestPath, Type = type ?? ConnectorTypes.OpenAICompatible };
+
+        await ConnectorProbe.ListModelsAsync("c", connector, new HttpClient(handler), TimeSpan.FromSeconds(5));
+
+        handler.Requests.Select(r => r.Request.RequestUri!.ToString()).Should().StartWith(expected);
+    }
+
     [Fact]
     public async Task A_401_without_a_key_says_authentication_is_required_and_names_the_setting()
     {
