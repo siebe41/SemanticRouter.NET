@@ -462,6 +462,7 @@ public sealed class HostTests : IDisposable
         report.Should().Contain("[ OK ] egress: ONNX Runtime telemetry: off (ORT_DISABLE_TELEMETRY=1, set before ONNX Runtime loads): mobile.events.data.microsoft.com is never contacted");
         report.Should().Contain("[ OK ] egress: webhook ops: hooks.example.com.");
         report.Should().Contain("[ OK ] egress: price list: openrouter.ai, only when the dashboard looks up cloud models' prices");
+        report.Should().Contain("[ OK ] egress: setup scan: when the dashboard's setup looks for models on this machine");
         report.Should().Contain("[ OK ] egress: desktop app updates: api.github.com, github.com, release-assets.githubusercontent.com and objects.githubusercontent.com (only the installed desktop app");
         report.Should().Contain($"[ OK ] network: HTTPS also trusts the 1 certificate(s) in {bundle}");
         report.Should().NotContain("hook-secret").And.NotContain("token=abc").And.NotContain("/services/").And.NotContain("sk-doctor-test");
@@ -477,6 +478,15 @@ public sealed class HostTests : IDisposable
         on.Status.Should().Be(RouterCheckStatus.Warning);
         on.Message.Should().Contain("ORT_DISABLE_TELEMETRY is '0'").And.Contain("mobile.events.data.microsoft.com").And.Contain("Set it to 1");
         EgressList.OnnxTelemetry(null).Message.Should().Contain("is not set");
+    }
+
+    [Fact]
+    public void The_egress_list_names_the_cli_vendors_the_setup_scan_may_reach()
+    {
+        EgressList.SetupScan(MachinePolicy.None).Should().StartWith(
+            "setup scan: when the dashboard's setup looks for models on this machine, it starts any claude (Anthropic), codex (OpenAI) or copilot (GitHub) CLI on PATH");
+        EgressList.SetupScan(MachinePolicy.FromJson("""{"DisabledPresets":["Codex","GitHubCopilot"]}""")).Should().Contain("it starts any claude (Anthropic) CLI on PATH");
+        EgressList.SetupScan(new MachinePolicy { Offline = true }).Should().StartWith("setup scan: starts no CLI");
     }
 
     [Fact]

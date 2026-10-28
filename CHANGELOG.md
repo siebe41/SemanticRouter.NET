@@ -96,6 +96,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Fixed
 
+- `doctor`'s egress list and [docs/network.md](docs/network.md) now say that the dashboard's setup scan starts any `claude`, `codex` or `copilot` CLI it finds on PATH, even when no connector uses it, to read its version and sign-in, and that the CLI may contact its vendor then. Offline mode and a machine policy that turns a CLI off still keep it from being started. (#351)
 - Malformed input no longer throws, hangs or breaks something unrelated. A file someone edited, a server's reply or a command line is now refused or skipped instead. (#350)
   - A theme file with an unreadable colour (`rgb(1..2, 0, 0)`) no longer makes `GET api/themes` fail for every theme.
   - A `client-turns.json` with `"turns": null` or a `null` entry falls back to the built-in patterns with a warning; before, every request failed.
