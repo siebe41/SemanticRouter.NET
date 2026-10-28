@@ -35,6 +35,7 @@ internal static class ActivityReports
     public static ActivitySeries Series(IReadOnlyList<RoutingActivityEntry> entries, DateTimeOffset since, DateTimeOffset until, TimeSpan bucket)
     {
         ArgumentNullException.ThrowIfNull(entries);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(bucket, TimeSpan.Zero);
         var buckets = new List<ActivityBucket>();
         for (DateTimeOffset start = since; start < until; start += bucket)
         {

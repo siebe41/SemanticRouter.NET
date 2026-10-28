@@ -49,8 +49,9 @@ internal sealed record WindowPlacement(int X, int Y, double Width, double Height
         double maxWidth = screen.Width / screen.Scaling, maxHeight = screen.Height / screen.Scaling;
         double width = Math.Clamp(placement.Width, Math.Min(MinimumWidth, maxWidth), maxWidth);
         double height = Math.Clamp(placement.Height, Math.Min(MinimumHeight, maxHeight), maxHeight);
-        int x = Math.Clamp(placement.X, screen.X, screen.X + screen.Width - (int)Math.Ceiling(width * screen.Scaling));
-        int y = Math.Clamp(placement.Y, screen.Y, screen.Y + screen.Height - (int)Math.Ceiling(height * screen.Scaling));
+        // Rounding the scaled size up can make it a pixel wider than the screen: then the window starts at its edge.
+        int x = Math.Clamp(placement.X, screen.X, Math.Max(screen.X, screen.X + screen.Width - (int)Math.Ceiling(width * screen.Scaling)));
+        int y = Math.Clamp(placement.Y, screen.Y, Math.Max(screen.Y, screen.Y + screen.Height - (int)Math.Ceiling(height * screen.Scaling)));
         return new WindowPlacement(x, y, width, height, placement.Maximized);
     }
 }

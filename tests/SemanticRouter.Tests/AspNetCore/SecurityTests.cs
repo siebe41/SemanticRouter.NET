@@ -613,6 +613,35 @@ public sealed class DashboardAccessTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_rollback_cannot_bring_back_what_a_cli_runs_unless_allowed()
+    {
+        // #277: rollback skipped the checks PUT api/config makes, so an old version could change the program a CLI runs.
+        HttpClient client = await StartAsync(remote: false);
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        RouterConfiguration clean = provider.Current.Configuration.Clone();
+        RouterConfiguration edited = clean.Clone();
+        edited.Connectors["evil"] = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.Custom, Executable = "/tmp/evil" };
+        long evil = provider.Apply(edited, persist: false, "configuration file").HistoryVersion!.Value;
+        provider.Apply(clean, persist: false, "configuration file");
+
+        HttpResponseMessage rollback = await client.PostAsync($"/router/api/config/history/{evil}/rollback", null);
+
+        rollback.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await rollback.Content.ReadAsStringAsync()).Should().Contain("Connectors:evil").And.Contain("AllowProcessSettings");
+        provider.Current.Configuration.Connectors.Should().NotContainKey("evil");
+        await DisposeAsync();
+
+        HttpClient allowed = await StartAsync(o => o.AllowProcessSettings = true, remote: false);
+        provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        clean = provider.Current.Configuration.Clone();
+        edited = clean.Clone();
+        edited.Connectors["evil"] = new ConnectorOptions { Type = ConnectorTypes.Cli, Preset = CliPreset.Custom, Executable = "/usr/local/bin/llm" };
+        evil = provider.Apply(edited, persist: false, "configuration file").HistoryVersion!.Value;
+        provider.Apply(clean, persist: false, "configuration file");
+        (await allowed.PostAsync($"/router/api/config/history/{evil}/rollback", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task What_a_cli_runs_cannot_be_changed_over_the_admin_api_unless_allowed()
     {
         HttpClient client = await StartAsync(remote: false);

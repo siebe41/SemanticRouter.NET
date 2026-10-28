@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 //   claude-agent A simulated Claude Code agent for latency benchmarks: after FAKE_CLI_STARTUP_MS (default 1500) it streams
 //                a reply word by word, FAKE_CLI_WORD_MS apart (default 30). Without a tool result in the prompt the reply
 //                explains its plan and ends in a call fenced with the run's tool_call label; with one, it answers.
+//   claude-status What the router's setup asks a Claude Code it finds: `--version`, and `auth status` (signed in).
 Console.OutputEncoding = new UTF8Encoding(false);
 Console.InputEncoding = new UTF8Encoding(false);
 string mode = Environment.GetEnvironmentVariable("FAKE_CLI_MODE") ?? "cat";
@@ -59,6 +60,10 @@ switch (mode)
         Console.Out.Write(JsonSerializer.Serialize(args) + "\n" + input);
         return 0;
     }
+
+    case "claude-status":
+        WriteLine(args is ["auth", "status"] ? """{"loggedIn":true,"authMethod":"claude.ai"}""" : "1.0.0 (Claude Code)");
+        return 0;
 
     case "quota":
         await Console.Error.WriteLineAsync("Error: You have exceeded your daily quota");

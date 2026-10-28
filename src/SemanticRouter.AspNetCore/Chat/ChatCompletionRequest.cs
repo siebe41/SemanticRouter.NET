@@ -146,13 +146,23 @@ public sealed partial class ChatCompletionRequest
                 var blocks = new List<ContentBlock>();
                 if (role == "tool")
                 {
-                    blocks.Add(new ToolResultBlock
+                    var result = new ToolResultBlock
                     {
                         ToolUseId = message.GetString("tool_call_id") ?? string.Empty,
                         Content = message.TryGetProperty("content", out JsonElement toolContent) ? ReadOpenAIContent(toolContent, null, ref hasImages) : string.Empty,
                         IsError = false,
-                    });
-                    turns.Add(new ChatTurn { Role = "user", Blocks = blocks });
+                    };
+
+                    // The results of parallel calls are one user turn, as in the Anthropic protocol, so all of them count as answered.
+                    if (turns.Count > 0 && turns[^1].Role == "user" && turns[^1].IsToolResultOnly)
+                    {
+                        turns[^1] = turns[^1] with { Blocks = [.. turns[^1].Blocks, result] };
+                    }
+                    else
+                    {
+                        turns.Add(new ChatTurn { Role = "user", Blocks = [result] });
+                    }
+
                     continue;
                 }
 

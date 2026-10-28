@@ -12,7 +12,8 @@ namespace SemanticRouter.Tests.Host;
 /// <summary>
 /// <c>doctor</c>'s egress list (docs/network.md) is meant to be a firewall allowlist (#185). The tool runs as a child
 /// process with a recording proxy in <c>HTTPS_PROXY</c> and <c>HTTP_PROXY</c>, a configuration whose connectors and judge
-/// are on made-up hosts, and Hashing embeddings. The proxy answers every request itself and forwards nothing. After
+/// are on made-up hosts, Hashing embeddings, and a stand-in <c>claude</c> as the only CLI on its PATH (the dashboard's
+/// setup scan starts every vendor CLI it finds, and a real one may contact its vendor whenever it likes). The proxy answers every request itself and forwards nothing. After
 /// start-up, <c>doctor</c>, a chat call (which the judge grades), a classify call and a dashboard page load, every host
 /// the proxy saw must be named on one of the <c>egress</c> lines <c>doctor</c> printed (the child's own list);
 /// offline, the proxy must see nothing.
@@ -58,7 +59,7 @@ public sealed class EgressRecordingTests : IDisposable
         HostSettings settings = Configure();
 
         // Doctor's connector check reaches the judge's host first (its models), so wait for the grading call itself.
-        IReadOnlyList<string> egress = await DriveAsync(settings, proxy, until: () => Chatted(proxy, Judge));
+        (IReadOnlyList<string> egress, JsonNode? setup) = await DriveAsync(settings, proxy, until: () => Chatted(proxy, Judge));
 
         await proxy.DrainAsync();
 
@@ -71,11 +72,15 @@ public sealed class EgressRecordingTests : IDisposable
         string lines = string.Join(Environment.NewLine, egress);
         foreach (Uri destination in seen.Where(d => !d.IsLoopback))
         {
-            Names(egress, destination).Should().BeTrue($"{destination.Authority} was contacted, so doctor lists it:{Environment.NewLine}{lines}");
+            Names(egress, destination).Should().BeTrue($"{destination.Authority} was contacted, so doctor lists it:{Environment.NewLine}{lines}{Environment.NewLine}The proxy saw:{Environment.NewLine}{requests}");
         }
 
         Names(egress, new Uri($"https://{Hooks}/")).Should().BeTrue(
             "the webhook's host is listed although the 5-minute notice check does not run in this test (WebhookTests cover its delivery)");
+
+        // The setup scan ran the stand-in, the only claude on the tool's PATH, and the egress list says it starts such a CLI.
+        setup?["detected"]?.AsArray().Select(d => (string?)d?["detail"]).Should().Contain(d => d != null && d.StartsWith("Signed in · claude 1.0.0 at ", StringComparison.Ordinal), setup?.ToJsonString());
+        egress.Should().Contain(l => l.StartsWith("setup scan: ", StringComparison.Ordinal) && l.Contains("claude (Anthropic)", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -85,7 +90,7 @@ public sealed class EgressRecordingTests : IDisposable
         HostSettings settings = Configure("--SemanticRouter:Network:Offline=true");
 
         // Nothing to wait for, so watch for 30 seconds of what the router does in the background (the judge among it).
-        IReadOnlyList<string> egress = await DriveAsync(settings, proxy, until: () => true, settle: TimeSpan.FromSeconds(30));
+        (IReadOnlyList<string> egress, JsonNode? setup) = await DriveAsync(settings, proxy, until: () => true, settle: TimeSpan.FromSeconds(30));
 
         await proxy.DrainAsync();
 
@@ -94,6 +99,8 @@ public sealed class EgressRecordingTests : IDisposable
             $"offline, the connectors, the judge and the webhook are on hosts that are not allowed: {string.Join(Environment.NewLine, proxy.Requests)}");
         proxy.WithoutDestination.Should().BeEmpty("a connection that says nothing about where it is going may be going anywhere");
         egress.Should().Contain(m => m.StartsWith($"connector llm: {Llm} (never contacted:", StringComparison.Ordinal));
+        egress.Should().Contain(m => m.StartsWith("setup scan: starts no CLI", StringComparison.Ordinal));
+        setup?["detected"]?.AsArray().Should().NotContain(d => d != null && (string?)d["id"] == "claude-code", "offline, the setup starts no CLI");
     }
 
     /// <summary>
@@ -124,13 +131,15 @@ public sealed class EgressRecordingTests : IDisposable
     /// <summary>
     /// Starts the tool, runs <c>doctor</c>, a chat and a classify call and loads the dashboard, then waits for
     /// <paramref name="until"/>. Returns the <c>egress</c> lines <c>doctor</c> printed: the child's own reading of the
-    /// configuration, which this machine's <c>SemanticRouter__…</c> variables do not reach.
+    /// configuration, which this machine's <c>SemanticRouter__…</c> variables do not reach), and what <c>GET api/setup</c>
+    /// answered.
     /// </summary>
-    private async Task<IReadOnlyList<string>> DriveAsync(HostSettings settings, RecordingProxy proxy, Func<bool> until, TimeSpan? settle = null)
+    private async Task<(IReadOnlyList<string> Egress, JsonNode? Setup)> DriveAsync(HostSettings settings, RecordingProxy proxy, Func<bool> until, TimeSpan? settle = null)
     {
         using var limit = new CancellationTokenSource(Limit);
         CancellationToken cancellationToken = limit.Token;
-        using RouterProcess router = RouterProcess.Start(Arguments(settings), proxy, Path.Combine(_directory, "keys"));
+        string path = FakeClaude();
+        using RouterProcess router = RouterProcess.Start(Arguments(settings), proxy, Path.Combine(_directory, "keys"), path);
         try
         {
             string? address;
@@ -156,7 +165,7 @@ public sealed class EgressRecordingTests : IDisposable
             (status?["warmedUp"]?.GetValue<bool>() ?? false).Should().BeTrue($"the router starts: {status?["warmUpError"]} {router.Output}");
 
             string checks;
-            using (RouterProcess doctor = RouterProcess.Start(["doctor", .. Arguments(settings)], proxy, Path.Combine(_directory, "keys")))
+            using (RouterProcess doctor = RouterProcess.Start(["doctor", .. Arguments(settings)], proxy, Path.Combine(_directory, "keys"), path))
             {
                 await doctor.WaitAsync(cancellationToken);
                 checks = doctor.Output;
@@ -175,6 +184,7 @@ public sealed class EgressRecordingTests : IDisposable
             }
 
             // What the dashboard's pages ask the router for when they open.
+            JsonNode? setup = null;
             foreach (string api in new[]
                      {
                          "session", "status", "config", "policy", "setup", "digest", "activity", "activity/series", "usage", "reliability",
@@ -183,6 +193,10 @@ public sealed class EgressRecordingTests : IDisposable
             {
                 using HttpResponseMessage response = await http.GetAsync(new Uri($"/router/api/{api}", UriKind.Relative), cancellationToken);
                 response.IsSuccessStatusCode.Should().BeTrue($"dashboard API {api} returned {response.StatusCode}");
+                if (api == "setup")
+                {
+                    setup = JsonNode.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                }
             }
 
             while (!until())
@@ -202,13 +216,36 @@ public sealed class EgressRecordingTests : IDisposable
 
             string[] egress = [.. Regex.Matches(checks, $@"^\[(?: OK |WARN|FAIL)\] {EgressList.Subject}: (.+?)\r?$", RegexOptions.Multiline).Select(m => m.Groups[1].Value)];
             egress.Should().NotBeEmpty($"doctor prints the egress list: {checks}");
-            return egress;
+            return (egress, setup);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw new TimeoutException(
                 $"The tool was not through within {Limit.TotalMinutes} minutes. The proxy saw:{Environment.NewLine}{string.Join(Environment.NewLine, proxy.Requests)}{Environment.NewLine}The tool wrote:{Environment.NewLine}{router.Output}");
         }
+    }
+
+    /// <summary>
+    /// A folder with a stand-in <c>claude</c> (the FakeCli program, in <c>claude-status</c> mode) to be the tool's PATH, so
+    /// the dashboard's setup scan starts it and never a CLI installed where the test runs, which may contact its vendor.
+    /// </summary>
+    private string FakeClaude()
+    {
+        string bin = Directory.CreateDirectory(Path.Combine(_directory, "bin")).FullName;
+        string suffix = OperatingSystem.IsWindows() ? ".exe" : string.Empty;
+        File.Copy(Path.Combine(AppContext.BaseDirectory, "fake-cli" + suffix), Path.Combine(bin, "claude" + suffix), overwrite: true);
+        foreach (string file in new[] { "fake-cli.dll", "fake-cli.runtimeconfig.json", "fake-cli.deps.json" })
+        {
+            if (File.Exists(Path.Combine(AppContext.BaseDirectory, file)))
+            {
+                File.Copy(Path.Combine(AppContext.BaseDirectory, file), Path.Combine(bin, file), overwrite: true);
+            }
+        }
+
+        // The .NET host's own folder stays, so the stand-in finds its runtime; it holds no vendor CLI.
+        return Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } dotnet
+            ? bin + Path.PathSeparator + Path.GetDirectoryName(dotnet)
+            : bin;
     }
 
     private static string[] Arguments(HostSettings settings) =>
@@ -264,7 +301,7 @@ public sealed class EgressRecordingTests : IDisposable
             }
         }
 
-        public static RouterProcess Start(IEnumerable<string> arguments, RecordingProxy proxy, string keys)
+        public static RouterProcess Start(IEnumerable<string> arguments, RecordingProxy proxy, string keys, string path)
         {
             var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } dotnet ? dotnet : "dotnet")
             {
@@ -286,6 +323,8 @@ public sealed class EgressRecordingTests : IDisposable
             }
 
             start.Environment[HostSettings.KeysVariable] = keys;
+            start.Environment["PATH"] = path;
+            start.Environment["FAKE_CLI_MODE"] = "claude-status";
             foreach (string name in new[] { "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy" })
             {
                 start.Environment[name] = proxy.Url;
