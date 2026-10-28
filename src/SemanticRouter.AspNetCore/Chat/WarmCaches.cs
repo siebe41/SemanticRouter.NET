@@ -77,7 +77,17 @@ public sealed class WarmCacheStore : IWarmCacheStore
 
         if (_caches.TryGetValue(conversation, out WarmCache[]? caches) && caches.Any(c => Same(c, model)))
         {
-            _caches[conversation] = [.. caches.Where(c => !Same(c, model))];
+            // A conversation with no warm cache left goes: the pruning sweep reads each one's latest expiry.
+            WarmCache[] rest = [.. caches.Where(c => !Same(c, model))];
+            if (rest.Length == 0)
+            {
+                _caches.TryRemove(conversation, out _);
+            }
+            else
+            {
+                _caches[conversation] = rest;
+            }
+
             return true;
         }
 

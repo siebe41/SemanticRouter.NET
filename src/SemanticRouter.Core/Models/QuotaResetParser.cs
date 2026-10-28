@@ -11,6 +11,9 @@ namespace SemanticRouter;
 /// </summary>
 public static partial class QuotaResetParser
 {
+    /// <summary>A wait longer than this is not a reset time (and would not fit in a date): such a message or header is ignored.</summary>
+    private static readonly TimeSpan Longest = TimeSpan.FromDays(3650);
+
     /// <summary>Finds a reset time in <paramref name="message"/>, relative to <paramref name="now"/>.</summary>
     public static bool TryParse(string? message, DateTimeOffset now, TimeZoneInfo? localZone, out DateTimeOffset resetAt)
     {
@@ -78,7 +81,7 @@ public static partial class QuotaResetParser
             }
 
             int day = int.Parse(absolute.Groups["day"].Value, CultureInfo.InvariantCulture);
-            if (day > DateTime.DaysInMonth(localNow.Year, monthOnly.Month))
+            if (day < 1 || day > DateTime.DaysInMonth(localNow.Year, monthOnly.Month))
             {
                 return false;
             }
@@ -113,6 +116,11 @@ public static partial class QuotaResetParser
 
         if (double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double seconds) && seconds > 0)
         {
+            if (seconds > Longest.TotalSeconds)
+            {
+                return false;
+            }
+
             resetAt = now.AddSeconds(seconds);
             return true;
         }
@@ -128,23 +136,24 @@ public static partial class QuotaResetParser
 
     private static TimeSpan? SumDuration(string text)
     {
-        TimeSpan total = TimeSpan.Zero;
+        double milliseconds = 0;
         bool any = false;
         foreach (Match part in DurationPart().Matches(text))
         {
             double amount = double.Parse(part.Groups["n"].Value, CultureInfo.InvariantCulture);
             string unit = part.Groups["unit"].Value.ToUpperInvariant();
-            total += unit[0] switch
+            milliseconds += amount * (unit[0] switch
             {
-                'D' => TimeSpan.FromDays(amount),
-                'H' => TimeSpan.FromHours(amount),
-                'S' => TimeSpan.FromSeconds(amount),
-                _ => unit.StartsWith("MS", StringComparison.Ordinal) ? TimeSpan.FromMilliseconds(amount) : TimeSpan.FromMinutes(amount),
-            };
+                'D' => TimeSpan.FromDays(1).TotalMilliseconds,
+                'H' => TimeSpan.FromHours(1).TotalMilliseconds,
+                'S' => 1000,
+                _ => unit.StartsWith("MS", StringComparison.Ordinal) ? 1 : TimeSpan.FromMinutes(1).TotalMilliseconds,
+            });
             any = true;
         }
 
-        return any ? total : null;
+        // Summed as a double, so a huge amount is refused here instead of overflowing a TimeSpan.
+        return any && milliseconds <= Longest.TotalMilliseconds ? TimeSpan.FromMilliseconds(milliseconds) : null;
     }
 
     [GeneratedRegex(
