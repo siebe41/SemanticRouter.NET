@@ -344,7 +344,8 @@ public sealed class ServiceTests : IDisposable
         // #339: every platform said it restarts the router, though the Windows sign-in entry does not.
         Directory.CreateDirectory(ConfigurationDirectory);
         var platform = new FakePlatform(onStart: () =>
-            new RouterInstance(Environment.ProcessId, ["http://localhost:6000"], DateTimeOffset.UtcNow, "1.2.3").Write(ConfigurationDirectory)) { Restarts = restarts };
+            new RouterInstance(Environment.ProcessId, ["http://localhost:6000"], DateTimeOffset.UtcNow, "1.2.3").Write(ConfigurationDirectory))
+        { Restarts = restarts };
         var output = new StringWriter();
 
         (await ServiceCommand.RunAsync(Settings("install"), output, platform, Definition())).Should().Be(0, output.ToString());
