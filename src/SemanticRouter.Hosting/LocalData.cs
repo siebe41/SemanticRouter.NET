@@ -128,6 +128,12 @@ internal static class LocalData
 
     private static bool TryMove(string from, string to)
     {
+        // A file already there is never replaced, nor removed by the clean-up below: only a copy this call made is.
+        if (File.Exists(to))
+        {
+            return false;
+        }
+
         try
         {
             File.Move(from, to);
