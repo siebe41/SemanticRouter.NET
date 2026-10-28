@@ -9,7 +9,7 @@ public class PromptRouterTests
     private static readonly ModelDefinition Cli = Model("claude-cli", 4);
     private static readonly ModelDefinition Api = Model("api", 2, costPerMillion: 1m, capabilities: "tools");
 
-    private static (PromptRouter Router, Mock<IPromptClassifier> Classifier, ModelHealthTracker Health) Create(int tier, bool localOnly = false)
+    private static (PromptRouter Router, Mock<IPromptClassifier> Classifier, ModelHealthTracker Health) Create(int tier, bool localOnly = false, bool localOnlyRoute = false)
     {
         var classifier = new Mock<IPromptClassifier>();
         classifier.Setup(c => c.ClassifyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
@@ -25,6 +25,13 @@ public class PromptRouterTests
         foreach (ModelDefinition model in new[] { Local, Cli, Api })
         {
             options.Models.Add(model);
+        }
+
+        if (localOnlyRoute)
+        {
+            RouteDefinition secret = Route("secret", 1, "s");
+            secret.LocalOnly = true;
+            options.Routes.Add(secret);
         }
 
         var health = new ModelHealthTracker();
@@ -90,6 +97,27 @@ public class PromptRouterTests
         plan.Classification.Reason.Should().Be(RoutingReason.ModelOverride);
         plan.Candidates.Should().ContainSingle().Which.Model.Should().BeSameAs(Cli);
         classifier.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task A_prompt_a_local_only_route_covers_stays_local_whichever_cloud_model_it_names_or_continues()
+    {
+        // #273: the conversation's affinity model skipped the local-only check, so such a prompt went to the cloud.
+        (PromptRouter router, _, _) = Create(tier: 1, localOnly: true, localOnlyRoute: true);
+
+        RoutingPlan requested = await router.RouteAsync(new PromptRoutingRequest { Prompt = "s", RequestedModel = "api" });
+        RoutingPlan continued = await router.RouteAsync(new PromptRoutingRequest { Prompt = "s", AffinityModel = "api" });
+        RoutingPlan unknown = await router.RouteAsync(new PromptRoutingRequest { Prompt = "s", RequestedModel = "gpt-x", AffinityModel = "api" });
+
+        foreach (RoutingPlan plan in new[] { requested, continued, unknown })
+        {
+            plan.Requirements.LocalOnly.Should().BeTrue();
+            plan.Candidates.Select(c => c.Model).Should().Equal(Local);
+        }
+
+        (PromptRouter open, _, _) = Create(tier: 1, localOnly: false, localOnlyRoute: true);
+        RoutingPlan pinned = await open.RouteAsync(new PromptRoutingRequest { Prompt = "s", AffinityModel = "api" });
+        pinned.Candidates[0].Model.Should().BeSameAs(Api, "a prompt no local-only route covers continues on its model");
     }
 
     [Fact]

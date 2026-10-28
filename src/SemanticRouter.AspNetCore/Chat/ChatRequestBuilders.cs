@@ -253,6 +253,9 @@ internal static class AnthropicRequestBuilder
     /// <summary>Used when an OpenAI client did not set a limit; the Messages API requires one.</summary>
     public const int DefaultMaxTokens = 8192;
 
+    /// <summary>The most <c>max_tokens</c> sent with thinking when the client set no limit: the lowest output limit of the thinking models (Opus 4).</summary>
+    public const int ThinkingMaxTokens = 32_000;
+
     /// <summary>The tool that carries a JSON-schema reply (structured output) on the Messages API.</summary>
     public const string StructuredOutputTool = "structured_output";
 
@@ -300,9 +303,20 @@ internal static class AnthropicRequestBuilder
     {
         bool structured = UsesStructuredOutputTool(request);
         int maxTokens = request.MaxTokens ?? DefaultMaxTokens;
-        int? thinkingBudget = reasoning && CarriesThinking(request) && request.Reasoning is { } wanted
-            ? Math.Clamp(wanted.EffectiveBudget, 1024, maxTokens - 1)
-            : null;
+        int? thinkingBudget = null;
+        if (reasoning && CarriesThinking(request) && request.Reasoning is { } wanted)
+        {
+            int budget = Math.Max(wanted.EffectiveBudget, 1024);
+            if (request.MaxTokens is null)
+            {
+                // No client limit: the answer gets the default room on top of the budget, within what every thinking model takes.
+                budget = Math.Min(budget, ThinkingMaxTokens - DefaultMaxTokens);
+                maxTokens = budget + DefaultMaxTokens;
+            }
+
+            thinkingBudget = Math.Min(budget, maxTokens - 1);
+        }
+
         string modelId = model ?? request.Model ?? "auto";
 
         string system = string.Join("\n\n", request.Turns.Where(t => t.Role == "system").Select(t => t.Text).Where(t => t.Length > 0));

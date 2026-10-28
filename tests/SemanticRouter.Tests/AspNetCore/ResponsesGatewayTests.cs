@@ -423,4 +423,24 @@ public sealed class ResponsesGatewayTests : RouterHostTest
         without.TryGetProperty("thinking", out _).Should().BeFalse();
         without.GetProperty("temperature").GetDouble().Should().Be(0.3);
     }
+
+    [Theory]
+    [InlineData("medium", 8192)]
+    [InlineData("high", 16384)]
+    [InlineData("max", AnthropicRequestBuilder.ThinkingMaxTokens - AnthropicRequestBuilder.DefaultMaxTokens)]
+    public void Without_a_client_limit_the_answer_gets_room_beyond_the_thinking_budget(string effort, int budget)
+    {
+        // #274: max_tokens fell back to 8192 and the budget was clamped to 8191, leaving one token for the answer.
+        ChatCompletionRequest request = ChatCompletionRequest.Parse(JsonDocument.Parse($$"""
+            {"model":"auto","reasoning_effort":"{{effort}}","messages":[{"role":"user","content":"hi"}]}
+            """).RootElement);
+
+        JsonElement sent = JsonDocument.Parse(AnthropicRequestBuilder.Build(request, "claude", reasoning: true)).RootElement;
+
+        sent.GetProperty("thinking").GetProperty("budget_tokens").GetInt32().Should().Be(budget);
+        sent.GetProperty("max_tokens").GetInt32().Should().Be(budget + AnthropicRequestBuilder.DefaultMaxTokens);
+
+        JsonElement without = JsonDocument.Parse(AnthropicRequestBuilder.Build(request, "claude", reasoning: false)).RootElement;
+        without.GetProperty("max_tokens").GetInt32().Should().Be(AnthropicRequestBuilder.DefaultMaxTokens, "no thinking, no extra room");
+    }
 }
