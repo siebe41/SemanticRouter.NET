@@ -21,11 +21,11 @@ namespace SemanticRouter.Tests.AspNetCore;
 public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
 {
     // Lower case on purpose: type names match case-insensitively, as the enum they replace did.
-    private static string Settings(string type) => $$"""
+    private static string Settings(string type, bool allowRemoteClients = false) => $$"""
         {
           "SemanticRouter": {
             "Connectors": {
-              "aws": { "Type": "{{type}}", "MaxConcurrency": 2 }
+              "aws": { "Type": "{{type}}", "MaxConcurrency": 2, "AllowRemoteClients": {{(allowRemoteClients ? "true" : "false")}} }
             }
           }
         }
@@ -35,12 +35,14 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
 
     public ConnectorTypeExtensibilityTests() => ClassifyAs(tier: 4);
 
-    private Task<HttpClient> StartBedrockAsync(bool withFactory, string type = "bedrock", IChatConnectorFactory? other = null) =>
+    private Task<HttpClient> StartBedrockAsync(
+        bool withFactory, string type = "bedrock", IChatConnectorFactory? other = null, bool remote = false, bool allowRemoteClients = false) =>
         StartAsync(
             o =>
             {
                 o.Mode = PromptRouterMode.Dispatch;
                 o.PathPrefixes.Add("/v1/chat/completions");
+                o.AllowUnauthenticatedRemoteClients = remote;
             },
             o =>
             {
@@ -51,7 +53,7 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
             },
             s =>
             {
-                IConfiguration configuration = new ConfigurationBuilder().AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes(Settings(type)))).Build();
+                IConfiguration configuration = new ConfigurationBuilder().AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes(Settings(type, allowRemoteClients)))).Build();
                 s.Configure<SemanticRouterConnectorsOptions>(configuration.GetSection(SemanticRouterOptions.SectionName));
                 if (withFactory)
                 {
@@ -62,7 +64,14 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
                 {
                     s.AddSingleton(other);
                 }
-            });
+            },
+            beforeRouter: remote
+                ? app => app.Use((context, next) =>
+                {
+                    context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("203.0.113.7");
+                    return next(context);
+                })
+                : null);
 
     [Fact]
     public async Task A_third_party_factory_serves_a_type_bound_from_json()
@@ -77,6 +86,26 @@ public sealed class ConnectorTypeExtensibilityTests : RouterHostTest
         _bedrock.Served.Should().Equal("anthropic.claude-sonnet");
         Services.GetRequiredService<RouterRuntimeProvider>().Current.Warnings.Should().NotContain(w => w.Contains("aws", StringComparison.Ordinal));
         CloudHttp.Requests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]
+    public async Task A_packaged_type_that_runs_a_program_serves_other_machines_only_when_allowed(bool remote, bool allowRemoteClients, bool served)
+    {
+        // #338: the Bedrock connector checks nothing itself, and runs a program as far as the router knows (its factory
+        // does not declare UsesBaseAddress); the router keeps other machines away from it unless AllowRemoteClients.
+        HttpClient client = await StartBedrockAsync(withFactory: true, remote: remote, allowRemoteClients: allowRemoteClients);
+
+        await client.PostAsync("/v1/chat/completions", new StringContent(ChatJson, Encoding.UTF8, "application/json"));
+
+        _bedrock.Served.Should().HaveCount(served ? 1 : 0);
+        if (!served)
+        {
+            Services.GetRequiredService<RoutingActivityLog>().Recent(1).Single().Detail.Should()
+                .Contain("bedrock-sonnet: skipped (connector 'aws' runs a program on this machine and serves only requests from it (AllowRemoteClients is false))");
+        }
     }
 
     [Theory]

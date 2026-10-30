@@ -116,6 +116,16 @@ internal sealed partial class PromptDispatcher
                 continue;
             }
 
+            // A connector that runs a program on this machine (a CLI, Copilot, a third party's) serves another machine
+            // only when it allows remote clients. The router holds every such connector to it, so a package that does
+            // not check it itself cannot turn a personal sign-in into a service for others (docs/TERMS.md, rule 4).
+            if (RefusesRemoteClient(runtime, model, context) is { } refused)
+            {
+                LogSkipped(_logger, model.Name, refused);
+                attempts.Add($"{model.Name}: skipped ({refused})");
+                continue;
+            }
+
             tried++;
             if (middleware.EmitResponseHeaders)
             {
@@ -450,6 +460,16 @@ internal sealed partial class PromptDispatcher
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Model {Model} failed ({Kind}): {Detail}. Trying the next candidate.")]
     private static partial void LogFailover(ILogger logger, string model, ModelFailureKind kind, string detail);
+
+    /// <summary>
+    /// Why <paramref name="model"/>'s connector may not serve this request: it runs a program, does not allow remote
+    /// clients, and the request is not from this machine (or comes from another account on it); otherwise <see langword="null"/>.
+    /// </summary>
+    internal static string? RefusesRemoteClient(RouterRuntime runtime, ModelDefinition model, HttpContext context) =>
+        runtime.Configuration.Connectors.TryGetValue(model.Connector, out ConnectorOptions? options)
+        && options.RunsProgram && !options.AllowRemoteClients && !DashboardAccess.IsLocal(context)
+            ? $"connector '{model.Connector}' runs a program on this machine and serves only requests from it (AllowRemoteClients is false)"
+            : null;
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Model {Model} skipped: {Detail}.")]
     private static partial void LogSkipped(ILogger logger, string model, string detail);

@@ -329,9 +329,10 @@ public sealed class ConnectorOptions
     public string? HomeDirectory { get; set; }
 
     /// <summary>
-    /// CLI: serve requests from other machines. Default <see langword="false"/>: a CLI connector signed in with your
-    /// personal subscription only answers requests that originate on this machine, and remote callers fall through to
-    /// the next model. See <c>docs/TERMS.md</c> before changing this.
+    /// A connector that runs a program (a CLI, Copilot, or a package's type without <see cref="IChatConnectorFactory.UsesBaseAddress"/>):
+    /// serve requests from other machines. Default <see langword="false"/>: such a connector, signed in with your personal
+    /// subscription, only answers requests that originate on this machine, and remote callers fall through to the next
+    /// model. The router enforces this itself, whatever the connector checks. See <c>docs/TERMS.md</c> before changing this.
     /// </summary>
     public bool AllowRemoteClients { get; set; }
 
