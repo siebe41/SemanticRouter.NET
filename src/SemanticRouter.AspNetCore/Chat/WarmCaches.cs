@@ -24,7 +24,7 @@ public interface IWarmCacheStore
 /// In-memory <see cref="IWarmCacheStore"/>, bounded: expired entries are pruned as it grows, and beyond 32,768
 /// conversations the ones whose caches expire first go.
 /// </summary>
-public sealed class WarmCacheStore : IWarmCacheStore
+internal sealed class WarmCacheStore : IWarmCacheStore
 {
     private const int PruneAbove = 4096;
     private const int MaxConversations = 32_768;

@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>A memory source as last scanned.</summary>
-public sealed record MemorySourceStatus
+internal sealed record MemorySourceStatus
 {
     /// <summary>The source's name.</summary>
     public required string Name { get; init; }

@@ -8,6 +8,10 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 - Context cost analysis: every routed request's input is broken down into system prompt, tool definitions, injected blocks, history, tool results, images and the new ask, and flagged when one of them is large (a long system prompt, many or unused tools, a large or repeated tool result, a long history, a nearly full context window, no prompt-cache hits), with what to do about it. The activity entry keeps the breakdown and its input cost (`context`), the Usage page's **Context** card adds a window up and splits its input cost by part, and **Analyze a request** (`POST api/context/analyze`) breaks a pasted request down and prices it on every model. Thresholds are under `Usage:Context`; `Usage:Context:Enabled` turns it off. (#348)
 
+### Changed
+
+- **Breaking (`SemanticRouter.AspNetCore`):** 19 types that only shaped the dashboard's JSON or served the sibling packages are internal: `ActivitySeries`, `ActivityBucket`, `BudgetStatus`, `ConfigurationIssue`, `EndpointStatus`, `EndpointCheck`, `FeedbackSummary`, `MemoryExposure`, `MemorySourceStatus`, `ModelReliability`, `RateLimitStatus`, `ServiceStatus`, `UsageSummaries`, `WarmCacheStore`, `ToolCallAffinity`, `InMemoryAuditLog`, `InMemoryUsageLedger`, `InMemoryTuningStore` and `InMemoryRouterConfigurationHistory`. The dashboard and admin API answer as before; code that named one of these types should use the endpoint's JSON or the interface the type implemented (`IAuditLog`, `IUsageLedger`, `ITuningStore`, `IRouterConfigurationHistory`, `IWarmCacheStore`, `IToolCallAffinity`). (#357)
+
 ### Fixed
 
 - Dashboard: the memory map no longer highlights a link from the selected note to one the filter or search hides. (#354)

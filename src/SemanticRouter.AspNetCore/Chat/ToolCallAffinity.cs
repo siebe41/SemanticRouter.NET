@@ -16,7 +16,7 @@ public interface IToolCallAffinity
 }
 
 /// <summary>In-memory <see cref="IToolCallAffinity"/> with a bounded size (oldest entries are evicted first).</summary>
-public sealed class ToolCallAffinity : IToolCallAffinity
+internal sealed class ToolCallAffinity : IToolCallAffinity
 {
     private readonly ConcurrentDictionary<string, string> _models = new(StringComparer.Ordinal);
     private readonly ConcurrentQueue<string> _order = new();

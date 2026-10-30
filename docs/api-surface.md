@@ -148,12 +148,6 @@ The router as ASP.NET Core middleware: connectors, the three chat protocols, the
 ### Default implementations
 
 - `JsonFileRouterConfigurationStore`: keeps the configuration in a JSON file.
-- `InMemoryRouterConfigurationHistory`: the default `IRouterConfigurationHistory`: this process's latest documents.
-- `InMemoryUsageLedger`: the default `IUsageLedger`: this process's usage for the last 40 days.
-- `InMemoryAuditLog`: the default `IAuditLog`: this process's latest entries.
-- `InMemoryTuningStore`: the default `ITuningStore`, gone on restart.
-- `ToolCallAffinity`: the default `IToolCallAffinity`, bounded in memory.
-- `WarmCacheStore`: the default `IWarmCacheStore`, bounded in memory.
 - `RoutingActivityLog`: a bounded in-memory log of recent routing decisions, optionally backed by an `IRoutingActivityStore`.
 - `JsonPromptExtractor`: the default `IPromptExtractor`, for the common LLM request shapes.
 
@@ -162,7 +156,6 @@ The router as ASP.NET Core middleware: connectors, the three chat protocols, the
 - `RouterConfiguration`: everything the router can be configured with, as one document.
 - `RouterConfigurationSource`: where the active configuration came from.
 - `RouterConfigurationVersion`: one applied configuration document.
-- `ConfigurationIssue`: a problem with a configuration document, tied to the field it is about.
 - `SecretReference`: references to secrets (`${env:…}`, the secret store) inside configuration values.
 
 ### Connectors
@@ -184,7 +177,6 @@ The router as ASP.NET Core middleware: connectors, the three chat protocols, the
 - `ConnectorProbeFailure`: why a probe failed.
 - `DiscoveredModel`: one model a connector's server reports, with the details it gives.
 - `DiscoveredModelKind`: what kind of model a server reports.
-- `EndpointCheck`: the outcome of checking a connector on demand: reachable, credentials accepted, installed, signed in.
 - `CliExecutableLocator`: finds a CLI's executable on the absolute PATH entries.
 - `CliExecutableLookup`: the result of `CliExecutableLocator.Find`.
 
@@ -206,7 +198,6 @@ The router as ASP.NET Core middleware: connectors, the three chat protocols, the
 - `RetryEscalationOptions`: a prompt repeated soon after its answer goes one tier up.
 - `HousekeepingOptions`: a client's side requests: how they are recognised and the tier they get.
 - `RateLimitOptions`: one client's rate limit over a sliding minute.
-- `RateLimitStatus`: a client's rate limit and its use in the last minute.
 - `NetworkOptions`: the router's own outbound connections, and who on this machine counts as local.
 
 ### The chat protocol model
@@ -236,14 +227,12 @@ The router as ASP.NET Core middleware: connectors, the three chat protocols, the
 - `UsageOptions`: usage accounting and budgets (`SemanticRouter:Usage`).
 - `BudgetDefinition`: a spending limit for one model or one connector.
 - `BudgetPeriod`: the period a budget covers.
-- `BudgetStatus`: where a budget stands in its current period.
 - `UsageRecord`: what one served request used.
 - `UsageTotals`: usage added up, including what the subscriptions' requests would have cost at API prices.
 - `UsageGroup`: one group of a usage summary.
 - `UsageGrouping`: how a summary groups usage.
 - `UsageModelTotals`: one model's usage within one group, at the prices it was recorded at.
 - `UsagePricing`: usage at the catalog's current prices.
-- `UsageSummaries`: the grouping that ledgers share.
 - `ModelPrice`: a cloud model's list prices, in USD per million tokens.
 - `ModelPriceList`: cloud providers' list prices, from OpenRouter's public model list.
 - `ModelPriceMatch`: a price the list has for a catalog model.
@@ -253,8 +242,6 @@ The router as ASP.NET Core middleware: connectors, the three chat protocols, the
 ### Activity, state and feedback
 
 - `RoutingActivityEntry`: one routed request, for the dashboard's activity view.
-- `ActivitySeries`: activity over a window.
-- `ActivityBucket`: one bucket of an `ActivitySeries`.
 - `ActivityPurgeResult`: what a purge of activity did, including whether it is gone from the store's files.
 - `StateOptions`: what the router keeps about requests, and for how long (`SemanticRouter:State`).
 - `StateRetentionOptions`: how long the state database keeps records.
@@ -263,10 +250,7 @@ The router as ASP.NET Core middleware: connectors, the three chat protocols, the
 - `RoutingFeedback`: one piece of feedback about a routing decision, with the tier it implies.
 - `FeedbackKind`: a sign, noticed afterwards, that a routing decision was not good enough.
 - `FeedbackOptions`: which feedback signs are recorded.
-- `FeedbackSummary`: feedback per route and per model over a period.
-- `FeedbackSummary.Group`: one route or model in a `FeedbackSummary`.
 - `ReliabilityOptions`: when a model that draws far more feedback than its peers on some work stops being offered for it.
-- `ModelReliability`: how one model has done on one kind of work.
 
 ### The judge and automatic tuning
 
@@ -286,11 +270,9 @@ The router as ASP.NET Core middleware: connectors, the three chat protocols, the
 - `MemoryOptions`: the memory sources the dashboard maps, and whether the router records which notes reach which model.
 - `MemorySourceOptions`: one memory source.
 - `MemorySourceType`: the built-in memory sources.
-- `MemorySourceStatus`: a memory source as last scanned.
 - `MemoryDocument`: a note as a source returns it.
 - `MemoryReference`: a note found in a routed request.
 - `MemoryShareKind`: how a note showed up in a request.
-- `MemoryExposure`: where one note has been sent.
 
 ### Dashboard, notifications and the service
 
@@ -301,8 +283,6 @@ The router as ASP.NET Core middleware: connectors, the three chat protocols, the
 - `RouterNotice`: one thing that needs a decision.
 - `WebhookOptions`: one webhook.
 - `WebhookFormat`: how a webhook message is written.
-- `ServiceStatus`: the router itself: where it runs, the addresses clients use, and how it is doing.
-- `EndpointStatus`: a connector's endpoint and its health, as `GET api/status` reports it.
 - `ClientAddress`: a base address clients point at.
 - `SetupDetection`: something `IRouterSetupDetector` found that the router could use.
 - `RouterServiceDescription`: how the router runs, for the dashboard's Service page.

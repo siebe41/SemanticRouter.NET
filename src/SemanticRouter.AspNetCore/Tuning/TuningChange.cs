@@ -198,7 +198,7 @@ public interface ITuningStore
 }
 
 /// <summary>The default <see cref="ITuningStore"/>: in memory, gone on restart.</summary>
-public sealed class InMemoryTuningStore : ITuningStore
+internal sealed class InMemoryTuningStore : ITuningStore
 {
     private readonly Lock _gate = new();
     private readonly SortedDictionary<long, TuningChange> _changes = [];

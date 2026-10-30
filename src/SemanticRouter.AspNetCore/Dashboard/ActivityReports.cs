@@ -149,7 +149,7 @@ internal static class ActivityReports
 }
 
 /// <summary>Activity over a window.</summary>
-public sealed record ActivitySeries
+internal sealed record ActivitySeries
 {
     /// <summary>Start of the window (inclusive).</summary>
     public required DateTimeOffset Since { get; init; }
@@ -177,7 +177,7 @@ public sealed record ActivitySeries
 }
 
 /// <summary>One bucket of an <see cref="ActivitySeries"/>.</summary>
-public sealed record ActivityBucket
+internal sealed record ActivityBucket
 {
     /// <summary>Start of the bucket.</summary>
     public required DateTimeOffset Start { get; init; }

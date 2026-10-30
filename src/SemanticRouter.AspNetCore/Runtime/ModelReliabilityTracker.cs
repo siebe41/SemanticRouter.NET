@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>How one model has done on one kind of work: a route, or turns with tools.</summary>
-public sealed record ModelReliability
+internal sealed record ModelReliability
 {
     /// <summary>The model that answered.</summary>
     public required string Model { get; init; }
