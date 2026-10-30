@@ -26,7 +26,7 @@ const copyable = (text) =>
 /* The base addresses: those the server reports, or the one this page was loaded from. */
 export function addresses(sv) {
   const list = sv.addresses || [];
-  return list.length ? list : [{ url: location.origin, local: ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname), encrypted: true }];
+  return list.length ? list : [{ url: location.origin, local: ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname), encrypted: location.protocol === 'https:' }];
 }
 
 /* Who else can use the gateway, and what they need. */

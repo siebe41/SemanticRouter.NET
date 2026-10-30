@@ -172,4 +172,19 @@ public class ThresholdTunerTests
         tuning.ConfirmedBefore.LocalOnlyMissed.Should().Be(0);
         tuning.ConfirmedAfter.Should().Be(new TuningScore { Total = 4, Correct = 4, TooLow = 0, TooHigh = 0, LocalOnlyMissed = 0 });
     }
+
+    [Fact]
+    public async Task A_step_smaller_than_a_hundredth_still_moves_the_threshold()
+    {
+        // #307: each step was rounded to two places, so a MaxStep under 0.005 never moved anything.
+        EvaluationCase[] confirmed =
+        [
+            new EvaluationCase { Prompt = At("hi there", 0.725f), ExpectedTier = 1 },
+            new EvaluationCase { Prompt = At("what is the weather in paris", 0.30f), ExpectedTier = 3 },
+        ];
+
+        ThresholdTuning tuning = await TuneAsync(Configuration(0.80f), confirmed, limits: new ThresholdTuningOptions { MaxStep = 0.004f });
+
+        tuning.Steps.Should().ContainSingle().Which.Proposed.Should().BeApproximately(0.796f, 1e-6f);
+    }
 }

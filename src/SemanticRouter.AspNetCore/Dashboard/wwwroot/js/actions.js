@@ -264,7 +264,7 @@ export const actions = {
     const i = +el.dataset.index;
     removeListItem(ensure(usage, 'Budgets'), i, null, `budget ${(usage().Budgets[i] || {}).Name || ''}`.trim(), nextRow('Usage.Budgets.#.Name', i, 'budget-add'), [`[data-bind="Usage.Budgets.${i}.Name"]`]);
   },
-  async 'audit-load'() { state.audit.entries = null; await loadAudit(); },
+  async 'audit-load'() { state.audit.entries = null; await loadAudit(true); },
   async 'sessions-revoke-all'() {
     const ok = await ask({ title: 'Sign out every session?', body: '<p>Every dashboard session signed in with a token ends, yours included. Tokens keep working; everyone signs in again.</p>', actions: [{ label: 'Sign out every session', value: true, kind: 'danger' }, { label: 'Cancel', value: false, focus: true }] });
     if (!ok) return;
@@ -486,8 +486,9 @@ export const actions = {
     const added = [];
     l.lineup.filter((e) => e.selected && e.suggestion && !e.inCatalog).forEach((e) => {
       const model = JSON.parse(JSON.stringify(e.suggestion));
-      let name = (model.Name || '').trim() || e.id; let n = 1;
-      while (taken.has(name.toLowerCase())) name = `${model.Name}-${++n}`;
+      const base = (model.Name || '').trim() || e.id;
+      let name = base; let n = 1;
+      while (taken.has(name.toLowerCase())) name = `${base}-${++n}`;
       model.Name = name; taken.add(name.toLowerCase());
       models.push(model);
       Object.assign(e, { inCatalog: name, selected: false });

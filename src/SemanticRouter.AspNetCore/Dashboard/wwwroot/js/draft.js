@@ -115,7 +115,9 @@ export function countChanges(base, draft) {
       return n + (ORDERED_MAPS.has(key) ? reordered(Object.keys(b), Object.keys(m)) : 0);
     }
     const unique = (list) => new Set(list.map(nameKey)).size === list.length;
-    if (Array.isArray(b) && Array.isArray(m) && !b.every(primitive) && named(b) && named(m) && unique(b) && unique(m)) {
+    // An empty list holds whatever the other one does, so items added to or all removed from it count one each.
+    const objects = (x, y) => !(x.length ? x : y).every(primitive);
+    if (Array.isArray(b) && Array.isArray(m) && objects(b, m) && named(b) && named(m) && unique(b) && unique(m)) {
       const inDraft = new Map(m.map((x) => [nameKey(x), x]));
       const inBase = new Set(b.map(nameKey));
       const gone = new Map();
@@ -127,7 +129,7 @@ export function countChanges(base, draft) {
       });
       return n + gone.size;
     }
-    if (Array.isArray(b) && Array.isArray(m) && !b.every(primitive) && !m.every(primitive)) {
+    if (Array.isArray(b) && Array.isArray(m) && objects(b, m) && objects(m, b)) {
       let n = Math.abs(b.length - m.length);
       for (let i = 0; i < Math.min(b.length, m.length); i++) n += count(b[i], m[i]);
       return n;

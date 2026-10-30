@@ -340,4 +340,13 @@ public class PromptedReplyStreamTests
         end.Calls.Should().HaveCount(2);
         end.Text.Trim().Should().BeEmpty();
     }
+
+    [Fact]
+    public void A_label_in_another_case_is_never_shown_to_the_client()
+    {
+        // #282: the fence is matched in any case, but the label was only taken out as written.
+        PromptedReply end = Stream("```TOOL_CALL-7F3A9C01\nbad\n```", format: StrictFormat with { Parsing = PromptedToolParsing.Lenient }).End;
+
+        end.Text.Should().NotContainEquivalentOf("tool_call-7f3a9c01").And.Contain("tool_call");
+    }
 }

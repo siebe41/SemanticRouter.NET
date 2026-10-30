@@ -261,7 +261,8 @@ internal sealed class DesktopUpdater(
             return null;
         }
 
-        VelopackAsset? asset = _ready;
+        // A newer version found after one was downloaded is downloaded in its place.
+        VelopackAsset? asset = _ready is not null && (_available is null || _available.TargetFullRelease.Version.ToString() == _ready.Version.ToString()) ? _ready : null;
         try
         {
             if (asset is null && _available is { } update)
@@ -286,7 +287,7 @@ internal sealed class DesktopUpdater(
             return null;
         }
 
-        if (_ready is null)
+        if (_ready != asset)
         {
             _ready = asset;
             Problem = null;

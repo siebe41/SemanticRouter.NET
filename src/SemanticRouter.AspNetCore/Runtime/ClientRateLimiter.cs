@@ -132,7 +132,15 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
         DateTimeOffset now = _time.GetUtcNow();
         lock (_gate)
         {
-            UsageOf(client, now).Add(new Entry(now, tokens, Request: false));
+            Usage usage = UsageOf(client, now);
+            if (tokens > 0)
+            {
+                usage.Add(new Entry(now, tokens, Request: false));
+            }
+            else
+            {
+                usage.Refund(-tokens, now);
+            }
         }
     }
 
@@ -228,6 +236,30 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
             LastSeen = entry.At;
             Tokens += entry.Tokens;
             Requests += entry.Request ? 1 : 0;
+        }
+
+        /// <summary>
+        /// Takes <paramref name="tokens"/> off the charges still in the window, newest first and none below zero. A refund
+        /// is not an entry of its own: one stamped later than the estimate it corrects would outlast it and take the
+        /// count below what was used.
+        /// </summary>
+        public void Refund(long tokens, DateTimeOffset now)
+        {
+            LastSeen = now;
+            Entry[] entries = Entries.ToArray();
+            for (int i = entries.Length - 1; i >= 0 && tokens > 0; i--)
+            {
+                long taken = Math.Min(tokens, entries[i].Tokens);
+                entries[i] = entries[i] with { Tokens = entries[i].Tokens - taken };
+                Tokens -= taken;
+                tokens -= taken;
+            }
+
+            Entries.Clear();
+            foreach (Entry entry in entries)
+            {
+                Entries.Enqueue(entry);
+            }
         }
 
         public void Prune(DateTimeOffset now)

@@ -400,4 +400,18 @@ public sealed class MachinePolicyTests : RouterHostTest
         MachinePolicy.FromJson($$"""{"Updates":{{registry}}}""").Updates.AllowCustomFeed.Should().BeTrue("a DWORD 1 in the registry");
         SemanticRouter.Host.EgressList.Updates(policy).Should().Contain("SEMANTICROUTER_UPDATE_SOURCE may name another feed");
     }
+
+    [Fact]
+    public void A_bracketed_ipv6_address_may_have_a_port()
+    {
+        // #295: the port was split off only at the only colon, so [::1]:8080 was not a host pattern.
+        MachinePolicy.IsHostPattern("[::1]:8080").Should().BeTrue();
+        MachinePolicy.IsHostPattern("[2001:db8::1]:443").Should().BeTrue();
+        MachinePolicy.IsHostPattern("[::1]").Should().BeTrue();
+        MachinePolicy.IsHostPattern("[::1]:0").Should().BeFalse();
+
+        MachinePolicy policy = MachinePolicy.FromJson("""{"AllowedEndpoints":["[2001:db8::1]:443"]}""");
+        policy.AllowsEndpoint(new Uri("https://[2001:db8::1]/")).Should().BeTrue();
+        policy.AllowsEndpoint(new Uri("https://[2001:db8::1]:8443/")).Should().BeFalse();
+    }
 }

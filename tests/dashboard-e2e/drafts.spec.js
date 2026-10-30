@@ -546,3 +546,20 @@ test('signing in again keeps the draft', async ({ page }) => {
   await expect(page.locator('input[data-bind="Routes.0.Name"]')).toHaveValue('chat');
   await expect(page.locator('#save-bar')).toContainText('1 unapplied change');
 });
+
+test('named items added to or removed from an empty list count one change each', async ({ page }) => {
+  // #310: an empty base list was taken for a list of plain values, so three new routes counted as one change.
+  await open(page, 'overview');
+  const r = await page.evaluate(async () => {
+    const { countChanges } = await import('/router/js/draft.js');
+    const three = [{ Name: 'a' }, { Name: 'b' }, { Name: 'c' }];
+    const tiers = [{ MinScore: 0.4, Tier: 2 }, { MinScore: 0.8, Tier: 3 }];
+    return {
+      added: countChanges({ Routes: [] }, { Routes: three }),
+      removed: countChanges({ Routes: three }, { Routes: [] }),
+      unnamed: countChanges({ ComplexityTiers: [] }, { ComplexityTiers: tiers }),
+      values: countChanges({ Utterances: [] }, { Utterances: ['x', 'y'] }),
+    };
+  });
+  expect(r).toEqual({ added: 3, removed: 3, unnamed: 2, values: 1 });
+});

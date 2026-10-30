@@ -55,7 +55,7 @@ export const state = {
   report: null,        // the Feedback form: kind, Activity entry, the text typed so far
   profileTester: { prompt: '', results: null, busy: false },
   checking: new Set(), // connectors whose endpoint check is running
-  audit: { entries: null, loading: false, limit: 200, error: null }, // GET api/audit (Audit log)
+  audit: { entries: null, loading: null, limit: 200, error: null }, // GET api/audit (Audit log); loading: the request on its way
   hostService: { data: null, loading: false, error: null, scope: null, port: null, waiting: null, stopped: null }, // GET api/service (Service)
   lineups: [],         // Discover models: one { connector, busy, error, server, loading, loadingNote, note, lineup } per connector asked
   issues: null,        // [{ path, message }] behind state.errors: each problem tied to its field (data-bind path)

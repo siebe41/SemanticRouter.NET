@@ -254,7 +254,7 @@ internal sealed partial class ThemeCatalog(string? directory)
     [GeneratedRegex(@"(?<selectors>[^{}]+)\{(?<body>[^{}]*)\}")]
     private static partial Regex Block();
 
-    [GeneratedRegex(@"(?<name>--[\w-]+|color-scheme)\s*:\s*(?<value>[^;]+);")]
+    [GeneratedRegex(@"(?<name>--[\w-]+|color-scheme)\s*:\s*(?<value>[^;]+)(?:;|$)")]
     private static partial Regex Declaration();
 
     [GeneratedRegex("^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$")]

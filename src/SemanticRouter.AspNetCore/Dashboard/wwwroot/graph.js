@@ -184,7 +184,7 @@
         ctx.lineWidth = 1.6 / view.k;
         ctx.beginPath();
         for (const l of links) {
-          if (l.s === focus || l.t === focus) { ctx.moveTo(l.s.x, l.s.y); ctx.lineTo(l.t.x, l.t.y); }
+          if ((l.s === focus || l.t === focus) && visible(l.s) && visible(l.t)) { ctx.moveTo(l.s.x, l.s.y); ctx.lineTo(l.t.x, l.t.y); }
         }
         ctx.stroke();
       }

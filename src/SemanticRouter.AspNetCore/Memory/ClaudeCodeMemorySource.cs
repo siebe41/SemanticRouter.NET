@@ -81,7 +81,7 @@ internal sealed partial class ClaudeCodeMemorySource : IMemorySource
         return name.Length > 0 ? name : folder;
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"\A---\r?\n(?:.*\r?\n)*?name:[ \t]*(?<name>[^\r\n]+)\r?\n(?:.*\r?\n)*?---")]
+    [System.Text.RegularExpressions.GeneratedRegex(@"\A---\r?\n(?:(?!---\r?\n).*\r?\n)*?name:[ \t]*(?<name>[^\r\n]+)\r?\n(?:.*\r?\n)*?---")]
     private static partial System.Text.RegularExpressions.Regex FrontmatterName();
 
     [System.Text.RegularExpressions.GeneratedRegex(@"^(?:[A-Za-z]--)?(?:home|Users)-[^-]+-")]

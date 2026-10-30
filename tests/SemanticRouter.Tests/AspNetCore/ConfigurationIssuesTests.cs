@@ -137,4 +137,16 @@ public sealed class ConfigurationIssuesTests
         issue.Path.Should().Be("Memory.Sources.0.Type");
         issue.Message.Should().Be($"\"Telepathy\" is not one of: {string.Join(", ", Enum.GetNames<MemorySourceType>())}");
     }
+
+    [Fact]
+    public void A_memory_source_the_policy_turns_off_points_at_its_own_switch()
+    {
+        // #304: the path was rebuilt from its first two parts, which dropped the source's index.
+        var document = new RouterConfiguration();
+        document.Memory.Sources.Add(new MemorySourceOptions { Name = "a", Path = "a" });
+        document.Memory.Sources.Add(new MemorySourceOptions { Name = "b", Path = "b" });
+
+        ConfigurationIssues.PathOf("Not allowed: Memory source 'b' is turned off: your organization's policy.", document)
+            .Should().Be("Memory.Sources.1.Enabled");
+    }
 }

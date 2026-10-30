@@ -97,6 +97,22 @@ public sealed class UpdateControlTests : IDisposable
     }
 
     [Fact]
+    public async Task A_newer_update_found_after_one_was_downloaded_is_downloaded_in_its_place()
+    {
+        // #290: once 1.0.1 was ready, 1.0.2 was never downloaded and 1.0.1 was still the one applied.
+        var updates = new FakeUpdates();
+        var updater = new DesktopUpdater(updates, new RecordingPlatform(), TextWriter.Null);
+        (await updater.CheckAsync()).Should().Be("1.0.1");
+
+        updates.Publish("1.0.2");
+        (await updater.CheckAsync()).Should().Be("1.0.2");
+
+        (updater.Ready, updater.Available).Should().Be(("1.0.2", "1.0.2"));
+        (await updater.ApplyOnQuitAsync()).Should().BeTrue();
+        updates.Calls.Should().Equal("check", "download", "check", "download", "apply 1.0.2 restart=False");
+    }
+
+    [Fact]
     public async Task Notify_announces_an_update_and_never_applies_it_on_quit()
     {
         var updates = new FakeUpdates();
@@ -685,13 +701,8 @@ public sealed class UpdateControlTests : IDisposable
     /// <summary>A feed with 1.0.1 for an installed 1.0.0, recording what the updater asks of Velopack.</summary>
     internal sealed class FakeUpdates : IAppUpdates
     {
-        private readonly VelopackAsset _latest = new()
-        {
-            PackageId = "SemanticRouter",
-            Version = SemanticVersion.Parse("1.0.1"),
-            Type = VelopackAssetType.Full,
-            FileName = "SemanticRouter-1.0.1-win-x64-full.nupkg",
-        };
+        private VelopackAsset _latest = Asset("1.0.1", VelopackAssetType.Full);
+        private VelopackAsset? _downloaded;
 
         public List<string> Calls { get; } = [];
 
@@ -713,7 +724,10 @@ public sealed class UpdateControlTests : IDisposable
 
         public string? CurrentVersion => "1.0.0";
 
-        public VelopackAsset? Pending => Downloaded ? _latest : null;
+        public VelopackAsset? Pending => Downloaded ? _downloaded ?? _latest : null;
+
+        /// <summary>The feed now offers <paramref name="version"/>.</summary>
+        public void Publish(string version) => _latest = Asset(version, VelopackAssetType.Full);
 
         public Task<UpdateInfo?> CheckAsync()
         {
@@ -727,7 +741,7 @@ public sealed class UpdateControlTests : IDisposable
         {
             Calls.Add("download");
             Requested = update;
-            Downloaded = true;
+            (Downloaded, _downloaded) = (true, update.TargetFullRelease);
             return Task.CompletedTask;
         }
 
