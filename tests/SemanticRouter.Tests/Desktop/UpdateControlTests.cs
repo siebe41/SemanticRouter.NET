@@ -113,6 +113,22 @@ public sealed class UpdateControlTests : IDisposable
     }
 
     [Fact]
+    public async Task An_update_already_downloaded_stays_ready_when_a_newer_one_fails_to_download()
+    {
+        var updates = new FakeUpdates();
+        var updater = new DesktopUpdater(updates, new RecordingPlatform(), TextWriter.Null);
+        await updater.CheckAsync();
+
+        updates.Publish("1.0.2");
+        updates.DownloadError = "connection reset";
+        await updater.CheckAsync();
+
+        updater.Ready.Should().Be("1.0.1");
+        (await updater.ApplyOnQuitAsync()).Should().BeTrue();
+        updates.Calls.Should().Equal("check", "download", "check", "download", "apply 1.0.1 restart=False");
+    }
+
+    [Fact]
     public async Task Notify_announces_an_update_and_never_applies_it_on_quit()
     {
         var updates = new FakeUpdates();
@@ -737,9 +753,17 @@ public sealed class UpdateControlTests : IDisposable
                 : Task.FromResult<UpdateInfo?>(UpToDate ? null : Deltas ? new UpdateInfo(_latest, false, Asset("1.0.0", VelopackAssetType.Full), [Asset("1.0.1", VelopackAssetType.Delta)]) : new UpdateInfo(_latest, false));
         }
 
+        /// <summary>Downloading fails with this message.</summary>
+        public string? DownloadError { get; set; }
+
         public Task DownloadAsync(UpdateInfo update, CancellationToken cancellationToken)
         {
             Calls.Add("download");
+            if (DownloadError is { } error)
+            {
+                return Task.FromException(new HttpRequestException(error));
+            }
+
             Requested = update;
             (Downloaded, _downloaded) = (true, update.TargetFullRelease);
             return Task.CompletedTask;

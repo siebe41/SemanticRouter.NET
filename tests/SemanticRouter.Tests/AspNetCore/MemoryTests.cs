@@ -142,6 +142,18 @@ public sealed class MemorySourceTests
     }
 
     [Fact]
+    public async Task A_long_crlf_frontmatter_without_a_name_is_read_at_once()
+    {
+        // Review of #354: with '.' matching the \r of a CRLF line, ruling out a name took time exponential in the lines.
+        string frontmatter = string.Concat(Enumerable.Range(0, 40).Select(i => $"key{i}: value\r\n"));
+        var document = new MemoryDocument { Path = "CLAUDE.md", Content = $"---\r\n{frontmatter}---\r\nbody\r\n" };
+
+        string title = await Task.Run(() => ClaudeCodeMemorySource.TitleFor(document)).WaitAsync(TimeSpan.FromSeconds(5));
+
+        title.Should().NotContain("value");
+    }
+
+    [Fact]
     public void Knowledge_graph_source_reads_entities_and_relations_from_jsonl()
     {
         const string jsonl = """
