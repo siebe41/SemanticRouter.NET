@@ -697,3 +697,76 @@ test.describe('screenshots', () => {
     }
   }
 });
+
+test('the audit log shows the limit chosen while an earlier load was still on its way', async ({ page }) => {
+  // #301: a load still running dropped the new one, and its older answer filled the table under the new limit.
+  let loads = 0;
+  await page.route('**/router/api/audit?limit=*', async (route) => {
+    const limit = new URL(route.request().url()).searchParams.get('limit');
+    if (limit === '200' && ++loads > 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return route.fulfill({ json: { entries: [] } });
+    }
+    return route.fulfill({ response: await route.fetch() });
+  });
+  await open(page, 'audit');
+  const table = page.locator('#view table[aria-label="Audit log"]');
+  await expect(table).toContainText('applied the configuration');
+
+  const late = page.waitForResponse((r) => r.url().includes('limit=200'));
+  await page.locator('#view [data-action="audit-load"]').click();
+  const wanted = page.waitForRequest((r) => r.url().includes('limit=1000'));
+  await page.locator('#audit-limit').selectOption('1000');
+  await wanted;
+  await late;
+
+  await expect(page.locator('#audit-limit')).toHaveValue('1000');
+  await expect(table).toContainText('applied the configuration');
+});
+
+test('the address the page was loaded from is marked unencrypted over http', async ({ page }) => {
+  // #311: with no addresses from the server, the page's own was always marked encrypted, hiding the warning.
+  await open(page, 'overview');
+  const fallback = await page.evaluate(async () => (await import('/router/js/service.js')).addresses({})[0]);
+  expect(fallback.encrypted).toBe(false);
+});
+
+test('a suggested model without a name is added under its id when that name is taken', async ({ page }) => {
+  // #314: the clash loop built names from the empty Name, adding "  -2".
+  await open(page, 'overview');
+  const names = await page.evaluate(async () => {
+    const { state } = await import('/router/js/core.js');
+    const { actions } = await import('/router/js/actions.js');
+    state.lineups = [{ connector: 'local', lineup: [{ id: 'local-small', selected: true, suggestion: { Name: '  ', Connector: 'local', Model: 'local-small', Tier: 1 } }] }];
+    actions['lineup-add']({ dataset: { index: '0' } });
+    return state.config.Models.map((m) => m.Name);
+  });
+  expect(names).toContain('local-small-2');
+});
+
+test('the memory map highlights no link to a node the filter hides', async ({ page }) => {
+  // #316: the focused node's links were drawn in the accent colour even when the other end was hidden.
+  await open(page, 'overview');
+  const highlighted = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.style.cssText = 'position:fixed;left:0;top:0;width:400px;height:300px';
+    document.body.append(canvas);
+    const ctx = canvas.getContext('2d');
+    const strokes = [];
+    let lines = 0;
+    const proto = CanvasRenderingContext2D.prototype;
+    ctx.beginPath = function () { lines = 0; return proto.beginPath.call(this); };
+    ctx.lineTo = function (...a) { lines++; return proto.lineTo.apply(this, a); };
+    ctx.stroke = function (...a) { strokes.push({ alpha: this.globalAlpha, lines }); return proto.stroke.apply(this, a); };
+    const graph = window.MemoryGraph.create(canvas, {});
+    graph.setData([{ id: 'a', title: 'A' }, { id: 'b', title: 'B' }, { id: 'c', title: 'C' }], [[0, 1], [0, 2]]);
+    graph.setVisible((n) => n.id !== 'b');
+    graph.select('a');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    graph.destroy();
+    canvas.remove();
+    return strokes.filter((s) => Math.abs(s.alpha - 0.95) < 0.01).map((s) => s.lines);
+  });
+  expect(highlighted.length).toBeGreaterThan(0);
+  expect(highlighted.every((n) => n === 1), `links drawn in each highlight pass: ${highlighted}`).toBe(true);
+});

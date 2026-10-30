@@ -50,6 +50,11 @@ internal static class EvaluationApi
             // A prompt labelled again replaces its earlier label.
             EvaluationCase added = label.ToCase();
             var cases = store.Load().Where(c => !string.Equals(c.Prompt, added.Prompt, StringComparison.Ordinal)).Append(added).ToArray();
+            if (cases.Length > MaxCases)
+            {
+                return Results.Problem($"An evaluation set can have at most {MaxCases} prompts.", statusCode: StatusCodes.Status400BadRequest);
+            }
+
             store.Save(cases);
             DashboardAudit.Detail(context, $"tier {label.Tier}");
             return Results.Json(new EvaluationSetResponse(store.Location, cases.Length, cases.Select(CaseDto.From).ToArray()), json);

@@ -401,4 +401,17 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
             Release.Dispose();
         }
     }
+
+    [Fact]
+    public async Task A_reset_to_the_baseline_names_the_history_version_it_runs()
+    {
+        // #308: Apply and RevertToSaved kept the version they recorded; ResetToBaseline dropped it.
+        await StartAsync();
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        _ = provider.Current;
+
+        RouterRuntime reset = provider.ResetToBaseline("admin");
+
+        reset.HistoryVersion.Should().Be(provider.History!.List(1).Single().Id);
+    }
 }

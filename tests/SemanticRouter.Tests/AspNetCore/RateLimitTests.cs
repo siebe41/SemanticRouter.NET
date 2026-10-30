@@ -260,4 +260,25 @@ public sealed class RateLimitTests : RouterHostTest
         options.RemoteRequestsPerMinute = 0;
         ClientRateLimiter.LimitFor(options, null, remote: true).Should().BeNull();
     }
+
+    [Fact]
+    public void A_refund_never_outlasts_the_estimate_it_corrects()
+    {
+        // #293: a refund was an entry of its own, stamped later than the estimate, so once the estimate left the window
+        // the count went below what was used.
+        var time = new ManualTimeProvider();
+        var limiter = new ClientRateLimiter(time);
+        var limit = new RateLimitOptions { TokensPerMinute = 1000 };
+
+        limiter.TryAdmit("a", limit, 1000).Admitted.Should().BeTrue();
+        time.Advance(TimeSpan.FromSeconds(59));
+        limiter.Charge("a", -900);
+        time.Advance(TimeSpan.FromSeconds(1));
+
+        var options = new PromptRouterMiddlewareOptions();
+        options.RateLimits["a"] = limit;
+        limiter.Status(options).Single().Tokens.Should().Be(0);
+        limiter.TryAdmit("a", limit, 1000).Admitted.Should().BeTrue();
+        limiter.TryAdmit("a", limit, 10).Admitted.Should().BeFalse("no refund is left over to lend extra budget");
+    }
 }

@@ -460,7 +460,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         lock (_gate)
         {
             runtime = Build(Baseline.Clone(), RouterConfigurationSource.Configuration, changeSource: "reset", actor: actor);
-            Record(runtime.Configuration, "reset", actor, "the application's own configuration");
+            runtime.HistoryVersion = Record(runtime.Configuration, "reset", actor, "the application's own configuration");
             previous = _current;
             _current = runtime;
         }

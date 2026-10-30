@@ -81,7 +81,9 @@ internal sealed partial class ClaudeCodeMemorySource : IMemorySource
         return name.Length > 0 ? name : folder;
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex(@"\A---\r?\n(?:.*\r?\n)*?name:[ \t]*(?<name>[^\r\n]+)\r?\n(?:.*\r?\n)*?---")]
+    // [^\r\n]* rather than .*: '.' also matches the \r of a CRLF line, so each line could be read two ways and a
+    // frontmatter without a name took time exponential in its length to rule out.
+    [System.Text.RegularExpressions.GeneratedRegex(@"\A---\r?\n(?:(?!---\r?\n)[^\r\n]*\r?\n)*?name:[ \t]*(?<name>[^\r\n]+)\r?\n(?:[^\r\n]*\r?\n)*?---")]
     private static partial System.Text.RegularExpressions.Regex FrontmatterName();
 
     [System.Text.RegularExpressions.GeneratedRegex(@"^(?:[A-Za-z]--)?(?:home|Users)-[^-]+-")]

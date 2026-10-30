@@ -2,19 +2,26 @@
 import { API, api, h, readOnly, state, toast, views } from './core.js';
 import { render } from './shell.js';
 
-/* GET api/audit into state.audit.entries. */
-export async function loadAudit() {
-  if (state.audit.loading) return;
-  state.audit.loading = true;
+/*
+ * GET api/audit into state.audit.entries. A load of the same limit already on its way is left to finish; a new limit, or
+ * again (Refresh), starts another, and only the latest one's answer is kept.
+ */
+export async function loadAudit(again = false) {
+  const limit = state.audit.limit;
+  if (state.audit.loading && state.audit.loading.limit === limit && !again) return;
+  const request = state.audit.loading = { limit };
+  let entries; let error = null;
   try {
-    state.audit.entries = (await api('GET', `/audit?limit=${state.audit.limit}`)).entries;
-    state.audit.error = null;
+    entries = (await api('GET', `/audit?limit=${limit}`)).entries;
   } catch (e) {
-    state.audit.entries = [];
-    state.audit.error = e.status === 403 ? 'Only the admin role can read the audit log.' : e.message;
-    if (e.status !== 403) toast(e.message, 'danger');
+    entries = [];
+    error = e;
   }
-  state.audit.loading = false;
+  if (state.audit.loading !== request) return;
+  state.audit.entries = entries;
+  state.audit.error = !error ? null : error.status === 403 ? 'Only the admin role can read the audit log.' : error.message;
+  if (error && error.status !== 403) toast(error.message, 'danger');
+  state.audit.loading = null;
   if (state.view === 'audit') render();
 }
 

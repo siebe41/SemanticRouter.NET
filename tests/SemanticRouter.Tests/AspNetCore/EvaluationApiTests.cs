@@ -225,4 +225,21 @@ public sealed class EvaluationApiTests : RouterHostTest
 
         retry.Headers.GetValues("X-Prompt-Route-Model").Should().Equal("local");
     }
+
+    [Fact]
+    public async Task Labelling_a_prompt_cannot_grow_the_set_past_its_limit()
+    {
+        // #302: POST evaluation/cases had no limit, so the set could outgrow what evaluate accepts.
+        HttpClient client = await StartRealAsync();
+        string full = string.Join('\n', Enumerable.Range(0, 5000).Select(i => $$"""{"prompt":"prompt {{i}}","tier":1}"""));
+        (await client.PutAsync("/router/api/evaluation/set", Text(full))).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        HttpResponseMessage added = await client.PostAsJsonAsync("/router/api/evaluation/cases", new { prompt = "one too many", tier = 2 });
+        HttpResponseMessage relabelled = await client.PostAsJsonAsync("/router/api/evaluation/cases", new { prompt = "prompt 7", tier = 2 });
+
+        added.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await added.Content.ReadAsStringAsync()).Should().Contain("at most 5000 prompts");
+        relabelled.StatusCode.Should().Be(HttpStatusCode.OK, "a prompt labelled again does not grow the set");
+        Services.GetRequiredService<IEvaluationSetStore>().Load().Should().HaveCount(5000);
+    }
 }

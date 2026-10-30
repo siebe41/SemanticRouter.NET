@@ -431,6 +431,8 @@ internal sealed partial class MemoryIndex : IDisposable
                 }
 
                 AddTo(fileNames, System.IO.Path.GetFileName(note.Path).ToLowerInvariant(), i);
+                // A [[link]] can name a note by its file name, as ResolveLinks allows, as well as by its title or an alias.
+                AddTo(titles, System.IO.Path.GetFileNameWithoutExtension(note.Path).ToLowerInvariant(), i);
                 AddTo(titles, note.Title.ToLowerInvariant(), i);
                 foreach (string alias in note.Aliases)
                 {

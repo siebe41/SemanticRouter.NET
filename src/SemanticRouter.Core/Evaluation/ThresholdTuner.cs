@@ -245,7 +245,8 @@ public sealed class ThresholdTuner
     private static float Toward(float from, float to, float maxStep)
     {
         float distance = to - from;
-        return Math.Abs(distance) <= maxStep + 1e-6f ? to : MathF.Round((from + (Math.Sign(distance) * maxStep)) * 100f) / 100f;
+        // Rounded to four places, which drops float noise without swallowing a step smaller than 0.01.
+        return Math.Abs(distance) <= maxStep + 1e-6f ? to : MathF.Round(from + (Math.Sign(distance) * maxStep), 4);
     }
 
     /// <summary>

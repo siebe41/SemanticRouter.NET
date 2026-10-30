@@ -412,7 +412,8 @@ public sealed class MachinePolicy
 
             int? port = null;
             int colon = value.LastIndexOf(':');
-            if (colon > 0 && !value.EndsWith(']') && value.Count(c => c == ':') == 1)
+            // A port follows a bracketed IPv6 address ([::1]:8080) or the only colon of a name or IPv4 address.
+            if (colon > 0 && (value.StartsWith('[') ? value[colon - 1] == ']' : value.Count(c => c == ':') == 1))
             {
                 if (!int.TryParse(value[(colon + 1)..], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int p) || p is < 1 or > 65535)
                 {

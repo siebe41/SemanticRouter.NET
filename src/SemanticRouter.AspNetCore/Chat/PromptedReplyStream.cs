@@ -125,10 +125,12 @@ internal sealed class PromptedReplyStream(IReadOnlyCollection<string>? toolNames
     /// <summary>The text with the request's label written as plain <c>tool_call</c>: the token is for the model only.</summary>
     private string Redact(string text)
     {
-        // Until none is left: "tool_call" is how the label starts, so a replacement can complete another label.
-        while (_format.Label != PromptedToolCalls.Fence && text.Contains(_format.Label, StringComparison.Ordinal))
+        // Until none is left: "tool_call" is how the label starts, so a replacement can complete another label. In any case,
+        // as the fence is matched: a model that upper-cases the label must not hand it to the client.
+        while (!string.Equals(_format.Label, PromptedToolCalls.Fence, StringComparison.OrdinalIgnoreCase)
+            && text.Contains(_format.Label, StringComparison.OrdinalIgnoreCase))
         {
-            text = text.Replace(_format.Label, PromptedToolCalls.Fence, StringComparison.Ordinal);
+            text = text.Replace(_format.Label, PromptedToolCalls.Fence, StringComparison.OrdinalIgnoreCase);
         }
 
         return text;

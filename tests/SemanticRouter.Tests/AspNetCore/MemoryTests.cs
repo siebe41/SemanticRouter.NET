@@ -133,6 +133,27 @@ public sealed class MemorySourceTests
     }
 
     [Fact]
+    public void A_name_after_the_frontmatter_is_not_the_title()
+    {
+        // #305: the frontmatter pattern ran past its closing --- and took a name: line from the body.
+        var document = new MemoryDocument { Path = "CLAUDE.md", Content = "---\ntitle: t\n---\nbody\nname: Body Name\n---\n" };
+
+        ClaudeCodeMemorySource.TitleFor(document).Should().NotBe("Body Name");
+    }
+
+    [Fact]
+    public async Task A_long_crlf_frontmatter_without_a_name_is_read_at_once()
+    {
+        // Review of #354: with '.' matching the \r of a CRLF line, ruling out a name took time exponential in the lines.
+        string frontmatter = string.Concat(Enumerable.Range(0, 40).Select(i => $"key{i}: value\r\n"));
+        var document = new MemoryDocument { Path = "CLAUDE.md", Content = $"---\r\n{frontmatter}---\r\nbody\r\n" };
+
+        string title = await Task.Run(() => ClaudeCodeMemorySource.TitleFor(document)).WaitAsync(TimeSpan.FromSeconds(5));
+
+        title.Should().NotContain("value");
+    }
+
+    [Fact]
     public void Knowledge_graph_source_reads_entities_and_relations_from_jsonl()
     {
         const string jsonl = """
@@ -342,6 +363,26 @@ public sealed class MemoryMapTests : RouterHostTest, IDisposable
         JsonNode exposure = (await MemoryAsync(client))["exposure"]!;
         exposure["vault:Billing.md"]!["localReference"]!.GetValue<int>().Should().Be(1);
         exposure["vault:Billing.md"]!["cloudReference"]!.GetValue<int>().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task A_wikilink_may_name_a_note_by_its_file_name_when_it_has_another_title()
+    {
+        // #294: links between notes resolve a file name, as Obsidian does, but a request's [[file name]] was not spotted.
+        using var vault = new TempFolder().With("plans.md", "---\ntitle: Roadmap for Q3\n---\nShip the ledger service before the quarter ends.\n");
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+            },
+            services: s => s.Configure<MemoryOptions>(m => m.Sources.Add(new MemorySourceOptions { Name = "notes", Path = vault.Root })));
+        await MemoryAsync(client);
+
+        await client.PostAsync("/v1/chat/completions", Chat("What does [[plans]] say about the ledger?"));
+
+        Services.GetRequiredService<RoutingActivityLog>().Recent(1).Single().Memory.Select(m => (m.Id, m.Kind))
+            .Should().Equal(("notes:plans.md", MemoryShareKind.Reference));
     }
 
     [Fact]

@@ -41,7 +41,7 @@ internal static partial class ConfigurationIssues
         {
             string inner = error["Not allowed: ".Length..];
             return inner.Contains(" is turned off", StringComparison.Ordinal) && NamedPath(inner, document) is { } model
-                ? model.Split('.')[0] + "." + model.Split('.')[1] + ".Enabled"
+                ? EnabledPath(model)
                 : inner.StartsWith("Prompt previews", StringComparison.Ordinal) ? "State.StorePrompts"
                 : inner.StartsWith("Activity is kept", StringComparison.Ordinal) ? "State.Retention.ActivityDays"
                 : inner.StartsWith("The embeddings endpoint", StringComparison.Ordinal) ? "Embeddings.Endpoint"
@@ -106,6 +106,14 @@ internal static partial class ConfigurationIssues
         }
 
         return null;
+    }
+
+    /// <summary>The <c>Enabled</c> switch of the item at <paramref name="path"/>: <c>Models.2.Enabled</c>, <c>Memory.Sources.1.Enabled</c>.</summary>
+    private static string EnabledPath(string path)
+    {
+        string[] parts = path.Split('.');
+        int item = path.StartsWith("Memory.Sources.", StringComparison.Ordinal) ? 3 : 2;
+        return parts.Length < item ? path : string.Join('.', parts.Take(item)) + ".Enabled";
     }
 
     /// <summary>Messages about a named item: <c>Connector 'x' …</c>, <c>Route 'x' …</c>, <c>Budget 'x' …</c>, ….</summary>

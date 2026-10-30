@@ -116,4 +116,12 @@ public sealed class DashboardThemeTests : RouterHostTest
         theme.Problem.Should().Contain(":root[data-theme=\"sunset\"]");
         theme.MissingTokens.Should().Contain("--bg");
     }
+
+    [Fact]
+    public void The_last_declaration_of_a_theme_may_leave_out_its_semicolon()
+    {
+        // #315: valid CSS may end a block without one, and that token used to be dropped.
+        ThemeCatalog.Tokens(""":root[data-theme="x"] { --bg: #fff; --text: #000 }""", "x")
+            .Should().BeEquivalentTo(new Dictionary<string, string> { ["--bg"] = "#fff", ["--text"] = "#000" });
+    }
 }
