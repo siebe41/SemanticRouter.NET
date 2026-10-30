@@ -1,7 +1,11 @@
 #nullable enable
 const SemanticRouter.Embeddings.Onnx.OnnxEmbeddingModels.DefaultModel = "all-MiniLM-L6-v2" -> string!
+const SemanticRouter.Embeddings.Onnx.OnnxEmbeddingModels.DownloadHosts = "huggingface.co and its CDN (*.hf.co)" -> string!
 const SemanticRouter.Embeddings.Onnx.OnnxEmbeddingOptions.HttpClientName = "SemanticRouter.OnnxModels" -> string!
 const SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.DefaultMaxTokens = 256 -> int
+const SemanticRouter.Embeddings.Onnx.OnnxEmbeddings.Provider = "Onnx" -> string!
+const SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.TelemetryHost = "mobile.events.data.microsoft.com" -> string!
+const SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.TelemetryVariable = "ORT_DISABLE_TELEMETRY" -> string!
 Microsoft.Extensions.DependencyInjection.OnnxEmbeddingsBuilderExtensions
 override SemanticRouter.Embeddings.Onnx.OnnxModelInfo.Equals(object? obj) -> bool
 override SemanticRouter.Embeddings.Onnx.OnnxModelInfo.GetHashCode() -> int
@@ -19,11 +23,13 @@ SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.Dispose() -> void
 SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.GenerateEmbeddingAsync(string! text, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.ReadOnlyMemory<float>>
 SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.GenerateEmbeddingsAsync(System.Collections.Generic.IReadOnlyList<string!>! texts, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<System.ReadOnlyMemory<float>>!>
 SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.ModelFile.get -> string!
-SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.OnnxEmbeddingProvider(string! modelFile, string! vocabFile, SemanticRouter.AspNetCore.EmbeddingPooling pooling = SemanticRouter.AspNetCore.EmbeddingPooling.Mean, int maxTokens = 256) -> void
+SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.OnnxEmbeddingProvider(string! modelFile, string! vocabFile) -> void
+SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.OnnxEmbeddingProvider(string! modelFile, string! vocabFile, SemanticRouter.AspNetCore.EmbeddingPooling pooling) -> void
+SemanticRouter.Embeddings.Onnx.OnnxEmbeddingProvider.OnnxEmbeddingProvider(string! modelFile, string! vocabFile, SemanticRouter.AspNetCore.EmbeddingPooling pooling, int maxTokens) -> void
+SemanticRouter.Embeddings.Onnx.OnnxEmbeddings
 SemanticRouter.Embeddings.Onnx.OnnxModelDownloader
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.<Clone>$() -> SemanticRouter.Embeddings.Onnx.OnnxModelInfo!
-SemanticRouter.Embeddings.Onnx.OnnxModelInfo.Deconstruct(out string! Name, out string! Repository, out string! Revision, out string! ModelFile, out string! ModelSha256, out long ModelBytes, out string! VocabSha256, out SemanticRouter.AspNetCore.EmbeddingPooling Pooling, out int Dimensions, out float SuggestedThreshold, out string! Description) -> void
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.Description.get -> string!
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.Description.init -> void
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.Dimensions.get -> int
@@ -38,7 +44,7 @@ SemanticRouter.Embeddings.Onnx.OnnxModelInfo.ModelSha256.init -> void
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.ModelUrl.get -> System.Uri!
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.Name.get -> string!
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.Name.init -> void
-SemanticRouter.Embeddings.Onnx.OnnxModelInfo.OnnxModelInfo(string! Name, string! Repository, string! Revision, string! ModelFile, string! ModelSha256, long ModelBytes, string! VocabSha256, SemanticRouter.AspNetCore.EmbeddingPooling Pooling, int Dimensions, float SuggestedThreshold, string! Description) -> void
+SemanticRouter.Embeddings.Onnx.OnnxModelInfo.OnnxModelInfo() -> void
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.Pooling.get -> SemanticRouter.AspNetCore.EmbeddingPooling
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.Pooling.init -> void
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.Repository.get -> string!
@@ -50,6 +56,7 @@ SemanticRouter.Embeddings.Onnx.OnnxModelInfo.SuggestedThreshold.init -> void
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.VocabSha256.get -> string!
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.VocabSha256.init -> void
 SemanticRouter.Embeddings.Onnx.OnnxModelInfo.VocabUrl.get -> System.Uri!
+SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment
 static Microsoft.Extensions.DependencyInjection.OnnxEmbeddingsBuilderExtensions.AddOnnxEmbeddings(this SemanticRouter.AspNetCore.SemanticRouterBuilder! builder, System.Action<SemanticRouter.Embeddings.Onnx.OnnxEmbeddingOptions!>? configure = null) -> SemanticRouter.AspNetCore.SemanticRouterBuilder!
 static Microsoft.Extensions.DependencyInjection.OnnxEmbeddingsBuilderExtensions.UseOnnxEmbeddings(this SemanticRouter.AspNetCore.SemanticRouterBuilder! builder, string! model = "all-MiniLM-L6-v2", System.Action<SemanticRouter.Embeddings.Onnx.OnnxEmbeddingOptions!>? configure = null) -> SemanticRouter.AspNetCore.SemanticRouterBuilder!
 static SemanticRouter.Embeddings.Onnx.OnnxEmbeddingModels.Find(string? name) -> SemanticRouter.Embeddings.Onnx.OnnxModelInfo?
@@ -58,3 +65,7 @@ static SemanticRouter.Embeddings.Onnx.OnnxModelDownloader.EnsureAsync(SemanticRo
 static SemanticRouter.Embeddings.Onnx.OnnxModelDownloader.EnsureAsync(SemanticRouter.Embeddings.Onnx.OnnxModelInfo! model, string! modelsDirectory, System.Net.Http.HttpClient! http, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<(string! ModelFile, string! VocabFile)>!
 static SemanticRouter.Embeddings.Onnx.OnnxModelInfo.operator !=(SemanticRouter.Embeddings.Onnx.OnnxModelInfo? left, SemanticRouter.Embeddings.Onnx.OnnxModelInfo? right) -> bool
 static SemanticRouter.Embeddings.Onnx.OnnxModelInfo.operator ==(SemanticRouter.Embeddings.Onnx.OnnxModelInfo? left, SemanticRouter.Embeddings.Onnx.OnnxModelInfo? right) -> bool
+static SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.DisableTelemetry() -> void
+static SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.TelemetrySetting.get -> string?
+static SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.TurnsTelemetryOff(string? value) -> bool
+static SemanticRouter.Embeddings.Onnx.OnnxRuntimeEnvironment.Unavailable.get -> string?

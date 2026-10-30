@@ -111,7 +111,7 @@ The secret scan checks the whole history, so a key that is committed and then de
 
 [`.github/rulesets/`](.github/rulesets) records the intended repository rulesets in GitHub's import format:
 
-- `protect-main.json`: changes reach `main` only through a pull request with an approving review from a code owner, and only when every CI job (all three `build-and-test` runs, the secret scan, the dashboard end-to-end tests, the three installers, the installer SBOMs and the container image) and both CodeQL analyses pass. Nobody can bypass it, administrators included, so the owner's own pull requests also need another code owner's approval.
+- `protect-main.json`: changes reach `main` only through a pull request with an approving review from a code owner, and only when every CI job (all three `build-and-test` runs, the secret scan, the npm audit, the dashboard end-to-end tests, the three installers, the installer SBOMs and the container image) and both CodeQL analyses pass. Nobody can bypass it, administrators included, so the owner's own pull requests also need another code owner's approval.
 - `protect-release-tags.json`: a `v*` tag, which starts a release, cannot be moved or deleted by anyone.
 - `create-release-tags.json`: only administrators can create `v*` tags.
 

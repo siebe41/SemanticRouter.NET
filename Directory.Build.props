@@ -35,7 +35,7 @@
       above the last release (Directory.Build.targets). The release itself takes the version from its tag. Move it on
       after each release (docs/releases.md#after-a-release).
     -->
-    <VersionPrefix>0.6.0</VersionPrefix>
+    <VersionPrefix>0.7.0</VersionPrefix>
     <Authors>SemanticRouter.NET contributors</Authors>
     <!-- As in LICENSE. Also the assemblies' copyright attribute. -->
     <Copyright>Copyright (c) 2026 Andrew Siebert</Copyright>

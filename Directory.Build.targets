@@ -27,7 +27,7 @@
   <PropertyGroup Label="Package validation" Condition="'$(IsPackable)' == 'true' and '$(PackAsTool)' != 'true'">
     <EnablePackageValidation>true</EnablePackageValidation>
     <!-- The last version on nuget.org. -->
-    <PackageValidationBaselineVersion>0.5.0</PackageValidationBaselineVersion>
+    <PackageValidationBaselineVersion>0.6.1</PackageValidationBaselineVersion>
   </PropertyGroup>
 
   <!--

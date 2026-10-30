@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -42,10 +43,24 @@ public sealed class UpgradeFromReleasedVersionsTests : IDisposable
     private static IEnumerable<string> ReleaseNames() =>
         Directory.GetFiles(Fixtures, "*.zip").Select(f => Path.GetFileNameWithoutExtension(f)).Order(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The releases: those before the changelog had a section per version, each version the changelog has a section
+    /// for, and the package validation baseline (the last release on nuget.org), which moves on after every release.
+    /// </summary>
+    private static IEnumerable<string> Released()
+    {
+        string releases = Path.Combine(AppContext.BaseDirectory, "releases");
+        IEnumerable<string> changelog = Regex.Matches(File.ReadAllText(Path.Combine(releases, "CHANGELOG.md")), @"^## \[(?<version>\d+\.\d+\.\d+)\] - ", RegexOptions.Multiline)
+            .Select(m => m.Groups["version"].Value);
+        string baseline = Regex.Match(File.ReadAllText(Path.Combine(releases, "Directory.Build.targets")), @"<PackageValidationBaselineVersion>(?<version>[^<]+)<").Groups["version"].Value;
+        return new[] { "0.1.0", "0.2.0", "0.2.1", baseline }.Concat(changelog).Distinct();
+    }
+
     [Fact]
     public void There_is_a_fixture_for_every_release()
     {
-        ReleaseNames().Should().Contain(["0.1.0", "0.2.0", "0.2.1", "0.3.0", "0.4.0", "0.5.0"], "docs/releases.md: add each release's fixture after it is published");
+        Released().Should().Contain(["0.5.0", "0.6.1"], "the changelog and the package validation baseline name the releases");
+        ReleaseNames().Should().Contain(Released(), "docs/releases.md: add each release's fixture after it is published");
     }
 
     [Theory]

@@ -38,6 +38,10 @@
             "integration_id": 15368
           },
           {
+            "context": "npm audit",
+            "integration_id": 15368
+          },
+          {
             "context": "build-and-test (ubuntu-latest)",
             "integration_id": 15368
           },
