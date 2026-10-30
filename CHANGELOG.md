@@ -10,7 +10,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Changed
 
-- **Breaking (`SemanticRouter.AspNetCore`):** 19 types that only shaped the dashboard's JSON or served the sibling packages are internal: `ActivitySeries`, `ActivityBucket`, `BudgetStatus`, `ConfigurationIssue`, `EndpointStatus`, `EndpointCheck`, `FeedbackSummary`, `MemoryExposure`, `MemorySourceStatus`, `ModelReliability`, `RateLimitStatus`, `ServiceStatus`, `UsageSummaries`, `WarmCacheStore`, `ToolCallAffinity`, `InMemoryAuditLog`, `InMemoryUsageLedger`, `InMemoryTuningStore` and `InMemoryRouterConfigurationHistory`. The dashboard and admin API answer as before; code that named one of these types should use the endpoint's JSON or the interface the type implemented (`IAuditLog`, `IUsageLedger`, `ITuningStore`, `IRouterConfigurationHistory`, `IWarmCacheStore`, `IToolCallAffinity`). (#PRNUM)
+- **Breaking (`SemanticRouter.AspNetCore`):** 19 types that only shaped the dashboard's JSON or served the sibling packages are internal: `ActivitySeries`, `ActivityBucket`, `BudgetStatus`, `ConfigurationIssue`, `EndpointStatus`, `EndpointCheck`, `FeedbackSummary`, `MemoryExposure`, `MemorySourceStatus`, `ModelReliability`, `RateLimitStatus`, `ServiceStatus`, `UsageSummaries`, `WarmCacheStore`, `ToolCallAffinity`, `InMemoryAuditLog`, `InMemoryUsageLedger`, `InMemoryTuningStore` and `InMemoryRouterConfigurationHistory`. The dashboard and admin API answer as before; code that named one of these types should use the endpoint's JSON or the interface the type implemented (`IAuditLog`, `IUsageLedger`, `ITuningStore`, `IRouterConfigurationHistory`, `IWarmCacheStore`, `IToolCallAffinity`). (#357)
 
 ### Fixed
 
