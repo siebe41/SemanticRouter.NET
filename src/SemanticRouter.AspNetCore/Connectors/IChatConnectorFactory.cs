@@ -10,7 +10,10 @@ namespace SemanticRouter.AspNetCore;
 /// </summary>
 /// <remarks>
 /// The router treats a connector of such a type as one that runs a program, like a <see cref="ConnectorTypes.Cli"/>
-/// connector (an offline machine policy turns it off), unless the factory declares <see cref="UsesBaseAddress"/>.
+/// connector, unless the factory declares <see cref="UsesBaseAddress"/>: an offline machine policy turns it off, and
+/// unless <see cref="ConnectorOptions.AllowRemoteClients"/> is set the router does not send it requests from other
+/// machines, so the connector need not check that itself. Limits on concurrent runs and the queue
+/// (<see cref="ConnectorOptions.MaxConcurrency"/>, <see cref="ConnectorOptions.MaxQueue"/>) are the connector's to apply.
 /// </remarks>
 public interface IChatConnectorFactory
 {

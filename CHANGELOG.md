@@ -52,6 +52,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Security
 
+- The router no longer sends a request from another machine to any connector that runs a program on this one (a CLI, Copilot, or a connector type from another package) unless its `AllowRemoteClients` is set. It used to leave that check to each connector, so a package that did not make it could serve your personal sign-in to other machines. (#PRNUM)
 - Prompted tool calling: a reply that writes the run's secret tool-call label in another case (` ```TOOL_CALL-… `) has it replaced like any other, so the label never reaches the client. (#354)
 - A prompt a local-only route covers stays on this machine when the conversation continues on a cloud model. The model a conversation started on skipped the local-only check, so such a prompt went to that cloud model. (#349)
 - Rolling back to an earlier configuration (`POST api/config/history/{id}/rollback`) gets the same checks as `PUT api/config`. A rollback could change what a CLI runs, which files a memory source reads, or bring back `${env:}` references, which `SemanticRouter:Dashboard:AllowProcessSettings` and the remote-client rules otherwise refuse over the admin API. (#349)
