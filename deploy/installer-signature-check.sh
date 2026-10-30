@@ -29,7 +29,8 @@ dir="$1"
 version="$2"
 rid="$3"
 summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
-entitlements="$(cd "$(dirname "$0")" && pwd)/macos/SemanticRouter.entitlements"
+here="$(cd "$(dirname "$0")" && pwd)"
+entitlements="$here/macos/SemanticRouter.entitlements"
 # Apple's requirement for Developer ID applications, as CodesignSignatures checks it: an ad-hoc signature (which vpk
 # gives an app it does not sign) or another certificate does not pass.
 developer_id='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
@@ -82,20 +83,7 @@ check_entitlements() {
     ok=false
     if ! codesign -d --entitlements - --xml "$target" >"$work/signed.plist" 2>"$work/codesign.log"; then
       detail="$(cat "$work/codesign.log")"
-    elif detail="$(python3 - "$entitlements" "$work/signed.plist" 2>&1 <<'PY'
-import plistlib, sys
-expected = plistlib.load(open(sys.argv[1], 'rb'))
-try:
-    signed = plistlib.load(open(sys.argv[2], 'rb'))
-except Exception as error:
-    sys.exit(f'it is signed with no entitlements that can be read ({error})')
-if signed != expected:
-    extra = sorted(set(signed) - set(expected))
-    missing = sorted(set(expected) - set(signed))
-    changed = sorted(k for k in set(signed) & set(expected) if signed[k] != expected[k])
-    sys.exit(f'its entitlements are not the file\'s: extra {extra}, missing {missing}, changed {changed}')
-PY
-    )"; then
+    elif detail="$(python3 "$here/macos/entitlements-match.py" "$entitlements" "$work/signed.plist" 2>&1)"; then
       ok=true
     fi
     report "entitlements of \`${target#"$work/"}\`" "$ok" "as in deploy/macos/SemanticRouter.entitlements" "$detail" \
