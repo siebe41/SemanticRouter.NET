@@ -96,20 +96,20 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Fixed
 
-- Dashboard: the memory map no longer highlights a link from the selected note to one the filter or search hides. (#PRNUM)
-- Dashboard: a theme file whose last declaration in a block leaves out the `;` keeps that token. It used to be dropped, reported as missing or replaced by the default theme's value. (#PRNUM)
-- Dashboard: a model **Discover models** suggests without a name is added under its id when that name is taken (`gpt-4o-2`). It used to be named `-2`. (#PRNUM)
-- Dashboard: when the router reports no addresses, the address the page was loaded from over `http` is marked unencrypted, with its warning. (#PRNUM)
-- Dashboard: the save bar counts each named item added to or removed from an empty list (routes, models, budgets) as one change. Three new routes used to count as one. (#PRNUM)
-- Dashboard: changing the audit log's **Show** limit, or pressing **Refresh**, while a load is running loads what was asked for. The newer request used to be dropped and the older answer shown under the new limit. (#PRNUM)
-- Dashboard: a memory source the machine policy turns off is shown next to that source's own switch (`Memory.Sources.1.Enabled`). (#PRNUM)
-- `POST api/evaluation/cases` refuses a new prompt once the evaluation set holds 5000, as `PUT api/evaluation/set` does. It used to save a set that `POST api/evaluate` then refused. (#PRNUM)
-- Automatic tuning moves a threshold with a `Tuning:MaxStep` under 0.005. Each step was rounded to two places, so such a step never moved it. (#PRNUM)
-- A Claude Code memory file's title comes only from a `name:` in its frontmatter, never from a `name:` line further down the file. (#PRNUM)
-- The memory map spots a `[[file name]]` in a request for a note whose frontmatter gives it another title, as links between notes already resolve it. (#PRNUM)
-- A per-client token limit never counts below what was used: a reply that used fewer tokens than estimated takes them off the estimate, instead of adding a refund that outlasted it and lent the client extra budget. (#PRNUM)
-- The machine policy's `AllowedEndpoints` accepts a bracketed IPv6 address with a port (`[2001:db8::1]:443`), as documented. (#PRNUM)
-- Desktop app: a newer update found after one was downloaded is downloaded and applied in its place. The first one used to stay ready until the app restarted. (#PRNUM)
+- Dashboard: the memory map no longer highlights a link from the selected note to one the filter or search hides. (#354)
+- Dashboard: a theme file whose last declaration in a block leaves out the `;` keeps that token. It used to be dropped, reported as missing or replaced by the default theme's value. (#354)
+- Dashboard: a model **Discover models** suggests without a name is added under its id when that name is taken (`gpt-4o-2`). It used to be named `-2`. (#354)
+- Dashboard: when the router reports no addresses, the address the page was loaded from over `http` is marked unencrypted, with its warning. (#354)
+- Dashboard: the save bar counts each named item added to or removed from an empty list (routes, models, budgets) as one change. Three new routes used to count as one. (#354)
+- Dashboard: changing the audit log's **Show** limit, or pressing **Refresh**, while a load is running loads what was asked for. The newer request used to be dropped and the older answer shown under the new limit. (#354)
+- Dashboard: a memory source the machine policy turns off is shown next to that source's own switch (`Memory.Sources.1.Enabled`). (#354)
+- `POST api/evaluation/cases` refuses a new prompt once the evaluation set holds 5000, as `PUT api/evaluation/set` does. It used to save a set that `POST api/evaluate` then refused. (#354)
+- Automatic tuning moves a threshold with a `Tuning:MaxStep` under 0.005. Each step was rounded to two places, so such a step never moved it. (#354)
+- A Claude Code memory file's title comes only from a `name:` in its frontmatter, never from a `name:` line further down the file. (#354)
+- The memory map spots a `[[file name]]` in a request for a note whose frontmatter gives it another title, as links between notes already resolve it. (#354)
+- A per-client token limit never counts below what was used: a reply that used fewer tokens than estimated takes them off the estimate, instead of adding a refund that outlasted it and lent the client extra budget. (#354)
+- The machine policy's `AllowedEndpoints` accepts a bracketed IPv6 address with a port (`[2001:db8::1]:443`), as documented. (#354)
+- Desktop app: a newer update found after one was downloaded is downloaded and applied in its place. The first one used to stay ready until the app restarted. (#354)
 - A request with tools, a forced `tool_choice` (`required` or a named tool) and reasoning goes to an Anthropic model without `thinking`, which Anthropic refuses alongside a forced tool, and the dropped reasoning is reported. It used to send both and fail. (#353)
 - Reasoning effort `xhigh` or `max` goes to an OpenAI Responses (`/v1/responses`) model as `high`, as it already did to chat completions. It used to be sent unchanged and refused. (#353)
 - `POST /semantic-router/classify` reads the model as the gateway does: `auto@profile` and virtual models pick their profile, and model aliases apply. It used to ask for a model named `auto@private`. (#353)
@@ -187,7 +187,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Security
 
-- Prompted tool calling: a reply that writes the run's secret tool-call label in another case (` ```TOOL_CALL-… `) has it replaced like any other, so the label never reaches the client. (#PRNUM)
+- Prompted tool calling: a reply that writes the run's secret tool-call label in another case (` ```TOOL_CALL-… `) has it replaced like any other, so the label never reaches the client. (#354)
 - A prompt a local-only route covers stays on this machine when the conversation continues on a cloud model. The model a conversation started on skipped the local-only check, so such a prompt went to that cloud model. (#349)
 - Rolling back to an earlier configuration (`POST api/config/history/{id}/rollback`) gets the same checks as `PUT api/config`. A rollback could change what a CLI runs, which files a memory source reads, or bring back `${env:}` references, which `SemanticRouter:Dashboard:AllowProcessSettings` and the remote-client rules otherwise refuse over the admin API. (#349)
 - Desktop app: without `Updates:Publisher` in the machine policy, an update from GitHub is applied only when the release workflow attested its package: the app asks GitHub's attestations API for the package's SHA-256 and checks the Sigstore bundle against the trust root it carries (SLSA provenance, the certificate issued to `release.yml` at the version's tag in the repository with this repository's id, the signature, the transparency log entry and its inclusion proof). An update without such an attestation, or with one that does not verify, is refused and deleted. When the check cannot run (GitHub unreachable or rate-limited, a log entry only in Rekor v2), the update is kept but not applied, the tray menu says it is waiting, and the next check tries again; when Sigstore has added a certificate authority this version does not carry, the app says it can no longer check updates and to install the new version by hand. Such an update is downloaded whole: one Velopack rebuilds from deltas is not the attested file. `deploy/update-attestation-check.sh` keeps the release workflow and the trust root in step with the app. (#181)
