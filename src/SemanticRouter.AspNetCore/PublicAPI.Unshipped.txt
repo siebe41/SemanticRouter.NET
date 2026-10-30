@@ -66,3 +66,406 @@ SemanticRouter.AspNetCore.UsageOptions.Context.get -> SemanticRouter.AspNetCore.
 SemanticRouter.AspNetCore.UsageOptions.Context.set -> void
 static SemanticRouter.AspNetCore.ContextBreakdown.operator !=(SemanticRouter.AspNetCore.ContextBreakdown? left, SemanticRouter.AspNetCore.ContextBreakdown? right) -> bool
 static SemanticRouter.AspNetCore.ContextBreakdown.operator ==(SemanticRouter.AspNetCore.ContextBreakdown? left, SemanticRouter.AspNetCore.ContextBreakdown? right) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.ActivityBucket.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.ActivityBucket.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.ActivityBucket.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.ActivitySeries.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.ActivitySeries.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.ActivitySeries.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.BudgetStatus.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.BudgetStatus.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.BudgetStatus.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.ConfigurationIssue.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.ConfigurationIssue.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.ConfigurationIssue.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.EndpointCheck.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.EndpointCheck.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.EndpointCheck.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.EndpointStatus.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.EndpointStatus.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.EndpointStatus.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.FeedbackSummary.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.FeedbackSummary.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.FeedbackSummary.Group.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.FeedbackSummary.Group.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.FeedbackSummary.Group.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.FeedbackSummary.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.MemoryExposure.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.MemoryExposure.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.MemoryExposure.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.MemorySourceStatus.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.MemorySourceStatus.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.MemorySourceStatus.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.ModelReliability.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.ModelReliability.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.ModelReliability.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.RateLimitStatus.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.RateLimitStatus.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.RateLimitStatus.ToString() -> string!
+*REMOVED*override SemanticRouter.AspNetCore.ServiceStatus.Equals(object? obj) -> bool
+*REMOVED*override SemanticRouter.AspNetCore.ServiceStatus.GetHashCode() -> int
+*REMOVED*override SemanticRouter.AspNetCore.ServiceStatus.ToString() -> string!
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.<Clone>$() -> SemanticRouter.AspNetCore.ActivityBucket!
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.ActivityBucket() -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.ByModel.get -> System.Collections.Generic.IReadOnlyDictionary<string!, int>!
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.ByModel.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.ByTier.get -> System.Collections.Generic.IReadOnlyDictionary<string!, int>!
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.ByTier.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.Equals(SemanticRouter.AspNetCore.ActivityBucket? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.Failed.get -> int
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.Failed.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.P50Milliseconds.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.P50Milliseconds.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.P95Milliseconds.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.P95Milliseconds.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.Requests.get -> int
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.Requests.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.Served.get -> int
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.Served.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.Start.get -> System.DateTimeOffset
+*REMOVED*SemanticRouter.AspNetCore.ActivityBucket.Start.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.<Clone>$() -> SemanticRouter.AspNetCore.ActivitySeries!
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.ActivitySeries() -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.Bucket.get -> System.TimeSpan
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.Bucket.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.Buckets.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.ActivityBucket!>!
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.Buckets.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.Equals(SemanticRouter.AspNetCore.ActivitySeries? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.P50Milliseconds.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.P50Milliseconds.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.P95Milliseconds.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.P95Milliseconds.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.P99Milliseconds.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.P99Milliseconds.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.Requests.get -> int
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.Requests.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.Since.get -> System.DateTimeOffset
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.Since.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.Until.get -> System.DateTimeOffset
+*REMOVED*SemanticRouter.AspNetCore.ActivitySeries.Until.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.<Clone>$() -> SemanticRouter.AspNetCore.BudgetStatus!
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.BudgetStatus() -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.CostUsedUsd.get -> decimal
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.CostUsedUsd.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Covers.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Covers.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Describe() -> string!
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Equals(SemanticRouter.AspNetCore.BudgetStatus? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Exceeded.get -> bool
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Exceeded.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.MaxCostUsd.get -> decimal?
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.MaxCostUsd.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.MaxTokens.get -> long?
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.MaxTokens.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Name.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Name.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Percent.get -> int
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Percent.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Period.get -> SemanticRouter.AspNetCore.BudgetPeriod
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Period.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.PeriodEnd.get -> System.DateTimeOffset
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.PeriodEnd.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.PeriodStart.get -> System.DateTimeOffset
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.PeriodStart.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.TokensUsed.get -> long
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.TokensUsed.init -> void
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Warning.get -> bool
+*REMOVED*SemanticRouter.AspNetCore.BudgetStatus.Warning.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ConfigurationIssue
+*REMOVED*SemanticRouter.AspNetCore.ConfigurationIssue.<Clone>$() -> SemanticRouter.AspNetCore.ConfigurationIssue!
+*REMOVED*SemanticRouter.AspNetCore.ConfigurationIssue.ConfigurationIssue() -> void
+*REMOVED*SemanticRouter.AspNetCore.ConfigurationIssue.Equals(SemanticRouter.AspNetCore.ConfigurationIssue? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.ConfigurationIssue.Message.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.ConfigurationIssue.Message.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ConfigurationIssue.Path.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.ConfigurationIssue.Path.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck.<Clone>$() -> SemanticRouter.AspNetCore.EndpointCheck!
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck.At.get -> System.DateTimeOffset
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck.At.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck.EndpointCheck() -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck.Equals(SemanticRouter.AspNetCore.EndpointCheck? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck.Messages.get -> System.Collections.Generic.IReadOnlyList<string!>!
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck.Messages.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck.Milliseconds.get -> double
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck.Milliseconds.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck.Status.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.EndpointCheck.Status.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.<Clone>$() -> SemanticRouter.AspNetCore.EndpointStatus!
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Attempts.get -> int
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Attempts.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Check.get -> SemanticRouter.AspNetCore.EndpointCheck?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Check.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Connector.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Connector.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.CooldownUntil.get -> System.DateTimeOffset?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.CooldownUntil.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Encrypted.get -> bool
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Encrypted.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.EndpointStatus() -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Equals(SemanticRouter.AspNetCore.EndpointStatus? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.FailingSince.get -> System.DateTimeOffset?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.FailingSince.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Failures.get -> int
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Failures.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.FirstByteP50.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.FirstByteP50.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.FirstByteP95.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.FirstByteP95.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Host.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Host.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Kind.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Kind.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.LastError.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.LastError.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.LastFailure.get -> System.DateTimeOffset?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.LastFailure.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.LastSuccess.get -> System.DateTimeOffset?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.LastSuccess.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.LastUsed.get -> System.DateTimeOffset?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.LastUsed.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.LimitDays.get -> int
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.LimitDays.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Local.get -> bool
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Local.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Models.get -> int
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Models.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.ModelsCoolingDown.get -> int
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.ModelsCoolingDown.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Program.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Program.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Scheme.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Scheme.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.State.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.State.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.StateNote.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.StateNote.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.SuccessRate.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.SuccessRate.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.TokensPerSecond.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.TokensPerSecond.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.TotalP50.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.TotalP50.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.TotalP95.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.TotalP95.init -> void
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Via.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.EndpointStatus.Via.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.<Clone>$() -> SemanticRouter.AspNetCore.FeedbackSummary!
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.ByKind.get -> System.Collections.Generic.IReadOnlyDictionary<SemanticRouter.AspNetCore.FeedbackKind, int>!
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.ByKind.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.ByModel.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.FeedbackSummary.Group!>!
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.ByModel.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.ByRoute.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.FeedbackSummary.Group!>!
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.ByRoute.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Decisions.get -> int
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Decisions.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Equals(SemanticRouter.AspNetCore.FeedbackSummary? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Feedback.get -> int
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Feedback.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.FeedbackSummary() -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.<Clone>$() -> SemanticRouter.AspNetCore.FeedbackSummary.Group!
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.ByKind.get -> System.Collections.Generic.IReadOnlyDictionary<SemanticRouter.AspNetCore.FeedbackKind, int>!
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.ByKind.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.Decisions.get -> int
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.Decisions.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.Equals(SemanticRouter.AspNetCore.FeedbackSummary.Group? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.Group() -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.Key.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.Key.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.Rate.get -> double
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.Rate.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.WithFeedback.get -> int
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Group.WithFeedback.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Since.get -> System.DateTimeOffset
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Since.init -> void
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Until.get -> System.DateTimeOffset
+*REMOVED*SemanticRouter.AspNetCore.FeedbackSummary.Until.init -> void
+*REMOVED*SemanticRouter.AspNetCore.InMemoryAuditLog
+*REMOVED*SemanticRouter.AspNetCore.InMemoryAuditLog.Append(SemanticRouter.AspNetCore.AuditEntry! entry) -> SemanticRouter.AspNetCore.AuditEntry!
+*REMOVED*SemanticRouter.AspNetCore.InMemoryAuditLog.InMemoryAuditLog() -> void
+*REMOVED*SemanticRouter.AspNetCore.InMemoryAuditLog.InMemoryAuditLog(int capacity) -> void
+*REMOVED*SemanticRouter.AspNetCore.InMemoryAuditLog.Query(System.DateTimeOffset? since, System.DateTimeOffset? until, int limit) -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.AuditEntry!>!
+*REMOVED*SemanticRouter.AspNetCore.InMemoryRouterConfigurationHistory
+*REMOVED*SemanticRouter.AspNetCore.InMemoryRouterConfigurationHistory.GetVersion(long id) -> SemanticRouter.AspNetCore.RouterConfiguration?
+*REMOVED*SemanticRouter.AspNetCore.InMemoryRouterConfigurationHistory.InMemoryRouterConfigurationHistory() -> void
+*REMOVED*SemanticRouter.AspNetCore.InMemoryRouterConfigurationHistory.InMemoryRouterConfigurationHistory(int capacity) -> void
+*REMOVED*SemanticRouter.AspNetCore.InMemoryRouterConfigurationHistory.List(int limit = 50) -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.RouterConfigurationVersion!>!
+*REMOVED*SemanticRouter.AspNetCore.InMemoryRouterConfigurationHistory.Record(SemanticRouter.AspNetCore.RouterConfiguration! document, string! source, string? actor = null, string? note = null) -> long
+*REMOVED*SemanticRouter.AspNetCore.InMemoryTuningStore
+*REMOVED*SemanticRouter.AspNetCore.InMemoryTuningStore.Changes() -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.TuningChange!>!
+*REMOVED*SemanticRouter.AspNetCore.InMemoryTuningStore.InMemoryTuningStore() -> void
+*REMOVED*SemanticRouter.AspNetCore.InMemoryTuningStore.LoadState() -> SemanticRouter.AspNetCore.TuningState!
+*REMOVED*SemanticRouter.AspNetCore.InMemoryTuningStore.Save(SemanticRouter.AspNetCore.TuningChange! change) -> void
+*REMOVED*SemanticRouter.AspNetCore.InMemoryTuningStore.SaveState(SemanticRouter.AspNetCore.TuningState! state) -> void
+*REMOVED*SemanticRouter.AspNetCore.InMemoryUsageLedger
+*REMOVED*SemanticRouter.AspNetCore.InMemoryUsageLedger.InMemoryUsageLedger() -> void
+*REMOVED*SemanticRouter.AspNetCore.InMemoryUsageLedger.ModelTotals(System.DateTimeOffset since, System.DateTimeOffset until, SemanticRouter.AspNetCore.UsageGrouping by, System.TimeZoneInfo? zone = null, string? model = null, string? connector = null, string? profile = null) -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.UsageModelTotals!>!
+*REMOVED*SemanticRouter.AspNetCore.InMemoryUsageLedger.Record(SemanticRouter.AspNetCore.UsageRecord! record) -> void
+*REMOVED*SemanticRouter.AspNetCore.InMemoryUsageLedger.Records(System.DateTimeOffset since, System.DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.UsageRecord!>!
+*REMOVED*SemanticRouter.AspNetCore.InMemoryUsageLedger.Summarize(System.DateTimeOffset since, System.DateTimeOffset until, SemanticRouter.AspNetCore.UsageGrouping by, System.TimeZoneInfo? zone = null) -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.UsageGroup!>!
+*REMOVED*SemanticRouter.AspNetCore.InMemoryUsageLedger.Total(System.DateTimeOffset since, System.DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) -> SemanticRouter.AspNetCore.UsageTotals!
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.<Clone>$() -> SemanticRouter.AspNetCore.MemoryExposure!
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.CloudContent.get -> int
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.CloudContent.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.CloudReference.get -> int
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.CloudReference.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.Equals(SemanticRouter.AspNetCore.MemoryExposure? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.FirstShared.get -> System.DateTimeOffset
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.FirstShared.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.LastShared.get -> System.DateTimeOffset
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.LastShared.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.LocalContent.get -> int
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.LocalContent.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.LocalReference.get -> int
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.LocalReference.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.MemoryExposure() -> void
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.Models.get -> System.Collections.Generic.IReadOnlyDictionary<string!, int>!
+*REMOVED*SemanticRouter.AspNetCore.MemoryExposure.Models.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.<Clone>$() -> SemanticRouter.AspNetCore.MemorySourceStatus!
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Equals(SemanticRouter.AspNetCore.MemorySourceStatus? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Error.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Error.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Kind.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Kind.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Location.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Location.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.MemorySourceStatus() -> void
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Name.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Name.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Notes.get -> int
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Notes.init -> void
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Skipped.get -> int
+*REMOVED*SemanticRouter.AspNetCore.MemorySourceStatus.Skipped.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.<Clone>$() -> SemanticRouter.AspNetCore.ModelReliability!
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.ByKind.get -> System.Collections.Generic.IReadOnlyDictionary<SemanticRouter.AspNetCore.FeedbackKind, int>!
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.ByKind.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Capability.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Capability.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Detail.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Detail.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Equals(SemanticRouter.AspNetCore.ModelReliability? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.ExcludedSince.get -> System.DateTimeOffset?
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.ExcludedSince.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.ExcludedUntil.get -> System.DateTimeOffset?
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.ExcludedUntil.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Failures.get -> int
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Failures.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Model.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Model.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.ModelReliability() -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.PeerRate.get -> double?
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.PeerRate.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Rate.get -> double
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Rate.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Route.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Route.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Turns.get -> int
+*REMOVED*SemanticRouter.AspNetCore.ModelReliability.Turns.init -> void
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.<Clone>$() -> SemanticRouter.AspNetCore.RateLimitStatus!
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.Client.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.Client.init -> void
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.Equals(SemanticRouter.AspNetCore.RateLimitStatus? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.LastLimited.get -> System.DateTimeOffset?
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.LastLimited.init -> void
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.Limit.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.Limit.init -> void
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.Limited.get -> long
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.Limited.init -> void
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.RateLimitStatus() -> void
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.Requests.get -> int
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.Requests.init -> void
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.RequestsPerMinute.get -> int?
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.RequestsPerMinute.init -> void
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.Tokens.get -> long
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.Tokens.init -> void
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.TokensPerMinute.get -> int?
+*REMOVED*SemanticRouter.AspNetCore.RateLimitStatus.TokensPerMinute.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.<Clone>$() -> SemanticRouter.AspNetCore.ServiceStatus!
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Addresses.get -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.ClientAddress!>!
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Addresses.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Equals(SemanticRouter.AspNetCore.ServiceStatus? other) -> bool
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.GatewayKeyRequired.get -> bool
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.GatewayKeyRequired.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.GatewayKeysConfigured.get -> bool
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.GatewayKeysConfigured.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.LastOutcome.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.LastOutcome.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.LastRequest.get -> System.DateTimeOffset?
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.LastRequest.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.LastServed.get -> System.DateTimeOffset?
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.LastServed.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Listening.get -> System.Collections.Generic.IReadOnlyList<string!>!
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Listening.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Machine.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Machine.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.OperatingSystem.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.OperatingSystem.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Problems.get -> System.Collections.Generic.IReadOnlyList<string!>!
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Problems.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.ProcessId.get -> int
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.ProcessId.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Program.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Program.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Remote.get -> bool
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Remote.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Runtime.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.Runtime.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.ServiceStatus() -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.StartedAt.get -> System.DateTimeOffset
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.StartedAt.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.State.get -> string!
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.State.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.StateNote.get -> string?
+*REMOVED*SemanticRouter.AspNetCore.ServiceStatus.StateNote.init -> void
+*REMOVED*SemanticRouter.AspNetCore.ToolCallAffinity
+*REMOVED*SemanticRouter.AspNetCore.ToolCallAffinity.Lookup(System.Collections.Generic.IEnumerable<string!>! toolUseIds) -> string?
+*REMOVED*SemanticRouter.AspNetCore.ToolCallAffinity.Remember(string! toolUseId, string! modelName) -> void
+*REMOVED*SemanticRouter.AspNetCore.ToolCallAffinity.ToolCallAffinity() -> void
+*REMOVED*SemanticRouter.AspNetCore.ToolCallAffinity.ToolCallAffinity(int capacity) -> void
+*REMOVED*SemanticRouter.AspNetCore.UsageSummaries
+*REMOVED*SemanticRouter.AspNetCore.WarmCacheStore
+*REMOVED*SemanticRouter.AspNetCore.WarmCacheStore.Forget(string! conversation, string? model = null) -> void
+*REMOVED*SemanticRouter.AspNetCore.WarmCacheStore.Lookup(string! conversation) -> System.Collections.Generic.IReadOnlyList<SemanticRouter.WarmCache!>!
+*REMOVED*SemanticRouter.AspNetCore.WarmCacheStore.Remember(string! conversation, SemanticRouter.WarmCache! cache) -> void
+*REMOVED*SemanticRouter.AspNetCore.WarmCacheStore.WarmCacheStore() -> void
+*REMOVED*SemanticRouter.AspNetCore.WarmCacheStore.WarmCacheStore(System.TimeProvider? time) -> void
+*REMOVED*static SemanticRouter.AspNetCore.ActivityBucket.operator !=(SemanticRouter.AspNetCore.ActivityBucket? left, SemanticRouter.AspNetCore.ActivityBucket? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.ActivityBucket.operator ==(SemanticRouter.AspNetCore.ActivityBucket? left, SemanticRouter.AspNetCore.ActivityBucket? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.ActivitySeries.operator !=(SemanticRouter.AspNetCore.ActivitySeries? left, SemanticRouter.AspNetCore.ActivitySeries? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.ActivitySeries.operator ==(SemanticRouter.AspNetCore.ActivitySeries? left, SemanticRouter.AspNetCore.ActivitySeries? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.BudgetStatus.operator !=(SemanticRouter.AspNetCore.BudgetStatus? left, SemanticRouter.AspNetCore.BudgetStatus? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.BudgetStatus.operator ==(SemanticRouter.AspNetCore.BudgetStatus? left, SemanticRouter.AspNetCore.BudgetStatus? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.ConfigurationIssue.operator !=(SemanticRouter.AspNetCore.ConfigurationIssue? left, SemanticRouter.AspNetCore.ConfigurationIssue? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.ConfigurationIssue.operator ==(SemanticRouter.AspNetCore.ConfigurationIssue? left, SemanticRouter.AspNetCore.ConfigurationIssue? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.EndpointCheck.operator !=(SemanticRouter.AspNetCore.EndpointCheck? left, SemanticRouter.AspNetCore.EndpointCheck? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.EndpointCheck.operator ==(SemanticRouter.AspNetCore.EndpointCheck? left, SemanticRouter.AspNetCore.EndpointCheck? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.EndpointStatus.operator !=(SemanticRouter.AspNetCore.EndpointStatus? left, SemanticRouter.AspNetCore.EndpointStatus? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.EndpointStatus.operator ==(SemanticRouter.AspNetCore.EndpointStatus? left, SemanticRouter.AspNetCore.EndpointStatus? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.FeedbackSummary.Build(System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.RoutingActivityEntry!>! activity, System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.RoutingFeedback!>! feedback, System.DateTimeOffset since, System.DateTimeOffset until) -> SemanticRouter.AspNetCore.FeedbackSummary!
+*REMOVED*static SemanticRouter.AspNetCore.FeedbackSummary.Group.operator !=(SemanticRouter.AspNetCore.FeedbackSummary.Group? left, SemanticRouter.AspNetCore.FeedbackSummary.Group? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.FeedbackSummary.Group.operator ==(SemanticRouter.AspNetCore.FeedbackSummary.Group? left, SemanticRouter.AspNetCore.FeedbackSummary.Group? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.FeedbackSummary.operator !=(SemanticRouter.AspNetCore.FeedbackSummary? left, SemanticRouter.AspNetCore.FeedbackSummary? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.FeedbackSummary.operator ==(SemanticRouter.AspNetCore.FeedbackSummary? left, SemanticRouter.AspNetCore.FeedbackSummary? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.MemoryExposure.operator !=(SemanticRouter.AspNetCore.MemoryExposure? left, SemanticRouter.AspNetCore.MemoryExposure? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.MemoryExposure.operator ==(SemanticRouter.AspNetCore.MemoryExposure? left, SemanticRouter.AspNetCore.MemoryExposure? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.MemorySourceStatus.operator !=(SemanticRouter.AspNetCore.MemorySourceStatus? left, SemanticRouter.AspNetCore.MemorySourceStatus? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.MemorySourceStatus.operator ==(SemanticRouter.AspNetCore.MemorySourceStatus? left, SemanticRouter.AspNetCore.MemorySourceStatus? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.ModelReliability.operator !=(SemanticRouter.AspNetCore.ModelReliability? left, SemanticRouter.AspNetCore.ModelReliability? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.ModelReliability.operator ==(SemanticRouter.AspNetCore.ModelReliability? left, SemanticRouter.AspNetCore.ModelReliability? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.RateLimitStatus.operator !=(SemanticRouter.AspNetCore.RateLimitStatus? left, SemanticRouter.AspNetCore.RateLimitStatus? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.RateLimitStatus.operator ==(SemanticRouter.AspNetCore.RateLimitStatus? left, SemanticRouter.AspNetCore.RateLimitStatus? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.ServiceStatus.operator !=(SemanticRouter.AspNetCore.ServiceStatus? left, SemanticRouter.AspNetCore.ServiceStatus? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.ServiceStatus.operator ==(SemanticRouter.AspNetCore.ServiceStatus? left, SemanticRouter.AspNetCore.ServiceStatus? right) -> bool
+*REMOVED*static SemanticRouter.AspNetCore.UsageSummaries.Group(System.Collections.Generic.IEnumerable<SemanticRouter.AspNetCore.UsageRecord!>! records, SemanticRouter.AspNetCore.UsageGrouping by, System.TimeZoneInfo! zone) -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.UsageGroup!>!
+*REMOVED*static SemanticRouter.AspNetCore.UsageSummaries.KeyOf(SemanticRouter.AspNetCore.UsageRecord! record, SemanticRouter.AspNetCore.UsageGrouping by, System.TimeZoneInfo! zone) -> string!

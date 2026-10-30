@@ -293,7 +293,7 @@ internal sealed class EndpointChecks(TimeProvider? time = null)
 }
 
 /// <summary>A connector's endpoint and its health, as <c>GET api/status</c> reports it under <c>endpoints</c>.</summary>
-public sealed record EndpointStatus
+internal sealed record EndpointStatus
 {
     /// <summary>The connector's name.</summary>
     public required string Connector { get; init; }
@@ -381,7 +381,7 @@ public sealed record EndpointStatus
 }
 
 /// <summary>The outcome of checking a connector on demand: reachable, credentials accepted, installed, signed in.</summary>
-public sealed record EndpointCheck
+internal sealed record EndpointCheck
 {
     /// <summary>When the check finished.</summary>
     public required DateTimeOffset At { get; init; }

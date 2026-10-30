@@ -223,7 +223,7 @@ internal static class ServiceHealth
 }
 
 /// <summary>The router itself: where it runs, the addresses clients use, and how it is doing.</summary>
-public sealed record ServiceStatus
+internal sealed record ServiceStatus
 {
     /// <summary>The machine's name.</summary>
     public required string Machine { get; init; }

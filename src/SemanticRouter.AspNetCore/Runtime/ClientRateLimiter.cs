@@ -9,7 +9,7 @@ namespace SemanticRouter.AspNetCore;
 internal readonly record struct RateLimitDecision(bool Admitted, TimeSpan RetryAfter, string? Detail);
 
 /// <summary>A client's rate limit and what it used in the last minute, for the dashboard.</summary>
-public sealed record RateLimitStatus
+internal sealed record RateLimitStatus
 {
     /// <summary>The client: a gateway client name, or the address of a client without a key.</summary>
     public required string Client { get; init; }

@@ -54,7 +54,7 @@ public interface IAuditLog
 }
 
 /// <summary>The default <see cref="IAuditLog"/>: the latest entries of this process, in memory.</summary>
-public sealed class InMemoryAuditLog : IAuditLog
+internal sealed class InMemoryAuditLog : IAuditLog
 {
     private readonly LinkedList<AuditEntry> _entries = new();
     private readonly int _capacity;

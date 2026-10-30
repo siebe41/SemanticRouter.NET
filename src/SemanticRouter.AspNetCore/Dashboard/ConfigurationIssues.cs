@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>A problem with a configuration document, tied to the field it is about.</summary>
-public sealed record ConfigurationIssue
+internal sealed record ConfigurationIssue
 {
     /// <summary>
     /// The field, as the dashboard's <c>data-bind</c> attributes name it: property names as in the configuration JSON,

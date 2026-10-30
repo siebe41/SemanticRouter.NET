@@ -221,7 +221,7 @@ public interface IUsageLedger
 /// ranges asked for most recently (a budget's current period) are kept up to date as records arrive, so a budget check
 /// does not add up the period's records on every request.
 /// </summary>
-public sealed class InMemoryUsageLedger : IUsageLedger
+internal sealed class InMemoryUsageLedger : IUsageLedger
 {
     private static readonly TimeSpan Retention = TimeSpan.FromDays(40);
     private readonly List<UsageRecord> _records = [];
@@ -389,7 +389,7 @@ internal sealed class RunningUsageTotals<T>
 }
 
 /// <summary>Shared grouping for ledgers.</summary>
-public static class UsageSummaries
+internal static class UsageSummaries
 {
     /// <summary>Groups <paramref name="records"/> by <paramref name="by"/>, largest cost (then tokens) first.</summary>
     public static IReadOnlyList<UsageGroup> Group(IEnumerable<UsageRecord> records, UsageGrouping by, TimeZoneInfo zone)

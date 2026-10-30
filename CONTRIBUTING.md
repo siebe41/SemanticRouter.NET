@@ -50,7 +50,7 @@ They also depend on each other exactly. `SemanticRouter.AspNetCore` 0.6.0 depend
 The internals the sibling packages use are a contract between the packages of one version, not a public API. Change them freely, but build and test the siblings with the change in the same pull request (the solution build does). Today they are:
 
 - Connectors.Copilot: `ChatResponseWriterFactory`, `IChatResponseWriter`, `ChatTranscript`, `CliScratch`, `DroppedFeatures`, `PromptedToolFormat` and `ConnectorOptions.EffectiveTimeout`.
-- Storage.Sqlite: `IStateRetention` and `OwnerOnly`.
+- Storage.Sqlite: `IStateRetention`, `OwnerOnly`, `UsageSummaries`, `WarmCacheStore`, `ToolCallAffinity`, and the in-memory stores it falls back to or wraps (`InMemoryAuditLog`, `InMemoryUsageLedger`, `InMemoryTuningStore`, `InMemoryRouterConfigurationHistory`).
 
 Do not add `InternalsVisibleTo` for a package outside this repository.
 

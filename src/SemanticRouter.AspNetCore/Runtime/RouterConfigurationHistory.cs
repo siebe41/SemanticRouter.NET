@@ -37,7 +37,7 @@ public interface IRouterConfigurationHistory
 }
 
 /// <summary>The default <see cref="IRouterConfigurationHistory"/>: the latest documents of this process, in memory.</summary>
-public sealed class InMemoryRouterConfigurationHistory : IRouterConfigurationHistory
+internal sealed class InMemoryRouterConfigurationHistory : IRouterConfigurationHistory
 {
     private readonly LinkedList<(RouterConfigurationVersion Version, string Json)> _versions = new();
     private readonly int _capacity;

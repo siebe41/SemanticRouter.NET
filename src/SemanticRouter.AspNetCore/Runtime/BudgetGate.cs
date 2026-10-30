@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>Where a budget stands in its current period.</summary>
-public sealed record BudgetStatus
+internal sealed record BudgetStatus
 {
     /// <summary>The budget's name (<see cref="BudgetDefinition.Name"/>).</summary>
     public required string Name { get; init; }

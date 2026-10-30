@@ -1,7 +1,7 @@
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>Feedback per route and per model over a period, against the decisions the router made there.</summary>
-public sealed record FeedbackSummary
+internal sealed record FeedbackSummary
 {
     /// <summary>Start of the period.</summary>
     public required DateTimeOffset Since { get; init; }

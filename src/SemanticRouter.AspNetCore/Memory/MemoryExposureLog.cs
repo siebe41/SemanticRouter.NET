@@ -1,7 +1,7 @@
 namespace SemanticRouter.AspNetCore;
 
 /// <summary>Where one note has been sent since the router started (or since the log was cleared).</summary>
-public sealed record MemoryExposure
+internal sealed record MemoryExposure
 {
     /// <summary>Requests that carried the note's text to a local model.</summary>
     public required int LocalContent { get; init; }
