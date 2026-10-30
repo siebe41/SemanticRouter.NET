@@ -40,6 +40,9 @@
     <None Include="..\..\src\SemanticRouter.Desktop\Assets\tray*" Link="tray-icons\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <!-- The intended public API of the library packages, for ApiSurfaceDocumentationTests. -->
     <None Include="..\..\docs\api-surface.md" Link="docs\api-surface.md" CopyToOutputDirectory="PreserveNewest" />
+    <!-- What has been released (the changelog's version headings and the package validation baseline), for UpgradeFromReleasedVersionsTests. -->
+    <None Include="..\..\CHANGELOG.md" Link="releases\CHANGELOG.md" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\Directory.Build.targets" Link="releases\Directory.Build.targets" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,3 +1,5 @@
 #nullable enable
+const SemanticRouter.Connectors.Copilot.CopilotConnector.Type = "Copilot" -> string!
 Microsoft.Extensions.DependencyInjection.CopilotConnectorBuilderExtensions
+SemanticRouter.Connectors.Copilot.CopilotConnector
 static Microsoft.Extensions.DependencyInjection.CopilotConnectorBuilderExtensions.AddCopilotConnector(this SemanticRouter.AspNetCore.SemanticRouterBuilder! builder) -> SemanticRouter.AspNetCore.SemanticRouterBuilder!
