@@ -11,7 +11,11 @@
 #   signature, and accepted by Gatekeeper as notarized (spctl --assess, source=Notarized Developer ID);
 # - the app in the update package SemanticRouter-<version>-<rid>-full.nupkg in <dir>, which the installed app updates
 #   to: codesign --verify --deep --strict with the team's Developer ID signature, the signature and team ID the desktop
-#   app checks an update for with Updates:Publisher (src/SemanticRouter.Desktop/UpdatePublisher.cs).
+#   app checks an update for with Updates:Publisher (src/SemanticRouter.Desktop/UpdatePublisher.cs);
+# - in both apps, the bundle, Contents/MacOS/SemanticRouter and Velopack's Contents/MacOS/UpdateMac are signed with
+#   exactly the entitlements in deploy/macos/SemanticRouter.entitlements (codesign -d --entitlements), not vpk's
+#   defaults, and Info.plist has the NSAppleEventsUsageDescription the apple-events entitlement needs
+#   (docs/desktop.md#signing).
 #
 # The team is TEAM_ID, or the (TEAMID) at the end of APP_IDENTITY ("Developer ID Application: Name (TEAMID)"). With
 # SIGNING=signed one of them must be set.
@@ -25,6 +29,7 @@ dir="$1"
 version="$2"
 rid="$3"
 summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+entitlements="$(cd "$(dirname "$0")" && pwd)/macos/SemanticRouter.entitlements"
 # Apple's requirement for Developer ID applications, as CodesignSignatures checks it: an ad-hoc signature (which vpk
 # gives an app it does not sign) or another certificate does not pass.
 developer_id='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
@@ -47,20 +52,63 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 failed=false
 
-# report <what> <passed: true|false> <line when it passed> <the tool's output when it did not>
+# report <what> <passed: true|false> <line when it passed> <the tool's output when it did not> [<error when it did not>]
 report() {
   local line
   if [ "$2" = true ]; then
     line="$3"
   elif [ "${SIGNING:-}" = signed ]; then
     printf '%s\n' "$4"
-    echo "::error::$1 should be signed and notarized, but is not."
+    echo "::error::${5:-$1 should be signed and notarized, but is not.}"
     failed=true line="**failed**"
   else
     line="**unsigned**"
   fi
   echo "$1: $line"
   echo "- $1: $line" >> "$summary"
+}
+
+# check_entitlements <the .app>: the bundle and its two executables carry exactly the entitlements file's set (vpk signs
+# with --deep, so they all should), and Info.plist explains the apple-events entitlement. A vpk that stopped applying
+# --signEntitlements would bring back its defaults, allow-dyld-environment-variables and disable-library-validation
+# among them, and only the signed app shows it.
+check_entitlements() {
+  local app="$1" target ok detail
+  for target in "$app" "$app/Contents/MacOS/SemanticRouter" "$app/Contents/MacOS/UpdateMac"; do
+    if [ ! -e "$target" ]; then
+      echo "::error::${target#"$work/"} does not exist."
+      exit 1
+    fi
+    ok=false
+    if ! codesign -d --entitlements - --xml "$target" >"$work/signed.plist" 2>"$work/codesign.log"; then
+      detail="$(cat "$work/codesign.log")"
+    elif detail="$(python3 - "$entitlements" "$work/signed.plist" 2>&1 <<'PY'
+import plistlib, sys
+expected = plistlib.load(open(sys.argv[1], 'rb'))
+try:
+    signed = plistlib.load(open(sys.argv[2], 'rb'))
+except Exception as error:
+    sys.exit(f'it is signed with no entitlements that can be read ({error})')
+if signed != expected:
+    extra = sorted(set(signed) - set(expected))
+    missing = sorted(set(expected) - set(signed))
+    changed = sorted(k for k in set(signed) & set(expected) if signed[k] != expected[k])
+    sys.exit(f'its entitlements are not the file\'s: extra {extra}, missing {missing}, changed {changed}')
+PY
+    )"; then
+      ok=true
+    fi
+    report "entitlements of \`${target#"$work/"}\`" "$ok" "as in deploy/macos/SemanticRouter.entitlements" "$detail" \
+      "The entitlements of ${target#"$work/"} are not deploy/macos/SemanticRouter.entitlements."
+  done
+
+  ok=false
+  if detail="$(/usr/libexec/PlistBuddy -c 'Print :NSAppleEventsUsageDescription' "$app/Contents/Info.plist" 2>&1)" \
+    && [ -n "${detail//[[:space:]]/}" ]; then
+    ok=true
+  fi
+  report "NSAppleEventsUsageDescription in \`${app#"$work/"}\`" "$ok" "set" "${detail:-empty}" \
+    "${app#"$work/"} has no NSAppleEventsUsageDescription: macOS would deny the updater's Apple event without asking."
 }
 
 pkg="$dir/SemanticRouter-$rid-Setup.pkg"
@@ -94,6 +142,7 @@ if detail="$(codesign --verify --deep --strict -R "=$developer_id" "$app" 2>&1)"
   ok=true
 fi
 report "\`$(basename "$app")\` in \`$(basename "$pkg")\`" "$ok" "signed and notarized, checked" "$detail"
+check_entitlements "$app"
 
 # The update package holds the bundle's Contents folder, without file modes: unpack it as an .app and make the
 # executable runnable, as the updater does.
@@ -111,6 +160,7 @@ if detail="$(codesign --verify --deep --strict -R "=$developer_id" "$bundle" 2>&
   ok=true
 fi
 report "\`SemanticRouter.app\` in \`$(basename "$package")\`" "$ok" "signed, checked" "$detail"
+check_entitlements "$bundle"
 
 if [ "$failed" = true ]; then
   exit 1

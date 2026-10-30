@@ -226,6 +226,7 @@ What is checked covers the code that ends up running, not just the installer, an
 | macOS | `SemanticRouter-<rid>-Setup.pkg` | `pkgutil --check-signature`, signed by the team, and `xcrun stapler validate` for the notarization ticket |
 | macOS | the `.app` inside the `.pkg` (`pkgutil --expand-full`) | `codesign --verify --deep --strict` with the team's Developer ID signature, and `spctl --assess` (Gatekeeper) reporting `source=Notarized Developer ID` |
 | macOS | the `.app` in the update package | `codesign --verify --deep --strict` with the team's Developer ID signature |
+| macOS | both `.app`s: the bundle, `Contents/MacOS/SemanticRouter` and `Contents/MacOS/UpdateMac` | signed with exactly the entitlements in `deploy/macos/SemanticRouter.entitlements` (`codesign -d --entitlements`), and `Info.plist` has `NSAppleEventsUsageDescription` ([Signing](desktop.md#signing)) |
 
 These are the signature rules the desktop app applies to an update when `Updates:Publisher` is set ([UpdatePublisher](../src/SemanticRouter.Desktop/UpdatePublisher.cs)), with the publisher taken from the release itself: the installer's signer on Windows, the repository's Apple team ID (`APPLE_TEAM_ID`) on macOS. The app's check also refuses .NET host files (`*.runtimeconfig.json`, `*.deps.json`) that point outside the package; the release does not check those.
 
