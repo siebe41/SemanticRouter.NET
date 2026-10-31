@@ -4,9 +4,9 @@
     "net10.0": {
       "GitHub.Copilot.SDK": {
         "type": "Direct",
-        "requested": "[1.0.26, 1.1.0)",
-        "resolved": "1.0.26",
-        "contentHash": "z5irU7ylg09KnZIE/82lbk08ZZ6S0mHc0RA+EzYrOxYrdBm+GEx+QDLM5dqOYE0xwvBxWRIkSKeGHeUcMkQGuA==",
+        "requested": "[1.0.28, 1.1.0)",
+        "resolved": "1.0.28",
+        "contentHash": "mYmpMjEHTQBUM71UAtO86e6uZ/ACPOLEhMS00ZqRMdAqmblygMtqo5uJbLFh6FCl0RzdwFH9j9g7EGpdfg6Hcg==",
         "dependencies": {
           "Microsoft.Extensions.AI.Abstractions": "10.2.0"
         }
@@ -25,7 +25,7 @@
       "semanticrouter.aspnetcore": {
         "type": "Project",
         "dependencies": {
-          "SemanticRouter.Core": "[0.6.0, )"
+          "SemanticRouter.Core": "[0.7.0, )"
         }
       },
       "semanticrouter.core": {
