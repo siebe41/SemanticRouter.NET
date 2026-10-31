@@ -278,14 +278,14 @@
       "semanticrouter.aspnetcore": {
         "type": "Project",
         "dependencies": {
-          "SemanticRouter.Core": "[0.6.0, )"
+          "SemanticRouter.Core": "[0.7.0, )"
         }
       },
       "semanticrouter.connectors.copilot": {
         "type": "Project",
         "dependencies": {
-          "GitHub.Copilot.SDK": "[1.0.26, 1.1.0)",
-          "SemanticRouter.AspNetCore": "[0.6.0, )"
+          "GitHub.Copilot.SDK": "[1.0.28, 1.1.0)",
+          "SemanticRouter.AspNetCore": "[0.7.0, )"
         }
       },
       "semanticrouter.core": {
@@ -296,30 +296,30 @@
         "dependencies": {
           "Microsoft.ML.OnnxRuntime": "[1.31.0, )",
           "Microsoft.ML.Tokenizers": "[2.0.1, )",
-          "SemanticRouter.AspNetCore": "[0.6.0, )"
+          "SemanticRouter.AspNetCore": "[0.7.0, )"
         }
       },
       "semanticrouter.hosting": {
         "type": "Project",
         "dependencies": {
-          "SemanticRouter.AspNetCore": "[0.6.0, )",
-          "SemanticRouter.Connectors.Copilot": "[0.6.0, )",
-          "SemanticRouter.Embeddings.Onnx": "[0.6.0, )",
-          "SemanticRouter.Storage.Sqlite": "[0.6.0, )"
+          "SemanticRouter.AspNetCore": "[0.7.0, )",
+          "SemanticRouter.Connectors.Copilot": "[0.7.0, )",
+          "SemanticRouter.Embeddings.Onnx": "[0.7.0, )",
+          "SemanticRouter.Storage.Sqlite": "[0.7.0, )"
         }
       },
       "semanticrouter.storage.sqlite": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.13, )",
-          "SemanticRouter.AspNetCore": "[0.6.0, )"
+          "SemanticRouter.AspNetCore": "[0.7.0, )"
         }
       },
       "GitHub.Copilot.SDK": {
         "type": "CentralTransitive",
-        "requested": "[1.0.26, 1.1.0)",
-        "resolved": "1.0.26",
-        "contentHash": "z5irU7ylg09KnZIE/82lbk08ZZ6S0mHc0RA+EzYrOxYrdBm+GEx+QDLM5dqOYE0xwvBxWRIkSKeGHeUcMkQGuA==",
+        "requested": "[1.0.28, 1.1.0)",
+        "resolved": "1.0.28",
+        "contentHash": "mYmpMjEHTQBUM71UAtO86e6uZ/ACPOLEhMS00ZqRMdAqmblygMtqo5uJbLFh6FCl0RzdwFH9j9g7EGpdfg6Hcg==",
         "dependencies": {
           "Microsoft.Extensions.AI.Abstractions": "10.2.0",
           "Microsoft.Extensions.Logging.Abstractions": "10.0.2"

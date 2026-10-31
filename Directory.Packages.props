@@ -12,11 +12,11 @@
   </ItemGroup>
   <ItemGroup>
     <!-- SemanticRouter.Storage.Sqlite only. -->
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.14" />
   </ItemGroup>
   <ItemGroup>
     <!-- SemanticRouter.Embeddings.Onnx only. -->
-    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime" Version="1.31.1" />
     <PackageVersion Include="Microsoft.ML.Tokenizers" Version="2.0.1" />
   </ItemGroup>
   <ItemGroup>
@@ -26,7 +26,7 @@
       not assumed to work. Raise the bound after testing the connector against it (CONTRIBUTING.md, Package versions
       and dependencies).
     -->
-    <PackageVersion Include="GitHub.Copilot.SDK" Version="[1.0.26, 1.1.0)" />
+    <PackageVersion Include="GitHub.Copilot.SDK" Version="[1.0.28, 1.1.0)" />
   </ItemGroup>
   <ItemGroup>
     <!-- SemanticRouter.Desktop only: the tray icon and the dashboard window (the platform's own web view). -->
@@ -45,7 +45,7 @@
     <!-- Pinned to 7.x: the last Apache-2.0 licensed line of FluentAssertions. -->
     <PackageVersion Include="FluentAssertions" Version="7.2.2" />
     <PackageVersion Include="Moq" Version="4.21.0" />
-    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.13" />
+    <PackageVersion Include="Microsoft.AspNetCore.TestHost" Version="10.0.14" />
     <PackageVersion Include="coverlet.collector" Version="10.1.0" />
   </ItemGroup>
 </Project>

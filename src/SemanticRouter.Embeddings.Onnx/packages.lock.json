@@ -10,11 +10,11 @@
       },
       "Microsoft.ML.OnnxRuntime": {
         "type": "Direct",
-        "requested": "[1.31.0, )",
-        "resolved": "1.31.0",
-        "contentHash": "7v58S0xqY1ZmLui5BnK3FQEWagRhmhkR/9yLrxF5rQGppGfcMaw7W0a2wgT1SWnT6ug0dmr1B2I4VWhlY/yvng==",
+        "requested": "[1.31.1, )",
+        "resolved": "1.31.1",
+        "contentHash": "XtsO/1JoKepkWbGk9/DcYtRUTduwJD68kw0eeaH5yy77YBivUZWhC1NBNlVecsBt9EitlQIjCd1hHDNXJ2jbQA==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.1"
         }
       },
       "Microsoft.ML.Tokenizers": {
@@ -33,8 +33,8 @@
       },
       "Microsoft.ML.OnnxRuntime.Managed": {
         "type": "Transitive",
-        "resolved": "1.31.0",
-        "contentHash": "o9nvEiddLLlAMOHN0XZ/06Oal0W6S7iWiSb8lzQAwfQKNOZtX4C8he5/I7Mc/DlSprNfovAW6kCkwX2BAE0JHw==",
+        "resolved": "1.31.1",
+        "contentHash": "158JCbNXN9/90LtjF4vHFiJYCF0bqF7CxLjm031jq7dJLEn/CtlHpMJm3UItQSIhQenlx+9Zuqi3zulwnsRVtA==",
         "dependencies": {
           "System.Numerics.Tensors": "9.0.0"
         }
@@ -47,7 +47,7 @@
       "semanticrouter.aspnetcore": {
         "type": "Project",
         "dependencies": {
-          "SemanticRouter.Core": "[0.6.0, )"
+          "SemanticRouter.Core": "[0.7.0, )"
         }
       },
       "semanticrouter.core": {
@@ -57,66 +57,66 @@
     "net10.0/linux-arm64": {
       "Microsoft.ML.OnnxRuntime": {
         "type": "Direct",
-        "requested": "[1.31.0, )",
-        "resolved": "1.31.0",
-        "contentHash": "7v58S0xqY1ZmLui5BnK3FQEWagRhmhkR/9yLrxF5rQGppGfcMaw7W0a2wgT1SWnT6ug0dmr1B2I4VWhlY/yvng==",
+        "requested": "[1.31.1, )",
+        "resolved": "1.31.1",
+        "contentHash": "XtsO/1JoKepkWbGk9/DcYtRUTduwJD68kw0eeaH5yy77YBivUZWhC1NBNlVecsBt9EitlQIjCd1hHDNXJ2jbQA==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.1"
         }
       }
     },
     "net10.0/linux-x64": {
       "Microsoft.ML.OnnxRuntime": {
         "type": "Direct",
-        "requested": "[1.31.0, )",
-        "resolved": "1.31.0",
-        "contentHash": "7v58S0xqY1ZmLui5BnK3FQEWagRhmhkR/9yLrxF5rQGppGfcMaw7W0a2wgT1SWnT6ug0dmr1B2I4VWhlY/yvng==",
+        "requested": "[1.31.1, )",
+        "resolved": "1.31.1",
+        "contentHash": "XtsO/1JoKepkWbGk9/DcYtRUTduwJD68kw0eeaH5yy77YBivUZWhC1NBNlVecsBt9EitlQIjCd1hHDNXJ2jbQA==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.1"
         }
       }
     },
     "net10.0/osx-arm64": {
       "Microsoft.ML.OnnxRuntime": {
         "type": "Direct",
-        "requested": "[1.31.0, )",
-        "resolved": "1.31.0",
-        "contentHash": "7v58S0xqY1ZmLui5BnK3FQEWagRhmhkR/9yLrxF5rQGppGfcMaw7W0a2wgT1SWnT6ug0dmr1B2I4VWhlY/yvng==",
+        "requested": "[1.31.1, )",
+        "resolved": "1.31.1",
+        "contentHash": "XtsO/1JoKepkWbGk9/DcYtRUTduwJD68kw0eeaH5yy77YBivUZWhC1NBNlVecsBt9EitlQIjCd1hHDNXJ2jbQA==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.1"
         }
       }
     },
     "net10.0/osx-x64": {
       "Microsoft.ML.OnnxRuntime": {
         "type": "Direct",
-        "requested": "[1.31.0, )",
-        "resolved": "1.31.0",
-        "contentHash": "7v58S0xqY1ZmLui5BnK3FQEWagRhmhkR/9yLrxF5rQGppGfcMaw7W0a2wgT1SWnT6ug0dmr1B2I4VWhlY/yvng==",
+        "requested": "[1.31.1, )",
+        "resolved": "1.31.1",
+        "contentHash": "XtsO/1JoKepkWbGk9/DcYtRUTduwJD68kw0eeaH5yy77YBivUZWhC1NBNlVecsBt9EitlQIjCd1hHDNXJ2jbQA==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.1"
         }
       }
     },
     "net10.0/win-arm64": {
       "Microsoft.ML.OnnxRuntime": {
         "type": "Direct",
-        "requested": "[1.31.0, )",
-        "resolved": "1.31.0",
-        "contentHash": "7v58S0xqY1ZmLui5BnK3FQEWagRhmhkR/9yLrxF5rQGppGfcMaw7W0a2wgT1SWnT6ug0dmr1B2I4VWhlY/yvng==",
+        "requested": "[1.31.1, )",
+        "resolved": "1.31.1",
+        "contentHash": "XtsO/1JoKepkWbGk9/DcYtRUTduwJD68kw0eeaH5yy77YBivUZWhC1NBNlVecsBt9EitlQIjCd1hHDNXJ2jbQA==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.1"
         }
       }
     },
     "net10.0/win-x64": {
       "Microsoft.ML.OnnxRuntime": {
         "type": "Direct",
-        "requested": "[1.31.0, )",
-        "resolved": "1.31.0",
-        "contentHash": "7v58S0xqY1ZmLui5BnK3FQEWagRhmhkR/9yLrxF5rQGppGfcMaw7W0a2wgT1SWnT6ug0dmr1B2I4VWhlY/yvng==",
+        "requested": "[1.31.1, )",
+        "resolved": "1.31.1",
+        "contentHash": "XtsO/1JoKepkWbGk9/DcYtRUTduwJD68kw0eeaH5yy77YBivUZWhC1NBNlVecsBt9EitlQIjCd1hHDNXJ2jbQA==",
         "dependencies": {
-          "Microsoft.ML.OnnxRuntime.Managed": "1.31.0"
+          "Microsoft.ML.OnnxRuntime.Managed": "1.31.1"
         }
       }
     }
