@@ -16,6 +16,7 @@
     "Avalonia.Angle.Windows.Natives": "BSD-3-Clause",
     "Microsoft.ML.OnnxRuntime": "MIT",
     "Microsoft.ML.OnnxRuntime.Managed": "MIT",
+    "SQLite": "blessing",
     "Microsoft.AspNetCore.App.Runtime.*": "MIT",
     "Microsoft.NETCore.App.Runtime.*": "MIT"
   },
