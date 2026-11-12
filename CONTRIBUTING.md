@@ -10,7 +10,7 @@ You do not need to write code to help. If a prompt went to a model that was stro
 
 ## Building and testing
 
-You need .NET SDK 10.0.402 or a later patch in the 10.0.4xx feature band. [`global.json`](global.json) pins 10.0.402 for CI and permits a later patch when that version is not installed, so every machine builds with the same compiler and MSBuild feature band. If `dotnet` reports "A compatible .NET SDK was not found", `dotnet --list-sdks` shows what you have: install the latest 10.0.4xx SDK beside it.
+You need .NET SDK 10.0.404 or a later patch in the 10.0.4xx feature band. [`global.json`](global.json) pins 10.0.404 for CI and permits a later patch when that version is not installed, so every machine builds with the same compiler and MSBuild feature band. If `dotnet` reports "A compatible .NET SDK was not found", `dotnet --list-sdks` shows what you have: install the latest 10.0.4xx SDK beside it.
 
 ```bash
 dotnet build      # warnings are errors; .NET analyzers at latest-recommended
