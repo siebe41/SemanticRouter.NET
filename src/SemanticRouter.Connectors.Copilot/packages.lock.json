@@ -4,11 +4,11 @@
     "net10.0": {
       "GitHub.Copilot.SDK": {
         "type": "Direct",
-        "requested": "[1.0.26, 1.1.0)",
-        "resolved": "1.0.26",
-        "contentHash": "z5irU7ylg09KnZIE/82lbk08ZZ6S0mHc0RA+EzYrOxYrdBm+GEx+QDLM5dqOYE0xwvBxWRIkSKeGHeUcMkQGuA==",
+        "requested": "[1.0.29, 1.1.0)",
+        "resolved": "1.0.29",
+        "contentHash": "QKRUZR0L5lRx4mog85lnXS2nue89iGAizPMiogtwDudIMESqxuGHJpndcNolpRByA28U4Wes/CE5FoGGDk8QEg==",
         "dependencies": {
-          "Microsoft.Extensions.AI.Abstractions": "10.2.0"
+          "Microsoft.Extensions.AI.Abstractions": "10.11.0"
         }
       },
       "Microsoft.CodeAnalysis.PublicApiAnalyzers": {
@@ -19,13 +19,13 @@
       },
       "Microsoft.Extensions.AI.Abstractions": {
         "type": "Transitive",
-        "resolved": "10.2.0",
-        "contentHash": "ONGlIBht0ygEdKc0bCt9XWUiq19/460dAu7fCKzPM34OFJSMQIohEDTJwjCJ8vVp8znNakloc9xFF9+R/eDCYQ=="
+        "resolved": "10.11.0",
+        "contentHash": "h4DX/TdJU4fk1GGaf19n6Kujkj6VXbGeL4UEOsQ8+ZJC5fVApPauokCtvBP684BYbczUYZQNfo1mbmyHG4WVSg=="
       },
       "semanticrouter.aspnetcore": {
         "type": "Project",
         "dependencies": {
-          "SemanticRouter.Core": "[0.6.0, )"
+          "SemanticRouter.Core": "[0.7.0, )"
         }
       },
       "semanticrouter.core": {
