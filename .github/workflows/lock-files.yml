@@ -1,0 +1,45 @@
+name: Lock files
+
+# Regenerates every packages.lock.json for a dependency branch and uploads the result, so a version bump in
+# Directory.Packages.props (by hand or by Dependabot) can be finished without a local restore (#369). CI, the
+# release and the container build restore in locked mode, so a bump without its lock files fails with NU1004.
+#
+# It does not push: a commit pushed with GITHUB_TOKEN would not start CI. Download the `packages-lock-files`
+# artifact, commit the files that changed, and push them yourself.
+
+on:
+  push:
+    branches: [ 'deps/**', 'dependabot/nuget/**' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    name: restore --force-evaluate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Restore every project that has a lock file
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+        run: |
+          git ls-files '*packages.lock.json' | while read -r lock; do
+            dotnet restore "$(dirname "$lock")" --force-evaluate
+          done
+      - name: Changed lock files
+        run: |
+          git status --short -- '*packages.lock.json'
+          git diff --stat -- '*packages.lock.json' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages-lock-files
+          path: '**/packages.lock.json'
+          retention-days: 7
