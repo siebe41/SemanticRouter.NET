@@ -38,6 +38,13 @@ jobs:
         run: |
           git status --short -- '*packages.lock.json'
           git diff --stat -- '*packages.lock.json' >> "$GITHUB_STEP_SUMMARY"
+      # The same changes as a patch in the log, for a session that can read job logs but not download artifacts:
+      # decode the lines between the markers with base64 -d and apply the result with git apply.
+      - name: Lock file patch (base64)
+        run: |
+          echo '--- BEGIN LOCK PATCH ---'
+          git diff --no-color --binary -- '*packages.lock.json' | gzip -9 | base64 -w 76
+          echo '--- END LOCK PATCH ---'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: packages-lock-files
