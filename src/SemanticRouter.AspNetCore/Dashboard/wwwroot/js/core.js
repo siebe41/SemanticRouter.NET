@@ -15,7 +15,6 @@ export const PREFIX = document.querySelector('meta[name="router-prefix"]')?.cont
 export const API = PREFIX + '/api';
 export const CAPABILITY_HINTS = ['chat', 'code', 'tools', 'vision', 'reasoning'];
 export const STRATEGIES = ['CheapestCapable', 'MostCapable', 'Priority', 'Fastest', 'Balanced'];
-export const SCORING = ['MaxSimilarity', 'Centroid'];
 // The router's own connector types, until api/status says which it has; installed packages add more (api/status).
 const BUILT_IN_CONNECTOR_TYPES = ['OpenAICompatible', 'Anthropic', 'Responses', 'Cli'];
 export const PRESETS = ['ClaudeCode', 'GitHubCopilot', 'Codex', 'Custom'];
@@ -283,9 +282,6 @@ export function ask({ title, body, actions, wide }) {
 export const actionKey = (el) => [el.dataset.action, el.dataset.id, el.dataset.index, el.dataset.name, el.dataset.connector, el.dataset.model].map((x) => x || '').join('|');
 
 /* Path-based binding: data-bind="Routes.0.Utterances" with data-kind="lines|csv|kv|number|float|bool|text|timespan". */
-export function getPath(obj, path) {
-  return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
-}
 export function setPath(obj, path, value) {
   const keys = path.split('.');
   let o = obj;

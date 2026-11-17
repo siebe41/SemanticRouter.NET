@@ -378,14 +378,6 @@ internal sealed class RunningUsageTotals<T>
     }
 
     public void Clear() => _entries.Clear();
-
-    public void RemoveWhere(Func<UsageRange, bool> predicate)
-    {
-        foreach (UsageRange range in _entries.Keys.Where(predicate).ToArray())
-        {
-            _entries.Remove(range);
-        }
-    }
 }
 
 /// <summary>Shared grouping for ledgers.</summary>

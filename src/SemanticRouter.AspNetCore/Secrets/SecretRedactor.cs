@@ -47,6 +47,4 @@ internal sealed class SecretRedactor
         return text;
     }
 
-    /// <summary>Like <see cref="Redact(string)"/>, passing <see langword="null"/> through.</summary>
-    public string? RedactOrNull(string? text) => text is null ? null : Redact(text);
 }

@@ -55,8 +55,6 @@ public sealed class CopilotConnectorTests : RouterHostTest
                 }
             });
 
-    private static string Esc(string text) => JsonSerializer.Serialize(text);
-
     [Fact]
     public async Task A_catalog_model_streams_a_chat_reply_through_the_sdk()
     {
