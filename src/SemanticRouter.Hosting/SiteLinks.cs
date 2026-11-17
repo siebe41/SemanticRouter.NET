@@ -24,7 +24,5 @@ internal static class SiteLinks
 
     public const string DashboardAccess = Dashboard + "#access-and-security";
 
-    public const string Clients = Root + "/clients";
-
     public const string Desktop = Root + "/desktop";
 }

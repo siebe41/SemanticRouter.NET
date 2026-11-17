@@ -284,13 +284,12 @@ pre code { background: none; padding: 0; }
 /* Cards and grids */
 .grid { display: grid; gap: 14px; }
 .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-@media (max-width: 1000px) { .grid.cols-3, .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1000px) { .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .nav-toggle { display: none; font-size: 18px; line-height: 1; padding: 4px 10px; }
 @media (max-width: 720px) {
   /* Phones: one column, but stat tiles stay two abreast. */
-  .grid.cols-2, .grid.cols-3 { grid-template-columns: minmax(0, 1fr); }
+  .grid.cols-2 { grid-template-columns: minmax(0, 1fr); }
   .grid.cols-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .app { grid-template-columns: 1fr; }
   /* The navigation becomes a drawer behind the menu button. */
@@ -371,7 +370,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 label.check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 14px; }
 .form-grid .wide { grid-column: 1 / -1; }
-.form-grid .span2 { grid-column: span 2; }
 .inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .row-actions { display: flex; gap: 6px; }
 

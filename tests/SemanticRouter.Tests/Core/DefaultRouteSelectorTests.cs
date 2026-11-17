@@ -5,7 +5,6 @@ namespace SemanticRouter.Tests.Core;
 public class DefaultRouteSelectorTests
 {
     private static readonly RouteDefinition Chat = Route("chat", 1, "x");
-    private static readonly RouteDefinition Code = Route("code", 2, "y");
     private static readonly RouteDefinition Reasoning = Route("reasoning", 4, "z");
     private static readonly ComplexityAnalysis Simple = new() { Score = 0.1, EstimatedTokens = 12 };
 
