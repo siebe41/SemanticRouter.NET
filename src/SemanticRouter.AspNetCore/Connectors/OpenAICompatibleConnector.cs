@@ -31,6 +31,13 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         "Transfer-Encoding", "Upgrade", "Proxy-Connection",
     };
 
+    // Headers that act on the browser's view of an origin. The router's origin also serves the dashboard, so an upstream must
+    // not set cookies, CORS grants, HSTS or the like there.
+    private static readonly HashSet<string> OriginScopedHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Set-Cookie", "Set-Cookie2", "Strict-Transport-Security", "Clear-Site-Data", "Alt-Svc", "Timing-Allow-Origin",
+    };
+
     private static readonly HashSet<string> NeverForwarded = new(StringComparer.OrdinalIgnoreCase)
     {
         "Authorization", "x-api-key", "Cookie", "Host", "Content-Length", "Content-Type",
@@ -307,6 +314,12 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         }
     }
 
+    /// <summary>Whether a pass-through reply's header reaches the client: not hop-by-hop, and not one that acts on the router's origin.</summary>
+    internal static bool IsRelayedResponseHeader(string name) =>
+        !HopByHopHeaders.Contains(name)
+        && !OriginScopedHeaders.Contains(name)
+        && !name.StartsWith("Access-Control-", StringComparison.OrdinalIgnoreCase);
+
     private async Task CopyResponseAsync(HttpContext context, HttpResponseMessage response, string modelName, List<string> copied, CancellationToken cancellationToken)
     {
         HttpResponse outgoing = context.Response;
@@ -314,7 +327,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
         foreach (KeyValuePair<string, HeaderStringValues> header in response.Headers.NonValidated.Concat(response.Content.Headers.NonValidated))
         {
-            if (HopByHopHeaders.Contains(header.Key))
+            if (!IsRelayedResponseHeader(header.Key))
             {
                 continue;
             }

@@ -247,6 +247,25 @@ public sealed class SecretHandlingTests : RouterHostTest
     }
 
     [Fact]
+    public async Task The_embeddings_probe_redacts_keys_in_its_error()
+    {
+        HttpClient client = await StartDispatchAsync(s => s.AddSingleton<IEmbeddingProvider>(new FailingEmbeddings("embedding server refused key sk-test")));
+
+        string probe = await (await client.PostAsJsonAsync("/router/api/embeddings/test", new { text = "x" })).Content.ReadAsStringAsync();
+
+        probe.Should().Contain("embedding server refused key").And.NotContain("sk-test");
+    }
+
+    private sealed class FailingEmbeddings(string message) : IEmbeddingProvider
+    {
+        public ValueTask<ReadOnlyMemory<float>> GenerateEmbeddingAsync(string text, CancellationToken cancellationToken = default) =>
+            throw new HttpRequestException(message);
+
+        public ValueTask<IReadOnlyList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken cancellationToken = default) =>
+            throw new HttpRequestException(message);
+    }
+
+    [Fact]
     public async Task Credentials_in_an_unreachable_connectors_address_never_reach_the_logs()
     {
         LocalHttp = new StubHttpMessageHandler((_, _) => throw new HttpRequestException("Connection refused (localhost:1234) for user:sk-userinfo-secret-77"));
@@ -521,6 +540,49 @@ public sealed class DashboardAccessTests : RouterHostTest
         HttpResponseMessage response = await client.SendAsync(rebound);
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await response.Content.ReadAsStringAsync()).Should().Contain("is not this machine");
+    }
+
+    [Fact]
+    public async Task An_origin_must_match_the_scheme_host_and_port_the_request_came_to()
+    {
+        HttpClient client = await StartAsync(o => o.PublicOrigins.Add("https://router.corp.example"), remote: false);
+        string config = JsonNode.Parse(await client.GetStringAsync("/router/api/config"))!["config"]!.ToJsonString();
+
+        HttpRequestMessage Put(string url, string origin, string? host = null)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Put, url) { Content = new StringContent(config, Encoding.UTF8, "application/json") };
+            request.Headers.Add("Origin", origin);
+            if (host is not null)
+            {
+                request.Headers.Host = host;
+            }
+
+            return request;
+        }
+
+        const string Path = "/router/api/config?persist=false";
+
+        // #407: a page on http://localhost is not the dashboard on https://localhost, nor the other way round.
+        (await client.SendAsync(Put("http://localhost" + Path, "https://localhost"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.SendAsync(Put("https://localhost" + Path, "http://localhost"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.SendAsync(Put("http://localhost" + Path, "http://localhost:8080"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.SendAsync(Put("https://localhost" + Path, "https://localhost"))).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.SendAsync(Put("https://localhost" + Path, "https://localhost:443"))).StatusCode.Should().Be(HttpStatusCode.OK, "443 is https's own port");
+
+        // A public origin is matched whole: behind a proxy that terminates TLS the request arrives over http.
+        (await client.SendAsync(Put("http://localhost" + Path, "https://router.corp.example", host: "router.corp.example"))).StatusCode
+            .Should().Be(HttpStatusCode.OK);
+        (await client.SendAsync(Put("https://localhost" + Path, "http://router.corp.example", host: "router.corp.example"))).StatusCode
+            .Should().Be(HttpStatusCode.Forbidden, "the listed origin is https, and the request came over https");
+
+        // The gateway applies the same rule.
+        var chat = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = Json(ChatJson) };
+        chat.Headers.Add("Origin", "https://localhost");
+        (await client.SendAsync(chat)).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var proxied = new HttpRequestMessage(HttpMethod.Post, "/v1/chat/completions") { Content = Json(ChatJson) };
+        proxied.Headers.Add("Origin", "https://router.corp.example");
+        proxied.Headers.Host = "router.corp.example";
+        (await client.SendAsync(proxied)).StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
     [Fact]

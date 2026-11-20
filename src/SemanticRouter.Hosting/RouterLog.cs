@@ -29,7 +29,14 @@ internal static class RouterLog
             File.Move(log, log + ".1", overwrite: true);
         }
 
-        var writer = new StreamWriter(new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+        var options = new FileStreamOptions { Mode = FileMode.Append, Access = FileAccess.Write, Share = FileShare.ReadWrite };
+        if (!OperatingSystem.IsWindows())
+        {
+            // Created owner-only, so nothing is readable by others before the mode is set; an older log is restricted below.
+            options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        }
+
+        var writer = new StreamWriter(new FileStream(log, options)) { AutoFlush = true };
         OwnerOnly.Restrict(log);
         TextWriter synchronized = TextWriter.Synchronized(writer);
         Console.SetOut(synchronized);

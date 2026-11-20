@@ -18,6 +18,7 @@ internal sealed class GatewayGuard(IEnumerable<string> publicOrigins)
     private static readonly GatewayGuard Default = new([]);
 
     private readonly HashSet<string> _publicAuthorities = LocalHosts.Authorities(publicOrigins);
+    private readonly HashSet<string> _publicOrigins = LocalHosts.Origins(publicOrigins);
 
     /// <summary>The registered guard (which knows the dashboard's public origins), or one that knows none.</summary>
     public static GatewayGuard For(HttpContext context) => context.RequestServices.GetService<GatewayGuard>() ?? Default;
@@ -33,12 +34,10 @@ internal sealed class GatewayGuard(IEnumerable<string> publicOrigins)
         }
 
         string? origin = request.Headers.Origin;
-        if (!string.IsNullOrEmpty(origin)
-            && (!Uri.TryCreate(origin, UriKind.Absolute, out Uri? uri)
-                || (!string.Equals(LocalHosts.Authority(uri), request.Host.Value, StringComparison.OrdinalIgnoreCase)
-                    && !_publicAuthorities.Contains(LocalHosts.Authority(uri)))))
+        if (!string.IsNullOrEmpty(origin) && !LocalHosts.IsSameOrigin(request, origin, _publicOrigins))
         {
-            return "Web pages on other sites cannot use the gateway (the request's Origin is not the router's own).";
+            return "Web pages on other sites cannot use the gateway (the request's Origin is not the router's own: its scheme, host " +
+                   "and port must match, or be listed in SemanticRouter:Dashboard:PublicOrigins).";
         }
 
         return null;
@@ -58,14 +57,46 @@ internal static class LocalHosts
     /// <summary>The <c>host[:port]</c> a browser puts in the Host header for <paramref name="uri"/>.</summary>
     public static string Authority(Uri uri) => uri.IsDefaultPort ? uri.Host : $"{uri.Host}:{uri.Port}";
 
-    /// <summary>The authorities of absolute origins such as <c>https://router.example.com</c>; anything else is ignored.</summary>
+    /// <summary>The authorities of absolute origins such as <c>https://router.example.com</c>, for the Host header; anything else is ignored.</summary>
     public static HashSet<string> Authorities(IEnumerable<string> origins) =>
-        new(
-            origins
-                .Select(o => Uri.TryCreate(o.Trim(), UriKind.Absolute, out Uri? uri) ? Authority(uri) : null)
-                .Where(a => a is not null)
-                .Cast<string>(),
-            StringComparer.OrdinalIgnoreCase);
+        new(WebAddresses(origins).Select(Authority), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Absolute origins such as <c>https://router.example.com</c> as <see cref="Origin(Uri)"/> writes them, for the
+    /// Origin header: scheme, host and port all count. Anything that is not an <c>http</c> or <c>https</c> address is ignored.
+    /// </summary>
+    public static HashSet<string> Origins(IEnumerable<string> origins) =>
+        new(WebAddresses(origins).Select(Origin), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary><c>scheme://host:port</c>, with the port written even when it is the scheme's default.</summary>
+    public static string Origin(Uri uri) => $"{uri.Scheme}://{uri.Host}:{uri.Port.ToString(CultureInfo.InvariantCulture)}";
+
+    /// <summary>
+    /// Whether a browser's <paramref name="origin"/> is the request's own (the scheme it arrived with, after any
+    /// forwarded headers, and its Host) or one of <paramref name="publicOrigins"/> (<see cref="Origins"/>). Scheme, host
+    /// and port must all match: a page on <c>http://router.example</c> is not the dashboard on <c>https://router.example</c>.
+    /// </summary>
+    public static bool IsSameOrigin(HttpRequest request, string origin, HashSet<string> publicOrigins)
+    {
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out Uri? uri) || !IsWebAddress(uri))
+        {
+            return false;
+        }
+
+        string seen = Origin(uri);
+        return publicOrigins.Contains(seen)
+            || (Uri.TryCreate($"{request.Scheme}://{request.Host.Value}", UriKind.Absolute, out Uri? own) && IsWebAddress(own)
+                && string.Equals(seen, Origin(own), StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IEnumerable<Uri> WebAddresses(IEnumerable<string> origins) =>
+        origins
+            .Select(o => Uri.TryCreate(o.Trim(), UriKind.Absolute, out Uri? uri) && IsWebAddress(uri) ? uri : null)
+            .Where(u => u is not null)
+            .Cast<Uri>();
+
+    private static bool IsWebAddress(Uri uri) =>
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps) && uri.Host.Length > 0;
 }
 
 /// <summary>Whether a gateway request may go on, and as which client.</summary>

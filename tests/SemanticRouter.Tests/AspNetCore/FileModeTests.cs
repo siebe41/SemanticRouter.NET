@@ -38,6 +38,68 @@ public sealed class FileModeTests : IDisposable
     }
 
     [Fact]
+    public void Owner_only_files_are_created_with_their_mode_rather_than_restricted_afterwards()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        // The usual umask leaves a new file readable by everyone; these are 0600 from the moment they exist.
+        string empty = Path.Combine(_directory, "state.db");
+        OwnerOnly.CreateFile(empty);
+        File.GetUnixFileMode(empty).Should().Be(OwnerFile);
+        new FileInfo(empty).Length.Should().Be(0);
+
+        // A leftover temporary file from an older release, readable by everyone, is not written into.
+        string secrets = Path.Combine(_directory, "router.secrets.json");
+        File.WriteAllText(secrets + ".tmp", "stale");
+        File.SetUnixFileMode(secrets + ".tmp", OwnerFile | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        OwnerOnly.WriteAllText(secrets, "{\"k\":\"v\"}");
+        File.GetUnixFileMode(secrets).Should().Be(OwnerFile);
+        File.ReadAllText(secrets).Should().Be("{\"k\":\"v\"}");
+        File.Exists(secrets + ".tmp").Should().BeFalse();
+
+        // An existing file is left as it is: CreateFile does not truncate a database.
+        File.WriteAllText(empty, "data");
+        OwnerOnly.CreateFile(empty);
+        File.ReadAllText(empty).Should().Be("data");
+    }
+
+    [Fact]
+    public void Sqlite_copies_a_database_into_an_empty_owner_only_file()
+    {
+        string source = Path.Combine(_directory, "source.db");
+        string copy = Path.Combine(_directory, "copy.db");
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={source};Pooling=False"))
+        {
+            connection.Open();
+            using Microsoft.Data.Sqlite.SqliteCommand create = connection.CreateCommand();
+            create.CommandText = "CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (42);";
+            create.ExecuteNonQuery();
+
+            OwnerOnly.CreateFile(copy);
+            using Microsoft.Data.Sqlite.SqliteCommand vacuum = connection.CreateCommand();
+            vacuum.CommandText = "VACUUM INTO $file;";
+            vacuum.Parameters.AddWithValue("$file", copy);
+            vacuum.ExecuteNonQuery();
+        }
+
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={copy};Mode=ReadOnly;Pooling=False"))
+        {
+            connection.Open();
+            using Microsoft.Data.Sqlite.SqliteCommand read = connection.CreateCommand();
+            read.CommandText = "SELECT x FROM t;";
+            Convert.ToInt64(read.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture).Should().Be(42);
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            File.GetUnixFileMode(copy).Should().Be(OwnerFile, "VACUUM INTO keeps the mode of the file it writes into");
+        }
+    }
+
+    [Fact]
     public void The_configuration_directory_is_tightened_to_its_owner()
     {
         if (OperatingSystem.IsWindows())

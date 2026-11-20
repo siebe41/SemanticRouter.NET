@@ -50,6 +50,46 @@ internal static class OwnerOnly
         }
     }
 
+    /// <summary>
+    /// Creates <paramref name="path"/> as an empty file that only its owner can read and write (0600 on Unix, set as it
+    /// is created, so it is never readable by others, whatever the umask); an existing file is left as it is.
+    /// </summary>
+    public static void CreateFile(string path)
+    {
+        using FileStream stream = Open(path, FileMode.OpenOrCreate);
+    }
+
+    /// <summary>
+    /// Replaces <paramref name="path"/> with <paramref name="contents"/> (UTF-8): written to a file next to it that is
+    /// created owner-only (<see cref="CreateFile"/>), then moved into place, so a write cut short never replaces a good
+    /// file and the contents are never readable by others, not even for a moment.
+    /// </summary>
+    public static void WriteAllText(string path, string contents)
+    {
+        string temp = path + ".tmp";
+
+        // A leftover temporary file may have been created with a wider mode, and opened by someone else while it was.
+        System.IO.File.Delete(temp);
+        using (FileStream stream = Open(temp, FileMode.CreateNew))
+        using (var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+        {
+            writer.Write(contents);
+        }
+
+        System.IO.File.Move(temp, path, overwrite: true);
+    }
+
+    private static FileStream Open(string path, FileMode mode)
+    {
+        var options = new FileStreamOptions { Mode = mode, Access = FileAccess.Write, Share = FileShare.None };
+        if (!OperatingSystem.IsWindows())
+        {
+            options.UnixCreateMode = File;
+        }
+
+        return new FileStream(path, options);
+    }
+
     /// <summary>Whether <paramref name="path"/> is <paramref name="profile"/> or a folder in it (case ignored, as on Windows).</summary>
     internal static bool IsInside(string path, string? profile)
     {
