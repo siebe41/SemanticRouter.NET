@@ -15,7 +15,10 @@
 # - only the jobs in oidc_jobs below may ask for an OIDC token (id-token: write, or write-all), and never a whole
 #   workflow: every step of such a job can ask for one. Only the jobs in signing_jobs may run in the windows-signing
 #   environment, whose OIDC token Azure accepts for signing (docs/desktop.md#signing-in-to-azure), and a job that logs
-#   in to Azure (azure/login) must be one of them.
+#   in to Azure (azure/login) must be one of them;
+# - every actions/checkout step sets `persist-credentials: false`, so the checkout does not leave the workflow's token
+#   in the repository's git config for whatever the job runs next (a build, a test, a package's MSBuild task) to read.
+#   A job that has to push with the checkout's credentials must be in checkout_credentials_jobs below.
 #
 #   deploy/workflow-secrets-check.sh [workflow...]
 #
@@ -27,6 +30,9 @@ set -euo pipefail
 # <workflow file name>:<job>
 oidc_jobs="release.yml:nuget release.yml:image-sign release.yml:installer-windows release.yml:checksums signing-dry-run.yml:windows pages.yml:deploy scorecard.yml:analysis"
 signing_jobs="release.yml:installer-windows signing-dry-run.yml:windows"
+# Jobs whose checkout may keep the workflow's token, because they push with it. None does today: add one here, with a
+# comment saying what it pushes, only if it must.
+checkout_credentials_jobs=""
 
 if [ $# -eq 0 ]; then
   set -- .github/workflows/*.yml .github/workflows/*.yaml
@@ -49,11 +55,12 @@ for file in "$@"; do
     /^    [A-Za-z0-9_-]+:/ { where = "job" }
     where != "job" && /^      - / { step++; where = "step" }
     { print job "\t" step "\t" where "\t" $0 }' | awk -F '\t' -v file="$file" -v name="$(basename "$file")" -v q="'" \
-      -v oidc_jobs="$oidc_jobs" -v signing_jobs="$signing_jobs" '
+      -v oidc_jobs="$oidc_jobs" -v signing_jobs="$signing_jobs" -v checkout_credentials_jobs="$checkout_credentials_jobs" '
     BEGIN {
       presence = "secrets\\.[A-Za-z0-9_]+[[:space:]]*[!=]=[[:space:]]*" q q
       n = split(oidc_jobs, list, " "); for (i = 1; i <= n; i++) oidc_allowed[list[i]] = 1
       n = split(signing_jobs, list, " "); for (i = 1; i <= n; i++) signing_allowed[list[i]] = 1
+      n = split(checkout_credentials_jobs, list, " "); for (i = 1; i <= n; i++) credentials_allowed[list[i]] = 1
     }
     function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
     function error(message) { print "::error file=" file "::" message }
@@ -95,6 +102,8 @@ for file in "$@"; do
       if (line ~ /^(      - |        )name:/) { l = line; sub(/^[[:space:]]*(- )?name:[[:space:]]*/, "", l); label[key] = trim(l) }
       if (secret) { holds[key] = 1; held[job] = 1 }
       if (line ~ /uses:[[:space:]]*azure\/login@/) { holds[key] = 1; azure[job] = 1 }
+      if (line ~ /uses:[[:space:]]*actions\/checkout@/) checkout[key] = 1
+      if (line ~ /^[[:space:]]+persist-credentials:[[:space:]]*("false"|false)[[:space:]]*(#.*)?$/) uncredentialed[key] = 1
       if (line ~ /dotnet[[:space:]]+(restore|build|publish|test|pack)([[:space:]]|$)|deploy\/publish-desktop\.sh/) builds[job] = 1
       if (line ~ /deploy\/package-installer\.sh/ && line !~ /PUBLISH_DIR=/) builds[job] = 1
       if (line ~ /(^|[^[:alnum:]_.\/-])dotnet[[:space:]]/) dotnet[key] = 1
@@ -103,6 +112,12 @@ for file in "$@"; do
       for (job in builds) {
         if (job in held) error("job " job " builds (dotnet, deploy/publish-desktop.sh, or deploy/package-installer.sh without PUBLISH_DIR) and holds a secret. Build in a job without secrets and hand the result on as an artifact.")
         if (job in oidc) error("job " job " builds (dotnet, deploy/publish-desktop.sh, or deploy/package-installer.sh without PUBLISH_DIR) and can ask for an OIDC token. Build in a job without one and hand the result on as an artifact.")
+      }
+      for (key in checkout) {
+        split(key, part, SUBSEP)
+        if (!(key in uncredentialed) && !((name ":" part[1]) in credentials_allowed)) {
+          error("job " part[1] ", step " q label[key] q " checks out without persist-credentials: false, which leaves the workflow token in the git config for every later step. Add it, or add the job to checkout_credentials_jobs in deploy/workflow-secrets-check.sh if it must push.")
+        }
       }
       for (job in azure) {
         if (!(job in signing)) error("job " job " logs in to Azure but does not run in the windows-signing environment, the one subject Azure trusts for signing.")
@@ -133,4 +148,4 @@ fi
 if [ "$failed" = true ]; then
   exit 1
 fi
-echo "In $checked workflows, every secret goes to the step that needs it, no step that builds or runs dotnet holds or follows one, and only the jobs allowed to ask for an OIDC token do."
+echo "In $checked workflows, every secret goes to the step that needs it, no step that builds or runs dotnet holds or follows one, only the jobs allowed to ask for an OIDC token do, and no checkout keeps the workflow's token."

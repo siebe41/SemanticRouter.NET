@@ -29,6 +29,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Built from the Go module proxy at a pinned version; the Go checksum database verifies the
       # source, so no third-party action or unverified binary download is involved.
@@ -51,6 +52,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -75,6 +78,8 @@ jobs:
       SEMANTIC_ROUTER_TEST_MODELS: ${{ github.workspace }}/.models
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -159,10 +164,17 @@ jobs:
             "Velopack native binaries" "Rust standard library" "AppImage type2-runtime"
 
       # The release still attests every update package as the desktop app checks it, and the app carries Sigstore's
-      # current trust root: like the weekly advisory run, a new trust root fails CI until it is copied in.
+      # current trust root, fetched through Sigstore's TUF repository (gh attestation trusted-root). A new trust root
+      # only warns on a pull request, which did not cause it; on main (and the weekly run) it fails, as it fails a
+      # release, until it is copied in.
       - name: Update attestation
         if: runner.os == 'Linux'
-        run: deploy/update-attestation-check.sh --online
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            deploy/update-attestation-check.sh --online-advisory
+          else
+            deploy/update-attestation-check.sh --online
+          fi
 
       # Package validation (Directory.Build.targets) fails the pack when a library package's public API breaks the last
       # release on nuget.org; restore downloaded that release.
@@ -212,6 +224,8 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -259,6 +273,8 @@ jobs:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -282,6 +298,8 @@ jobs:
           deploy/package-installer.sh win-x64 1.0.0 installers
           cp installers/SemanticRouter-win-x64-Setup.exe SemanticRouter-1.0.0-Setup.exe
           deploy/package-installer.sh win-x64 1.0.1 installers
+          # As the release records what vpk uploads, for its checksums job: fails if Velopack changes that.
+          deploy/record-attached.sh installers win-x64 attached
 
       # The release's signature check, on unsigned packages: it must find every file it checks and report them unsigned.
       - name: Check the signatures (unsigned)
@@ -321,6 +339,8 @@ jobs:
       AVALONIA_TELEMETRY_OPTOUT: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -340,6 +360,8 @@ jobs:
           deploy/package-installer.sh osx-arm64 1.0.0 installers
           cp installers/SemanticRouter-osx-arm64-Setup.pkg SemanticRouter-1.0.0.pkg
           deploy/package-installer.sh osx-arm64 1.0.1 installers
+          # As the release records what vpk uploads, for its checksums job: fails if Velopack changes that.
+          deploy/record-attached.sh installers osx-arm64 attached
 
       # The release's signature check, on unsigned packages: it must find every file it checks and report them unsigned.
       - name: Check the signatures (unsigned)
@@ -366,6 +388,8 @@ jobs:
       AVALONIA_TELEMETRY_OPTOUT: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -381,6 +405,8 @@ jobs:
           deploy/package-installer.sh linux-x64 1.0.0 installers
           cp installers/SemanticRouter-linux-x64.AppImage SemanticRouter-1.0.0.AppImage
           deploy/package-installer.sh linux-x64 1.0.1 installers
+          # As the release records what vpk uploads, for its checksums job: fails if Velopack changes that.
+          deploy/record-attached.sh installers linux-x64 attached
 
       - name: Run and update
         run: tests/installer/linux.sh SemanticRouter-1.0.0.AppImage installers
@@ -409,6 +435,8 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -438,6 +466,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Built as a version of its own, as the release builds the tag's, to check that the version reaches the router.
       - name: Build the image
