@@ -533,7 +533,7 @@ public static partial class RouterDashboardEndpoints
             }
             catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException or JsonException)
             {
-                return Results.Json(new EmbeddingTestResponse(false, 0, Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1), ex.Message), ApiJson);
+                return Results.Json(new EmbeddingTestResponse(false, 0, Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1), runtime.Redactor.Redact(ex.Message)), ApiJson);
             }
         }).WithMetadata(DashboardWriteMetadata.Instance).Audited("tested the embeddings");
 

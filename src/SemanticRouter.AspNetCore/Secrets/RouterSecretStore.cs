@@ -154,13 +154,6 @@ internal sealed class ProtectedFileSecretStore : IRouterSecretStore
     private void WriteAll(Dictionary<string, string> all)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        string temp = _path + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(all, Json));
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
-
-        File.Move(temp, _path, overwrite: true);
+        OwnerOnly.WriteAllText(_path, JsonSerializer.Serialize(all, Json));
     }
 }

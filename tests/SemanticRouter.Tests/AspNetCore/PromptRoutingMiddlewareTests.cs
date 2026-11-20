@@ -410,6 +410,33 @@ public sealed class DispatchModeTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Pass_through_does_not_relay_headers_that_act_on_the_routers_origin()
+    {
+        LocalHttp = new StubHttpMessageHandler((_, _) =>
+        {
+            var reply = new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"from":"local"}""", Encoding.UTF8, "application/json") };
+            reply.Headers.TryAddWithoutValidation("Set-Cookie", "session=upstream; Path=/");
+            reply.Headers.TryAddWithoutValidation("Access-Control-Allow-Origin", "*");
+            reply.Headers.TryAddWithoutValidation("Access-Control-Allow-Credentials", "true");
+            reply.Headers.TryAddWithoutValidation("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+            reply.Headers.TryAddWithoutValidation("Clear-Site-Data", "\"cookies\"");
+            reply.Headers.TryAddWithoutValidation("x-request-id", "req-123");
+            return reply;
+        });
+        HttpClient client = await StartDispatchAsync();
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        (await response.Content.ReadAsStringAsync()).Should().Be("""{"from":"local"}""");
+        response.Headers.GetValues("x-request-id").Should().Equal("req-123");
+        string[] names = [.. response.Headers.Select(h => h.Key)];
+        names.Should().NotContain(n => n.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase)
+            || n.StartsWith("Access-Control-", StringComparison.OrdinalIgnoreCase)
+            || n.Equals("Strict-Transport-Security", StringComparison.OrdinalIgnoreCase)
+            || n.Equals("Clear-Site-Data", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task Relays_client_errors_without_failing_over()
     {
         LocalHttp = StubHttpMessageHandler.Json("""{"error":"bad request"}""", HttpStatusCode.BadRequest);

@@ -154,6 +154,30 @@ public sealed class MemorySourceTests
     }
 
     [Fact]
+    public async Task Notes_built_to_make_the_patterns_backtrack_are_read_at_once()
+    {
+        // #407: '[' with no ']' made the Markdown link pattern quadratic, and "name:" followed by spaces and no line end
+        // (or no closing ---) did the same to the frontmatter pattern.
+        string brackets = new('[', 200_000);
+        string links = string.Concat(Enumerable.Repeat("[a](b.md", 50_000));
+        var spaces = new MemoryDocument { Path = "CLAUDE.md", Content = "---\nname:" + new string(' ', 200_000) };
+        var unclosed = new MemoryDocument { Path = "CLAUDE.md", Content = "---\nname: Never closed\n" + string.Concat(Enumerable.Repeat("key: value\n", 50_000)) };
+
+        await Task.Run(() =>
+        {
+            MarkdownNoteParser.Parse("brackets.md", brackets).Links.Should().BeEmpty();
+            MarkdownNoteParser.Parse("links.md", links).Links.Should().BeEmpty();
+            ClaudeCodeMemorySource.TitleFor(spaces).Should().Be("CLAUDE.md (user)");
+            ClaudeCodeMemorySource.TitleFor(unclosed).Should().Be("CLAUDE.md (user)", "a frontmatter that never closes is not one");
+        }).WaitAsync(TimeSpan.FromSeconds(10));
+
+        MarkdownNoteParser.Parse("n.md", "See [the plan](docs/plan%20b.md#goals) and [site](https://x.example/a.md).").Links
+            .Should().ContainSingle().Which.Should().Be(new NoteLink("docs/plan b.md", IsPath: true));
+        ClaudeCodeMemorySource.TitleFor(new MemoryDocument { Path = "CLAUDE.md", Content = "---\r\nname: \"Quoted\"  \r\n---\r\nbody" })
+            .Should().Be("Quoted");
+    }
+
+    [Fact]
     public void Knowledge_graph_source_reads_entities_and_relations_from_jsonl()
     {
         const string jsonl = """

@@ -57,7 +57,9 @@ public sealed class RouterDashboardOptions
 
     /// <summary>
     /// Addresses the dashboard is reached at besides <c>localhost</c>, e.g. <c>https://router.home.lan</c>. Changes
-    /// are accepted from these origins, and loopback requests may name them in the Host header.
+    /// are accepted from these origins (scheme, host and port must all match, so list each scheme people browse with),
+    /// and loopback requests may name them in the Host header. Entries that are not <c>http</c> or <c>https</c>
+    /// addresses are ignored.
     /// </summary>
     public IList<string> PublicOrigins { get; } = new List<string>();
 

@@ -982,10 +982,7 @@ public sealed class JsonFileRouterConfigurationStore : IRouterConfigurationStore
         lock (_gate)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            string temp = _path + ".tmp";
-            File.WriteAllText(temp, configuration.ToJson());
-            OwnerOnly.Restrict(temp);
-            File.Move(temp, _path, overwrite: true);
+            OwnerOnly.WriteAllText(_path, configuration.ToJson());
         }
     }
 }

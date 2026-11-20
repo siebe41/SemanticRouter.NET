@@ -132,6 +132,7 @@ internal sealed class DashboardAccess
     private readonly byte[]? _readOnly;
     private readonly byte[]? _metrics;
     private readonly HashSet<string> _publicAuthorities;
+    private readonly HashSet<string> _publicOrigins;
     private readonly DashboardPolicy _policy;
     private readonly TimeProvider _time;
     private readonly Dictionary<string, RouterDashboardRole> _identityRoles;
@@ -146,6 +147,7 @@ internal sealed class DashboardAccess
         _readOnly = string.IsNullOrEmpty(readOnlyToken) ? null : Encoding.UTF8.GetBytes(readOnlyToken);
         _metrics = string.IsNullOrEmpty(metricsToken) ? null : Encoding.UTF8.GetBytes(metricsToken);
         _publicAuthorities = LocalHosts.Authorities(options.PublicOrigins);
+        _publicOrigins = LocalHosts.Origins(options.PublicOrigins);
         _time = time ?? TimeProvider.System;
         _identityRoles = new Dictionary<string, RouterDashboardRole>(options.TrustedIdentityRoles, StringComparer.OrdinalIgnoreCase);
         Throttle = new SignInThrottle(_time);
@@ -585,13 +587,7 @@ internal sealed class DashboardAccess
             return site is null || site is "same-origin" or "none";
         }
 
-        if (!Uri.TryCreate(origin, UriKind.Absolute, out Uri? uri))
-        {
-            return false;
-        }
-
-        string authority = LocalHosts.Authority(uri);
-        return string.Equals(authority, request.Host.Value, StringComparison.OrdinalIgnoreCase) || _publicAuthorities.Contains(authority);
+        return LocalHosts.IsSameOrigin(request, origin, _publicOrigins);
     }
 
     private bool IsLocalHost(HttpRequest request) =>

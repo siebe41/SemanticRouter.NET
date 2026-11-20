@@ -65,10 +65,7 @@ internal sealed class JsonLinesEvaluationSetStore : IEvaluationSetStore
         lock (_gate)
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            string temp = _path + ".tmp";
-            File.WriteAllText(temp, EvaluationSet.ToJsonLines(cases));
-            OwnerOnly.Restrict(temp);
-            File.Move(temp, _path, overwrite: true);
+            OwnerOnly.WriteAllText(_path, EvaluationSet.ToJsonLines(cases));
         }
     }
 }
