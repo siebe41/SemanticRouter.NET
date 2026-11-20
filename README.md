@@ -647,7 +647,7 @@ The tests cover:
 - in-process `TestServer` runs of both middleware modes, including failover, quota cooldowns, local-only routing and the remote-client guard;
 - all three protocols: parsing, translation in each direction (JSON and SSE), the Anthropic and Responses front doors end to end (with a recorded Codex request against every backend type), thinking, structured output and dropped-feature reporting, tool-turn affinity, model aliases, prompted tool calling, and the dashboard's admin API, configuration store and hot reload.
 
-No network, model or vendor CLI is needed. CI runs the suite on Linux, Windows and macOS, and builds and smoke-tests the container image. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
+No network, model or vendor CLI is needed: the tests that run the real ONNX embedding models (`Category=Model`) download them from huggingface.co (57 MB, once), so `dotnet test` skips them and says why. Run them with `SEMANTIC_ROUTER_MODEL_TESTS=1 dotnet test --filter Category=Model`; `SEMANTIC_ROUTER_TEST_MODELS` sets where the models are kept. CI runs the suite on Linux, Windows and macOS, and builds and smoke-tests the container image. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every pull request, on `main`, and weekly so new advisories surface without a push:
 

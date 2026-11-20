@@ -86,7 +86,7 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj', '**/packages.lock.json', 'global.json') }}
           restore-keys: nuget-${{ runner.os }}-
 
-      # The ONNX embedding tests download two small models (57 MB) once and reuse them.
+      # The ONNX model tests (Category=Model, the Model tests step) download two small models (57 MB) once and reuse them.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.models
@@ -138,6 +138,13 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build --configuration Release --logger "trx" --collect:"XPlat Code Coverage"
+
+      # The tests that run the real ONNX embedding models download them into the cache above, so the Test step skips them
+      # and they run here, by their trait (CONTRIBUTING.md#building-and-testing).
+      - name: Model tests
+        env:
+          SEMANTIC_ROUTER_MODEL_TESTS: 1
+        run: dotnet test --no-build --configuration Release --filter "Category=Model" --logger "trx"
 
       # The vpk every workflow installs builds the installers with its own native binaries, which the notices name by
       # the Velopack package's version and list the Rust crates of (deploy/third-party/velopack-crates.json).

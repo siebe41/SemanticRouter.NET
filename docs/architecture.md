@@ -16,7 +16,7 @@ How a request moves through the router, how configuration reloads without droppi
 | `SemanticRouter.Connectors.Copilot` | AspNetCore, `GitHub.Copilot.SDK` | The `Copilot` connector type on GitHub's Copilot SDK (`AddCopilotConnector`): one runtime process shared across configuration reloads, a fresh session per turn, native tool calls returned to the client. |
 | `samples/RoutingApiSample` | AspNetCore | A host with an annotated `appsettings.json`: Annotate and Dispatch modes, dashboard, Anthropic endpoints. |
 | `samples/LmStudioClaudePoc` | AspNetCore | The LM Studio plus Claude Code personal setup, with a preflight and a self-test. |
-| `tests/SemanticRouter.Tests` | all | Over 1,000 tests; no network, model or vendor CLI needed. Run on Linux, Windows and macOS in CI. |
+| `tests/SemanticRouter.Tests` | all | Over 1,000 tests; no network, model or vendor CLI needed. The ONNX model tests (`Category=Model`) download their models and are skipped unless `SEMANTIC_ROUTER_MODEL_TESTS=1`. Run on Linux, Windows and macOS in CI. |
 | `tests/SemanticRouter.FakeCli` | nothing | A stand-in CLI (`fake-cli`) the process tests start, so they run on every OS. |
 
 ### Namespaces

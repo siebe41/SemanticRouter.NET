@@ -14,7 +14,7 @@ You need .NET SDK 10.0.404 or a later patch in the 10.0.4xx feature band. [`glob
 
 ```bash
 dotnet build      # warnings are errors; .NET analyzers at latest-recommended
-dotnet test       # no network, model or vendor CLI needed
+dotnet test       # no network, model or vendor CLI needed (the ONNX model tests are skipped)
 dotnet format     # fixes formatting in place; CI runs it with --verify-no-changes
 ```
 
@@ -26,6 +26,14 @@ SEMANTIC_ROUTER_FUZZ_ITERATIONS=5000 SEMANTIC_ROUTER_FUZZ_SEED=42 dotnet test --
 
 A failure lists each distinct crash site with the seed, the iteration and the body that caused it.
 
+The tests that run the real ONNX embedding models carry the trait `Category=Model`. They download the two pinned models (57 MB) from huggingface.co on their first run, so `dotnet test` skips them and says why. CI runs them in its **Model tests** step. To run them, with network access the first time:
+
+```bash
+SEMANTIC_ROUTER_MODEL_TESTS=1 dotnet test --filter "Category=Model"
+```
+
+The models are kept in `SEMANTIC_ROUTER_TEST_MODELS` (default: `semantic-router-test-models` in the temp directory) and are not downloaded again.
+
 Builds send no telemetry from Avalonia: [`Directory.Build.targets`](Directory.Build.targets) replaces its build-telemetry target, so you don't need `AVALONIA_TELEMETRY_OPTOUT`. The .NET SDK has its own; set `DOTNET_CLI_TELEMETRY_OPTOUT=1` to turn it off. [Network traffic](docs/network.md) lists what the router itself contacts.
 
 Every pull request runs CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)): build, test and pack on Linux, Windows and macOS, the dashboard end-to-end tests, the installers, the container image, a secret scan of the git history, a check for NuGet packages with known vulnerabilities and the formatting check. The README's [Building and testing](README.md#building-and-testing) section says what each check does and how to run it locally.
@@ -35,7 +43,7 @@ Every pull request runs CI ([`.github/workflows/ci.yml`](.github/workflows/ci.ym
 - **Keep `SemanticRouter.Core` dependency-free.** It references no NuGet packages and is AOT-compatible. Code that needs a package belongs in another project (`SemanticRouter.AspNetCore`, `SemanticRouter.Embeddings.Onnx`, …).
 - **Package versions** are set centrally in `Directory.Packages.props`. Each project's `packages.lock.json` records every package it restores, transitive ones included, with a content hash. After changing a version or a package reference, run `dotnet restore` and commit the changed lock files: CI, the release and the container build restore with `--locked-mode` and fail when a lock file is out of date. The desktop app and the libraries it references also record the runtimes it is published for (`DesktopRuntimeIdentifiers` in `Directory.Build.props`); add a runtime there before publishing for it.
 - **Namespaces.** A new type goes in its package's own namespace. Only static classes of setup extension methods go in `Microsoft.Extensions.DependencyInjection` (on `IServiceCollection` and `SemanticRouterBuilder`) or `Microsoft.AspNetCore.Builder` (`Use*` and `Map*`), and request and response bodies of HTTP endpoints are `internal` ([Namespaces](docs/architecture.md#namespaces)).
-- **Add tests** for behaviour you change. Tests must not need the network, a model or a vendor CLI; the existing tests show how to use `TestServer` and the stand-in CLI in `tests/SemanticRouter.FakeCli`.
+- **Add tests** for behaviour you change. Tests must not need the network, a model or a vendor CLI; a test that needs a real ONNX model uses `[ModelFact]` or `[ModelTheory]` with `[Trait("Category", "Model")]`, so it runs only when asked. The existing tests show how to use `TestServer` and the stand-in CLI in `tests/SemanticRouter.FakeCli`.
 - **Update the documentation** (README or `docs/`) when you change configuration, endpoints or behaviour.
 - **Changing the built-in template** (`src/SemanticRouter.Hosting/Templates/semantic-router.template.json`) reaches existing installs only through a template upgrade. The first change after a release raises its `TemplateVersion` (and `TemplateMigration.Current`) and adds the released files to `Templates/Previous` as `semantic-router.template.<old version>.json` and `semantic-router.evaluation.<old version>.jsonl`. `TemplateMigrationTests` fails until the fingerprint it keeps for the current template is updated, as a reminder.
 

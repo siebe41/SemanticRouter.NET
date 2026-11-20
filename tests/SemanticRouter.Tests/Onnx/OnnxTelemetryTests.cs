@@ -60,7 +60,8 @@ public sealed class OnnxTelemetryTests : IDisposable
     /// is loaded nothing connects anywhere for 30 seconds (ONNX Runtime 1.31 called home after about 10), and no device
     /// id is written to the home directory.
     /// </summary>
-    [Fact]
+    [ModelFact]
+    [Trait(ModelTests.Category, ModelTests.Model)]
     public async Task The_router_with_onnx_embeddings_connects_nowhere_and_writes_no_device_id()
     {
         if (!OperatingSystem.IsLinux())
