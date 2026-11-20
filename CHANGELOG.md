@@ -7,6 +7,17 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 ### Security
 
 - The container image, the `semantic-router` tool and the desktop app are built on .NET 10.0.15 (from 10.0.13), which fixes CVE-2026-70197, the .NET Brotli advisory CVE-2026-111497, and the ASP.NET Core advisories CVE-2026-114146, CVE-2026-114147 and CVE-2026-114149. (#377)
+- The dashboard and the gateway compare a browser's `Origin` by scheme, host and port, so a page on `http://router.example` is no longer treated as the dashboard on `https://router.example`. `Dashboard:PublicOrigins` entries are matched as whole origins: list each scheme people browse with. (#407)
+- Replies passed through from a backend no longer set cookies, CORS headers, `Strict-Transport-Security`, `Clear-Site-Data` or `Alt-Svc` on the router's origin, which also serves the dashboard. (#407)
+- The configuration, the secret store, the evaluation set, the state database, its migration backup and the log file are created readable by their owner only, instead of being restricted after they were written. (#407)
+- The dashboard's embeddings test no longer shows keys that appear in the embedding server's error message. (#407)
+- The Copilot SDK connector no longer starts its runtime with the router's full environment: the router's settings, provider keys and variables holding its secrets are left out, as for the CLI connectors, and the connector's `EnvironmentVariables` and `RemoveEnvironmentVariables` now apply. (#399)
+- Failed dashboard sign-ins, wrong gateway keys and per-address rate limits count an IPv6 address by its /64 and keep at most 10,000 addresses each, so a client cannot get a fresh allowance per address or grow the tables without end. (#402)
+- The router no longer reads without limit from a backend or a CLI: error bodies are cut at 64 KiB, event-stream lines and events at 16 MiB, translated JSON replies at 64 MiB, and a CLI's standard error is kept to its first and last 32 K characters. (#402)
+- `/v1/messages/count_tokens`, the dashboard's context analysis, and the configuration and draft-connector endpoints enforce `Middleware:MaxRequestBodyBytes`, also for bodies sent without a length. (#402)
+- Desktop app: an update whose attestation names a certificate authority the app does not know is refused and deleted, unless the app's Sigstore trust root is more than six months old and no other attestation for it fails. The "cannot be checked" message no longer tells you to install the release by hand; it asks you to check it with `gh attestation verify` first. (#405)
+- Desktop app: with `Updates:Publisher` on Windows, an update's `.nuspec` must name `SemanticRouter` and `SemanticRouter.exe`, and every program must be the exact build listed in the release's signed `SemanticRouter.Files.dll`; programs not in the list must be signed by the publisher. (#405)
+- Release assets are attested only when the release run built and attached them: the release stops if the draft holds a file the run did not attach or one that was changed, and refuses a draft for the tag it did not create. Up to 0.6.1, the release attested what was on its draft. (#404)
 
 ### Added
 
@@ -14,10 +25,14 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Changed
 
+- A passed-through non-streamed reply reaches the client as it arrives instead of after the whole reply was buffered, and passed-through event streams are relayed byte for byte, line endings included. (#402)
 - **Breaking (`SemanticRouter.AspNetCore`):** 19 types that only shaped the dashboard's JSON or served the sibling packages are internal: `ActivitySeries`, `ActivityBucket`, `BudgetStatus`, `ConfigurationIssue`, `EndpointStatus`, `EndpointCheck`, `FeedbackSummary`, `MemoryExposure`, `MemorySourceStatus`, `ModelReliability`, `RateLimitStatus`, `ServiceStatus`, `UsageSummaries`, `WarmCacheStore`, `ToolCallAffinity`, `InMemoryAuditLog`, `InMemoryUsageLedger`, `InMemoryTuningStore` and `InMemoryRouterConfigurationHistory`. The dashboard and admin API answer as before; code that named one of these types should use the endpoint's JSON or the interface the type implemented (`IAuditLog`, `IUsageLedger`, `ITuningStore`, `IRouterConfigurationHistory`, `IWarmCacheStore`, `IToolCallAffinity`). (#357)
 
 ### Fixed
 
+- A Copilot runtime that goes quiet after the reply has started is given up on after `StallTimeout` instead of holding a connector slot until the client disconnects, and a Copilot runtime that has died is replaced on the next request. (#399)
+- Without `UseSqliteState`, the in-memory usage ledger no longer grows without bound: beyond its newest 100,000 requests it keeps quarter-hour totals, and budgets and the Usage page add up the same. (#402)
+- A crafted Markdown note or Claude Code memory file no longer makes reading the memory map take time that grows with the square of its size. (#407)
 - Dashboard: the memory map no longer highlights a link from the selected note to one the filter or search hides. (#354)
 - Dashboard: a theme file whose last declaration in a block leaves out the `;` keeps that token. It used to be dropped, reported as missing or replaced by the default theme's value. (#354)
 - Dashboard: a model **Discover models** suggests without a name is added under its id when that name is taken (`gpt-4o-2`). It used to be named `-2`. (#354)

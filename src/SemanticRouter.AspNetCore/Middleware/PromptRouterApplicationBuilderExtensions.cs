@@ -88,8 +88,17 @@ public static class PromptRouterApplicationBuilderExtensions
 
         return endpoints.MapPost(pattern, async (HttpContext context) =>
             {
-                using System.Text.Json.JsonDocument document = await System.Text.Json.JsonDocument
-                    .ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted).ConfigureAwait(false);
+                // Read within the routing middleware's limit, chunked bodies included.
+                long limit = BoundedRequestBody.LimitFor(context);
+                if (await BoundedRequestBody.ReadAsync(context.Request, limit, context.RequestAborted).ConfigureAwait(false) is not { } body)
+                {
+                    await ProtocolErrors.WriteAsync(
+                        context, ChatProtocol.Anthropic, StatusCodes.Status413PayloadTooLarge, "Request body too large", BoundedRequestBody.TooLarge(limit), context.RequestAborted)
+                        .ConfigureAwait(false);
+                    return Results.Empty;
+                }
+
+                using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(body);
                 ChatCompletionRequest request = ChatCompletionRequest.ParseAnthropic(document.RootElement);
                 return Results.Ok(new TokenCountResponse(request.EstimatedInputTokens));
             })

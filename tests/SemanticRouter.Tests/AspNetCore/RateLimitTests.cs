@@ -206,7 +206,12 @@ public sealed class RateLimitTests : RouterHostTest
         limiter.TryAdmit("10.9.9.9", limit, 1);
         limiter.TryAdmit("10.9.9.9", limit, 1).Admitted.Should().BeFalse();
         time.Advance(TimeSpan.FromMinutes(31));
-        limiter.TryAdmit("10.9.9.10", limit, 1);
+
+        // The table is looked at every 64 writes, not on each.
+        for (int i = 0; i < 64; i++)
+        {
+            limiter.TryAdmit("10.9.9.10", limit, 1);
+        }
 
         limiter.Status(everyone).Select(s => s.Client).Should().BeEquivalentTo(["10.9.9.9", "10.9.9.10"], "the clients idle for over an hour are forgotten");
     }

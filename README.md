@@ -521,7 +521,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:RetryEscalation:Enabled` / `Window` | `false` / `00:02:00` | A prompt repeated by the same client within the window goes one tier up. See [Retry escalation](docs/routing-quality.md#retry-escalation). |
 | `Middleware:StripSystemReminders` | `true` | Ignore the context blocks clients inject into user messages when classifying: `<system-reminder>`, `<system_reminder>`, `<current_datetime>`, `<copilot_tauri_workspace>` and `Middleware:InjectedTags`. |
 | `Middleware:InjectedTags` | `[]` | More tag names (e.g. `environment_details`) whose blocks are ignored when classifying. |
-| `Middleware:MaxRequestBodyBytes` | `8388608` | Larger bodies get 413. Agentic clients send 100 KB+ requests. |
+| `Middleware:MaxRequestBodyBytes` | `8388608` | Larger bodies get 413. Agentic clients send 100 KB+ requests. Also applies to `/v1/messages/count_tokens`, the dashboard's context analysis and configuration documents, a body sent without a length (chunked) included. |
 | `Middleware:EmitResponseHeaders` / `HeaderPrefix` | `true` / `X-Prompt-Route` | `X-Prompt-Route`, `-Tier`, `-Reason`, `-Similarity`, `-Complexity`, `-Model`, `-Connector`, `-Attempt`, `-Degraded`, `-Budget`, `-Dropped`, `-Profile`, `-Local-Only`, `-Unreliable`. |
 | `Middleware:FailOpen` | `true` | Route with `FallbackTier` if classification fails. |
 | `Middleware:MessageSelection` | `LastUserMessage` | Which messages are classified. |
@@ -546,7 +546,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:LocalOnlyWhen:Secrets` / `FilePaths` | `false` / `false` | Keep a conversation local when it contains a credential or an absolute file path. |
 | `Dashboard:AdminToken`, `Dashboard:ReadOnlyToken` | | Tokens for remote dashboard access (16+ characters). See [Access and security](docs/dashboard.md#access-and-security). |
 | `Dashboard:MetricsToken` | | Token for figures only: status, usage and the digest's counts, never prompt text, the configuration or activity. See [Dashboard roles](docs/dashboard.md#roles). |
-| `Dashboard:SessionLifetime` | `12:00:00` | How long a dashboard sign-in lasts before the token must be entered again; signing out ends the session on the server. Five wrong tokens from one address in 15 minutes make it wait (`429`) until the first is 15 minutes old. |
+| `Dashboard:SessionLifetime` | `12:00:00` | How long a dashboard sign-in lasts before the token must be entered again; signing out ends the session on the server. Five wrong tokens from one address (an IPv6 address counts by its /64) in 15 minutes make it wait (`429`) until the first is 15 minutes old. |
 | `Dashboard:AllowProcessSettings` | `false` | Let the admin API change what a CLI connector runs and which paths memory sources read; otherwise those change only in the configuration file. See [Access and security](docs/dashboard.md#access-and-security). |
 | `Dashboard:RequireLocalClient` | `true` | Loopback only. Turn off together with a token to reach the dashboard from other machines. |
 | `Dashboard:PublicOrigins[]` | `[]` | Addresses the dashboard is reached at besides `localhost` (`https://router.home.lan`): changes are accepted from these origins. Scheme, host and port must match, so list each scheme people browse with. |

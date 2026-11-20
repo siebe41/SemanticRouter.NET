@@ -387,15 +387,15 @@ public static partial class RouterDashboardEndpoints
         {
             RouterRuntime runtime = provider.Current;
             long limit = runtime.Configuration.Middleware.MaxRequestBodyBytes;
-            if (context.Request.ContentLength > limit)
+            if (await BoundedRequestBody.ReadAsync(context.Request, limit, context.RequestAborted).ConfigureAwait(false) is not { } body)
             {
-                return Results.Problem($"The request is larger than {limit} bytes (Middleware:MaxRequestBodyBytes).", statusCode: StatusCodes.Status413PayloadTooLarge);
+                return Results.Problem(BoundedRequestBody.TooLarge(limit), statusCode: StatusCodes.Status413PayloadTooLarge);
             }
 
             JsonDocument document;
             try
             {
-                document = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted).ConfigureAwait(false);
+                document = JsonDocument.Parse(body);
             }
             catch (JsonException ex)
             {
@@ -972,8 +972,12 @@ public static partial class RouterDashboardEndpoints
     /// </summary>
     private static async Task<(RouterConfiguration? Candidate, IResult? Problem)> ReadConfigurationAsync(HttpContext context, RouterRuntimeProvider provider)
     {
-        using var reader = new StreamReader(context.Request.Body);
-        string raw = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
+        long limit = provider.Current.Configuration.Middleware.MaxRequestBodyBytes;
+        if (await ReadTextAsync(context, limit).ConfigureAwait(false) is not { } raw)
+        {
+            return (null, Results.Problem(BoundedRequestBody.TooLarge(limit), statusCode: StatusCodes.Status413PayloadTooLarge));
+        }
+
         if (string.IsNullOrWhiteSpace(raw))
         {
             return (null, NotADocument());
@@ -1007,6 +1011,21 @@ public static partial class RouterDashboardEndpoints
             statusCode: StatusCodes.Status400BadRequest);
     }
 
+    /// <summary>
+    /// The body as text, or <see langword="null"/> when it is longer than <paramref name="limit"/> bytes
+    /// (<see cref="PromptRouterMiddlewareOptions.MaxRequestBodyBytes"/>), a chunked body included.
+    /// </summary>
+    private static async Task<string?> ReadTextAsync(HttpContext context, long limit)
+    {
+        if (await BoundedRequestBody.ReadAsync(context.Request, limit, context.RequestAborted).ConfigureAwait(false) is not { } body)
+        {
+            return null;
+        }
+
+        using var reader = new StreamReader(new MemoryStream(body.ToArray(), writable: false));
+        return await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
+    }
+
     /// <summary>A connector from the dashboard's draft: its name, settings and the draft's catalog, if sent.</summary>
     private sealed record DraftConnector(string Name, RouterConfiguration Document, IReadOnlyList<ModelDefinition>? Models);
 
@@ -1014,8 +1033,12 @@ public static partial class RouterDashboardEndpoints
     private static async Task<(DraftConnector? Draft, IResult? Problem)> ReadDraftConnectorAsync(HttpContext context)
     {
         const string expected = "Expected {\"name\": \"…\", \"settings\": { …connector settings… }}, with the draft's \"models\" optionally.";
-        using var reader = new StreamReader(context.Request.Body);
-        string raw = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
+        long limit = BoundedRequestBody.LimitFor(context);
+        if (await ReadTextAsync(context, limit).ConfigureAwait(false) is not { } raw)
+        {
+            return (null, Results.Problem(BoundedRequestBody.TooLarge(limit), statusCode: StatusCodes.Status413PayloadTooLarge));
+        }
+
         JsonObject? wrapper = null;
         try
         {
