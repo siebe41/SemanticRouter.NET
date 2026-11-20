@@ -492,6 +492,7 @@ When a backend speaks the client's protocol, the body passes through untouched (
 | Tools and tool results | ✓ | ✓ | ✓ | with `ToolCalling: Prompted` |
 | Codex custom tools and namespaces | as functions | as tools | ✓ | with `ToolCalling: Prompted` |
 | Reasoning request (`reasoning_effort`, `thinking`, `reasoning.effort`) | `reasoning_effort` on models with `reasoning` | `thinking` with a budget on models with `reasoning` | `reasoning.effort` on models with `reasoning` | dropped |
+| Output limit (`max_tokens`, `max_completion_tokens`, `max_output_tokens`) | `max_tokens`; `max_completion_tokens` for a model with `reasoning` on a server that is not local ([`MaxTokensParameter`](#output-limits-on-openai-reasoning-models)) | `max_tokens` (8,192 when the client set none) | `max_output_tokens` | not sent |
 | Reasoning in the reply | read from `reasoning_content` | `thinking` blocks | reasoning summaries | n/a |
 | Structured output (`response_format`, `text.format`) | ✓ | a forced `structured_output` tool for a JSON schema; an instruction for JSON mode | ✓ | dropped |
 | `parallel_tool_calls: false` | ✓ | `disable_parallel_tool_use` | ✓ | dropped |
@@ -508,6 +509,11 @@ Notes:
 - **Reasoning across protocols.** Reasoning a backend returns is shown to the client in its own format. An Anthropic client gets a `thinking` block signed `semantic-router-relayed`. Anthropic's API would reject that signature, so the router removes such blocks before a native Anthropic backend sees the conversation. Real Anthropic thinking blocks pass through.
 - **Thinking and a schema don't mix.** Anthropic cannot think while a tool is forced, so a JSON-schema request to an Anthropic backend drops the reasoning request. Thinking also needs `max_tokens` above 1,024. While thinking is on, `temperature` and `top_p` are not sent.
 - **Declare `reasoning` only on models that accept it.** Servers that don't know `reasoning_effort` may reject the request.
+- **Empty turns are left out for Anthropic.** A turn with nothing the Messages API takes (an empty assistant message after a cancelled turn, say) is not sent, as the API rejects `"content": []`; the turns around it merge when they then share a role.
+
+### Output limits on OpenAI reasoning models
+
+OpenAI's reasoning models (the o-series and GPT-5) reject `max_tokens` and take the limit as `max_completion_tokens`, while most local servers read only `max_tokens`. A request the router translates for an OpenAI-compatible connector (from Claude Code, say, which always sets `max_tokens`) therefore carries the limit as `max_completion_tokens` when the model declares the `reasoning` capability and the connector's server is not on this machine or the local network, and as `max_tokens` otherwise. Set the connector's `MaxTokensParameter` to `max_tokens` or `max_completion_tokens` to choose one for all its models: `max_completion_tokens` for an OpenAI reasoning model that does not declare `reasoning`, or `max_tokens` for a hosted server that does not know the newer name. Requests from OpenAI clients pass through with the name the client chose.
 
 ## Writing your own connector
 

@@ -82,7 +82,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
                 ChatProtocol.Anthropic => AnthropicRequestBuilder.Build(
                     request.Chat, request.Model.Model, reasoning: reasoning, caching: _options.PromptCaching, cacheTtl: _options.CacheTtl),
                 ChatProtocol.Responses => ResponsesRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
-                _ => OpenAIRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
+                _ => OpenAIRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning, maxCompletionTokens: UsesMaxCompletionTokens(_options, reasoning)),
             };
 
         using var message = new HttpRequestMessage(HttpMethod.Post, _requestUri) { Content = new ReadOnlyMemoryContent(body) };
@@ -240,6 +240,18 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             return ConnectorResult.Completed;
         }
     }
+
+    /// <summary>
+    /// Whether a translated request to an OpenAI-compatible backend carries its output limit as <c>max_completion_tokens</c>
+    /// (<see cref="ConnectorOptions.MaxTokensParameter"/>): when set so, or by default for a reasoning model on a server
+    /// that is not local. OpenAI's reasoning models reject <c>max_tokens</c>; local servers all read it.
+    /// </summary>
+    internal static bool UsesMaxCompletionTokens(ConnectorOptions options, bool reasoning) => options.MaxTokensParameter switch
+    {
+        "max_completion_tokens" => true,
+        "max_tokens" => false,
+        _ => reasoning && options.BaseAddress is { } address && !ConnectorProbe.IsLocalAddress(address),
+    };
 
     /// <summary>
     /// Sets <c>model</c> on a pass-through body. With <paramref name="stripRelayedThinking"/>, also removes thinking
