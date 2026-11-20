@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 
@@ -130,23 +131,31 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
     private sealed class SystemCliProcess : ICliProcess
     {
         private readonly Process _process;
-        private readonly StringBuilder _stderr = new();
+        private readonly BoundedText _stderr = new(BoundedText.StandardErrorLimit);
+        private readonly Task _stderrReader;
         private readonly Task _stdinWriter;
 
         public SystemCliProcess(Process process, string? standardInput)
         {
             _process = process;
-            _process.ErrorDataReceived += (_, e) =>
+
+            // Read in chunks, not lines, so a child that writes without line breaks cannot grow one line without end.
+            _stderrReader = Task.Run(async () =>
             {
-                if (e.Data is not null)
+                char[] buffer = new char[4096];
+                try
                 {
-                    lock (_stderr)
+                    int read;
+                    while ((read = await _process.StandardError.ReadAsync(buffer.AsMemory()).ConfigureAwait(false)) > 0)
                     {
-                        _stderr.AppendLine(e.Data);
+                        _stderr.Append(buffer.AsSpan(0, read));
                     }
                 }
-            };
-            _process.BeginErrorReadLine();
+                catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+                {
+                    // The process was killed and disposed: what was read so far is what there is.
+                }
+            });
 
             // Write on a background task so a child that produces output before reading its input cannot deadlock us.
             _stdinWriter = Task.Run(async () =>
@@ -175,16 +184,7 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
             });
         }
 
-        public string StandardError
-        {
-            get
-            {
-                lock (_stderr)
-                {
-                    return _stderr.ToString();
-                }
-            }
-        }
+        public string StandardError => _stderr.ToString();
 
         public async IAsyncEnumerable<string> ReadOutputLinesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
@@ -198,6 +198,7 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
         {
             await _process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             await _stdinWriter.ConfigureAwait(false);
+            await _stderrReader.WaitAsync(cancellationToken).ConfigureAwait(false);
             return _process.ExitCode;
         }
 
@@ -217,6 +218,67 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
             }
 
             _process.Dispose();
+        }
+    }
+}
+
+/// <summary>
+/// Text that arrives in pieces (a child's standard error), kept to its first and last <c>limit / 2</c> characters with
+/// a note of how many were left out between them, so a child that writes without end cannot fill the router's memory.
+/// The start holds what a tool said first (a usage error), the end what it said last (the error it stopped on).
+/// Thread-safe.
+/// </summary>
+internal sealed class BoundedText(int limit)
+{
+    /// <summary>How much of a CLI's standard error is kept: 64 Ki characters, far more than a diagnostic needs.</summary>
+    public const int StandardErrorLimit = 64 * 1024;
+
+    private readonly int _half = limit / 2;
+    private readonly StringBuilder _head = new();
+    private readonly StringBuilder _tail = new();
+    private readonly Lock _gate = new();
+    private long _omitted;
+
+    public void Append(ReadOnlySpan<char> text)
+    {
+        lock (_gate)
+        {
+            int toHead = Math.Min(text.Length, _half - _head.Length);
+            if (toHead > 0)
+            {
+                _head.Append(text[..toHead]);
+                text = text[toHead..];
+            }
+
+            if (text.IsEmpty)
+            {
+                return;
+            }
+
+            if (text.Length >= _half)
+            {
+                _omitted += _tail.Length + text.Length - _half;
+                _tail.Clear().Append(text[^_half..]);
+                return;
+            }
+
+            _tail.Append(text);
+            if (_tail.Length > _half)
+            {
+                int excess = _tail.Length - _half;
+                _tail.Remove(0, excess);
+                _omitted += excess;
+            }
+        }
+    }
+
+    public override string ToString()
+    {
+        lock (_gate)
+        {
+            return _omitted == 0
+                ? string.Concat(_head.ToString(), _tail.ToString())
+                : string.Create(CultureInfo.InvariantCulture, $"{_head}\n[… {_omitted} characters left out …]\n{_tail}");
         }
     }
 }

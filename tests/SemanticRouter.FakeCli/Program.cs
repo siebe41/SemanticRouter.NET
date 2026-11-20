@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 //   args-json    Plain-text reply: the arguments as a JSON array, then stdin.
 //   cat          Plain-text reply: stdin, then a line "(done)".
 //   quota        Writes a quota message to stderr and exits with code 3.
+//   noisy-quota  Writes 4 MB of stderr without a line break, then the quota message, and exits with code 3.
 //   slow         Sleeps, then creates the file named by FAKE_CLI_MARKER (which must not happen once killed).
 //   claude-agent A simulated Claude Code agent for latency benchmarks: after FAKE_CLI_STARTUP_MS (default 1500) it streams
 //                a reply word by word, FAKE_CLI_WORD_MS apart (default 30). Without a tool result in the prompt the reply
@@ -66,6 +67,18 @@ switch (mode)
         return 0;
 
     case "quota":
+        await Console.Error.WriteLineAsync("Error: You have exceeded your daily quota");
+        return 3;
+
+    case "noisy-quota":
+        // Megabytes of standard error without a line break, then the quota message.
+        string noise = new('x', 64 * 1024);
+        for (int i = 0; i < 64; i++)
+        {
+            await Console.Error.WriteAsync(noise);
+        }
+
+        await Console.Error.WriteLineAsync();
         await Console.Error.WriteLineAsync("Error: You have exceeded your daily quota");
         return 3;
 

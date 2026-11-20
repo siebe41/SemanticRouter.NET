@@ -83,6 +83,13 @@ A connector either passes the client's body through or translates it.
 
 What crosses protocols and what is dropped (reported in `X-Prompt-Route-Dropped`) is in [What survives translation](providers.md#what-survives-translation).
 
+**How much of a reply is held in memory** (`UpstreamLimits`), so that a broken or hostile backend cannot make the router buffer without end; `StallTimeout` bounds how long a reply may go quiet, these bound how much it may send:
+
+- A passed-through reply is streamed to the client as it arrives, byte for byte, JSON included. The router scans a copy for tool-call ids and usage: a JSON reply up to 64 MiB, an event stream line by line up to 16 MiB a line. A reply too large to scan still reaches the client whole; only its tool-call pinning and reported usage are lost (usage is then estimated).
+- A translated reply is read whole when it is JSON (up to 64 MiB) and line by line when it is an event stream (up to 16 Mi characters a line or event, room for several base64 images in one `response.completed`). Past either, the reply fails as if the connection had dropped: the next model answers if nothing reached the client yet.
+- Of an error reply (a `4xx`, a `429`, a `5xx`) at most 64 KiB is read; a passed-through client gets at most that much of it.
+- Of a CLI's standard error the first and last 32 Ki characters are kept, with a note of how many were left out between them.
+
 ## Configuration and hot reload
 
 ```mermaid

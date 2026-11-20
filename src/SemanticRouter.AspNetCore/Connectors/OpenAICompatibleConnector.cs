@@ -155,7 +155,9 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
                 throw;
             }
 
-            string why = stall.Stalled ? stall.Describe() : $"connection dropped ({_redactor.Redact(ex.Message)})";
+            string why = stall.Stalled ? stall.Describe()
+                : ex is UpstreamLimitException ? ex.Message
+                : $"connection dropped ({_redactor.Redact(ex.Message)})";
 
             // Nothing reached the client: undo what was set for it, and let the next model answer.
             foreach (string header in copied)
@@ -194,7 +196,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             if (passThrough && !response.IsSuccessStatusCode)
             {
                 // Relay the backend's error in its own shape, but never a key it may have echoed back.
-                string error = _redactor.Redact(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+                string error = _redactor.Redact(await UpstreamLimits.ReadErrorBodyAsync(response.Content, cancellationToken).ConfigureAwait(false));
                 context.Response.StatusCode = status;
                 context.Response.ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/json";
                 await context.Response.WriteAsync(error, cancellationToken).ConfigureAwait(false);
@@ -352,7 +354,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
     private static async Task RelayErrorAsync(
         HttpContext context, HttpResponseMessage response, ChatProtocol clientProtocol, SecretRedactor redactor, CancellationToken cancellationToken)
     {
-        string upstreamBody = redactor.Redact(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        string upstreamBody = redactor.Redact(await UpstreamLimits.ReadErrorBodyAsync(response.Content, cancellationToken).ConfigureAwait(false));
         string detail = ExtractErrorMessage(upstreamBody) ?? (upstreamBody.Length > 500 ? upstreamBody[..500] : upstreamBody);
         await ProtocolErrors.WriteAsync(
             context, clientProtocol, (int)response.StatusCode, "Upstream request rejected", detail, cancellationToken).ConfigureAwait(false);
@@ -387,7 +389,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             return latest;
         }
 
-        string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        string body = await UpstreamLimits.ReadErrorBodyAsync(response.Content, cancellationToken).ConfigureAwait(false);
         return QuotaResetParser.TryParse(body.Length > 2000 ? body[..2000] : body, now, null, out DateTimeOffset fromBody) ? fromBody : null;
     }
 
