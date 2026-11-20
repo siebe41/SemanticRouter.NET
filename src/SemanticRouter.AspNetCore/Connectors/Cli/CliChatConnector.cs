@@ -312,22 +312,24 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
         }
 
         string diagnostics = _redactor.Redact(string.Join(" | ", new[] { reply, process.StandardError.Trim() }.Where(s => s.Length > 0)));
-        if (writer.HasStarted)
-        {
-            // Too late to fail over: end the stream cleanly and record what happened.
-            LogMidStreamFailure(_logger, Name, exitCode, Output(diagnostics, 1000));
-            await writer.CompleteAsync(ChatStopReason.EndTurn, default, cancellationToken).ConfigureAwait(false);
-            return ConnectorResult.Completed;
-        }
-
         bool quota = quotaSignal || _quotaPatterns.Any(p => diagnostics.Contains(p, StringComparison.OrdinalIgnoreCase));
         DateTimeOffset? retryAt = quota && QuotaResetParser.TryParse(diagnostics, DateTimeOffset.UtcNow, null, out DateTimeOffset reset) ? reset : null;
-        LogRunFailed(_logger, Name, exitCode, quota, Output(diagnostics, 1000));
-        return ConnectorResult.Failed(
+        ConnectorResult failure = ConnectorResult.Failed(
             quota ? ModelFailureKind.QuotaExceeded : ModelFailureKind.Unavailable,
             $"exit code {exitCode}{(quota && _storePrompts == PromptStorage.Off ? ", usage limit" : string.Empty)}: {Output(diagnostics, 200)}",
             affectsAllConnectorModels: quota && !ModelSpecificLimitPatterns.Any(p => diagnostics.Contains(p, StringComparison.OrdinalIgnoreCase)),
             retryAt: retryAt);
+        if (context.Response.HasStarted)
+        {
+            // Too late to fail over: the CLI crashed or hit its limit after the client got part of the answer. The
+            // dispatcher ends the reply with an error and cools the model down, so a cut-off answer is not taken for a whole one.
+            LogMidStreamFailure(_logger, Name, exitCode, Output(diagnostics, 1000));
+            throw new UpstreamReplyException(failure);
+        }
+
+        // A reply that is not streamed was only buffered: the next model can still answer.
+        LogRunFailed(_logger, Name, exitCode, quota, Output(diagnostics, 1000));
+        return failure;
     }
 
     /// <summary>Writes the rest of a prompted reply: the held text, then the tool calls (repaired once if malformed).</summary>

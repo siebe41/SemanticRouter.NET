@@ -80,6 +80,11 @@ internal static class OpenAIResponseReader
                 using (document)
                 {
                     JsonElement root = document.RootElement;
+                    if (UpstreamReplyException.TryFind(root, ChatProtocol.OpenAI, out UpstreamReplyException? failed))
+                    {
+                        throw failed;
+                    }
+
                     if (root.TryGetObject("usage", out JsonElement usageElement))
                     {
                         usage = ReadUsage(usageElement);
@@ -149,6 +154,11 @@ internal static class OpenAIResponseReader
 
     private static async Task RelayJsonAsync(JsonElement root, IChatResponseWriter writer, CancellationToken cancellationToken)
     {
+        if (UpstreamReplyException.TryFind(root, ChatProtocol.OpenAI, out UpstreamReplyException? failed))
+        {
+            throw failed;
+        }
+
         ChatStopReason stop = ChatStopReason.EndTurn;
         if (root.TryGetArray("choices", out JsonElement choices) && choices.GetArrayLength() > 0)
         {
@@ -318,9 +328,9 @@ internal static class AnthropicResponseReader
 
                             break;
 
-                        case "error":
-                            // Mid-stream upstream error: end the reply cleanly with what was received.
-                            break;
+                        case "error" when UpstreamReplyException.TryFind(root, ChatProtocol.Anthropic, out UpstreamReplyException? failed):
+                            // An upstream error (overloaded, rate limited) is not a finished reply, however much came before it.
+                            throw failed;
                     }
                 }
             }
@@ -337,6 +347,11 @@ internal static class AnthropicResponseReader
 
     private static async Task RelayJsonAsync(JsonElement root, IChatResponseWriter writer, CancellationToken cancellationToken)
     {
+        if (UpstreamReplyException.TryFind(root, ChatProtocol.Anthropic, out UpstreamReplyException? failed))
+        {
+            throw failed;
+        }
+
         if (root.TryGetArray("content", out JsonElement content))
         {
             foreach (JsonElement block in content.EnumerateArray())
@@ -390,7 +405,10 @@ internal static class AnthropicResponseReader
 
 /// <summary>
 /// Watches a response that is being passed through untouched and records the tool-call ids it contains, so a
-/// follow-up request carrying their results can be pinned to the same model.
+/// follow-up request carrying their results can be pinned to the same model. A reply that reports an error instead of
+/// an answer throws <see cref="UpstreamReplyException"/>: before anything is sent when the error comes first (a JSON
+/// reply, or a stream's first event), so the next model can answer; otherwise once the stream, the backend's own error
+/// event included, has reached the client.
 /// </summary>
 internal static class PassThroughToolCallScanner
 {
@@ -401,40 +419,84 @@ internal static class PassThroughToolCallScanner
         {
             using var buffer = new MemoryStream();
             await upstream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (ScanJson(buffer.GetBuffer().AsMemory(0, (int)buffer.Length), protocol, onToolCall, onUsage) is { } error)
+            {
+                throw error;
+            }
+
             buffer.Position = 0;
             await buffer.CopyToAsync(downstream, cancellationToken).ConfigureAwait(false);
-            ScanJson(buffer.GetBuffer().AsMemory(0, (int)buffer.Length), protocol, onToolCall, onUsage);
             return;
         }
 
-        // Line-oriented copy: forward every line as soon as it arrives, inspecting the data lines on the way past.
+        // Line-oriented copy: forward every line as soon as it arrives, inspecting the data lines on the way past. What
+        // comes before the first data line is held back until that line shows the reply is not an error.
         using var reader = new StreamReader(upstream);
+        List<string>? held = [];
+        UpstreamReplyException? failed = null;
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
         {
+            bool data = line.StartsWith("data:", StringComparison.Ordinal);
+            UpstreamReplyException? error = data
+                && (line.Contains("\"id\"", StringComparison.Ordinal) || line.Contains("\"call_id\"", StringComparison.Ordinal)
+                    || line.Contains("\"error\"", StringComparison.Ordinal)
+                    || (onUsage is not null && line.Contains("\"usage\"", StringComparison.Ordinal)))
+                ? ScanJson(System.Text.Encoding.UTF8.GetBytes(line.AsSpan(5).TrimStart().ToString()), protocol, onToolCall, onUsage)
+                : null;
+            if (held is not null)
+            {
+                if (error is not null)
+                {
+                    throw error; // nothing has reached the client yet
+                }
+
+                held.Add(line);
+                if (data)
+                {
+                    await WriteLinesAsync(downstream, held, cancellationToken).ConfigureAwait(false);
+                    held = null;
+                }
+
+                continue;
+            }
+
+            failed ??= error;
             await downstream.WriteAsync(System.Text.Encoding.UTF8.GetBytes(line + "\n"), cancellationToken).ConfigureAwait(false);
             if (line.Length == 0)
             {
                 await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
-                continue;
-            }
-
-            if (line.StartsWith("data:", StringComparison.Ordinal)
-                && (line.Contains("\"id\"", StringComparison.Ordinal) || line.Contains("\"call_id\"", StringComparison.Ordinal)
-                    || (onUsage is not null && line.Contains("\"usage\"", StringComparison.Ordinal))))
-            {
-                ScanJson(System.Text.Encoding.UTF8.GetBytes(line.AsSpan(5).TrimStart().ToString()), protocol, onToolCall, onUsage);
             }
         }
 
+        await WriteLinesAsync(downstream, held ?? [], cancellationToken).ConfigureAwait(false);
         await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        if (failed is not null)
+        {
+            // The client has the backend's own error event; the reply still did not finish.
+            throw new UpstreamReplyException(failed.Failure, clientNotified: true);
+        }
     }
 
-    private static void ScanJson(ReadOnlyMemory<byte> json, ChatProtocol protocol, Action<string> onToolCall, Action<ChatUsage>? onUsage)
+    private static async Task WriteLinesAsync(Stream downstream, List<string> lines, CancellationToken cancellationToken)
+    {
+        foreach (string line in lines)
+        {
+            await downstream.WriteAsync(System.Text.Encoding.UTF8.GetBytes(line + "\n"), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Reports the tool calls and usage in one reply or event, and returns the error it reports instead of an answer, if any.</summary>
+    private static UpstreamReplyException? ScanJson(ReadOnlyMemory<byte> json, ChatProtocol protocol, Action<string> onToolCall, Action<ChatUsage>? onUsage)
     {
         try
         {
             using JsonDocument document = JsonDocument.Parse(json);
             JsonElement root = document.RootElement;
+            if (UpstreamReplyException.TryFind(root, protocol, out UpstreamReplyException? error))
+            {
+                return error;
+            }
+
             if (onUsage is not null && root.ValueKind == JsonValueKind.Object && UsageCapture.Find(root, protocol) is { } usage)
             {
                 onUsage(usage);
@@ -494,6 +556,8 @@ internal static class PassThroughToolCallScanner
         {
             // Not JSON (e.g. "[DONE]"): nothing to record.
         }
+
+        return null;
     }
 }
 
@@ -536,6 +600,12 @@ internal static class ResponsesResponseReader
                     }
 
                     JsonElement root = document.RootElement;
+                    if (UpstreamReplyException.TryFind(root, ChatProtocol.Responses, out UpstreamReplyException? failed))
+                    {
+                        document.Dispose();
+                        throw failed;
+                    }
+
                     bool keep = false;
                     switch (root.GetString("type"))
                     {
@@ -587,7 +657,7 @@ internal static class ResponsesResponseReader
                             openCall = null;
                             break;
 
-                        case "response.completed" or "response.incomplete" or "response.failed" when root.TryGetObject("response", out JsonElement finished):
+                        case "response.completed" or "response.incomplete" when root.TryGetObject("response", out JsonElement finished):
                             finalDocument?.Dispose();
                             finalDocument = document;
                             final = finished;
@@ -632,6 +702,11 @@ internal static class ResponsesResponseReader
 
     private static async Task RelayJsonAsync(JsonElement root, IChatResponseWriter writer, CancellationToken cancellationToken)
     {
+        if (UpstreamReplyException.TryFind(root, ChatProtocol.Responses, out UpstreamReplyException? failed))
+        {
+            throw failed;
+        }
+
         if (root.TryGetArray("output", out JsonElement output))
         {
             foreach (JsonElement item in output.EnumerateArray())
