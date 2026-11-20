@@ -195,6 +195,30 @@ public sealed class CliProcessIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task Standard_error_is_kept_to_its_start_and_end_however_much_a_cli_writes()
+    {
+        var invocation = new CliInvocation
+        {
+            Executable = FakeCli,
+            Arguments = [],
+            WorkingDirectory = _scratch,
+            SetEnvironment = new Dictionary<string, string> { ["FAKE_CLI_MODE"] = "noisy-quota" },
+        };
+        await using ICliProcess process = new SystemCliProcessRunner().Start(invocation);
+
+        (await process.WaitForExitAsync(CancellationToken.None)).Should().Be(3);
+
+        string stderr = process.StandardError;
+        stderr.Length.Should().BeLessThan(BoundedText.StandardErrorLimit + 100, "4 MB of standard error are not all kept");
+        stderr.Should().StartWith("xxxx").And.Contain("characters left out");
+        stderr.TrimEnd().Should().EndWith("Error: You have exceeded your daily quota", "the end, where a CLI says why it stopped, is kept");
+
+        var connector = new CliChatConnector("custom", Options("noisy-quota"), new SystemCliProcessRunner(), NullLogger.Instance);
+        (ConnectorResult result, _) = await SendAsync(connector, "hi");
+        result.FailureKind.Should().Be(ModelFailureKind.QuotaExceeded);
+    }
+
+    [Fact]
     public async Task Custom_cli_text_output_is_the_reply()
     {
         var connector = new CliChatConnector("custom", Options("cat"), new SystemCliProcessRunner(), NullLogger.Instance);

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 
 namespace SemanticRouter.AspNetCore;
@@ -40,9 +41,12 @@ internal sealed record RateLimitStatus
 /// Per-client rate limits (<see cref="PromptRouterMiddlewareOptions.RateLimits"/>) over a sliding minute: requests per
 /// minute and tokens per minute. A request is charged its estimated input tokens when admitted and the difference to its
 /// real usage when the reply is in. Kept in memory across configuration reloads, so changing a limit takes effect at once
-/// without resetting what clients used.
+/// without resetting what clients used. A client without a gateway key is counted by its address (an IPv6 address by
+/// its /64, <see cref="ClientAddressKey"/>). At most <see cref="MaxClients"/> clients are kept: those unseen for an hour
+/// go, and beyond that the least recently seen (<see cref="TrackerPruning"/>), so a stream of addresses costs constant
+/// work each.
 /// </summary>
-internal sealed class ClientRateLimiter(TimeProvider? time = null)
+internal sealed class ClientRateLimiter
 {
     /// <summary>The entry that applies to every client without its own.</summary>
     public const string Everyone = "*";
@@ -50,13 +54,32 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
     /// <summary>The name shown for <see cref="PromptRouterMiddlewareOptions.RemoteRequestsPerMinute"/>.</summary>
     public const string RemoteDefault = "remote default";
 
+    /// <summary>The most clients kept.</summary>
+    public const int MaxClients = 10_000;
+
     private const int SweepAbove = 1000;
 
     private static readonly TimeSpan Window = TimeSpan.FromMinutes(1);
 
-    private readonly TimeProvider _time = time ?? TimeProvider.System;
-    private readonly Dictionary<string, Usage> _clients = new(StringComparer.OrdinalIgnoreCase);
+    // A client unseen for this long is forgotten, with its count of requests turned away.
+    private static readonly TimeSpan IdleAfter = TimeSpan.FromHours(1);
+
+    private readonly TimeProvider _time;
+    private readonly ConcurrentDictionary<string, Usage> _clients = new(StringComparer.OrdinalIgnoreCase);
+    private readonly TrackerPruning _pruning;
     private readonly Lock _gate = new();
+
+    public ClientRateLimiter(TimeProvider? time = null)
+    {
+        _time = time ?? TimeProvider.System;
+        _pruning = new TrackerPruning(MaxClients, SweepAbove, _time);
+    }
+
+    /// <summary>The clients kept, for tests.</summary>
+    internal int Count => _clients.Count;
+
+    /// <summary>The table's pruning, for tests of the cost per write.</summary>
+    internal TrackerPruning Pruning => _pruning;
 
     /// <summary>The limit for <paramref name="client"/>: its own entry, else <c>*</c>; <see langword="null"/> when none applies.</summary>
     public static (string Name, RateLimitOptions Limit)? LimitFor(IDictionary<string, RateLimitOptions> limits, string? client)
@@ -81,6 +104,38 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
 
     /// <summary>Admits a request from <paramref name="client"/> and charges it, or says when to retry.</summary>
     public RateLimitDecision TryAdmit(string client, RateLimitOptions limit, int estimatedTokens, bool remote = false)
+    {
+        RateLimitDecision decision = Admit(client, limit, estimatedTokens, remote);
+        _pruning.Written(_clients, static u => u.LastSeen, IdleAfter);
+        return decision;
+    }
+
+    /// <summary>Charges <paramref name="client"/> the difference between a request's real usage and its estimate (may be negative).</summary>
+    public void Charge(string client, long tokens)
+    {
+        if (tokens == 0)
+        {
+            return;
+        }
+
+        DateTimeOffset now = _time.GetUtcNow();
+        lock (_gate)
+        {
+            Usage usage = UsageOf(client, now);
+            if (tokens > 0)
+            {
+                usage.Add(new Entry(now, tokens, Request: false));
+            }
+            else
+            {
+                usage.Refund(-tokens, now);
+            }
+        }
+
+        _pruning.Written(_clients, static u => u.LastSeen, IdleAfter);
+    }
+
+    private RateLimitDecision Admit(string client, RateLimitOptions limit, int estimatedTokens, bool remote)
     {
         DateTimeOffset now = _time.GetUtcNow();
         lock (_gate)
@@ -118,29 +173,6 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
 
             usage.Add(new Entry(now, Math.Max(0, estimatedTokens), Request: true));
             return new RateLimitDecision(true, TimeSpan.Zero, null);
-        }
-    }
-
-    /// <summary>Charges <paramref name="client"/> the difference between a request's real usage and its estimate (may be negative).</summary>
-    public void Charge(string client, long tokens)
-    {
-        if (tokens == 0)
-        {
-            return;
-        }
-
-        DateTimeOffset now = _time.GetUtcNow();
-        lock (_gate)
-        {
-            Usage usage = UsageOf(client, now);
-            if (tokens > 0)
-            {
-                usage.Add(new Entry(now, tokens, Request: false));
-            }
-            else
-            {
-                usage.Refund(-tokens, now);
-            }
         }
     }
 
@@ -192,20 +224,9 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
 
     private Usage UsageOf(string client, DateTimeOffset now)
     {
-        if (!_clients.TryGetValue(client, out Usage? usage))
-        {
-            if (_clients.Count >= SweepAbove)
-            {
-                // Clients without a key are counted per address: forget the idle ones, so the table stays small.
-                foreach ((string idle, Usage _) in _clients.Where(c => now - c.Value.LastSeen > TimeSpan.FromHours(1)).ToArray())
-                {
-                    _clients.Remove(idle);
-                }
-            }
-
-            _clients[client] = usage = new Usage();
-        }
-
+        // Clients without a key are counted per address; the pruning after each write keeps the table bounded. Seen from
+        // the start, so a sweep running beside it cannot take the new entry for an idle one.
+        Usage usage = _clients.GetOrAdd(client, static (_, at) => new Usage { LastSeen = at }, now);
         usage.Prune(now);
         return usage;
     }
@@ -214,6 +235,8 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
 
     private sealed class Usage
     {
+        private long _lastSeenTicks;
+
         public Queue<Entry> Entries { get; } = new();
 
         public int Requests { get; private set; }
@@ -227,8 +250,15 @@ internal sealed class ClientRateLimiter(TimeProvider? time = null)
 
         public DateTimeOffset? LastLimited { get; set; }
 
-        /// <summary>When the client was last seen: its last request, charge or refusal.</summary>
-        public DateTimeOffset LastSeen { get; set; }
+        /// <summary>
+        /// When the client was last seen: its last request, charge or refusal. Written under the limiter's lock, read
+        /// without it by the pruning, so it is kept as ticks that are read and written whole.
+        /// </summary>
+        public DateTimeOffset LastSeen
+        {
+            get => new(Interlocked.Read(ref _lastSeenTicks), TimeSpan.Zero);
+            set => Interlocked.Exchange(ref _lastSeenTicks, value.UtcTicks);
+        }
 
         public void Add(Entry entry)
         {

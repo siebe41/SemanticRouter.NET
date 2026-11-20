@@ -157,7 +157,7 @@ public sealed partial class ProtocolFuzzTests(ITestOutputHelper output)
                 }
                 else
                 {
-                    Encoding.UTF8.GetString(downstream.ToArray()).Should().Be(sse ? Lines(body) : body, "a pass-through reply reaches the client unchanged (SSE line by line)");
+                    Encoding.UTF8.GetString(downstream.ToArray()).Should().Be(body, "a pass-through reply reaches the client byte for byte");
                 }
                 using JsonDocument? document = sse ? null : JsonDocument.Parse(body);
                 if (document is not null)
@@ -308,19 +308,6 @@ public sealed partial class ProtocolFuzzTests(ITestOutputHelper output)
 
     [GeneratedRegex(@"^\[/?(?:user|assistant|system|developer|tool|tool_use|tool_result)(?: error)?\]", RegexOptions.IgnoreCase)]
     private static partial Regex TurnMarker();
-
-    /// <summary>The body as the line-by-line SSE copy forwards it: every line ended with a line feed.</summary>
-    private static string Lines(string body)
-    {
-        var lines = new StringBuilder();
-        using var reader = new StringReader(body);
-        while (reader.ReadLine() is { } line)
-        {
-            lines.Append(line).Append('\n');
-        }
-
-        return lines.ToString();
-    }
 
     private static void ValidJson(ReadOnlyMemory<byte> json)
     {

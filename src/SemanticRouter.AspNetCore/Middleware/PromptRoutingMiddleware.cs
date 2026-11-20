@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
@@ -15,8 +14,6 @@ namespace SemanticRouter.AspNetCore;
 /// </summary>
 internal sealed partial class PromptRoutingMiddleware
 {
-    private const int ReadChunkSize = 16 * 1024;
-
     private readonly RequestDelegate _next;
     private readonly RouterRuntimeProvider _runtime;
     private readonly PromptDispatcher _dispatcher;
@@ -117,7 +114,7 @@ internal sealed partial class PromptRoutingMiddleware
         using Activity? routeSpan = RouterTelemetry.Source.StartActivity("semantic_router.route");
         routeSpan?.SetTag("semantic_router.protocol", protocol.ToString());
         routeSpan?.SetTag("semantic_router.client", client);
-        ReadOnlyMemory<byte>? body = await ReadBodyAsync(context.Request, options.MaxRequestBodyBytes, context.RequestAborted).ConfigureAwait(false);
+        ReadOnlyMemory<byte>? body = await BoundedRequestBody.ReadAsync(context.Request, options.MaxRequestBodyBytes, context.RequestAborted).ConfigureAwait(false);
         if (body is not { } bodyBytes)
         {
             await ProtocolErrors.WriteAsync(
@@ -189,8 +186,8 @@ internal sealed partial class PromptRoutingMiddleware
         }
 
         // A client over its rate limit is turned away before anything is spent on it. A client without a gateway key is
-        // counted by its address.
-        string rateClient = client ?? context.Connection.RemoteIpAddress?.ToString() ?? "local";
+        // counted by its address (an IPv6 address by its /64).
+        string rateClient = client ?? ClientAddressKey.KeyOf(context);
         bool remoteClient = !DashboardAccess.IsLocal(context);
         (string Name, RateLimitOptions Limit)? rateLimit = _rateLimiter is null ? null : ClientRateLimiter.LimitFor(options, client, remoteClient);
         if (rateLimit is { } limit)
@@ -843,32 +840,6 @@ internal sealed partial class PromptRoutingMiddleware
         }
 
         return false;
-    }
-
-    private static async Task<ReadOnlyMemory<byte>?> ReadBodyAsync(HttpRequest request, long limit, CancellationToken cancellationToken)
-    {
-        if (request.ContentLength > limit)
-        {
-            return null;
-        }
-
-        int initialCapacity = (int)Math.Min(request.ContentLength ?? ReadChunkSize, limit);
-        var buffer = new ArrayBufferWriter<byte>(Math.Max(initialCapacity, 256));
-        while (true)
-        {
-            Memory<byte> chunk = buffer.GetMemory(ReadChunkSize);
-            int read = await request.Body.ReadAsync(chunk, cancellationToken).ConfigureAwait(false);
-            if (read == 0)
-            {
-                return buffer.WrittenMemory;
-            }
-
-            buffer.Advance(read);
-            if (buffer.WrittenCount > limit)
-            {
-                return null;
-            }
-        }
     }
 
     private bool TryParse(
