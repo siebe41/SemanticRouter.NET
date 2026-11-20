@@ -1857,7 +1857,8 @@ internal sealed class SqliteConfigurationHistory(SqliteRouterDatabase database) 
 /// The totals of the ranges asked for most recently (a budget's current period) are also kept in memory: what this
 /// instance records is added to them, and when one is asked for and <see cref="RefreshInterval"/> has passed (or a row
 /// it does not know of was written meanwhile), only the rows added since are read, so instances sharing the file agree
-/// within that time and a budget check does not read the period's usage on every request.
+/// within that time and a budget check does not read the period's usage on every request. Those totals never wait for
+/// the background writer: the records this instance made that it has not saved yet are added to them (#391).
 /// </summary>
 internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageLedger
 {
@@ -1870,6 +1871,11 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
     private readonly InMemoryUsageLedger _fallback = new();
     private readonly RunningUsageTotals<Running> _running = new();
     private readonly Lock _gate = new();
+
+    // Records waiting for the background writer, by the order they were made, so the totals count them without
+    // waiting for it.
+    private readonly ConcurrentDictionary<long, Unsaved> _unsaved = new();
+    private long _made;
     private int _writes;
     private int _reads;
 
@@ -1885,6 +1891,8 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
         DateTimeOffset oldest = record.Timestamp - database.UsageRetention;
         (long? cost, long? reference, long? value) = Picodollars(record.CostUsd, record.ReferenceCostUsd, record.SubscriptionValueUsd);
         long id = -1;
+        var unsaved = new Unsaved(Interlocked.Increment(ref _made), record);
+        _unsaved.TryAdd(unsaved.Order, unsaved);
         database.Write("recording usage", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
@@ -1901,18 +1909,36 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
                 ("$value", record.SubscriptionValueUsd.ToString(CultureInfo.InvariantCulture)),
                 ("$costPico", cost), ("$referencePico", reference), ("$valuePico", value));
             id = (long)command.ExecuteScalar()!;
-        }, done: saved => Saved(saved ? id : -1, record, prune, oldest));
+            unsaved.Row = id; // before the commit: a read that finds the row knows it is this record
+        }, done: saved => Saved(saved ? id : -1, unsaved, prune, oldest));
     }
 
-    /// <summary>Once the background writer saved <paramref name="record"/> as row <paramref name="id"/> (-1: it could not).</summary>
-    private void Saved(long id, UsageRecord record, bool prune, DateTimeOffset oldest)
+    /// <summary>Once the background writer saved <paramref name="unsaved"/> as row <paramref name="id"/> (-1: it could not).</summary>
+    private void Saved(long id, Unsaved unsaved, bool prune, DateTimeOffset oldest)
     {
+        UsageRecord record = unsaved.Record;
         if (id < 0)
         {
+            // Out of the unsaved records first, so it is never counted twice.
+            _unsaved.TryRemove(unsaved.Order, out _);
             _fallback.Record(record);
             return;
         }
 
+        // Into the running totals first, then out of the unsaved records: in between, the totals hold it as a row
+        // they include (Row ≤ their newest), so it is counted once.
+        try
+        {
+            AddToRunning(id, record, prune, oldest);
+        }
+        finally
+        {
+            _unsaved.TryRemove(unsaved.Order, out _);
+        }
+    }
+
+    private void AddToRunning(long id, UsageRecord record, bool prune, DateTimeOffset oldest)
+    {
         KeyValuePair<UsageRange, Running>[] running;
         lock (_gate)
         {
@@ -1928,33 +1954,53 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
     public UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
         ModelTotals(since, until, UsageGrouping.Model, null, model, connector, profile).Aggregate(UsageTotals.Zero, (total, t) => total.Add(t.Totals));
 
-    public IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null) =>
-        UsageSummaries.Group(ModelTotals(since, until, by, zone), by);
+    // The dashboard's summaries: read from the file once this router's own rows are in it.
+    public IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null)
+    {
+        database.WaitForWrites();
+        return UsageSummaries.Group(ModelTotals(since, until, by, zone), by);
+    }
 
     public IReadOnlyList<UsageModelTotals> ModelTotals(
         DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null, string? model = null, string? connector = null, string? profile = null)
     {
-        // Before any lock is taken: this router's own rows are counted once they are in the file.
-        database.WaitForWrites();
         var range = new UsageRange(since, until, model, connector, profile);
         IReadOnlyList<UsageModelTotals> stored;
+        List<UsageRecord>? waiting = null;
         if (by == UsageGrouping.Model && database.Available)
         {
+            // The budget check, on every request: it must not wait for the writer (which can wait for another router
+            // holding the file, or a purge). The records not saved yet are looked at before the totals are: one saved
+            // meanwhile is then either in the totals, with its row, or still counted here. In the order they were
+            // made, as the file would list them.
+            Unsaved[] unsaved = [.. _unsaved.Values.OrderBy(u => u.Order)];
             Running running;
             lock (_gate)
             {
                 running = _running.GetOrAdd(range, _ => new Running());
             }
 
-            stored = running.Current(this, range);
+            (stored, long newest) = running.Current(this, range);
+            foreach (Unsaved item in unsaved)
+            {
+                if (item.Row is not { } row || row > newest)
+                {
+                    if (range.Covers(item.Record))
+                    {
+                        (waiting ??= []).Add(item.Record);
+                    }
+                }
+            }
         }
         else
         {
+            // The dashboard's groupings are read from the file: this router's own rows are counted once they are in it.
+            database.WaitForWrites();
             stored = Read(range, by, zone ?? TimeZoneInfo.Local, after: null)?.Totals ?? [];
         }
 
         IReadOnlyList<UsageModelTotals> unstored = _fallback.ModelTotals(since, until, by, zone, model, connector, profile);
-        if (unstored.Count == 0)
+        if (unstored.Count == 0 && waiting is null)
         {
             return stored;
         }
@@ -1962,7 +2008,28 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
         var merged = new UsageModelTotalsBuilder();
         merged.Add(stored);
         merged.Add(unstored);
+        foreach (UsageRecord record in waiting ?? [])
+        {
+            merged.Add(record.Model, record);
+        }
+
         return merged.ToList();
+    }
+
+    /// <summary>A record waiting for the background writer, and its row once the writer inserted it (before the commit).</summary>
+    private sealed class Unsaved(long order, UsageRecord record)
+    {
+        private long _row = -1;
+
+        public long Order { get; } = order;
+
+        public UsageRecord Record { get; } = record;
+
+        public long? Row
+        {
+            get => Volatile.Read(ref _row) is var row and >= 0 ? row : null;
+            set => Volatile.Write(ref _row, value ?? -1);
+        }
     }
 
     public IReadOnlyList<UsageRecord> Records(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
@@ -2227,14 +2294,15 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
         private bool _stale;
         private DateTimeOffset _readAt;
 
-        public IReadOnlyList<UsageModelTotals> Current(SqliteUsageLedger ledger, UsageRange range)
+        /// <summary>The totals, and the newest row they include (0 when none).</summary>
+        public (IReadOnlyList<UsageModelTotals> Totals, long Newest) Current(SqliteUsageLedger ledger, UsageRange range)
         {
             lock (_lock)
             {
                 DateTimeOffset now = ledger.Database.Time.GetUtcNow();
                 if (_totals is not null && !_stale && now - _readAt < RefreshInterval)
                 {
-                    return _totals.ToList();
+                    return (_totals.ToList(), _newest);
                 }
 
                 // From scratch the first time, and while the range reaches back past the retention: pruning there
@@ -2260,7 +2328,7 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
                     _readAt = now;
                 }
 
-                return _totals?.ToList() ?? [];
+                return _totals is null ? ([], 0) : (_totals.ToList(), _newest);
             }
         }
 

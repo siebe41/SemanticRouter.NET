@@ -279,19 +279,16 @@ public readonly record struct ActivityPurgeResult
 public sealed class RoutingActivityLog
 {
     // Ids are reserved from a shared store this many at a time, so routers sharing it never hand out the same one. Enough
-    // for half a second at a few thousand requests a second: the next block is asked for halfway through this one, and
-    // a reservation can wait for another writer of the file. A restart leaves at most two blocks unused.
+    // for half a second at a few thousand requests a second: the next block is asked for in the background halfway
+    // through this one, since a reservation can wait for another writer of the file (IdBlocks). A restart leaves at most
+    // two blocks unused.
     internal const int IdBlock = 1024;
     private const int DefaultCapacity = 500;
     private readonly RoutingActivityEntry?[] _entries;
     private readonly IRoutingActivityStore? _store;
     private readonly Lock _gate = new();
     private readonly List<(DateTimeOffset Since, DateTimeOffset Until, long Below)> _purges = [];
-    private long _next;
-    private long _blockEnd;
-
-    // The next block of ids, asked for while the current one is half used: a request does not wait for the store.
-    private Task<long>? _nextBlock;
+    private readonly IdBlocks _ids;
     private long _added;
 
     /// <summary>Creates an in-memory log keeping the latest 500 entries.</summary>
@@ -317,6 +314,7 @@ public sealed class RoutingActivityLog
     {
         _entries = new RoutingActivityEntry?[Math.Max(10, capacity)];
         _store = store;
+        long next = 0;
         if (store?.Recent(_entries.Length) is { Count: > 0 } stored)
         {
             // Oldest first into the slots. Ids may have gaps (a request that never finished, ids a router reserved and
@@ -324,8 +322,11 @@ public sealed class RoutingActivityLog
             RoutingActivityEntry[] oldestFirst = [.. stored.OrderBy(e => e.Id).TakeLast(_entries.Length)];
             oldestFirst.CopyTo(_entries, 0);
             _added = oldestFirst.Length;
-            _next = oldestFirst[^1].Id + 1;
+            next = oldestFirst[^1].Id + 1;
         }
+
+        // The first block of ids is reserved now, at start-up, so no request waits for the store.
+        _ids = new IdBlocks(store is null ? null : store.ReserveIds, next);
     }
 
     /// <summary>
@@ -349,7 +350,7 @@ public sealed class RoutingActivityLog
         {
             lock (_gate)
             {
-                return _next;
+                return _ids.Upcoming;
             }
         }
     }
@@ -426,7 +427,7 @@ public sealed class RoutingActivityLog
         lock (_gate)
         {
             // Entries with lower ids may still be running or waiting for the judge: they must not come back.
-            _purges.Add((since, until, _next));
+            _purges.Add((since, until, _ids.Upcoming));
             for (int i = 0; i < _entries.Length; i++)
             {
                 if (_entries[i] is { } entry && entry.Timestamp >= since && entry.Timestamp < until)
@@ -467,26 +468,13 @@ public sealed class RoutingActivityLog
 
     /// <summary>
     /// Reserves an id for a new entry. Each call returns another one, and logs sharing a store never get the same one:
-    /// the store hands out blocks of them (<see cref="IRoutingActivityStore.ReserveIds"/>).
+    /// the store hands out blocks of them (<see cref="IRoutingActivityStore.ReserveIds"/>). Never waits for the store.
     /// </summary>
     public long Reserve()
     {
         lock (_gate)
         {
-            if (_next >= _blockEnd)
-            {
-                // A store that only this log uses (or that failed) reserves nothing: then the log counts on.
-                long first = _nextBlock is { } ahead ? ahead.GetAwaiter().GetResult() : _store?.ReserveIds(IdBlock) ?? -1;
-                _nextBlock = null;
-                _next = first >= 0 ? first : _next;
-                _blockEnd = _next + IdBlock;
-            }
-            else if (_store is { } store && _nextBlock is null && _blockEnd - _next == IdBlock / 2)
-            {
-                _nextBlock = Task.Run(() => store.ReserveIds(IdBlock));
-            }
-
-            return _next++;
+            return _ids.Next();
         }
     }
 

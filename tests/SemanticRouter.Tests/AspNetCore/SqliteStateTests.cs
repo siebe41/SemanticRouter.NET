@@ -1117,6 +1117,8 @@ public sealed class SqliteStateTests : IDisposable
         b.Record(Request());
         Settle();
         a.Record(Request());
+        a.Total(Since, Until, connector: "c").Requests.Should().BeGreaterThanOrEqualTo(2, "its own record counts before it is saved; b's within the refresh interval at most");
+        Settle();
         a.Total(Since, Until, connector: "c").Requests.Should().Be(3, "a row it did not write came before its own, so it reads the rows it missed");
         b.Total(Since, Until, connector: "c").CostUsd.Should().Be(0.75m);
     }
@@ -1273,6 +1275,65 @@ public sealed class DurableStateHostTests : RouterHostTest
 
     private static async Task<string> LastPreviewAsync(HttpClient client) =>
         JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray()[0]!["promptPreview"]!.GetValue<string>();
+
+    [Fact]
+    public async Task Requests_do_not_wait_for_a_busy_state_writer()
+    {
+        // Issue #391: the budget check waited for the writer (up to twice the busy timeout plus 5 s), and the latency and
+        // cache-share figures after an apply were read from the file by the request.
+        HttpClient client = await StartDurableAsync(services: s => s.Configure<UsageOptions>(u =>
+        {
+            u.Budgets.Add(new BudgetDefinition { Name = "local-daily", Model = "local", MaxTokens = 1_000_000 });
+            u.Budgets.Add(new BudgetDefinition { Name = "cloud-daily", Connector = "anthropic", MaxCostUsd = 100 });
+        }));
+        (await client.PostAsync("/v1/chat/completions", Chat("hello before"))).StatusCode.Should().Be(HttpStatusCode.OK);
+        await WaitForStoredActivityAsync(1);
+
+        SqliteRouterDatabase database = Services.GetRequiredService<SqliteRouterDatabase>();
+        using var busy = new ManualResetEventSlim();
+        database.Write("a write that takes its time (another router holds the file)", _ => busy.Wait(TimeSpan.FromSeconds(60)));
+        try
+        {
+            // As after an apply: the figures are worked out afresh.
+            Services.GetRequiredService<ModelLatencyTracker>().Configure(new ModelSelectionOptions());
+            Services.GetRequiredService<ModelCacheTracker>().Configure(new ModelSelectionOptions());
+
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < 3; i++)
+            {
+                (await client.PostAsync("/v1/chat/completions", Chat("hello " + i))).StatusCode.Should().Be(HttpStatusCode.OK);
+            }
+
+            timer.Stop();
+            timer.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(4), "no request waits for the writer");
+
+            IUsageLedger ledger = Services.GetRequiredService<IUsageLedger>();
+            timer.Restart();
+            UsageTotals before = ledger.Total(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), model: "local");
+            ledger.Record(new UsageRecord
+            {
+                Timestamp = DateTimeOffset.UtcNow,
+                Model = "local",
+                Connector = "lmstudio",
+                IsLocal = true,
+                InputTokens = 1000,
+                OutputTokens = 500,
+                CacheReadTokens = 0,
+                CacheWriteTokens = 0,
+                CostUsd = 0,
+                ReferenceCostUsd = 0,
+            });
+            ledger.Total(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), model: "local").Requests
+                .Should().Be(before.Requests + 1, "a budget counts what waits to be saved");
+            timer.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(4), "without waiting for it");
+        }
+        finally
+        {
+            busy.Set();
+        }
+
+        await WaitForStoredActivityAsync(4);
+    }
 
     [Fact]
     public async Task Concurrent_requests_get_distinct_ids_and_each_its_own_stored_entry()
