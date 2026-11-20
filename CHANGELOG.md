@@ -57,6 +57,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - A reasoning request without `max_tokens` sent to an Anthropic model gets room for its answer on top of the thinking budget. It was left 1 token, so replies came back empty or cut off. (#349)
 - **Discover models** and the start-up checks ask for the model list beside the connector's request path, so the OpenRouter and Google Gemini presets are probed at `/api/v1/models` and `/v1beta/openai/models` instead of a `/v1/models` they do not serve. (#349)
 - An OpenAI client's parallel tool results all count as answered. Each `tool` message used to become its own turn, so only the last call's result did. (#349)
+- SQLite state: an exception of a kind the state writer or the hourly retention prune did not expect is logged, and a write it stops is counted as lost, as with other storage failures. It used to end the router's process. (#395)
 
 ### Security
 

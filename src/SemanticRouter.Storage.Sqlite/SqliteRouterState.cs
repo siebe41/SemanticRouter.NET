@@ -126,7 +126,7 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
             // Retention must not depend on traffic: a router that serves a few requests a day, or is restarted every
             // evening, still loses what is past it.
             Prune();
-            _pruning = Time.CreateTimer(_ => Prune(), null, PruneInterval, PruneInterval);
+            _pruning = Time.CreateTimer(_ => PruneOnTimer(), null, PruneInterval, PruneInterval);
         }
         catch (NewerSchemaException ex)
         {
@@ -263,6 +263,29 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         return deleted;
     });
 
+    /// <summary>
+    /// The timer's prune. An exception it does not expect is logged and the next prune tries again: an exception that
+    /// escaped a timer callback would end the process.
+    /// </summary>
+    private void PruneOnTimer()
+    {
+        try
+        {
+            Prune();
+        }
+        catch (Exception ex) when (Survivable(ex))
+        {
+            Warn("deleting state past its retention", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Whether the background writer and the retention timer carry on after <paramref name="ex"/>: every exception but
+    /// running out of memory or stack. State storage never stops routing, and on those threads an exception that
+    /// escaped would end the process.
+    /// </summary>
+    internal static bool Survivable(Exception ex) => ex is not (OutOfMemoryException or InsufficientExecutionStackException);
+
     private static long TotalChanges(SqliteConnection connection)
     {
         using SqliteCommand command = Command(connection, "SELECT total_changes();");
@@ -345,18 +368,35 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
 
         if (!queued)
         {
-            bool saved = Execute("saving state", false, connection =>
+            // Counted as written whatever happens, or every later read would wait for it until its deadline.
+            try
             {
-                write.Operation(connection);
-                return true;
-            });
-            if (!saved)
-            {
-                Drop(write.What, "it failed");
-            }
+                bool saved;
+                try
+                {
+                    saved = Execute("saving state", false, connection =>
+                    {
+                        write.Operation(connection);
+                        return true;
+                    });
+                }
+                catch (Exception ex) when (Survivable(ex))
+                {
+                    Warn(write.What, ex.Message);
+                    saved = false;
+                }
 
-            write.Done?.Invoke(saved);
-            Progress(1);
+                if (!saved)
+                {
+                    Drop(write.What, "it failed");
+                }
+
+                Done(write, saved);
+            }
+            finally
+            {
+                Progress(1);
+            }
         }
     }
 
@@ -465,9 +505,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
                         batch[i].Operation(connection);
                         saved[i] = true;
                     }
-                    catch (Exception ex) when (ex is SqliteException or InvalidOperationException or JsonException)
+                    catch (Exception ex) when (Survivable(ex))
                     {
-                        // One bad write (a constraint) does not undo the batch: SQLite rolls back only its statement.
+                        // One bad write (a constraint, or an exception nobody expected) does not undo the batch: SQLite
+                        // rolls back only its statement.
                         Warn(batch[i].What, ex.Message);
                         Drop(batch[i].What, ex.Message);
                         failed[i] = true;
@@ -482,9 +523,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
                 transaction?.Dispose();
             }
         }
-        catch (Exception ex) when (ex is SqliteException or InvalidOperationException)
+        catch (Exception ex) when (Survivable(ex))
         {
-            // The batch could not be saved (the file is locked past the busy timeout, or broken).
+            // The batch could not be saved (the file is locked past the busy timeout, or broken, or opening it failed
+            // in a way nobody expected).
             Warn(batch[0].What, ex.Message);
             for (int i = 0; i < batch.Count; i++)
             {
@@ -500,17 +542,23 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         // writes go on. So a callback must never wait for writes: the ledger reads under its locks with Peek.
         for (int i = 0; i < batch.Count; i++)
         {
-            try
-            {
-                batch[i].Done?.Invoke(saved[i]);
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
-            {
-                Warn(batch[i].What, ex.Message);
-            }
+            Done(batch[i], saved[i]);
         }
 
         Progress(batch.Count);
+    }
+
+    /// <summary>Tells <paramref name="write"/>'s callback whether it was saved; a callback that throws is logged.</summary>
+    private void Done(PendingWrite write, bool saved)
+    {
+        try
+        {
+            write.Done?.Invoke(saved);
+        }
+        catch (Exception ex) when (Survivable(ex))
+        {
+            Warn(write.What, ex.Message);
+        }
     }
 
     private void Progress(int count)

@@ -782,6 +782,30 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void An_exception_nobody_expected_on_the_writer_thread_drops_that_write_and_the_writer_carries_on()
+    {
+        // Issue #395: the writer is a thread of its own, so an exception that escaped it would end the process.
+        SqliteRouterDatabase database = Open();
+        var cooldowns = new SqliteCooldownStore(database);
+        DateTimeOffset until = _time.GetUtcNow().AddMinutes(5);
+
+        database.Write("a write that breaks oddly", _ => throw new InvalidCastException("not a long"));
+        database.Write("a write whose callback breaks", _ => { }, done: _ => throw new FormatException("not a number"));
+        cooldowns.SaveCooldown("claude", until);
+        database.WaitForWrites();
+
+        new SqliteCooldownStore(Open()).LoadCooldowns().Should().ContainKey("claude", "the writer saved what came after");
+        database.Dropped.Should().Be(1, "only the write that threw is lost");
+        _logs.All.Should().Contain("a write that breaks oddly").And.Contain("not a long");
+
+        database.Write("another write that breaks oddly", _ => throw new OverflowException("too large"));
+        cooldowns.SaveCooldown("gpt", until);
+        database.WaitForWrites();
+        new SqliteCooldownStore(Open()).LoadCooldowns().Should().ContainKeys("claude", "gpt");
+        database.Dropped.Should().Be(2);
+    }
+
+    [Fact]
     public void A_locked_database_degrades_to_memory_without_throwing()
     {
         SqliteRouterDatabase database = Open(o => o.BusyTimeout = TimeSpan.FromSeconds(1));
