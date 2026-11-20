@@ -271,6 +271,62 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         logs.All.Should().NotContain(nameof(ObjectDisposedException)).And.NotContainAny("unhandled", "Unhandled");
     }
 
+    [Fact]
+    public async Task A_configuration_the_store_rejects_neither_prunes_stored_state_nor_reconfigures_the_trackers()
+    {
+        // #393: building a candidate runtime must not touch the state every runtime shares.
+        var retention = new RecordingRetention();
+        var store = new FailingStore();
+        await StartDispatchAsync(s =>
+        {
+            s.AddSingleton<IRouterConfigurationStore>(store);
+            s.AddSingleton<IStateRetention>(retention);
+        });
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        var health = (ModelHealthTracker)Services.GetRequiredService<IModelHealth>();
+        RouterRuntime running = provider.Current;
+        ModelDefinition local = running.Configuration.Models.Single(m => m.Name == "local");
+        retention.Applied.Should().ContainSingle("the start-up configuration's retention is applied once");
+
+        RouterConfiguration next = running.Configuration.Clone();
+        next.State.Retention.UsageDays = 1;
+        next.Selection.FailureCooldown = TimeSpan.FromHours(1);
+        provider.Invoking(p => p.Apply(next, persist: true)).Should().Throw<IOException>();
+
+        provider.Current.Should().BeSameAs(running);
+        retention.Applied.Should().ContainSingle("nothing is pruned under a configuration that was not accepted");
+        health.ReportFailure(local, ModelFailureKind.Unavailable);
+        health.GetCooldowns()[local.Name].Should().BeBefore(DateTimeOffset.UtcNow.AddMinutes(5), "the running configuration's 30 s cooldown still applies");
+
+        // Accepted (applied without saving): now the new settings are put to use.
+        provider.Apply(next, persist: false);
+        retention.Applied.Should().HaveCount(2);
+        retention.Applied[^1].UsageDays.Should().Be(1);
+        health.ReportFailure(local, ModelFailureKind.Unavailable);
+        health.GetCooldowns()[local.Name].Should().BeAfter(DateTimeOffset.UtcNow.AddMinutes(30));
+
+        // A reset hands them the application's own settings again.
+        provider.ResetToBaseline();
+        retention.Applied.Should().HaveCount(3);
+        retention.Applied[^1].UsageDays.Should().BeNull();
+    }
+
+    private sealed class RecordingRetention : IStateRetention
+    {
+        public List<StateRetentionOptions> Applied { get; } = [];
+
+        public void Apply(StateRetentionOptions retention) => Applied.Add(retention);
+    }
+
+    private sealed class FailingStore : IRouterConfigurationStore
+    {
+        public string Location => "/read-only/semantic-router.json";
+
+        public RouterConfiguration? Load() => null;
+
+        public void Save(RouterConfiguration configuration) => throw new IOException("The disk is full.");
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));

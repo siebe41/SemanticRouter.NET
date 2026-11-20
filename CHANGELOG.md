@@ -58,6 +58,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - **Discover models** and the start-up checks ask for the model list beside the connector's request path, so the OpenRouter and Google Gemini presets are probed at `/api/v1/models` and `/v1beta/openai/models` instead of a `/v1/models` they do not serve. (#349)
 - An OpenAI client's parallel tool results all count as answered. Each `tool` message used to become its own turn, so only the last call's result did. (#349)
 - Applying a configuration (a dashboard save, a tuning change, a revert or a reset) while a CLI or Copilot request is running no longer breaks that request and the ones queued behind it. The running request used to end in an unhandled exception without its usage being recorded or its scratch directory deleted, and queued requests hung until the client gave up. (#388)
+- A configuration that cannot be applied (it fails to save, for example on a full disk) no longer deletes stored usage, activity or audit entries under its retention settings, and no longer changes the cooldowns and latency and cache tracking the running configuration uses. They change only once a configuration is in use. (#393)
 
 ### Security
 
