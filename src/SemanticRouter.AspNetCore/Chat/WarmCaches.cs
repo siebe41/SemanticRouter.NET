@@ -75,20 +75,19 @@ internal sealed class WarmCacheStore : IWarmCacheStore
             return _caches.TryRemove(conversation, out _);
         }
 
-        if (_caches.TryGetValue(conversation, out WarmCache[]? caches) && caches.Any(c => Same(c, model)))
+        // Compare and swap: the entry is replaced only if it is still the one read, so a Remember of another model in
+        // between is never undone (it is read again instead).
+        while (_caches.TryGetValue(conversation, out WarmCache[]? caches) && caches.Any(c => Same(c, model)))
         {
             // A conversation with no warm cache left goes: the pruning sweep reads each one's latest expiry.
             WarmCache[] rest = [.. caches.Where(c => !Same(c, model))];
-            if (rest.Length == 0)
+            bool replaced = rest.Length == 0
+                ? _caches.TryRemove(new KeyValuePair<string, WarmCache[]>(conversation, caches))
+                : _caches.TryUpdate(conversation, rest, caches);
+            if (replaced)
             {
-                _caches.TryRemove(conversation, out _);
+                return true;
             }
-            else
-            {
-                _caches[conversation] = rest;
-            }
-
-            return true;
         }
 
         return false;

@@ -981,11 +981,9 @@ public sealed class JsonFileRouterConfigurationStore : IRouterConfigurationStore
         ArgumentNullException.ThrowIfNull(configuration);
         lock (_gate)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            string temp = _path + ".tmp";
-            File.WriteAllText(temp, configuration.ToJson());
-            OwnerOnly.Restrict(temp);
-            File.Move(temp, _path, overwrite: true);
+            // A temporary file of its own, flushed and renamed over the file: the desktop app, the service and init may
+            // save at once, and a crash never leaves half a configuration.
+            AtomicFile.WriteAllText(_path, configuration.ToJson());
         }
     }
 }

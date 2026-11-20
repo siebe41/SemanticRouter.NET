@@ -18,6 +18,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Fixed
 
+- The configuration, `semantic-router.host.json` and `semantic-router.instance.json` are replaced in one step, through a temporary file of their own that is owner-only from the start and flushed to disk, so a crash or a second writer (the desktop app, the background service and `init` at once) never leaves one truncated. Before a newer release's template fixes rewrite `semantic-router.json`, which drops its comments and unknown properties, the file as it was is kept as `semantic-router.json.bak`. Forgetting a conversation's warm prompt cache on one model no longer drops a cache recorded on another model at the same moment. (#400)
 - Validation refuses a model with a negative `CacheReadCostPerMillionTokens` or `CacheWriteCostPerMillionTokens`, as it already refused the other prices, and the dashboard shows the error next to that price. A negative cache price used to lower the recorded spend and skew the cheapest-model ranking. (#403)
 - Dashboard: the memory map no longer highlights a link from the selected note to one the filter or search hides. (#354)
 - Dashboard: a theme file whose last declaration in a block leaves out the `;` keeps that token. It used to be dropped, reported as missing or replaced by the default theme's value. (#354)

@@ -409,9 +409,7 @@ internal static class HostListen
         }
 
         root["Urls"] = urls;
-        Directory.CreateDirectory(configurationDirectory);
-        File.WriteAllText(file, root.ToJsonString(Json) + Environment.NewLine);
-        OwnerOnly.Restrict(file);
+        AtomicFile.WriteAllText(file, root.ToJsonString(Json) + Environment.NewLine);
     }
 
     /// <summary>This machine only (<c>localhost</c>), or every network interface (<c>0.0.0.0</c>).</summary>
