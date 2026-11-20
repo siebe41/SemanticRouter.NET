@@ -297,13 +297,14 @@ public sealed class ConnectorOptions
     /// </summary>
     public IList<string> QuotaErrorPatterns { get; } = new List<string>();
 
-    /// <summary>CLI: environment variables to set for the child process.</summary>
+    /// <summary>CLI: environment variables to set for the child process. Copilot: for the runtime process the SDK starts.</summary>
     public IDictionary<string, string> EnvironmentVariables { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>
     /// CLI: environment variables to remove from the child process. When <see langword="null"/>, the preset's defaults
     /// apply; for Claude Code these stop an inherited API key from switching billing away from your subscription and
-    /// stop <c>ANTHROPIC_BASE_URL</c> from looping requests back into this router.
+    /// stop <c>ANTHROPIC_BASE_URL</c> from looping requests back into this router. Copilot: removed from the runtime
+    /// process the SDK starts; nothing by default.
     /// </summary>
 #pragma warning disable CA2227 // Settable so configuration binding replaces the preset defaults.
     public IList<string>? RemoveEnvironmentVariables { get; set; }
@@ -361,7 +362,7 @@ public sealed class ConnectorOptions
 
     /// <summary>
     /// Time allowed between two pieces of a reply once it has started (HTTP: reads of the response body; CLI: lines of
-    /// output). A backend that stops sending for longer is given up on: before anything reached the client the next model
+    /// output; Copilot: the runtime's updates). A backend that stops sending for longer is given up on: before anything reached the client the next model
     /// answers; after, the client gets an error and the model cools down. Default: the same as <see cref="Timeout"/>.
     /// </summary>
     public TimeSpan StallTimeout { get; set; }

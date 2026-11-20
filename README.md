@@ -473,14 +473,14 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Arguments[]` | CLI | | Custom: the full template (`{model}`, `{prompt}`). Presets: extra arguments appended. |
 | `PromptInput` | CLI | `Stdin` | `Stdin` or `Argument`. `Argument` puts the prompt on the command line (Custom: the `{prompt}` placeholder), where other users of the machine can read it while the CLI runs. Codex always uses stdin. |
 | `QuotaErrorPatterns[]` | CLI | preset patterns | Extra output fragments that mean "quota exhausted". |
-| `EnvironmentVariables`, `RemoveEnvironmentVariables[]` | CLI | preset defaults | The presets remove API-key variables that would switch billing away from your subscription. |
+| `EnvironmentVariables`, `RemoveEnvironmentVariables[]` | CLI, Copilot | preset defaults | The presets remove API-key variables that would switch billing away from your subscription. Every CLI, and the Copilot runtime, also goes without the router's own settings and keys. |
 | `MaxConcurrency` | CLI, Copilot | `2` | Simultaneous processes (Copilot: simultaneous turns). |
 | `MaxQueue` | CLI, Copilot | `16` | When this many requests are already waiting for a process, the next goes to another model. `0`: never wait. |
 | `MaxArgumentLength` | CLI | `24000` | With `PromptInput: Argument`, longer prompts are sent on stdin. Longer Claude Code system prompts are moved into the conversation. |
 | `Executable`, `HomeDirectory` | Copilot | `copilot`, `~/.copilot` | The Copilot CLI the SDK runs as its runtime, and its `COPILOT_HOME`. |
 | `AllowRemoteClients` | CLI, Copilot, other connectors that run a program | `false` | See [Subscription CLI terms](docs/TERMS.md) before changing this. |
 | `Timeout` | all | HTTP 100 s · CLI 5 min | Time to first output. |
-| `StallTimeout` | HTTP, CLI | the `Timeout` | Time allowed between two pieces of a reply once it has started. A backend that stops sending for longer is given up on: before anything reached the client the next model answers; after, the client gets an error event and the model cools down. A reply that keeps coming is never cut off. |
+| `StallTimeout` | HTTP, CLI, Copilot | the `Timeout` | Time allowed between two pieces of a reply once it has started. A backend that stops sending for longer is given up on: before anything reached the client the next model answers; after, the client gets an error event and the model cools down. A reply that keeps coming is never cut off. |
 
 ### `Embeddings`, `Middleware` and the other sections
 

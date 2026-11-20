@@ -607,6 +607,8 @@ public static partial class RouterDashboardEndpoints
             RouterConfiguration resolved = alone.ResolveSecrets(provider.Secrets, unresolved);
             ConnectorOptions connector = resolved.Connectors[name];
 
+            var redactor = new SecretRedactor([.. runtime.Resolved.SecretValues(), .. resolved.SecretValues()]);
+
             // A packaged type (Copilot) lists models through its own connector: the running one when it is this one, else a
             // new one from its package's factory for this call.
             IModelDiscovery? live = null;
@@ -620,14 +622,13 @@ public static partial class RouterDashboardEndpoints
                 }
                 else if (services.GetServices<IChatConnectorFactory>().FirstOrDefault(f => connector.IsType(f.Type)) is { } factory)
                 {
-                    IChatConnector made = factory.Create(name, connector);
+                    IChatConnector made = ConnectorCatalog.Create(factory, name, connector, redactor);
                     (live, created) = (made as IModelDiscovery, made as IDisposable);
                 }
             }
 
             try
             {
-                var redactor = new SecretRedactor([.. runtime.Resolved.SecretValues(), .. resolved.SecretValues()]);
                 ModelLineupReport report = await ModelLineup.DiscoverAsync(
                     services, name, connector, live, draft.Models ?? [.. runtime.Resolved.Models], redactor, cancellationToken).ConfigureAwait(false);
                 if (unresolved.Count > 0)

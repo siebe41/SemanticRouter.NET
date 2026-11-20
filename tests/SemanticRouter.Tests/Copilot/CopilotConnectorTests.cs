@@ -19,6 +19,7 @@ public sealed class CopilotConnectorTests : RouterHostTest
     private const string CloudReply = """{"choices":[{"message":{"role":"assistant","content":"from cloud"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}""";
 
     private readonly FakeCopilot _copilot = new();
+    private readonly List<IReadOnlyDictionary<string, string>> _environments = [];
 
     public CopilotConnectorTests()
     {
@@ -26,7 +27,8 @@ public sealed class CopilotConnectorTests : RouterHostTest
         CloudHttp = StubHttpMessageHandler.Json(CloudReply);
     }
 
-    private Task<HttpClient> StartCopilotAsync(bool withFactory = true, Action<ConnectorOptions>? connector = null) =>
+    private Task<HttpClient> StartCopilotAsync(
+        bool withFactory = true, Action<ConnectorOptions>? connector = null, Func<Dictionary<string, string?>>? inherited = null) =>
         StartAsync(
             o =>
             {
@@ -51,7 +53,14 @@ public sealed class CopilotConnectorTests : RouterHostTest
                 });
                 if (withFactory)
                 {
-                    s.AddSingleton<IChatConnectorFactory>(new CopilotConnectorFactory(NullLoggerFactory.Instance, _ => _copilot));
+                    s.AddSingleton<IChatConnectorFactory>(new CopilotConnectorFactory(
+                        NullLoggerFactory.Instance,
+                        (_, environment) =>
+                        {
+                            _environments.Add(environment);
+                            return _copilot;
+                        },
+                        inherited));
                 }
             });
 
@@ -251,14 +260,111 @@ public sealed class CopilotConnectorTests : RouterHostTest
     public async Task Configuration_reloads_reuse_one_copilot_runtime()
     {
         int created = 0;
-        var factory = new CopilotConnectorFactory(NullLoggerFactory.Instance, _ => { created++; return _copilot; });
+        var factory = new CopilotConnectorFactory(NullLoggerFactory.Instance, (_, _) => { created++; return _copilot; }, () => new() { ["PATH"] = "/usr/bin" });
+        var withVariable = new ConnectorOptions { Type = CopilotConnector.Type };
+        withVariable.EnvironmentVariables["NODE_EXTRA_CA_CERTS"] = "/etc/corporate-root.pem";
 
         factory.Create("a", new ConnectorOptions { Type = CopilotConnector.Type });
         factory.Create("a", new ConnectorOptions { Type = CopilotConnector.Type });
         factory.Create("b", new ConnectorOptions { Type = CopilotConnector.Type, HomeDirectory = "/elsewhere" });
+        factory.Create("c", withVariable);
         await factory.DisposeAsync();
 
-        created.Should().Be(2);
+        created.Should().Be(3, "the runtime's environment is fixed when it starts: a different one needs its own runtime");
+    }
+
+    [Fact]
+    public async Task A_runtime_that_goes_quiet_mid_reply_is_given_up_on_and_frees_its_slot()
+    {
+        // The runtime sends no event when it dies or hangs after the first delta (#399).
+        _copilot.Script(new CopilotUpdate.Text("Hel"));
+        _copilot.HangAfterScript = true;
+        HttpClient client = await StartCopilotAsync(connector: c =>
+        {
+            c.MaxConcurrency = 1;
+            c.StallTimeout = TimeSpan.FromMilliseconds(300);
+        });
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(
+            """{"model":"auto","stream":true,"messages":[{"role":"user","content":"say hello"}]}"""));
+        string sse = await response.Content.ReadAsStringAsync();
+
+        sse.Should().Contain("\"content\":\"Hel\"").And.Contain("copilot-gpt stopped mid-reply: stalled: no output for 300 ms");
+        _copilot.Cancelled.Should().Be(1, "the turn was abandoned, so the backend ends the session");
+        RoutingActivityEntry entry = Services.GetRequiredService<RoutingActivityLog>().Recent(1).Single();
+        (entry.Outcome, entry.ServedBy).Should().Be(("failed", "copilot-gpt"));
+
+        _copilot.HangAfterScript = false;
+        _copilot.Script(new CopilotUpdate.Text("Hello again."));
+        HttpResponseMessage next = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        next.Headers.GetValues("X-Prompt-Route-Model").Should().Equal(["copilot-claude"], "the model that stalled cools down, and the connector's only slot is free again");
+        (await next.Content.ReadAsStringAsync()).Should().Contain("Hello again.");
+    }
+
+    [Fact]
+    public async Task A_runtime_that_never_answers_times_out_and_fails_over()
+    {
+        _copilot.Script(new CopilotUpdate.Usage(10, null, null));
+        _copilot.Script(new CopilotUpdate.Usage(10, null, null));
+        _copilot.HangAfterScript = true;
+        HttpClient client = await StartCopilotAsync(connector: c => c.Timeout = TimeSpan.FromMilliseconds(300));
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        response.Headers.GetValues("X-Prompt-Route-Model").Should().Equal("cloud");
+        _copilot.Cancelled.Should().Be(2, "usage is not output: the time-to-first-output limit still applies, to both Copilot models");
+    }
+
+    [Fact]
+    public void The_runtime_gets_the_routers_environment_without_its_settings_and_secrets()
+    {
+        const string Secret = "fake-resolved-test-value";
+        var options = new ConnectorOptions { Type = CopilotConnector.Type, RemoveEnvironmentVariables = ["SR_REMOVED"] };
+        options.EnvironmentVariables["SR_SET"] = "yes";
+        options.EnvironmentVariables["SR_OVERRIDDEN"] = "mine";
+        Dictionary<string, string?> inherited = new()
+        {
+            ["PATH"] = "/usr/bin",
+            ["HOME"] = "/home/me",
+            ["HTTPS_PROXY"] = "http://proxy:3128",
+            ["GH_TOKEN"] = Secret, // Copilot's own sign-in stays, even when a router setting reads the same token
+            ["COPILOT_GITHUB_TOKEN"] = "gho_copilot",
+            ["SemanticRouter__Dashboard__AdminToken"] = "admin-0123456789",
+            ["ROUTER_GATEWAY_KEY"] = "gateway-0123456789",
+            ["OPENAI_API_KEY"] = "sk-openai-0123456789",
+            ["SR_HOLDS_KEY"] = Secret,
+            ["SR_REMOVED"] = "gone",
+            ["SR_OVERRIDDEN"] = "inherited",
+        };
+
+        IReadOnlyDictionary<string, string> environment = CopilotConnectorFactory.RuntimeEnvironment(options, [Secret], inherited);
+
+        environment.Should().BeEquivalentTo(new Dictionary<string, string>
+        {
+            ["PATH"] = "/usr/bin",
+            ["HOME"] = "/home/me",
+            ["HTTPS_PROXY"] = "http://proxy:3128",
+            ["GH_TOKEN"] = Secret,
+            ["COPILOT_GITHUB_TOKEN"] = "gho_copilot",
+            ["SR_SET"] = "yes",
+            ["SR_OVERRIDDEN"] = "mine",
+        });
+    }
+
+    [Fact]
+    public async Task The_router_gives_the_factory_its_secrets_for_the_runtimes_environment()
+    {
+        // A connector's EnvironmentVariables values are secrets of the configuration: an inherited variable holding one
+        // stays out, and the connector's own variable is set.
+        HttpClient client = await StartCopilotAsync(
+            connector: c => c.EnvironmentVariables["SR_TEST_SET"] = "copilot-env-value-0123",
+            inherited: () => new() { ["PATH"] = "/usr/bin", ["SR_TEST_COPY"] = "copilot-env-value-0123", ["ROUTER_SR_TEST"] = "x" });
+
+        (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).Headers.GetValues("X-Prompt-Route-Model").Should().Equal("cloud");
+
+        _environments.Should().NotBeEmpty();
+        _environments[^1].Keys.Should().BeEquivalentTo("PATH", "SR_TEST_SET");
     }
 
     [Fact]
@@ -308,6 +414,12 @@ public sealed class CopilotConnectorTests : RouterHostTest
 
         public Exception? Throw { get; set; }
 
+        /// <summary>After its script, a turn sends nothing more until it is cancelled, like a runtime that died or hangs.</summary>
+        public bool HangAfterScript { get; set; }
+
+        /// <summary>How many turns were cancelled while waiting.</summary>
+        public int Cancelled { get; private set; }
+
         public void Script(params CopilotUpdate[] updates) => _scripts.Enqueue(updates);
 
         public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken) => Task.FromResult(Models);
@@ -324,6 +436,19 @@ public sealed class CopilotConnectorTests : RouterHostTest
             {
                 await Task.Yield();
                 yield return update;
+            }
+
+            if (HangAfterScript)
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    Cancelled++;
+                    throw;
+                }
             }
         }
     }
