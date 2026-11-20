@@ -666,6 +666,7 @@ public sealed class SqliteStateTests : IDisposable
         first.Failed("claude", ModelFailureKind.QuotaExceeded, "limit reached");
         _time.Advance(TimeSpan.FromDays(1));
         first.Failed("claude", ModelFailureKind.QuotaExceeded, "limit reached again");
+        first.Dispose(); // stopping saves what waits
 
         var restarted = new ConnectorIncidents(_time, new SqliteStateValues(Open()));
 
@@ -673,6 +674,7 @@ public sealed class SqliteStateTests : IDisposable
         restarted.LimitDays().Should().Equal(("claude", 2, "limit reached again"));
 
         restarted.Served("lmstudio");
+        restarted.Dispose();
         new ConnectorIncidents(_time, new SqliteStateValues(Open())).Failing().Should().BeEmpty("serving again clears it, on disk too");
     }
 
@@ -1530,6 +1532,7 @@ public sealed class DurableStateHostTests : RouterHostTest
         });
         Services.GetRequiredService<RoutingFeedbackLog>().Recent().Should().ContainSingle().Which.Detail.Should().Contain("purge-marker 4c1d");
         Services.GetRequiredService<ConnectorIncidents>().Failing().Should().ContainSingle().Which.Detail.Should().Contain("purge-marker 4c1d");
+        Services.GetRequiredService<ConnectorIncidents>().Flush(TimeSpan.FromSeconds(10)).Should().BeTrue("incidents are saved in the background");
         DatabaseFiles().Should().Contain("purge-marker 4c1d");
 
         JsonNode purge = JsonNode.Parse(await (await client.DeleteAsync("/router/api/activity")).Content.ReadAsStringAsync())!;

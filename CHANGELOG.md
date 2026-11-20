@@ -59,6 +59,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - An OpenAI client's parallel tool results all count as answered. Each `tool` message used to become its own turn, so only the last call's result did. (#349)
 - SQLite state: an exception of a kind the state writer or the hourly retention prune did not expect is logged, and a write it stops is counted as lost, as with other storage failures. It used to end the router's process. (#395)
 - A model that hits its limit stays cooling down when the cooldowns are re-read from the state store at that moment, and one that answers again is not put back into cooldown by such a re-read. The re-read could miss the change while it waited to be saved, so the limited model was tried again for a few seconds, or the recovered one skipped. (#394)
+- A failed request no longer writes the connector incidents (the source of the "connector down" and "keeps hitting its usage limit" notices) to the state store while other failing requests wait: they are saved in the background, and only when something a restart would miss changed. A connector that hits its usage limit on every request keeps the latest hit of each day instead of one per request, which grew the saved state by a timestamp per request for a week. State saved by earlier versions is read and trimmed. (#392)
 
 ### Security
 
