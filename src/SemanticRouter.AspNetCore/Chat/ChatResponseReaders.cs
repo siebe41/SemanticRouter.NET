@@ -394,8 +394,13 @@ internal static class AnthropicResponseReader
 /// </summary>
 internal static class PassThroughToolCallScanner
 {
+    /// <summary>
+    /// Copies the reply, reporting tool-call ids and usage. With <c>stripUsageChunk</c> (the router asked for usage the
+    /// client did not, with <c>stream_options.include_usage</c>), the usage-only final chunk is read but not relayed.
+    /// </summary>
     public static async Task CopyAsync(
-        Stream upstream, Stream downstream, bool sse, ChatProtocol protocol, Action<string> onToolCall, CancellationToken cancellationToken, Action<ChatUsage>? onUsage = null)
+        Stream upstream, Stream downstream, bool sse, ChatProtocol protocol, Action<string> onToolCall, CancellationToken cancellationToken,
+        Action<ChatUsage>? onUsage = null, bool stripUsageChunk = false)
     {
         if (!sse)
         {
@@ -409,8 +414,23 @@ internal static class PassThroughToolCallScanner
 
         // Line-oriented copy: forward every line as soon as it arrives, inspecting the data lines on the way past.
         using var reader = new StreamReader(upstream);
+        bool skipBlank = false;
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
         {
+            if (skipBlank && line.Length == 0)
+            {
+                skipBlank = false; // the end of the event that was not relayed
+                continue;
+            }
+
+            skipBlank = false;
+            if (stripUsageChunk && IsUsageOnlyChunk(line))
+            {
+                ScanJson(System.Text.Encoding.UTF8.GetBytes(line.AsSpan(5).TrimStart().ToString()), protocol, onToolCall, onUsage);
+                skipBlank = true;
+                continue;
+            }
+
             await downstream.WriteAsync(System.Text.Encoding.UTF8.GetBytes(line + "\n"), cancellationToken).ConfigureAwait(false);
             if (line.Length == 0)
             {
@@ -427,6 +447,32 @@ internal static class PassThroughToolCallScanner
         }
 
         await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Whether an SSE line is the chunk <c>stream_options.include_usage</c> adds at the end of a chat-completions stream:
+    /// no choices, and the usage.
+    /// </summary>
+    internal static bool IsUsageOnlyChunk(string line)
+    {
+        if (!line.StartsWith("data:", StringComparison.Ordinal)
+            || !(line.Contains("\"choices\":[]", StringComparison.Ordinal) || line.Contains("\"choices\": []", StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(line.AsSpan(5).TrimStart().ToString());
+            JsonElement root = document.RootElement;
+            return root.ValueKind == JsonValueKind.Object
+                   && root.TryGetArray("choices", out JsonElement choices) && choices.GetArrayLength() == 0
+                   && root.TryGetObject("usage", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static void ScanJson(ReadOnlyMemory<byte> json, ChatProtocol protocol, Action<string> onToolCall, Action<ChatUsage>? onUsage)

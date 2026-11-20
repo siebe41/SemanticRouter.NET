@@ -484,7 +484,7 @@ Both models get the same instructions; only the reading of the reply differs. Th
 
 ## What survives translation
 
-When a backend speaks the client's protocol, the body passes through untouched (only `model` is rewritten). Otherwise the request is translated, and anything the backend cannot carry is listed in the `X-Prompt-Route-Dropped` response header and the activity entry's `dropped` field.
+When a backend speaks the client's protocol, the body passes through untouched (only `model` is rewritten, and a streamed chat-completions request asks for usage with `stream_options.include_usage`, so budgets see it). Otherwise the request is translated, and anything the backend cannot carry is listed in the `X-Prompt-Route-Dropped` response header and the activity entry's `dropped` field.
 
 | Feature | OpenAI-compatible backend | Anthropic backend | Responses backend | CLI backend |
 |---|---|---|---|---|
