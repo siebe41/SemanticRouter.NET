@@ -232,6 +232,15 @@ public sealed class CopilotConnectorTests : RouterHostTest
     }
 
     [Fact]
+    public void A_replaced_configuration_does_not_dispose_the_connector_its_requests_still_use()
+    {
+        // #388: the catalog disposes the IDisposable connectors of a retired runtime while its requests still hold the
+        // concurrency gate, so the Copilot connector must not be one of them.
+        typeof(CopilotChatConnector).Should().NotImplement<IDisposable>();
+        typeof(CliChatConnector).Should().NotImplement<IDisposable>();
+    }
+
+    [Fact]
     public async Task The_dashboard_offers_the_copilot_type_once_the_package_is_added()
     {
         HttpClient client = await StartCopilotAsync();

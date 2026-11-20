@@ -156,6 +156,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                 {
                     (RouterConfiguration document, RouterConfigurationSource source) = LoadInitial();
                     _current = Build(document, source, changeSource: "startup");
+                    Activate(_current);
                     RecordStartup(document, source);
                     ScheduleWarmUp(_current);
                 }
@@ -346,13 +347,23 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             runtime = Build(document, runtimeSource, notes, source, actor);
             if (persist && _store is not null)
             {
-                _store.Save(document);
+                try
+                {
+                    _store.Save(document);
+                }
+                catch
+                {
+                    // Rejected: the running configuration stays, and nothing of the new one was put to use.
+                    runtime.Dispose();
+                    throw;
+                }
             }
 
             runtime.HistoryVersion = Record(document, source, actor, persist && _store is not null ? note : string.Join("; ", new[] { note, "not saved" }.Where(n => n is not null)));
 
             previous = _current;
             _current = runtime;
+            Activate(runtime);
         }
 
         LogApplied(_logger, runtime.Version, runtime.Source, configuration.Routes.Count, configuration.Models.Count, configuration.Connectors.Count);
@@ -444,6 +455,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             runtime.HistoryVersion = Record(runtime.Configuration, "revert", actor, source == RouterConfigurationSource.Store ? _store.Location : "the application's own configuration");
             previous = _current;
             _current = runtime;
+            Activate(runtime);
         }
 
         ScheduleWarmUp(runtime);
@@ -463,6 +475,7 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
             runtime.HistoryVersion = Record(runtime.Configuration, "reset", actor, "the application's own configuration");
             previous = _current;
             _current = runtime;
+            Activate(runtime);
         }
 
         ScheduleWarmUp(runtime);
@@ -566,6 +579,21 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         return (baseline.Clone(), RouterConfigurationSource.Configuration);
     }
 
+    /// <summary>
+    /// Hands the state shared by every runtime the settings of <paramref name="runtime"/>, once it has been accepted and
+    /// swapped in: the health, latency, cache and residency trackers, and the state store's retention (which deletes what
+    /// is past it). Called under the lock, so the shared state always follows the runtime that is current.
+    /// </summary>
+    private void Activate(RouterRuntime runtime)
+    {
+        RouterConfiguration configuration = runtime.Configuration;
+        (_services.GetService<IModelHealth>() as ModelHealthTracker)?.Configure(configuration.Selection);
+        (_services.GetService<IModelLatency>() as ModelLatencyTracker)?.Configure(configuration.Selection);
+        (_services.GetService<IModelCacheShare>() as ModelCacheTracker)?.Configure(configuration.Selection);
+        (_services.GetService<IModelResidency>() as ModelResidencyTracker)?.Configure(runtime.Resolved);
+        _services.GetService<IStateRetention>()?.Apply(configuration.State.Retention);
+    }
+
     private RouterRuntime Build(
         RouterConfiguration configuration, RouterConfigurationSource source, IReadOnlyList<string>? notes = null, string? changeSource = null, string? actor = null)
     {
@@ -587,16 +615,10 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
                 "Invalid SemanticRouter configuration:" + Environment.NewLine + " - " + string.Join(Environment.NewLine + " - ", errors));
         }
 
-        if (_services.GetService<IModelHealth>() is ModelHealthTracker tracker)
-        {
-            tracker.Configure(configuration.Selection);
-        }
-
+        // Nothing shared is changed here: a runtime is built before it is accepted (saved and swapped in), and one that is
+        // not must leave the running one as it was. Activate hands the shared state the new settings.
         IModelLatency? latency = _services.GetService<IModelLatency>();
-        (latency as ModelLatencyTracker)?.Configure(configuration.Selection);
         IModelCacheShare? cache = _services.GetService<IModelCacheShare>();
-        (cache as ModelCacheTracker)?.Configure(configuration.Selection);
-        _services.GetService<IStateRetention>()?.Apply(configuration.State.Retention);
 
         var warnings = new List<string>(enforced);
         if (_services.GetService<IStateStorageHealth>()?.Problem is { } state)
@@ -672,7 +694,6 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         IPromptClassifier classifier = ResolveCustom<IPromptClassifier>() ?? new SemanticPromptClassifier(
             embeddings, configuration, new SemanticPromptClassifierDependencies { ComplexityAnalyzer = complexity, RouteSelector = routeSelector });
         IModelResidency? residency = _services.GetService<IModelResidency>();
-        (residency as ModelResidencyTracker)?.Configure(resolved);
         IModelSelector modelSelector = ResolveCustom<IModelSelector>() ?? new DefaultModelSelector(
             configuration.Selection, new DefaultModelSelectorDependencies { Latency = latency, CacheShare = cache, Residency = residency });
         IModelHealth health = _services.GetRequiredService<IModelHealth>();

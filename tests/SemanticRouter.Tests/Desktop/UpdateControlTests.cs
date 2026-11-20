@@ -97,6 +97,21 @@ public sealed class UpdateControlTests : IDisposable
     }
 
     [Fact]
+    public async Task A_failed_hand_off_to_the_updater_starts_the_background_service_again()
+    {
+        // #396: the service was stopped for the update and stayed stopped when the hand-off threw.
+        var updates = new FakeUpdates { ApplyError = "the updater is missing" };
+        var platform = new RecordingPlatform { Installed = true };
+        var updater = new DesktopUpdater(updates, platform, TextWriter.Null);
+        await updater.CheckAsync();
+
+        (await updater.ApplyOnQuitAsync()).Should().BeFalse();
+
+        platform.Calls.Should().Equal("stop", "start");
+        updater.Problem.Should().Be("Update 1.0.1 could not be handed to the updater: the updater is missing");
+    }
+
+    [Fact]
     public async Task A_newer_update_found_after_one_was_downloaded_is_downloaded_in_its_place()
     {
         // #290: once 1.0.1 was ready, 1.0.2 was never downloaded and 1.0.1 was still the one applied.
@@ -781,7 +796,17 @@ public sealed class UpdateControlTests : IDisposable
             Downloaded = false;
         }
 
-        public void ApplyAfterExit(VelopackAsset asset, bool restart, string[] arguments) => Calls.Add($"apply {asset.Version} restart={restart}");
+        /// <summary>Handing the update to the updater fails with this message.</summary>
+        public string? ApplyError { get; set; }
+
+        public void ApplyAfterExit(VelopackAsset asset, bool restart, string[] arguments)
+        {
+            Calls.Add($"apply {asset.Version} restart={restart}");
+            if (ApplyError is { } error)
+            {
+                throw new InvalidOperationException(error);
+            }
+        }
 
         private static VelopackAsset Asset(string version, VelopackAssetType type) => new()
         {

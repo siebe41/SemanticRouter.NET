@@ -45,9 +45,9 @@ internal sealed class ConnectorCatalog : IDisposable
             }
             else if (connector.Type == ConnectorTypes.Cli)
             {
-                var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity, redactor, metrics, storePrompts);
-                _owned.Add(cli);
-                _connectors[name] = cli;
+                // Not disposable: requests that started on this snapshot keep using it after a configuration change.
+                _connectors[name] = new CliChatConnector(
+                    name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity, redactor, metrics, storePrompts);
             }
             else
             {

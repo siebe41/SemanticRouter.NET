@@ -59,6 +59,9 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - A reasoning request without `max_tokens` sent to an Anthropic model gets room for its answer on top of the thinking budget. It was left 1 token, so replies came back empty or cut off. (#349)
 - **Discover models** and the start-up checks ask for the model list beside the connector's request path, so the OpenRouter and Google Gemini presets are probed at `/api/v1/models` and `/v1beta/openai/models` instead of a `/v1/models` they do not serve. (#349)
 - An OpenAI client's parallel tool results all count as answered. Each `tool` message used to become its own turn, so only the last call's result did. (#349)
+- Applying a configuration (a dashboard save, a tuning change, a revert or a reset) while a CLI or Copilot request is running no longer breaks that request and the ones queued behind it. The running request used to end in an unhandled exception without its usage being recorded or its scratch directory deleted, and queued requests hung until the client gave up. (#388)
+- A configuration that cannot be applied (it fails to save, for example on a full disk) no longer deletes stored usage, activity or audit entries under its retention settings, and no longer changes the cooldowns and latency and cache tracking the running configuration uses. They change only once a configuration is in use. (#393)
+- Desktop app: quitting always ends the app, even when stopping the router or handing over an update fails; it used to linger in the tray without a router, and Quit did nothing. Signing out or shutting down waits for the app to stop its router and hand over a downloaded update. If the update cannot be handed over, the background service it stopped for the update is started again. Two launches at the same moment no longer both start an app, and **Restart router** recovers when restarting the background service fails. (#396)
 
 ### Security
 
