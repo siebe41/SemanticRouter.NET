@@ -3,17 +3,23 @@
 // `write` puts the SHA-256 of every file in a published app that is not a Windows executable image into a small library,
 // SemanticRouter.Files.dll, next to them. vpk signs that library with the rest of the release, and the desktop app's
 // publisher check (src/SemanticRouter.Desktop/UpdateFileList.cs) refuses an update whose data files differ from it.
+// The programs and libraries are in it too, each with the SHA-256 of what its Authenticode signature covers (the file
+// without its signature, ProgramDigest below), which is the same before and after vpk signs it: so the app's check
+// also refuses a program swapped for another one the publisher or Microsoft signed. Programs vpk adds after `write`
+// (Velopack's Squirrel.exe and execution stub) are not in it; the app requires those to be signed by the publisher.
 // `check` reads the list back from a Velopack package and fails unless it matches the package's files exactly, so a
-// file added to the app after `write` ran is caught before the release, not by every updater in the field. A .NET 10
-// file-based app, with nothing to install:
+// file added to the app after `write` ran, or a program vpk changed other than by signing it, is caught before the
+// release, not by every updater in the field. A .NET 10 file-based app, with nothing to install:
 //
 //   dotnet run --file deploy/update-file-list.cs -- write <publish-dir>
 //   dotnet run --file deploy/update-file-list.cs -- check <SemanticRouter-<version>-<rid>-full.nupkg>
 //
-// The library holds one managed resource, files.json: {"files":{"<path relative to the app folder>":"<sha256 hex>"}},
-// paths with forward slashes, sorted. It is never loaded: no deps.json names it. Same files, same bytes.
+// The library holds one managed resource, files.json:
+// {"files":{"<path relative to the app folder>":"<sha256 hex>"},"programs":{"<path>":"<digest hex>"}}, paths with
+// forward slashes, sorted. It is never loaded: no deps.json names it. Same files, same bytes.
 #:property PublishAot=false
 
+using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Reflection;
 using System.Reflection.Metadata;
@@ -34,20 +40,33 @@ if (args is ["write", var publish])
 {
     string root = Path.GetFullPath(publish);
     var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
+    var programs = new SortedDictionary<string, string>(StringComparer.Ordinal);
     foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
     {
         string relative = Path.GetRelativePath(root, file).Replace('\\', '/');
-        using FileStream stream = File.OpenRead(file);
-        if (relative != ListFile && !IsExecutableImage(stream))
+        if (relative == ListFile)
         {
-            stream.Position = 0;
-            files[relative] = Convert.ToHexStringLower(SHA256.HashData(stream));
+            continue;
+        }
+
+        byte[] content = File.ReadAllBytes(file);
+        if (IsExecutableImage(new MemoryStream(content)))
+        {
+            programs[relative] = ProgramDigest(content);
+        }
+        else
+        {
+            files[relative] = Convert.ToHexStringLower(SHA256.HashData(content));
         }
     }
 
-    var json = new JsonObject { ["files"] = new JsonObject(files.Select(f => KeyValuePair.Create(f.Key, (JsonNode?)f.Value))) };
+    var json = new JsonObject
+    {
+        ["files"] = new JsonObject(files.Select(f => KeyValuePair.Create(f.Key, (JsonNode?)f.Value))),
+        ["programs"] = new JsonObject(programs.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)p.Value))),
+    };
     File.WriteAllBytes(Path.Combine(root, ListFile), Library(JsonSerializer.SerializeToUtf8Bytes(json)));
-    Console.WriteLine($"{ListFile}: {files.Count} files that are not programs or libraries");
+    Console.WriteLine($"{ListFile}: {files.Count} files that are not programs or libraries, and {programs.Count} programs and libraries");
     return 0;
 }
 
@@ -62,14 +81,22 @@ if (args is ["check", var package])
         return 1;
     }
 
+    JsonNode written = JsonNode.Parse(ReadResource(Bytes(list)))!;
     var listed = new Dictionary<string, string>(StringComparer.Ordinal);
-    foreach ((string path, JsonNode? hash) in JsonNode.Parse(ReadResource(Bytes(list)))!["files"]!.AsObject())
+    foreach ((string path, JsonNode? hash) in written["files"]!.AsObject())
     {
         listed[path] = hash!.GetValue<string>();
     }
 
+    var programs = new Dictionary<string, string>(StringComparer.Ordinal);
+    foreach ((string path, JsonNode? digest) in written["programs"]?.AsObject() ?? [])
+    {
+        programs[path] = digest!.GetValue<string>();
+    }
+
     byte[] nuspec = Bytes(zip.Entries.Single(e => !e.FullName.Contains('/', StringComparison.Ordinal) && e.FullName.EndsWith(".nuspec", StringComparison.OrdinalIgnoreCase)));
     var problems = new List<string>();
+    var added = new List<string>();
     var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     foreach (ZipArchiveEntry entry in app)
     {
@@ -79,9 +106,22 @@ if (args is ["check", var package])
         {
             problems.Add($"{relative} is in the package twice");
         }
-        else if (IsExecutableImage(new MemoryStream(content)))
+        else if (relative == ListFile)
         {
             // Covered by its own signature.
+        }
+        else if (IsExecutableImage(new MemoryStream(content)))
+        {
+            // Listed by what its signature covers, which signing leaves as it was; one vpk added is not listed, and the
+            // app requires it to be signed by the publisher.
+            if (!programs.Remove(relative, out string? expected))
+            {
+                added.Add(relative);
+            }
+            else if (!string.Equals(ProgramDigest(content), expected, StringComparison.OrdinalIgnoreCase))
+            {
+                problems.Add($"{relative} was changed after deploy/update-file-list.cs write ran, other than by signing it");
+            }
         }
         else if (relative == VersionFile)
         {
@@ -101,6 +141,7 @@ if (args is ["check", var package])
     }
 
     problems.AddRange(listed.Keys.Select(path => $"{path} is in {ListFile} but not in the package (or is now a program or library)"));
+    problems.AddRange(programs.Keys.Select(path => $"{path} is in {ListFile} as a program but not in the package (or is no longer a program or library)"));
     foreach (string problem in problems)
     {
         Console.Error.WriteLine($"::error::{name}: {problem}");
@@ -111,7 +152,8 @@ if (args is ["check", var package])
         return 1;
     }
 
-    Console.WriteLine($"{name}: every file that is not a program or library is in {ListFile}");
+    Console.WriteLine($"{name}: every file of the app is in {ListFile}"
+        + (added.Count > 0 ? $", except the programs vpk added ({string.Join(", ", added)}), which must be signed by the publisher" : string.Empty));
     return 0;
 }
 
@@ -123,6 +165,71 @@ static bool IsExecutableImage(Stream stream)
 {
     Span<byte> header = stackalloc byte[2];
     return stream.ReadAtLeast(header, 2, throwOnEndOfStream: false) == 2 && header[0] == (byte)'M' && header[1] == (byte)'Z';
+}
+
+// What a program's Authenticode signature covers, so the same before and after signing, exactly as the desktop app
+// computes it (UpdateFileList.ProgramDigest): the SHA-256 of the file without the optional header's checksum, the
+// certificate table's entry in the data directories and the certificate table at the end, plus, for an unsigned file,
+// the zeros signing pads it with to a multiple of eight bytes. Of a file that is not a PE image laid out that way, the
+// SHA-256 of the whole file.
+static string ProgramDigest(byte[] image)
+{
+    if (!Layout(image, out int checksum, out int certificateEntry, out int certificates))
+    {
+        return Convert.ToHexStringLower(SHA256.HashData(image));
+    }
+
+    using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+    hash.AppendData(image, 0, checksum);
+    hash.AppendData(image, checksum + 4, certificateEntry - checksum - 4);
+    hash.AppendData(image, certificateEntry + 8, certificates - certificateEntry - 8);
+    hash.AppendData(new byte[(8 - (certificates % 8)) % 8]);
+    return Convert.ToHexStringLower(hash.GetHashAndReset());
+}
+
+static bool Layout(byte[] image, out int checksum, out int certificateEntry, out int certificates)
+{
+    (checksum, certificateEntry, certificates) = (0, 0, 0);
+    if (image.Length < 0x40 || image[0] != (byte)'M' || image[1] != (byte)'Z')
+    {
+        return false;
+    }
+
+    int header = BinaryPrimitives.ReadInt32LittleEndian(image.AsSpan(0x3C));
+    if (header < 0x40 || header > image.Length - 26 || !image.AsSpan(header, 4).SequenceEqual("PE\0\0"u8))
+    {
+        return false;
+    }
+
+    int optional = header + 24;
+    (int count, int directories) = BinaryPrimitives.ReadUInt16LittleEndian(image.AsSpan(optional)) switch
+    {
+        0x10b => (optional + 92, optional + 96),
+        0x20b => (optional + 108, optional + 112),
+        _ => (-1, -1),
+    };
+    if (count < 0 || directories + (5 * 8) > image.Length || BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(count)) < 5)
+    {
+        return false;
+    }
+
+    checksum = optional + 64;
+    certificateEntry = directories + (4 * 8);
+    uint offset = BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(certificateEntry));
+    uint size = BinaryPrimitives.ReadUInt32LittleEndian(image.AsSpan(certificateEntry + 4));
+    if (size == 0)
+    {
+        certificates = image.Length;
+        return true;
+    }
+
+    if (offset < certificateEntry + 8 || (long)offset + size != image.Length)
+    {
+        return false;
+    }
+
+    certificates = (int)offset;
+    return true;
 }
 
 static byte[] Bytes(ZipArchiveEntry entry)

@@ -354,13 +354,17 @@ public sealed class UpdateControlTests : IDisposable
         using X509Certificate2 microsoft = Certificate("CN=.NET, " + UpdatePublisher.Microsoft);
         string package = WindowsPackage();
         UpdatePublisher Check(Func<string, CodeSignature> read) => new("Contoso Ltd", UpdatePublisher.Platform.Windows, new FakeSignatures(read));
-        CodeSignature Ours(string file) => Path.GetFileName(file).StartsWith("SemanticRouter", StringComparison.Ordinal) ? new CodeSignature(null, Contoso) : new CodeSignature(null, microsoft);
+        CodeSignature Ours(string file) => Path.GetFileName(file).StartsWith("SemanticRouter", StringComparison.Ordinal) || Path.GetFileName(file) == "Squirrel.exe"
+            ? new CodeSignature(null, Contoso)
+            : new CodeSignature(null, microsoft);
 
-        Check(Ours).Refuses(package).Should().BeNull("the app is Contoso's; the runtime and the updater are signed by their makers");
+        Check(Ours).Refuses(package).Should().BeNull("the app and the updater vpk adds are Contoso's; the runtime is signed by its maker");
         Check(f => Path.GetFileName(f) == "SemanticRouter.Core.dll" ? new CodeSignature(null, microsoft) : Ours(f)).Refuses(package)
             .Should().Be($"SemanticRouter.Core.dll is signed by {microsoft.Subject}, not by Contoso Ltd");
-        Check(f => Path.GetFileName(f) == "Squirrel.exe" ? new CodeSignature(null, Contoso) : Ours(f)).Refuses(package)
-            .Should().BeNull("vpk signs the updater with the release's certificate");
+
+        // The updater is not in the list (vpk adds it after the list is made), so only the publisher's signature will do.
+        Check(f => Path.GetFileName(f) == "Squirrel.exe" ? new CodeSignature(null, microsoft) : Ours(f)).Refuses(package)
+            .Should().Be($"Squirrel.exe is not one of the programs its publisher listed, and is signed by {microsoft.Subject}, not by Contoso Ltd");
 
         // A valid signature from anyone else is not enough: a cheap certificate would let a tampered library through.
         using X509Certificate2 mallory = Certificate("CN=Mallory, O=Mallory, C=US");
@@ -384,6 +388,108 @@ public sealed class UpdateControlTests : IDisposable
         Check(Ours).Refuses(Package("noexe.nupkg", "SemanticRouter.exe", ["lib/app/SemanticRouter.dll"])).Should().Be("its package has no SemanticRouter.exe");
         Check(Ours).Refuses(Package("escape.nupkg", "SemanticRouter.exe", ["lib/app/SemanticRouter.exe", "lib/app/../../evil.dll"])).Should().Contain("points outside the package");
         Check(Ours).Refuses(Path.Combine(_directory, "missing.nupkg")).Should().StartWith("its package cannot be read");
+    }
+
+    [Fact]
+    public void Which_files_are_the_apps_own_is_not_the_packages_to_say()
+    {
+        // #405: with another <id> in its .nuspec, SemanticRouter.*.dll would need only Microsoft's signature, and another
+        // <mainExe> would make Velopack start any signed program after the update.
+        using X509Certificate2 microsoft = Certificate("CN=.NET, " + UpdatePublisher.Microsoft);
+        CodeSignature Ours(string file) => Path.GetFileName(file).StartsWith("SemanticRouter", StringComparison.Ordinal) ? new CodeSignature(null, Contoso) : new CodeSignature(null, microsoft);
+        var check = new UpdatePublisher("Contoso Ltd", UpdatePublisher.Platform.Windows, new FakeSignatures(f => Path.GetFileName(f) == "SemanticRouter.Core.dll" ? new CodeSignature(null, microsoft) : Ours(f)));
+        string[] files = ["lib/app/SemanticRouter.exe", "lib/app/SemanticRouter.dll", "lib/app/SemanticRouter.Core.dll", "lib/app/createdump.exe"];
+
+        check.Refuses(Package("other-id.nupkg", "SemanticRouter.exe", files, id: "Contoso.Tool"))
+            .Should().Be("its .nuspec names Contoso.Tool (SemanticRouter.exe) as the app, not SemanticRouter (SemanticRouter.exe)");
+        check.Refuses(Package("other-exe.nupkg", "createdump.exe", files))
+            .Should().Be("its .nuspec names SemanticRouter (createdump.exe) as the app, not SemanticRouter (SemanticRouter.exe)");
+        check.Refuses(Package("own.nupkg", "SemanticRouter.exe", files))
+            .Should().Be($"SemanticRouter.Core.dll is signed by {microsoft.Subject}, not by Contoso Ltd", "its own name makes it the app's");
+
+        var mac = new UpdatePublisher("TEAM", UpdatePublisher.Platform.MacOS, new FakeSignatures(_ => new CodeSignature(null, null, "TEAM")));
+        mac.Refuses(Package("osx-other.nupkg", "Other", ["lib/app/Contents/MacOS/Other"])).Should().Be("its .nuspec names SemanticRouter (Other) as the app, not SemanticRouter (SemanticRouter)");
+    }
+
+    [Fact]
+    public void On_Windows_every_program_must_be_the_build_the_publisher_listed()
+    {
+        // A valid signature alone would let a program be swapped for another one the publisher or Microsoft signed.
+        using X509Certificate2 microsoft = Certificate("CN=.NET, " + UpdatePublisher.Microsoft);
+        CodeSignature Ours(string file) => Path.GetFileName(file).StartsWith("SemanticRouter", StringComparison.Ordinal) || Path.GetFileName(file) == "Squirrel.exe"
+            ? new CodeSignature(null, Contoso)
+            : new CodeSignature(null, microsoft);
+        var check = new UpdatePublisher("Contoso Ltd", UpdatePublisher.Platform.Windows, new FakeSignatures(Ours));
+        string[] files = ["lib/app/SemanticRouter.exe", "lib/app/SemanticRouter.dll", "lib/app/onnxruntime.dll", "lib/app/Squirrel.exe", "lib/app/SemanticRouter.deps.json"];
+        string? Refuses(string name, IReadOnlyDictionary<string, string?>? listed = null, string[]? extra = null, bool programs = true) =>
+            check.Refuses(Package(name, "SemanticRouter.exe", [.. files, .. extra ?? []], listed: listed, programs: programs));
+
+        Refuses("programs.nupkg").Should().BeNull();
+
+        // Signed by Microsoft, as onnxruntime.dll is, but another build than the one the release was made with.
+        Refuses("older.nupkg", new Dictionary<string, string?> { ["lib/app/onnxruntime.dll"] = "MZ onnxruntime 1.17" })
+            .Should().Be("onnxruntime.dll is not the program its publisher listed");
+        Refuses("own-older.nupkg", new Dictionary<string, string?> { ["lib/app/SemanticRouter.dll"] = "MZ SemanticRouter 0.5.0" })
+            .Should().Be("SemanticRouter.dll is not the program its publisher listed", "an older build of the app is the publisher's too");
+
+        // A program added after the list was made must be the publisher's; one the list names must be there.
+        Refuses("added.nupkg", new Dictionary<string, string?> { ["lib/app/version.dll"] = null }, ["lib/app/version.dll"])
+            .Should().Be($"version.dll is not one of the programs its publisher listed, and is signed by {microsoft.Subject}, not by Contoso Ltd");
+        Refuses("removed.nupkg", new Dictionary<string, string?> { ["lib/app/WebView2Loader.dll"] = "MZ loader" })
+            .Should().Be("WebView2Loader.dll is missing from its package");
+
+        // A list from before programs were listed pins none, so only the publisher's own programs pass.
+        Refuses("unpinned.nupkg", programs: false)
+            .Should().Be($"onnxruntime.dll is not one of the programs its publisher listed, and is signed by {microsoft.Subject}, not by Contoso Ltd");
+    }
+
+    [Fact]
+    public void A_programs_digest_leaves_out_its_signature_and_nothing_else()
+    {
+        // deploy/update-file-list.cs lists each program before vpk signs it; signing changes the checksum, the
+        // certificate table's entry and the end of the file, so those are what the digest leaves out.
+        byte[] unsigned = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "fixtures", "update-file-list", "program.dll"));
+        string digest = UpdateFileList.ProgramDigest(unsigned);
+        digest.Should().NotBe(Convert.ToHexStringLower(SHA256.HashData(unsigned)), "a PE image's digest is not its SHA-256");
+
+        byte[] signed = Sign(unsigned, 200);
+        UpdateFileList.ProgramDigest(signed).Should().Be(digest);
+        UpdateFileList.ProgramDigest(Sign(signed, 120)).Should().Be(digest, "signed again, with another certificate");
+
+        // A file whose length is not a multiple of eight is padded with zeros before its signature, as signing does.
+        byte[] odd = [.. unsigned, 1, 2, 3];
+        UpdateFileList.ProgramDigest(Sign(odd, 64)).Should().Be(UpdateFileList.ProgramDigest(odd)).And.NotBe(digest);
+
+        // Any other change counts, including one in the zeros signing adds.
+        byte[] changed = Sign(unsigned, 64);
+        changed[0x80] ^= 1;
+        UpdateFileList.ProgramDigest(changed).Should().NotBe(digest);
+        byte[] padded = Sign(odd, 64);
+        padded[odd.Length] = 7;
+        UpdateFileList.ProgramDigest(padded).Should().NotBe(UpdateFileList.ProgramDigest(odd));
+
+        // A certificate table that is not at the end of the file is not one signing made: the whole file counts.
+        byte[] trailing = [.. signed, 0];
+        UpdateFileList.ProgramDigest(trailing).Should().Be(Convert.ToHexStringLower(SHA256.HashData(trailing)));
+        UpdateFileList.ProgramDigest("MZ not really a program"u8.ToArray()).Should().Be(Convert.ToHexStringLower(SHA256.HashData("MZ not really a program"u8)));
+
+        // Signing as Authenticode does: a new checksum, the file padded to eight bytes, and the certificate table at
+        // its end, which the data directory's fifth entry points at. A signed file's old table is replaced.
+        static byte[] Sign(byte[] image, int certificate)
+        {
+            int header = BitConverter.ToInt32(image, 0x3C);
+            int optional = header + 24;
+            int entry = optional + (BitConverter.ToUInt16(image, optional) == 0x10b ? 96 : 112) + (4 * 8);
+            int end = BitConverter.ToInt32(image, entry + 4) > 0 ? BitConverter.ToInt32(image, entry) : image.Length;
+            int start = (end + 7) / 8 * 8;
+            byte[] result = new byte[start + certificate];
+            image.AsSpan(0, end).CopyTo(result);
+            RandomNumberGenerator.Fill(result.AsSpan(start));
+            BitConverter.TryWriteBytes(result.AsSpan(optional + 64), RandomNumberGenerator.GetInt32(int.MaxValue));
+            BitConverter.TryWriteBytes(result.AsSpan(entry), start);
+            BitConverter.TryWriteBytes(result.AsSpan(entry + 4), certificate);
+            return result;
+        }
     }
 
     [Fact]
@@ -484,13 +590,25 @@ public sealed class UpdateControlTests : IDisposable
     [Fact]
     public void The_list_of_files_is_read_as_deploy_update_file_list_writes_it()
     {
-        // Written by `dotnet run --file deploy/update-file-list.cs -- write` from SemanticRouter.exe (MZ…, left out),
-        // SemanticRouter.runtimeconfig.json ({"runtimeOptions":{"tfm":"net10.0"}}) and wwwroot/notes.txt ("notices\n").
-        UpdateFileList.Read(Path.Combine(AppContext.BaseDirectory, "fixtures", "update-file-list", UpdateFileList.FileName)).Should().Equal(new Dictionary<string, string>
+        // Written by `dotnet run --file deploy/update-file-list.cs -- write` from SemanticRouter.exe (a PE image, the
+        // fixture program.dll), SemanticRouter.runtimeconfig.json ({"runtimeOptions":{"tfm":"net10.0"}}) and
+        // wwwroot/notes.txt ("notices\n"). The script's digest of the program is the app's.
+        string fixtures = Path.Combine(AppContext.BaseDirectory, "fixtures", "update-file-list");
+        UpdateFileList.Contents list = UpdateFileList.Read(Path.Combine(fixtures, UpdateFileList.FileName));
+        list.Files.Should().Equal(new Dictionary<string, string>
         {
             ["SemanticRouter.runtimeconfig.json"] = Convert.ToHexStringLower(SHA256.HashData("""{"runtimeOptions":{"tfm":"net10.0"}}"""u8)),
             ["wwwroot/notes.txt"] = Convert.ToHexStringLower(SHA256.HashData("notices\n"u8)),
         });
+        list.Programs.Should().Equal(new Dictionary<string, string>
+        {
+            ["SemanticRouter.exe"] = UpdateFileList.ProgramDigest(File.ReadAllBytes(Path.Combine(fixtures, "program.dll"))),
+        });
+
+        // A list from before programs were listed (made here as the script then wrote it) names none.
+        string old = Path.Combine(_directory, "old-" + UpdateFileList.FileName);
+        File.WriteAllBytes(old, FileList(new Dictionary<string, string> { ["readme.txt"] = new string('0', 64) }));
+        UpdateFileList.Read(old).Programs.Should().BeEmpty();
     }
 
     [Fact]
@@ -624,9 +742,19 @@ public sealed class UpdateControlTests : IDisposable
     /// A package holding <paramref name="files"/>. A Windows one (its main executable an .exe) also has the publisher's
     /// list of its files (<see cref="UpdateFileList.FileName"/>), made from what the package holds except where
     /// <paramref name="listed"/> says otherwise: the contents a file had when the list was made, or <see langword="null"/>
-    /// for a file it leaves out. No list when <paramref name="list"/> is <see langword="false"/>.
+    /// for a file it leaves out. Its programs are listed too, except those vpk adds after the list is made (Squirrel.exe,
+    /// the execution stub), and all of them when <paramref name="programs"/> is <see langword="false"/> (a list from
+    /// before programs were listed). No list when <paramref name="list"/> is <see langword="false"/>.
     /// </summary>
-    private string Package(string name, string mainExe, string[] files, IReadOnlyDictionary<string, string>? contents = null, IReadOnlyDictionary<string, string?>? listed = null, bool list = true)
+    private string Package(
+        string name,
+        string mainExe,
+        string[] files,
+        IReadOnlyDictionary<string, string>? contents = null,
+        IReadOnlyDictionary<string, string?>? listed = null,
+        bool list = true,
+        string id = "SemanticRouter",
+        bool programs = true)
     {
         string path = Path.Combine(_directory, name);
         if (File.Exists(path))
@@ -635,14 +763,15 @@ public sealed class UpdateControlTests : IDisposable
         }
 
         using ZipArchive zip = ZipFile.Open(path, ZipArchiveMode.Create);
-        Nuspec(zip, mainExe);
+        Nuspec(zip, mainExe, id);
         var hashes = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var digests = new SortedDictionary<string, string>(StringComparer.Ordinal);
         foreach (string file in files)
         {
             // Programs and libraries start as Windows executable images do; JSON files are as given or an empty object;
             // sq.version is the .nuspec; the rest is text.
             string content = contents?.GetValueOrDefault(file)
-                ?? (file.EndsWith("/sq.version", StringComparison.Ordinal) ? NuspecText(mainExe)
+                ?? (file.EndsWith("/sq.version", StringComparison.Ordinal) ? NuspecText(mainExe, id)
                 : file.EndsWith(".json", StringComparison.Ordinal) ? "{}"
                 : (file.EndsWith(".exe", StringComparison.Ordinal) || file.EndsWith(".dll", StringComparison.Ordinal) || file.EndsWith(".bin", StringComparison.Ordinal) ? "MZ" : string.Empty) + "not really " + file);
             using (StreamWriter writer = new(zip.CreateEntry(file).Open()))
@@ -650,28 +779,39 @@ public sealed class UpdateControlTests : IDisposable
                 writer.Write(content);
             }
 
-            if (!content.StartsWith("MZ", StringComparison.Ordinal) && !file.EndsWith("/sq.version", StringComparison.Ordinal))
+            string relative = file["lib/app/".Length..];
+            if (content.StartsWith("MZ", StringComparison.Ordinal))
             {
-                hashes[file["lib/app/".Length..]] = Sha256(content);
+                if (programs && relative is not ("Squirrel.exe" or "SemanticRouter_ExecutionStub.exe"))
+                {
+                    digests[relative] = UpdateFileList.ProgramDigest(Encoding.UTF8.GetBytes(content));
+                }
+            }
+            else if (!file.EndsWith("/sq.version", StringComparison.Ordinal))
+            {
+                hashes[relative] = Sha256(content);
             }
         }
 
         foreach ((string file, string? content) in listed ?? new Dictionary<string, string?>())
         {
-            if (content is null)
+            string relative = file["lib/app/".Length..];
+            hashes.Remove(relative);
+            digests.Remove(relative);
+            if (content?.StartsWith("MZ", StringComparison.Ordinal) == true)
             {
-                hashes.Remove(file["lib/app/".Length..]);
+                digests[relative] = UpdateFileList.ProgramDigest(Encoding.UTF8.GetBytes(content));
             }
-            else
+            else if (content is not null)
             {
-                hashes[file["lib/app/".Length..]] = Sha256(content);
+                hashes[relative] = Sha256(content);
             }
         }
 
         if (list && mainExe.EndsWith(".exe", StringComparison.Ordinal))
         {
             using Stream stream = zip.CreateEntry("lib/app/" + UpdateFileList.FileName).Open();
-            stream.Write(FileList(hashes));
+            stream.Write(FileList(hashes, programs ? digests : null));
         }
 
         return path;
@@ -679,23 +819,33 @@ public sealed class UpdateControlTests : IDisposable
         static string Sha256(string content) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
     }
 
-    private static string NuspecText(string mainExe) => $"""
+    private static string NuspecText(string mainExe, string id = "SemanticRouter") => $"""
         <?xml version="1.0" encoding="utf-8"?>
         <package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
-        <metadata><id>SemanticRouter</id><version>1.0.1</version><mainExe>{mainExe}</mainExe></metadata>
+        <metadata><id>{id}</id><version>1.0.1</version><mainExe>{mainExe}</mainExe></metadata>
         </package>
         """;
 
-    private static void Nuspec(ZipArchive zip, string mainExe)
+    private static void Nuspec(ZipArchive zip, string mainExe, string id = "SemanticRouter")
     {
-        using StreamWriter writer = new(zip.CreateEntry("SemanticRouter.nuspec").Open());
-        writer.Write(NuspecText(mainExe));
+        using StreamWriter writer = new(zip.CreateEntry(id + ".nuspec").Open());
+        writer.Write(NuspecText(mainExe, id));
     }
 
-    /// <summary>A list of files as deploy/update-file-list.cs writes it: a library whose one resource, files.json, maps each path to its SHA-256.</summary>
-    private static byte[] FileList(IReadOnlyDictionary<string, string> hashes)
+    /// <summary>
+    /// A list of files as deploy/update-file-list.cs writes it: a library whose one resource, files.json, maps each path
+    /// to its SHA-256, and each program to its digest (none when <paramref name="programs"/> is <see langword="null"/>,
+    /// as before programs were listed).
+    /// </summary>
+    private static byte[] FileList(IReadOnlyDictionary<string, string> hashes, IReadOnlyDictionary<string, string>? programs = null)
     {
-        byte[] json = Encoding.UTF8.GetBytes(new JsonObject { ["files"] = new JsonObject(hashes.Select(h => KeyValuePair.Create(h.Key, (JsonNode?)h.Value))) }.ToJsonString());
+        var files = new JsonObject { ["files"] = new JsonObject(hashes.Select(h => KeyValuePair.Create(h.Key, (JsonNode?)h.Value))) };
+        if (programs is not null)
+        {
+            files["programs"] = new JsonObject(programs.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)p.Value)));
+        }
+
+        byte[] json = Encoding.UTF8.GetBytes(files.ToJsonString());
         var metadata = new MetadataBuilder();
         metadata.AddModule(0, metadata.GetOrAddString(UpdateFileList.FileName), metadata.GetOrAddGuid(Guid.NewGuid()), default, default);
         metadata.AddAssembly(metadata.GetOrAddString("SemanticRouter.Files"), new Version(1, 0, 0, 0), default, default, default, AssemblyHashAlgorithm.Sha1);
