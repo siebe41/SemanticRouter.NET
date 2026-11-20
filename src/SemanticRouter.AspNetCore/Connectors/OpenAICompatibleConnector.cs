@@ -141,6 +141,20 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         {
             return await RelayAsync(request, context, response, passThrough, copied, stall.Token).ConfigureAwait(false);
         }
+        catch (UpstreamReplyException ex) when (!context.Response.HasStarted)
+        {
+            // A 200 that reported an error instead of an answer (e.g. Anthropic's overloaded_error as the first event), and
+            // nothing reached the client: undo what was set for it, and let the next model answer. Once the reply has
+            // started, the dispatcher ends it with an error and cools the model down.
+            foreach (string header in copied)
+            {
+                context.Response.Headers.Remove(header);
+            }
+
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            LogUpstreamFailure(_logger, Name, AddressDisplay.Show(message.RequestUri)!, _redactor.Redact(ex.Message));
+            return ex.Failure;
+        }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested
                                    && (stall.Stalled || ex is IOException or HttpRequestException))
         {

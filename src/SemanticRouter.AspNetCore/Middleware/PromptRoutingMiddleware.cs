@@ -428,101 +428,137 @@ internal sealed partial class PromptRoutingMiddleware
             ? new AnswerCapture(responseBody, AnswerJudge.CaptureLimit)
             : null;
 
-        using (_logger.BeginScope(new Dictionary<string, object> { ["RouteRequestId"] = entry.Id }))
+        // Whatever happens while the request is served, the entry is finished and stored, the rate limit charged and the
+        // captured answer released (#390).
+        bool faulted = true;
+        try
         {
-            if (answer is not null)
+            using (_logger.BeginScope(new Dictionary<string, object> { ["RouteRequestId"] = entry.Id }))
             {
-                context.Response.Body = answer;
-                try
+                if (answer is not null)
+                {
+                    context.Response.Body = answer;
+                    try
+                    {
+                        await _dispatcher.DispatchAsync(context, runtime, plan, chat, bodyBytes, entry).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        context.Response.Body = responseBody;
+                    }
+                }
+                else if (options.Mode == PromptRouterMode.Dispatch)
                 {
                     await _dispatcher.DispatchAsync(context, runtime, plan, chat, bodyBytes, entry).ConfigureAwait(false);
                 }
-                finally
+                else
                 {
-                    context.Response.Body = responseBody;
+                    await _next(context).ConfigureAwait(false);
                 }
             }
-            else if (options.Mode == PromptRouterMode.Dispatch)
+
+            faulted = false;
+        }
+        catch (Exception ex) when (options.Mode == PromptRouterMode.Dispatch)
+        {
+            // Not handled by the dispatcher: record it on the entry, then let the host deal with the request as usual.
+            bool gone = context.RequestAborted.IsCancellationRequested;
+            if (entry.Outcome is not ("failed" or "cancelled"))
             {
-                await _dispatcher.DispatchAsync(context, runtime, plan, chat, bodyBytes, entry).ConfigureAwait(false);
+                entry.Outcome = gone ? "cancelled" : "failed";
+                string why = gone ? "the client went away" : $"the router failed ({ex.GetType().Name})";
+                entry.Detail = entry.Detail is { Length: > 0 } earlier ? $"{earlier}; {why}" : why;
             }
-            else
+
+            throw;
+        }
+        finally
+        {
+            Finish(faulted);
+        }
+
+        // The bookkeeping after the request was served, or failed to be: retries, conversations, feedback, warm caches, the
+        // rate limit, and the entry itself. A request that ended in an exception updates none of what an answer would, but
+        // its entry is still stored and the captured answer released.
+        void Finish(bool faulted)
+        {
+            try
             {
-                await _next(context).ConfigureAwait(false);
+                entry.TotalMilliseconds = Math.Round(_time.GetElapsedTime(started).TotalMilliseconds, 1);
+                routeSpan?.SetTag("semantic_router.outcome", entry.Outcome);
+                routeSpan?.SetTag("semantic_router.served_by", entry.ServedBy);
+                if (entry.Outcome == "failed")
+                {
+                    routeSpan?.SetStatus(ActivityStatusCode.Error, "no model available");
+                }
+
+                string? answeredBy = faulted ? null : entry.ServedBy ?? (options.Mode == PromptRouterMode.Annotate ? entry.PlannedModel : null);
+                if (retryable && answeredBy is not null
+                    && runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, answeredBy, StringComparison.OrdinalIgnoreCase)) is { } answering)
+                {
+                    _retries!.Answered(
+                        retryClient, prompt, new DecisionRecord(entry.Id, answering.Tier, result.RouteName, answeredBy, automatic), retry.Window, retryScope, repeat: retried is not null);
+                }
+
+                if (conversationKey is not null && answeredBy is not null && !chat.IsToolResultContinuation)
+                {
+                    _conversations!.Decided(conversationKey, new DecisionRecord(entry.Id, result.RequiredTier, result.RouteName, answeredBy, automatic), conversation);
+                }
+
+                if (feedback && automatic && entry.Outcome == "served" && entry.OutputTokens == 0)
+                {
+                    AddFeedback(entry, FeedbackKind.EmptyReply, new DecisionRecord(entry.Id, result.RequiredTier, result.RouteName, answeredBy, automatic),
+                        client, Math.Min(result.RequiredTier + 1, Math.Max(highestTier, result.RequiredTier)), "no output tokens");
+                }
+
+                if (feedback && automatic && entry.Notes is { } notes && notes.Contains("malformed tool call", StringComparison.OrdinalIgnoreCase))
+                {
+                    AddFeedback(entry, FeedbackKind.ToolErrors, new DecisionRecord(entry.Id, result.RequiredTier, result.RouteName, answeredBy, automatic),
+                        client, Math.Min(result.RequiredTier + 1, Math.Max(highestTier, result.RequiredTier)), notes.Length <= 160 ? notes : notes[..160] + "…");
+                }
+
+                if (conversationKey is not null && answeredBy is not null)
+                {
+                    if (classifiedTurn)
+                    {
+                        _conversations!.Record(
+                            conversationKey, result.RequiredTier, result.Reason == RoutingReason.ConversationFloor, conversationContext.FollowUp, answeredBy, conversation);
+                    }
+                    else
+                    {
+                        _conversations!.Touch(conversationKey, answeredBy, conversation);
+                    }
+                }
+
+                if (conversationKey is not null && entry.ServedBy is { } servedBy && _warmCaches is not null && conversation.Enabled && conversation.StickToModel)
+                {
+                    RememberCache(conversationKey, servedBy, entry, routedAt, CacheLifetime(runtime, servedBy, chat) ?? conversation.CacheLifetime);
+                }
+
+                if (rateLimit is not null && (entry.InputTokens is not null || entry.OutputTokens is not null))
+                {
+                    // Admission charged the estimate; charge the rest now that the real usage is known.
+                    _rateLimiter!.Charge(rateClient, (long)(entry.InputTokens ?? chat.EstimatedInputTokens) + (entry.OutputTokens ?? 0) - chat.EstimatedInputTokens);
+                }
+
+                if (entry.Context is { } breakdown && answeredBy is not null)
+                {
+                    // The usage the backend reported prices the context, and says whether its prompt cache was used.
+                    ModelDefinition? answeringModel = runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, answeredBy, StringComparison.OrdinalIgnoreCase));
+                    entry.Context = ContextAnalyzer.Complete(breakdown, entry, answeringModel, runtime.Configuration.Usage.Context);
+                }
             }
-        }
-
-        entry.TotalMilliseconds = Math.Round(_time.GetElapsedTime(started).TotalMilliseconds, 1);
-        routeSpan?.SetTag("semantic_router.outcome", entry.Outcome);
-        routeSpan?.SetTag("semantic_router.served_by", entry.ServedBy);
-        if (entry.Outcome == "failed")
-        {
-            routeSpan?.SetStatus(ActivityStatusCode.Error, "no model available");
-        }
-
-        string? answeredBy = entry.ServedBy ?? (options.Mode == PromptRouterMode.Annotate ? entry.PlannedModel : null);
-        if (retryable && answeredBy is not null
-            && runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, answeredBy, StringComparison.OrdinalIgnoreCase)) is { } answering)
-        {
-            _retries!.Answered(
-                retryClient, prompt, new DecisionRecord(entry.Id, answering.Tier, result.RouteName, answeredBy, automatic), retry.Window, retryScope, repeat: retried is not null);
-        }
-
-        if (conversationKey is not null && answeredBy is not null && !chat.IsToolResultContinuation)
-        {
-            _conversations!.Decided(conversationKey, new DecisionRecord(entry.Id, result.RequiredTier, result.RouteName, answeredBy, automatic), conversation);
-        }
-
-        if (feedback && automatic && entry.Outcome == "served" && entry.OutputTokens == 0)
-        {
-            AddFeedback(entry, FeedbackKind.EmptyReply, new DecisionRecord(entry.Id, result.RequiredTier, result.RouteName, answeredBy, automatic),
-                client, Math.Min(result.RequiredTier + 1, Math.Max(highestTier, result.RequiredTier)), "no output tokens");
-        }
-
-        if (feedback && automatic && entry.Notes is { } notes && notes.Contains("malformed tool call", StringComparison.OrdinalIgnoreCase))
-        {
-            AddFeedback(entry, FeedbackKind.ToolErrors, new DecisionRecord(entry.Id, result.RequiredTier, result.RouteName, answeredBy, automatic),
-                client, Math.Min(result.RequiredTier + 1, Math.Max(highestTier, result.RequiredTier)), notes.Length <= 160 ? notes : notes[..160] + "…");
-        }
-
-        if (conversationKey is not null && answeredBy is not null)
-        {
-            if (classifiedTurn)
+            finally
             {
-                _conversations!.Record(
-                    conversationKey, result.RequiredTier, result.Reason == RoutingReason.ConversationFloor, conversationContext.FollowUp, answeredBy, conversation);
-            }
-            else
-            {
-                _conversations!.Touch(conversationKey, answeredBy, conversation);
-            }
-        }
-
-        if (conversationKey is not null && entry.ServedBy is { } servedBy && _warmCaches is not null && conversation.Enabled && conversation.StickToModel)
-        {
-            RememberCache(conversationKey, servedBy, entry, routedAt, CacheLifetime(runtime, servedBy, chat) ?? conversation.CacheLifetime);
-        }
-
-        if (rateLimit is not null && (entry.InputTokens is not null || entry.OutputTokens is not null))
-        {
-            // Admission charged the estimate; charge the rest now that the real usage is known.
-            _rateLimiter!.Charge(rateClient, (long)(entry.InputTokens ?? chat.EstimatedInputTokens) + (entry.OutputTokens ?? 0) - chat.EstimatedInputTokens);
-        }
-
-        if (entry.Context is { } breakdown && answeredBy is not null)
-        {
-            // The usage the backend reported prices the context, and says whether its prompt cache was used.
-            ModelDefinition? answeringModel = runtime.Router.Models.FirstOrDefault(m => string.Equals(m.Name, answeredBy, StringComparison.OrdinalIgnoreCase));
-            entry.Context = ContextAnalyzer.Complete(breakdown, entry, answeringModel, runtime.Configuration.Usage.Context);
-        }
-
-        RecordMemoryExposure(runtime, entry);
-        _activity.Complete(entry);
-        if (answer is not null)
-        {
-            using (answer)
-            {
-                _judge!.Enqueue(runtime, entry, prompt, protocol, answer, highestTier, remoteClient);
+                RecordMemoryExposure(runtime, entry);
+                _activity.Complete(entry);
+                using (answer)
+                {
+                    if (answer is not null && !faulted)
+                    {
+                        _judge!.Enqueue(runtime, entry, prompt, protocol, answer, highestTier, remoteClient);
+                    }
+                }
             }
         }
     }
@@ -932,9 +968,6 @@ internal sealed partial class PromptRoutingMiddleware
             headers[prefix + "-Unreliable"] = unreliable;
         }
     }
-
-    internal static Task WriteProblemAsync(HttpContext context, ChatProtocol protocol, int statusCode, string title, string detail) =>
-        ProtocolErrors.WriteAsync(context, protocol, statusCode, title, detail, context.RequestAborted);
 
     /// <summary>Answers a client over its rate limit with a 429 and <c>Retry-After</c> in its protocol, and records it in the activity log.</summary>
     private async Task RejectRateLimitedAsync(
