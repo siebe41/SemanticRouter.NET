@@ -82,6 +82,14 @@ public sealed class ModelHealthTracker : IModelHealth
     private volatile ModelSelectionOptions _options;
     private long _lastRefreshTicks;
 
+    // Local writes, numbered: a refresh does not overwrite what was written after its load began, which the load may
+    // not have seen (a store that saves in the background reads without waiting for its queue). Under _gate, with the
+    // change to _cooldownUntil, so a refresh sees the change and its number together.
+    private readonly Lock _gate = new();
+    private readonly Dictionary<string, long> _written = new(StringComparer.OrdinalIgnoreCase);
+    private long _writes;
+    private long _cleared;
+
     /// <summary>Creates a tracker with the default cooldowns, in memory only.</summary>
     public ModelHealthTracker()
         : this(null, new ModelHealthTrackerDependencies())
@@ -123,8 +131,13 @@ public sealed class ModelHealthTracker : IModelHealth
     /// <summary>Clears every cooldown so all models are tried again immediately.</summary>
     public void Clear()
     {
-        _cooldownUntil.Clear();
         _store?.ClearCooldowns();
+        lock (_gate)
+        {
+            _cooldownUntil.Clear();
+            _written.Clear();
+            _cleared = ++_writes;
+        }
     }
 
     /// <inheritdoc />
@@ -153,9 +166,14 @@ public sealed class ModelHealthTracker : IModelHealth
         if (_cooldownUntil.ContainsKey(model.Name))
         {
             // Only a model that was cooling down costs a write; ordinary successes stay in memory. The store goes
-            // first so a concurrent refresh cannot bring the cooldown back.
+            // first, and a refresh whose load began before the change leaves the model alone (Wrote), so a concurrent
+            // refresh cannot bring the cooldown back.
             _store?.RemoveCooldown(model.Name);
-            _cooldownUntil.TryRemove(model.Name, out _);
+            lock (_gate)
+            {
+                _cooldownUntil.TryRemove(model.Name, out _);
+                Wrote(model.Name);
+            }
         }
     }
 
@@ -176,8 +194,13 @@ public sealed class ModelHealthTracker : IModelHealth
             : now + cooldown;
         if (end > now)
         {
+            // As in ReportSuccess: a concurrent refresh cannot take the new cooldown away.
             _store?.SaveCooldown(model.Name, end);
-            _cooldownUntil[model.Name] = end;
+            lock (_gate)
+            {
+                _cooldownUntil[model.Name] = end;
+                Wrote(model.Name);
+            }
         }
     }
 
@@ -204,6 +227,9 @@ public sealed class ModelHealthTracker : IModelHealth
         }
     }
 
+    /// <summary>Numbers a local change to <paramref name="model"/>'s cooldown. Call under <see cref="_gate"/>.</summary>
+    private void Wrote(string model) => _written[model] = ++_writes;
+
     private void Refresh()
     {
         if (_store is null)
@@ -213,21 +239,38 @@ public sealed class ModelHealthTracker : IModelHealth
 
         DateTimeOffset now = _time.GetUtcNow();
         Interlocked.Exchange(ref _lastRefreshTicks, now.UtcTicks);
-        IReadOnlyDictionary<string, DateTimeOffset> stored = _store.LoadCooldowns();
-        foreach ((string model, DateTimeOffset until) in stored)
+        long began;
+        lock (_gate)
         {
-            if (until > now)
-            {
-                _cooldownUntil[model] = until;
-            }
+            began = _writes;
         }
 
-        // A cooldown another instance cleared (success, reset) ends here too.
-        foreach (string model in _cooldownUntil.Keys)
+        IReadOnlyDictionary<string, DateTimeOffset> stored = _store.LoadCooldowns();
+        lock (_gate)
         {
-            if (!stored.ContainsKey(model))
+            if (_cleared > began)
             {
-                _cooldownUntil.TryRemove(model, out _);
+                return; // everything was cleared while the store was read
+            }
+
+            // What this instance changed while the store was read is newer than what was read.
+            bool Changed(string model) => _written.TryGetValue(model, out long change) && change > began;
+
+            foreach ((string model, DateTimeOffset until) in stored)
+            {
+                if (until > now && !Changed(model))
+                {
+                    _cooldownUntil[model] = until;
+                }
+            }
+
+            // A cooldown another instance cleared (success, reset) ends here too.
+            foreach (string model in _cooldownUntil.Keys)
+            {
+                if (!stored.ContainsKey(model) && !Changed(model))
+                {
+                    _cooldownUntil.TryRemove(model, out _);
+                }
             }
         }
     }

@@ -46,6 +46,8 @@ public sealed class ModelCacheShareTests
         }
 
         var tracker = new ModelCacheTracker(activity, clock);
+        tracker.Typical().Should().BeEmpty("the figures are worked out in the background, never while a request waits (#391)");
+        tracker.RefreshNow();
 
         tracker.Typical(Model("CACHED", 3), "agentic").Should().Be(new PromptCacheShare { Read = 0.8, Write = 0.1 });
         PromptCacheShare overall = new PromptCacheShare { Read = 4000 / 8000.0, Write = 500 / 8000.0 };
@@ -55,6 +57,8 @@ public sealed class ModelCacheShareTests
         tracker.Typical().Keys.Should().BeEquivalentTo(["cached"], "stale turns are outside the day, failed ones were not served, turns without usage do not count");
 
         tracker.Configure(new ModelSelectionOptions { CacheShareSamples = 3, CacheShareWindow = TimeSpan.FromDays(3) });
+        tracker.Typical(Model("cached", 3), null).Should().NotBeNull("the last figures stay until the new configuration's land");
+        tracker.RefreshNow();
 
         tracker.Typical(Model("cached", 3), "chat").Should().Be(new PromptCacheShare { Read = 0, Write = 0 });
         tracker.Typical(Model("cached", 3), "stale").Should().Be(new PromptCacheShare { Read = 1, Write = 0 });
