@@ -12,6 +12,7 @@ using System.Text.RegularExpressions;
 //                a reply word by word, FAKE_CLI_WORD_MS apart (default 30). Without a tool result in the prompt the reply
 //                explains its plan and ends in a call fenced with the run's tool_call label; with one, it answers.
 //   claude-status What the router's setup asks a Claude Code it finds: `--version`, and `auth status` (signed in).
+//   env-file     Stands in for the Copilot SDK's runtime: writes the environment it got to FAKE_CLI_MARKER and exits.
 Console.OutputEncoding = new UTF8Encoding(false);
 Console.InputEncoding = new UTF8Encoding(false);
 string mode = Environment.GetEnvironmentVariable("FAKE_CLI_MODE") ?? "cat";
@@ -52,6 +53,25 @@ switch (mode)
         WriteLine(JsonSerializer.Serialize(new { type = "stream_event", @event = new { type = "content_block_delta", delta = new { type = "text_delta", text = reply } } }));
         WriteLine(JsonSerializer.Serialize(new { type = "result", subtype = "success", is_error = false, result = reply }));
         return 0;
+    }
+
+    case "env-file":
+    {
+        // Stands in for the Copilot runtime the SDK starts: records the environment it got in FAKE_CLI_MARKER, then
+        // exits without speaking the SDK's protocol (so starting the client fails, as the test expects).
+        string reportFile = Environment.GetEnvironmentVariable("FAKE_CLI_MARKER") ?? throw new InvalidOperationException("FAKE_CLI_MARKER is not set");
+        var report = new Dictionary<string, object?>
+        {
+            ["copilotHome"] = Environment.GetEnvironmentVariable("COPILOT_HOME"),
+            ["hasPath"] = Environment.GetEnvironmentVariable("PATH") is { Length: > 0 },
+            ["inherited"] = Environment.GetEnvironmentVariables().Keys.Cast<string>()
+                .Where(n => n.StartsWith("SR_TEST_", StringComparison.OrdinalIgnoreCase) || n.StartsWith("ROUTER_", StringComparison.OrdinalIgnoreCase)
+                    || n.StartsWith("SemanticRouter__", StringComparison.OrdinalIgnoreCase))
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+        };
+        await File.WriteAllTextAsync(reportFile, JsonSerializer.Serialize(report));
+        return 1;
     }
 
     case "args-json":

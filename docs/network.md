@@ -58,7 +58,7 @@ docker run -v ./corporate-root.pem:/etc/semantic-router/corporate-root.pem:ro \
 
 On Linux, .NET also reads `SSL_CERT_FILE` (a bundle) and `SSL_CERT_DIR`, but these **replace** the system store instead of adding to it: a file with only the corporate root then fails every site the proxy does not inspect. Use `CaBundle`, or give `SSL_CERT_FILE` a file with both the system's roots and yours.
 
-**The CLIs** are separate programs: `CaBundle` does not reach them. They inherit the router's environment (minus the variables the preset removes), so the same proxy variables reach them, and so do their own certificate settings: `NODE_EXTRA_CA_CERTS` for Claude Code and the Copilot CLI (Node.js programs; it adds to their built-in roots) and `CODEX_CA_CERTIFICATE` for Codex. Set them in the router's environment, or per connector in `EnvironmentVariables`, e.g. `"EnvironmentVariables": { "NODE_EXTRA_CA_CERTS": "/etc/semantic-router/corporate-root.pem" }`.
+**The CLIs** (and the Copilot SDK's runtime, the same `copilot` program) are separate programs: `CaBundle` does not reach them. They inherit the router's environment (minus the router's own settings and keys, and the variables the preset or `RemoveEnvironmentVariables` removes), so the same proxy variables reach them, and so do their own certificate settings: `NODE_EXTRA_CA_CERTS` for Claude Code and the Copilot CLI (Node.js programs; it adds to their built-in roots) and `CODEX_CA_CERTIFICATE` for Codex. Set them in the router's environment, or per connector in `EnvironmentVariables`, e.g. `"EnvironmentVariables": { "NODE_EXTRA_CA_CERTS": "/etc/semantic-router/corporate-root.pem" }`.
 
 ## Offline mode
 

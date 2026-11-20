@@ -38,6 +38,17 @@ public interface IChatConnectorFactory
 }
 
 /// <summary>
+/// An <see cref="IChatConnectorFactory"/> of one of this repository's packages whose connectors start a process: it is
+/// given the router's secrets as well, to keep them out of that process's environment as <see cref="CliEnvironment"/>
+/// does for the CLI connectors. The router calls this instead of <see cref="IChatConnectorFactory.Create"/>.
+/// </summary>
+internal interface ISecretAwareConnectorFactory
+{
+    /// <summary>Creates the connector called <paramref name="name"/>; <paramref name="secrets"/> holds the resolved secret values of the configuration being applied.</summary>
+    IChatConnector Create(string name, ConnectorOptions options, SecretRedactor secrets);
+}
+
+/// <summary>
 /// Implemented by connectors that can list the provider's models, for the dashboard's <b>Discover</b> button.
 /// </summary>
 public interface IModelDiscovery

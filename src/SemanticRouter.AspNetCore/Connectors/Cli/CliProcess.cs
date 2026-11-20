@@ -102,28 +102,7 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
             startInfo.ArgumentList.Add(argument);
         }
 
-        foreach (string name in invocation.RemoveEnvironment)
-        {
-            startInfo.Environment.Remove(name);
-        }
-
-        // The router's own settings and keys stay with it: what configures the router (SemanticRouter__…, ROUTER_…), the
-        // providers' keys the setup reads (OPENAI_API_KEY, …), and any variable holding a secret the router resolved.
-        // Variables the connector sets itself come back below.
-        HashSet<string> secrets = [.. invocation.SecretValues];
-        foreach ((string name, string? value) in startInfo.Environment.ToArray())
-        {
-            if (CliEnvironment.IsRouterVariable(name) || (value is not null && secrets.Contains(value)))
-            {
-                startInfo.Environment.Remove(name);
-            }
-        }
-
-        foreach ((string name, string value) in invocation.SetEnvironment)
-        {
-            startInfo.Environment[name] = value;
-        }
-
+        CliEnvironment.Apply(startInfo.Environment, invocation.RemoveEnvironment, invocation.SecretValues, invocation.SetEnvironment);
         return startInfo;
     }
 
@@ -221,9 +200,67 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
     }
 }
 
-/// <summary>The variables of the router's environment that a CLI child never inherits.</summary>
+/// <summary>
+/// The variables of the router's environment that a child it starts (a CLI, or the Copilot SDK's runtime) never inherits,
+/// and the one place that builds such a child's environment.
+/// </summary>
 internal static class CliEnvironment
 {
+    /// <summary>
+    /// Turns <paramref name="environment"/>, a copy of the router's own, into the child's: removes the connector's
+    /// <paramref name="remove"/> list, then what belongs to the router (<see cref="IsRouterVariable"/>, and any variable
+    /// whose value is one of <paramref name="secretValues"/>), then sets the connector's <paramref name="set"/> variables,
+    /// which win. A name in <paramref name="keepSecretValued"/> survives the secret-value check (not the other two): a
+    /// variable that is how the child itself signs in stays the child's even when a router setting reads the same value.
+    /// </summary>
+    public static void Apply(
+        IDictionary<string, string?> environment,
+        IEnumerable<string> remove,
+        IEnumerable<string> secretValues,
+        IEnumerable<KeyValuePair<string, string>> set,
+        IReadOnlyCollection<string>? keepSecretValued = null)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        foreach (string name in remove)
+        {
+            environment.Remove(name);
+        }
+
+        // The router's own settings and keys stay with it: what configures the router (SemanticRouter__…, ROUTER_…), the
+        // providers' keys the setup reads (OPENAI_API_KEY, …), and any variable holding a secret the router resolved.
+        // Variables the connector sets itself come back below.
+        HashSet<string> secrets = [.. secretValues];
+        foreach ((string name, string? value) in environment.ToArray())
+        {
+            bool holdsSecret = value is not null && secrets.Contains(value)
+                               && keepSecretValued?.Contains(name, StringComparer.OrdinalIgnoreCase) != true;
+            if (IsRouterVariable(name) || holdsSecret)
+            {
+                environment.Remove(name);
+            }
+        }
+
+        foreach ((string name, string value) in set)
+        {
+            environment[name] = value;
+        }
+    }
+
+    /// <summary>
+    /// A copy of the router's environment, keyed as the operating system compares names (case-insensitively on Windows),
+    /// for <see cref="Apply"/>.
+    /// </summary>
+    public static Dictionary<string, string?> Inherited()
+    {
+        var environment = new Dictionary<string, string?>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        {
+            environment[(string)entry.Key] = (string?)entry.Value;
+        }
+
+        return environment;
+    }
+
     private static readonly string[] Prefixes = ["SemanticRouter__", "ROUTER_"];
 
     // The API keys the dashboard's provider presets read (SetupApi.Presets), plus ANTHROPIC_API_KEY that Claude Code
