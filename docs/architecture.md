@@ -139,7 +139,7 @@ History documents are stored as applied. They keep `${…}` references where the
 **Failures never stop routing.** A file that cannot be opened (corrupt, wrong schema, no permission) leaves everything in memory, with one warning at start-up. A write that fails later, for example while another process holds the file longer than `BusyTimeout`, is logged at most once a minute and counted: the dashboard's status warns how many were lost, and the `semantic_router.state.dropped_writes` metric counts them. The in-memory state carries on.
 
 **Several instances.** Instances on one machine can share the file: SQLite in WAL mode serialises writers.
-- Cooldowns are re-read every `ModelHealthTracker.RefreshInterval` (5 s), so an account limit one instance hits is honoured by the others within seconds.
+- Cooldowns are re-read every `ModelHealthTracker.RefreshInterval` (5 s), so an account limit one instance hits is honoured by the others within seconds A cooldown this instance just set or cleared is kept as it is by a re-read that started before the change, or found the file without it while it waited for the writer.
 - Affinity lookups fall through to the file, so a tool turn can continue on another instance.
 - Budgets count every instance's usage: each reads the rows the others added at most every 2 s (`SqliteUsageLedger.RefreshInterval`).
 - Activity and feedback ids come from a counter in the file, which each instance takes 1,024 at a time (the next block is fetched halfway through the last), so no two requests get the same id. Ids therefore skip ahead after a restart, and two instances' ids interleave in blocks. The shared file mixes their entries; give each instance its own file if you want separate logs.

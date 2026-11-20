@@ -1173,26 +1173,73 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
 }
 
 /// <summary>Cooldowns with absolute expiry, so a restart during a quota cooldown keeps the model cooling down.</summary>
+/// <remarks>
+/// Saves go to the background writer, and loads read the file without waiting for it. So a load lays this instance's
+/// changes that are not in the file yet over what it read: otherwise a refresh just after a model hit its limit would
+/// find no cooldown and end it, or one just after a model answered again would bring its old one back (#394).
+/// </remarks>
 internal sealed class SqliteCooldownStore(SqliteRouterDatabase database) : ICooldownStore
 {
-    // Peek: the health tracker reloads these on a request every few seconds, for other routers' cooldowns; its own it
-    // keeps in memory, so it need not wait for them to be saved.
-    public IReadOnlyDictionary<string, DateTimeOffset> LoadCooldowns() =>
-        database.Peek<IReadOnlyDictionary<string, DateTimeOffset>>("reading cooldowns", new Dictionary<string, DateTimeOffset>(), connection =>
+    private readonly Lock _gate = new();
+
+    // Per model, the newest change not saved yet (its number, and the end of the cooldown, or null when removed).
+    private readonly Dictionary<string, (long Change, DateTimeOffset? Until)> _waiting = new(StringComparer.OrdinalIgnoreCase);
+    private long _changes;
+
+    // The number of a clear not saved yet, or 0.
+    private long _clearing;
+
+    // Peek: the health tracker reloads these on a request every few seconds, for other routers' cooldowns; its own
+    // changes are laid over what the file holds, so it need not wait for them to be saved.
+    public IReadOnlyDictionary<string, DateTimeOffset> LoadCooldowns()
+    {
+        // Taken before the file is read: a change saved meanwhile is then in both, and they agree.
+        KeyValuePair<string, (long Change, DateTimeOffset? Until)>[] waiting;
+        bool clearing;
+        lock (_gate)
         {
-            var result = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+            waiting = [.. _waiting];
+            clearing = _clearing != 0;
+        }
+
+        DateTimeOffset now = database.Time.GetUtcNow();
+        Dictionary<string, DateTimeOffset> result = database.Peek("reading cooldowns", new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase), connection =>
+        {
+            var read = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
             using SqliteCommand command = SqliteRouterDatabase.Command(
-                connection, "SELECT model, until_ticks FROM cooldowns WHERE until_ticks > $now;", ("$now", database.Time.GetUtcNow().UtcTicks));
+                connection, "SELECT model, until_ticks FROM cooldowns WHERE until_ticks > $now;", ("$now", now.UtcTicks));
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
             {
-                result[reader.GetString(0)] = new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero);
+                read[reader.GetString(0)] = new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero);
             }
 
-            return result;
+            return read;
         });
 
-    public void SaveCooldown(string model, DateTimeOffset until) =>
+        if (clearing)
+        {
+            result.Clear();
+        }
+
+        foreach ((string model, (long _, DateTimeOffset? until)) in waiting)
+        {
+            if (until is { } end && end > now)
+            {
+                result[model] = end;
+            }
+            else
+            {
+                result.Remove(model);
+            }
+        }
+
+        return result;
+    }
+
+    public void SaveCooldown(string model, DateTimeOffset until)
+    {
+        long change = Waiting(model, until);
         database.Write("saving a cooldown", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
@@ -1201,21 +1248,65 @@ internal sealed class SqliteCooldownStore(SqliteRouterDatabase database) : ICool
                 "DELETE FROM cooldowns WHERE until_ticks <= $now;",
                 ("$model", model), ("$until", until.UtcTicks), ("$now", database.Time.GetUtcNow().UtcTicks));
             command.ExecuteNonQuery();
-        });
+        }, done: _ => Settled(model, change));
+    }
 
-    public void RemoveCooldown(string model) =>
+    public void RemoveCooldown(string model)
+    {
+        long change = Waiting(model, null);
         database.Write("removing a cooldown", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(connection, "DELETE FROM cooldowns WHERE model = $model;", ("$model", model));
             command.ExecuteNonQuery();
-        });
+        }, done: _ => Settled(model, change));
+    }
 
-    public void ClearCooldowns() =>
+    public void ClearCooldowns()
+    {
+        long change;
+        lock (_gate)
+        {
+            _waiting.Clear(); // the clear covers every change made before it
+            _clearing = change = ++_changes;
+        }
+
         database.Write("clearing cooldowns", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(connection, "DELETE FROM cooldowns;");
             command.ExecuteNonQuery();
+        }, done: _ =>
+        {
+            lock (_gate)
+            {
+                if (_clearing == change)
+                {
+                    _clearing = 0;
+                }
+            }
         });
+    }
+
+    private long Waiting(string model, DateTimeOffset? until)
+    {
+        lock (_gate)
+        {
+            long change = ++_changes;
+            _waiting[model] = (change, until);
+            return change;
+        }
+    }
+
+    /// <summary>The change is in the file now, or it failed: the file says what holds again, unless a newer change waits.</summary>
+    private void Settled(string model, long change)
+    {
+        lock (_gate)
+        {
+            if (_waiting.TryGetValue(model, out (long Change, DateTimeOffset? Until) newest) && newest.Change == change)
+            {
+                _waiting.Remove(model);
+            }
+        }
+    }
 }
 
 /// <summary>

@@ -806,6 +806,43 @@ public sealed class SqliteStateTests : IDisposable
     }
 
     [Fact]
+    public void A_refresh_while_the_writer_is_busy_keeps_the_cooldowns_this_router_just_changed()
+    {
+        // Issue #394: cooldowns are saved in the background and loaded without waiting, so a refresh found the file
+        // without a cooldown just set (and ended it), or with one just cleared (and brought it back).
+        SqliteRouterDatabase database = Open();
+        var store = new SqliteCooldownStore(database);
+        var tracker = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = store });
+        ModelDefinition claude = Model("claude", 4);
+        ModelDefinition gpt = Model("gpt", 4);
+        tracker.ReportFailure(gpt, ModelFailureKind.QuotaExceeded);
+        database.WaitForWrites();
+
+        using var busy = new ManualResetEventSlim();
+        database.Write("a write that takes its time", _ => busy.Wait(TimeSpan.FromSeconds(30)));
+        try
+        {
+            tracker.ReportFailure(claude, ModelFailureKind.QuotaExceeded);
+            tracker.ReportSuccess(gpt);
+            _time.Advance(tracker.RefreshInterval);
+
+            tracker.IsAvailable(claude).Should().BeFalse("the refresh sees the cooldown waiting to be saved");
+            tracker.IsAvailable(gpt).Should().BeTrue("the refresh sees the removal waiting to be saved");
+            store.LoadCooldowns().Keys.Should().BeEquivalentTo(["claude"]);
+        }
+        finally
+        {
+            busy.Set();
+        }
+
+        database.WaitForWrites();
+        new SqliteCooldownStore(Open()).LoadCooldowns().Keys.Should().BeEquivalentTo(["claude"]);
+
+        store.ClearCooldowns();
+        store.LoadCooldowns().Should().BeEmpty("a clear waiting to be saved holds too");
+    }
+
+    [Fact]
     public void A_locked_database_degrades_to_memory_without_throwing()
     {
         SqliteRouterDatabase database = Open(o => o.BusyTimeout = TimeSpan.FromSeconds(1));

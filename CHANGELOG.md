@@ -58,6 +58,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - **Discover models** and the start-up checks ask for the model list beside the connector's request path, so the OpenRouter and Google Gemini presets are probed at `/api/v1/models` and `/v1beta/openai/models` instead of a `/v1/models` they do not serve. (#349)
 - An OpenAI client's parallel tool results all count as answered. Each `tool` message used to become its own turn, so only the last call's result did. (#349)
 - SQLite state: an exception of a kind the state writer or the hourly retention prune did not expect is logged, and a write it stops is counted as lost, as with other storage failures. It used to end the router's process. (#395)
+- A model that hits its limit stays cooling down when the cooldowns are re-read from the state store at that moment, and one that answers again is not put back into cooldown by such a re-read. The re-read could miss the change while it waited to be saved, so the limited model was tried again for a few seconds, or the recovered one skipped. (#394)
 
 ### Security
 
