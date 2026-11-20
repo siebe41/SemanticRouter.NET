@@ -485,6 +485,14 @@ internal sealed partial class PromptRoutingMiddleware
             try
             {
                 entry.TotalMilliseconds = Math.Round(_time.GetElapsedTime(started).TotalMilliseconds, 1);
+
+                // First, so nothing later in the bookkeeping can skip charging the real usage.
+                if (rateLimit is not null && (entry.InputTokens is not null || entry.OutputTokens is not null))
+                {
+                    // Admission charged the estimate; charge the rest now that the real usage is known.
+                    _rateLimiter!.Charge(rateClient, (long)(entry.InputTokens ?? chat.EstimatedInputTokens) + (entry.OutputTokens ?? 0) - chat.EstimatedInputTokens);
+                }
+
                 routeSpan?.SetTag("semantic_router.outcome", entry.Outcome);
                 routeSpan?.SetTag("semantic_router.served_by", entry.ServedBy);
                 if (entry.Outcome == "failed")
@@ -533,12 +541,6 @@ internal sealed partial class PromptRoutingMiddleware
                 if (conversationKey is not null && entry.ServedBy is { } servedBy && _warmCaches is not null && conversation.Enabled && conversation.StickToModel)
                 {
                     RememberCache(conversationKey, servedBy, entry, routedAt, CacheLifetime(runtime, servedBy, chat) ?? conversation.CacheLifetime);
-                }
-
-                if (rateLimit is not null && (entry.InputTokens is not null || entry.OutputTokens is not null))
-                {
-                    // Admission charged the estimate; charge the rest now that the real usage is known.
-                    _rateLimiter!.Charge(rateClient, (long)(entry.InputTokens ?? chat.EstimatedInputTokens) + (entry.OutputTokens ?? 0) - chat.EstimatedInputTokens);
                 }
 
                 if (entry.Context is { } breakdown && answeredBy is not null)
