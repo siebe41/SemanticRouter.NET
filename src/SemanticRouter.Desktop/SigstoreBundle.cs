@@ -30,6 +30,9 @@ namespace SemanticRouter.Desktop;
 /// the log id nor the kind is signed, so either could be made up. A certificate from an authority the trust root does not
 /// have at all (its authority key identifier names none of the trust root's certificates, as after Sigstore adds a
 /// certificate authority) is reported apart from a chain that does not verify (<see cref="Outcome.UnknownAuthority"/>).
+/// That outcome proves nothing: there is no key to check such a certificate's signature with, and a certificate anyone
+/// makes for themselves, with an authority key identifier of their choosing, gets that far. The caller decides how much
+/// it counts (<see cref="UpdateAttestation"/>).
 /// </summary>
 internal static class SigstoreBundle
 {
@@ -418,8 +421,11 @@ internal static class SigstoreBundle
 
     /// <summary>
     /// Whether <paramref name="certificate"/>'s issuer key (its authority key identifier) is that of a certificate in the
-    /// trust root, at any time. One that is not was issued by an authority the trust root does not have; one without the
-    /// extension is left to the chain.
+    /// trust root, at any time. One that is not claims an authority the trust root does not have; one without the
+    /// extension is left to the chain. This only sorts certificates: one that names a known authority has its signature
+    /// checked against that authority's key (<see cref="ChainRefuses"/>), and one that names an unknown authority cannot
+    /// be checked at all, since the trust root has no key for it (an attestation bundle from GitHub carries the leaf
+    /// certificate only, so there is no intermediate to chain through either).
     /// </summary>
     private static bool IssuedByTrustRoot(X509Certificate2 certificate, SigstoreTrustRoot trust)
     {

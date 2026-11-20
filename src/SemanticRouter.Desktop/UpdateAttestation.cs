@@ -18,18 +18,34 @@ namespace SemanticRouter.Desktop;
 /// <list type="bullet">
 /// <item><see cref="Outcome.Verified"/>: an attestation checks out.</item>
 /// <item><see cref="Outcome.Refused"/>: the check ran and failed. GitHub has no attestation for the package, or none
-/// that checks out (another workflow or tag, a signature or log entry that does not verify).</item>
+/// that checks out (another workflow or tag, a signature or log entry that does not verify), or one fails and none
+/// verifies.</item>
 /// <item><see cref="Outcome.Unchecked"/>: the check could not run. GitHub's API could not be asked (offline,
-/// rate-limited, an error, an answer without a bundle), or the only attestation that otherwise checks out has a
-/// transparency log entry in a log of the trust root whose key this app cannot check. The update is not applied; it is
-/// kept and checked again later.</item>
-/// <item><see cref="Outcome.Outdated"/>: the only attestation that otherwise checks out has a certificate from an
-/// authority the trust root this version carries does not have (Sigstore added one since). This version cannot check
-/// that update, or later ones: it is not applied, and the person has to install the new version themselves.</item>
+/// rate-limited, an error, an answer without a bundle), or an attestation that otherwise checks out has a transparency
+/// log entry in a log of the trust root whose key this app cannot check. The update is not applied; it is kept and
+/// checked again later.</item>
+/// <item><see cref="Outcome.Outdated"/>: no attestation fails outright, but the ones that otherwise check out have a
+/// certificate from an authority the trust root this version carries does not have, and that trust root was last known
+/// current more than <see cref="TrustRootLifetime"/> ago, so Sigstore may have added that authority since. The update is
+/// not applied.</item>
 /// </list>
+/// Every check before the authority's passes for a certificate anyone can make for themselves, and a Rekor log takes
+/// any certificate; so whoever can store an attestation for a tampered package can make its certificate's authority
+/// unknown. While the trust root is younger than <see cref="TrustRootLifetime"/> (or its age is not known), that is
+/// refused like any other failure: a release carries Sigstore's current trust root, so for the attestation to be
+/// genuine, Sigstore would have had to add an authority and have GitHub's attestations use it within that time. An
+/// <see cref="Outcome.Outdated"/> verdict is no reason to trust the update either: it can be brought about in the same
+/// way once the trust root is old, so the app does not apply it and asks for the new version to be checked by hand.
 /// </remarks>
-internal sealed class UpdateAttestation(string repository, string repositoryId, Func<string, CancellationToken, Task<string?>> lookup, SigstoreTrustRoot trust)
+internal sealed class UpdateAttestation(string repository, string repositoryId, Func<string, CancellationToken, Task<string?>> lookup, SigstoreTrustRoot trust, TimeProvider? time = null)
 {
+    /// <summary>
+    /// How long after its trust root was last known current a version may find an attestation from a certificate
+    /// authority it does not know and take it for one Sigstore added since (<see cref="Outcome.Outdated"/>) rather than
+    /// refuse it: six months.
+    /// </summary>
+    public static readonly TimeSpan TrustRootLifetime = TimeSpan.FromDays(183);
+
     internal enum Outcome
     {
         Verified,
@@ -51,6 +67,9 @@ internal sealed class UpdateAttestation(string repository, string repositoryId, 
         string repository = new Uri(repositoryUrl).AbsolutePath.Trim('/');
         return new UpdateAttestation(repository, repositoryId, (sha256, cancellationToken) => AskGitHubAsync(s_http, repository, sha256, cancellationToken), SigstoreTrustRoot.PublicGood);
     }
+
+    /// <summary>The repository the releases are from: <c>owner/name</c>.</summary>
+    public string Repository => repository;
 
     /// <summary>The identity a release's attestations are made with: the release workflow, run for the version's tag.</summary>
     public string Identity(string version) => $"https://github.com/{repository}/{Workflow}@refs/tags/v{version}";
@@ -115,7 +134,7 @@ internal sealed class UpdateAttestation(string repository, string repositoryId, 
             }
 
             string identity = Identity(version);
-            (string? failed, string? unlogged, string? outdated, bool unread) = (null, null, null, false);
+            (string? failed, string? unlogged, string? unknown, bool unread) = (null, null, null, false);
             foreach (JsonElement attestation in attestations.EnumerateArray())
             {
                 if (attestation.ValueKind != JsonValueKind.Object || !attestation.TryGetProperty("bundle", out JsonElement bundle) || bundle.ValueKind != JsonValueKind.Object)
@@ -134,7 +153,7 @@ internal sealed class UpdateAttestation(string repository, string repositoryId, 
                         unlogged ??= result.Detail;
                         break;
                     case SigstoreBundle.Outcome.UnknownAuthority:
-                        outdated ??= result.Detail;
+                        unknown ??= result.Detail;
                         break;
                     default:
                         failed ??= result.Detail;
@@ -142,13 +161,24 @@ internal sealed class UpdateAttestation(string repository, string repositoryId, 
                 }
             }
 
-            return outdated is not null ? new Verdict(Outcome.Outdated, $"its attestation is {outdated}")
-                : unlogged is not null ? new Verdict(Outcome.Unchecked, $"its attestation is {unlogged}")
+            // An unknown authority is what a certificate made by anyone looks like, so it never outranks a clean failure,
+            // and is put down to Sigstore only when this version's trust root is old enough for that to be likely.
+            return unlogged is not null ? new Verdict(Outcome.Unchecked, $"its attestation is {unlogged}")
                 : failed is not null ? new Verdict(Outcome.Refused, $"its attestation does not hold: {failed}")
+                : unknown is not null && TrustRootAge is { } age && age > TrustRootLifetime ? new Verdict(Outcome.Outdated, $"its attestation is {unknown}")
+                : unknown is not null ? new Verdict(Outcome.Refused, $"its attestation does not hold: it is {unknown}, and {TrustRootRecent}")
                 : unread ? new Verdict(Outcome.Unchecked, "GitHub's attestations API gave no attestation the app can read")
                 : new Verdict(Outcome.Refused, missing);
         }
     }
+
+    /// <summary>How long ago this version's trust root was last known current, or <see langword="null"/> when that is not known.</summary>
+    private TimeSpan? TrustRootAge => trust.AsOf is { } asOf ? (time ?? TimeProvider.System).GetUtcNow() - asOf : null;
+
+    /// <summary>Why an unknown authority is not put down to Sigstore having added one.</summary>
+    private string TrustRootRecent => TrustRootAge is null
+        ? "when this version's trust root was last current is not known, so that is not taken for an authority Sigstore added since"
+        : "this version's trust root was current less than six months ago, too recently for that to be taken for an authority Sigstore added since";
 
     /// <summary>
     /// GitHub's attestations for <paramref name="sha256"/> in <paramref name="repository"/> (the API's JSON), or
