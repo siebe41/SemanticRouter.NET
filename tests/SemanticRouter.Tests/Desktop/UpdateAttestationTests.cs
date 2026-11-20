@@ -101,11 +101,19 @@ public sealed class UpdateAttestationTests : IDisposable
         SigstoreTrustRoot publicGood = SigstoreTrustRoot.PublicGood;
         (publicGood.Authorities.Count, publicGood.Logs.Count, publicGood.Unreadable.Count).Should().Be((2, 1, 1), "two Fulcio authorities; Rekor v1 has an ECDSA key, Rekor v2 an Ed25519 one");
 
-        // An authority the trust root does not have, as after Sigstore adds one: this version cannot check it, which is
-        // not the same as a certificate that does not verify.
-        UpdateAttestation.Verdict noAuthority = await GitHub(Release050, SigstoreTrustRoot.Of([], publicGood.Logs, publicGood.Unreadable)).CheckDigestAsync(sha256, Package, "0.5.0");
-        noAuthority.Should().Be(new UpdateAttestation.Verdict(UpdateAttestation.Outcome.Outdated,
-            "its attestation is signed by https://github.com/siebe41/SemanticRouter.NET/.github/workflows/release.yml@refs/tags/v0.5.0, but its certificate is from a certificate authority this version of the app does not know"));
+        // An authority the trust root does not have, as after Sigstore adds one: a trust root more than six months old
+        // cannot check it, which is not the same as a certificate that does not verify.
+        const string Unknown = "signed by https://github.com/siebe41/SemanticRouter.NET/.github/workflows/release.yml@refs/tags/v0.5.0, but its certificate is from a certificate authority this version of the app does not know";
+        UpdateAttestation.Verdict noAuthority = await GitHub(Release050, SigstoreTrustRoot.Of([], publicGood.Logs, publicGood.Unreadable, DateTimeOffset.UtcNow.AddDays(-200))).CheckDigestAsync(sha256, Package, "0.5.0");
+        noAuthority.Should().Be(new UpdateAttestation.Verdict(UpdateAttestation.Outcome.Outdated, "its attestation is " + Unknown));
+
+        // A younger trust root, or one whose age is not known, does not put that down to Sigstore: refused.
+        UpdateAttestation.Verdict recent = await GitHub(Release050, SigstoreTrustRoot.Of([], publicGood.Logs, publicGood.Unreadable, DateTimeOffset.UtcNow.AddDays(-30))).CheckDigestAsync(sha256, Package, "0.5.0");
+        recent.Should().Be(new UpdateAttestation.Verdict(UpdateAttestation.Outcome.Refused,
+            $"its attestation does not hold: it is {Unknown}, and this version's trust root was current less than six months ago, too recently for that to be taken for an authority Sigstore added since"));
+        UpdateAttestation.Verdict ageless = await GitHub(Release050, SigstoreTrustRoot.Of([], publicGood.Logs, publicGood.Unreadable)).CheckDigestAsync(sha256, Package, "0.5.0");
+        ageless.Outcome.Should().Be(UpdateAttestation.Outcome.Refused);
+        ageless.Detail.Should().EndWith("when this version's trust root was last current is not known, so that is not taken for an authority Sigstore added since");
 
         // A log of the trust root whose key the app cannot check (as Rekor v2's): the check could not run.
         byte[] rekor = publicGood.Logs[0].KeyId;
@@ -117,6 +125,52 @@ public sealed class UpdateAttestationTests : IDisposable
         UpdateAttestation.Verdict noLog = await GitHub(Release050, SigstoreTrustRoot.Of(publicGood.Authorities, [], publicGood.Unreadable)).CheckDigestAsync(sha256, Package, "0.5.0");
         noLog.Should().Be(new UpdateAttestation.Verdict(UpdateAttestation.Outcome.Refused,
             "its attestation does not hold: its transparency log entry is in a log that is not in Sigstore's trust root"));
+    }
+
+    [Fact]
+    public async Task An_unknown_authority_counts_as_outdated_only_six_months_after_the_trust_root_was_current()
+    {
+        string sha256 = Subjects050()[Package];
+        SigstoreTrustRoot publicGood = SigstoreTrustRoot.PublicGood;
+        var current = new DateTimeOffset(2026, 3, 1, 0, 0, 0, TimeSpan.Zero);
+        SigstoreTrustRoot withoutAuthority = SigstoreTrustRoot.Of([], publicGood.Logs, publicGood.Unreadable, current);
+        async Task<UpdateAttestation.Outcome> At(DateTimeOffset now) =>
+            (await new UpdateAttestation(Repository, RepositoryId, (_, _) => Task.FromResult<string?>(Release050), withoutAuthority, new FixedTime(now))
+                .CheckDigestAsync(sha256, Package, "0.5.0")).Outcome;
+
+        (await At(current.AddDays(1))).Should().Be(UpdateAttestation.Outcome.Refused);
+        (await At(current + UpdateAttestation.TrustRootLifetime)).Should().Be(UpdateAttestation.Outcome.Refused);
+        (await At(current + UpdateAttestation.TrustRootLifetime + TimeSpan.FromMinutes(1))).Should().Be(UpdateAttestation.Outcome.Outdated);
+        UpdateAttestation.TrustRootLifetime.Should().Be(TimeSpan.FromDays(183), "six months, as the docs and the app's message say");
+    }
+
+    [Fact]
+    public void The_trust_root_the_app_carries_is_as_of_the_commit_it_was_built_from()
+    {
+        // The project file records the commit's time when it is built in a git checkout (as CI and the release are).
+        string? recorded = typeof(SigstoreTrustRoot).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false)
+            .Cast<System.Reflection.AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == SigstoreTrustRoot.SourceCommitTime)?.Value;
+        if (recorded is not null)
+        {
+            SigstoreTrustRoot.PublicGood.AsOf.Should().Be(DateTimeOffset.Parse(recorded, CultureInfo.InvariantCulture));
+            SigstoreTrustRoot.PublicGood.AsOf.Should().BeBefore(DateTimeOffset.UtcNow.AddMinutes(5));
+        }
+
+        SigstoreTrustRoot.BuiltFrom(typeof(UpdateAttestationTests).Assembly).Should().BeNull("a build that recorded no commit time");
+        SigstoreTrustRoot.Parse(TrustedRootJson()).AsOf.Should().BeNull("unless the caller knows when it was current");
+
+        static string TrustedRootJson()
+        {
+            using Stream stream = typeof(SigstoreTrustRoot).Assembly.GetManifestResourceStream("sigstore-trusted-root.json")!;
+            using StreamReader reader = new(stream);
+            return reader.ReadToEnd();
+        }
+    }
+
+    /// <summary>A clock that always says <paramref name="now"/>.</summary>
+    private sealed class FixedTime(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     [Fact]
@@ -170,10 +224,28 @@ public sealed class UpdateAttestationTests : IDisposable
             // Naming the trust root's authority as its issuer, the certificate must chain to it.
             (await Refused(_sigstore.Bundle(identity, [(Package, sha256)], authority: mallory, named: _sigstore))).Should().Contain("not issued by Sigstore's certificate authority");
 
-            // Naming an authority the trust root does not have: as after Sigstore adds one, not applied but not refused either.
-            UpdateAttestation.Verdict unknown = await Check(_sigstore.Bundle(identity, [(Package, sha256)], authority: mallory));
+            // Naming an authority the trust root does not have, which anyone can: refused, unless the trust root is old
+            // enough for Sigstore to have added one since (#405).
+            JsonObject selfMade = _sigstore.Bundle(identity, [(Package, sha256)], authority: mallory);
+            (await Refused(selfMade)).Should().EndWith("but its certificate is from a certificate authority this version of the app does not know, "
+                + "and when this version's trust root was last current is not known, so that is not taken for an authority Sigstore added since");
+            SigstoreTrustRoot old = SigstoreTrustRoot.Of(_sigstore.Trust.Authorities, _sigstore.Trust.Logs, asOf: DateTimeOffset.UtcNow.AddYears(-1));
+            UpdateAttestation.Verdict unknown = await Check(selfMade, old);
             unknown.Outcome.Should().Be(UpdateAttestation.Outcome.Outdated);
             unknown.Detail.Should().EndWith("but its certificate is from a certificate authority this version of the app does not know");
+
+            // Even then, an attestation that fails outright outranks it: "cannot be checked" never hides "refused".
+            JsonObject forged = Good();
+            Flip(forged["dsseEnvelope"]!["signatures"]![0]!, "sig");
+            foreach (string response in new[] { TestSigstore.Response(selfMade, forged), TestSigstore.Response(forged, selfMade) })
+            {
+                UpdateAttestation.Verdict both = await new UpdateAttestation(Repository, RepositoryId, (_, _) => Task.FromResult<string?>(response), old).CheckDigestAsync(sha256, Package, "0.5.0");
+                both.Should().Be(new UpdateAttestation.Verdict(UpdateAttestation.Outcome.Refused, "its attestation does not hold: its signature does not verify"));
+            }
+
+            // A genuine attestation among them still verifies.
+            (await new UpdateAttestation(Repository, RepositoryId, (_, _) => Task.FromResult<string?>(TestSigstore.Response(selfMade, forged, Good())), old).CheckDigestAsync(sha256, Package, "0.5.0"))
+                .Outcome.Should().Be(UpdateAttestation.Outcome.Verified);
         }
 
         (await Refused(_sigstore.Bundle(identity, [(Package, sha256)], logged: TestSigstore.Issued.AddMinutes(20)))).Should().Contain("when its certificate or the log's key was not valid");
@@ -356,23 +428,48 @@ public sealed class UpdateAttestationTests : IDisposable
     [Fact]
     public async Task An_update_this_version_is_too_old_to_check_is_kept_not_applied_and_not_offered_again()
     {
-        // Sigstore added a certificate authority after this version was released: say so, and do not delete the package.
+        // A certificate authority this version's trust root, more than six months old, does not have (Sigstore may have
+        // added one since): say so, and do not delete the package. Nor send the person to install it unchecked: whoever
+        // tampered with the release can bring this about as well.
         var updates = new FakeUpdates { Package = PackageFile() };
         var log = new StringWriter();
         using var newer = new TestSigstore();
         string sha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(updates.Package)));
         string response = TestSigstore.Response(newer.Bundle(GitHub(null).Identity("1.0.1"), [(Path.GetFileName(updates.Package), sha256)]));
-        var updater = new DesktopUpdater(updates, null, log, attestation: new UpdateAttestation(Repository, RepositoryId, (_, _) => Task.FromResult<string?>(response), SigstoreTrustRoot.Of(_sigstore.Trust.Authorities, newer.Trust.Logs)));
+        SigstoreTrustRoot old = SigstoreTrustRoot.Of(_sigstore.Trust.Authorities, newer.Trust.Logs, asOf: DateTimeOffset.UtcNow.AddMonths(-7));
+        var updater = new DesktopUpdater(updates, null, log, attestation: new UpdateAttestation(Repository, RepositoryId, (_, _) => Task.FromResult<string?>(response), old));
 
         (await updater.CheckAsync()).Should().BeNull();
 
         updater.Problem.Should().StartWith("Update 1.0.1 cannot be checked by this version of the app: its attestation is signed by")
-            .And.EndWith($"Install the new version yourself from {ProjectLinks.Releases}");
-        log.ToString().Should().Contain("Sigstore changed its certificate authorities after this version was released");
+            .And.EndWith($"Before you install a new version by hand, check it with: gh attestation verify <file> --repo {Repository}")
+            .And.NotContain("Install the new version yourself");
+        log.ToString().Should().Contain("This version's Sigstore trust root is more than six months old: Sigstore may have added a certificate authority since, "
+            + "or the release's files may have been tampered with. The update is not applied either way.");
         (await updater.ApplyOnQuitAsync()).Should().BeFalse();
         await updater.CheckAsync();
         updates.Calls.Should().Equal("check", "download", "package", "package", "check");
         updates.Downloaded.Should().BeTrue("the package is kept, so a later start does not download it again");
+    }
+
+    [Fact]
+    public async Task An_update_from_an_unknown_authority_is_refused_while_the_trust_root_is_recent()
+    {
+        // A certificate made by whoever tampered with the release, logged in Rekor (which takes any certificate) and stored
+        // with GitHub's attestations, gets as far as the authority check: with a recent trust root that is a refusal (#405).
+        var updates = new FakeUpdates { Package = PackageFile() };
+        var log = new StringWriter();
+        using var mallory = new TestSigstore();
+        string sha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(updates.Package)));
+        string response = TestSigstore.Response(_sigstore.Bundle(GitHub(null).Identity("1.0.1"), [(Path.GetFileName(updates.Package), sha256)], authority: mallory));
+        SigstoreTrustRoot recent = SigstoreTrustRoot.Of(_sigstore.Trust.Authorities, _sigstore.Trust.Logs, asOf: DateTimeOffset.UtcNow.AddDays(-10));
+        var updater = new DesktopUpdater(updates, null, log, attestation: new UpdateAttestation(Repository, RepositoryId, (_, _) => Task.FromResult<string?>(response), recent));
+
+        (await updater.CheckAsync()).Should().BeNull();
+
+        updater.Problem.Should().StartWith("Update 1.0.1 was refused: its attestation does not hold: it is signed by")
+            .And.Contain("too recently for that to be taken for an authority Sigstore added since");
+        updates.Calls.Should().Equal("check", "download", "package", "discard");
     }
 
     [Fact]

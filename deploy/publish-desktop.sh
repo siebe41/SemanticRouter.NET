@@ -25,9 +25,10 @@ dotnet publish "$root/src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj" 
 
 dotnet run --file "$root/deploy/third-party-notices.cs" -- "$out/THIRD-PARTY-NOTICES.txt" "$out"
 
-# Windows: SemanticRouter.Files.dll, the SHA-256 of every file that is not a program or library, which vpk signs with
-# the rest so the app's publisher check covers those files too (deploy/update-file-list.cs). Last, so it lists the
-# notices as well; package-installer.sh checks it against the package.
+# Windows: SemanticRouter.Files.dll, the SHA-256 of every file that is not a program or library and a digest of each
+# program and library without its signature, which vpk signs with the rest so the app's publisher check covers those
+# files too, and pins each program to this build (deploy/update-file-list.cs). Last, so it lists the notices as well;
+# package-installer.sh checks it against the package.
 case "$rid" in
   win-*) dotnet run --file "$root/deploy/update-file-list.cs" -- write "$out" ;;
 esac

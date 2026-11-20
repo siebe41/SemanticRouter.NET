@@ -30,9 +30,11 @@ namespace SemanticRouter.Desktop;
 /// Without a publisher, an update from GitHub Releases is applied only when this project's release workflow attested its
 /// package for that version (<see cref="UpdateAttestation"/>); one that is not is refused the same way. When the check
 /// cannot run (GitHub's API cannot be reached), the update is kept but not applied, the app says it is waiting to be
-/// checked (<see cref="Problem"/>), and the next check tries again. When this version's trust root is too old to check it
-/// (Sigstore added a certificate authority), the update is kept, not applied and not offered again in this run, and the
-/// app says to install the new version by hand. Updates from another feed are not checked this way.
+/// checked (<see cref="Problem"/>), and the next check tries again. When the attestation's certificate authority is one
+/// this version's trust root does not have, and that trust root is old enough for Sigstore to have added one since
+/// (<see cref="UpdateAttestation.TrustRootLifetime"/>), the update is kept, not applied and not offered again in this
+/// run, and the app says how to check a new version before installing it by hand; with a younger trust root, it is
+/// refused. Updates from another feed are not checked this way.
 /// </para>
 /// </remarks>
 internal sealed class DesktopUpdater(
@@ -407,13 +409,17 @@ internal sealed class DesktopUpdater(
                 // The check could not run, which whoever can reset a connection can bring about: not applied, tried again.
                 return Hold(update, $"Update {update.Version} is waiting to be checked against its attestation: {verdict.Detail}", "It is not applied until the check passes; the app tries again at the next check.");
             case UpdateAttestation.Outcome.Outdated:
-                // Not offered again in this run; the package is kept, so a later start checks it without downloading it again.
+                // Not offered again in this run; the package is kept, so a later start checks it without downloading it
+                // again. Whoever can store an attestation for a tampered package can bring this about too, so the person
+                // is asked to check the new version, not just to install it.
                 _refused = update.Version.ToString();
                 _available = null;
                 return Hold(
                     update,
-                    $"Update {update.Version} cannot be checked by this version of the app: {verdict.Detail}. Install the new version yourself from {ProjectLinks.Releases}",
-                    "Sigstore changed its certificate authorities after this version was released, so it can no longer check its updates.");
+                    $"Update {update.Version} cannot be checked by this version of the app: {verdict.Detail}. "
+                        + $"Before you install a new version by hand, check it with: gh attestation verify <file> --repo {attestation!.Repository}",
+                    "This version's Sigstore trust root is more than six months old: Sigstore may have added a certificate authority since, "
+                        + "or the release's files may have been tampered with. The update is not applied either way.");
             default:
                 return Refuse(update, verdict.Detail, "Without a publisher in your organization's policy, only updates the project's release workflow attested are applied.");
         }

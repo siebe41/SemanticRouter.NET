@@ -45,6 +45,35 @@
     <InternalsVisibleTo Include="SemanticRouter.Tests" />
   </ItemGroup>
 
+  <!--
+    The time of the commit the app is built from, as assembly metadata (SourceCommitTime): the updater takes it as the
+    time its Sigstore trust root was last known current (SigstoreTrustRoot.AsOf), since a release fails unless the trust
+    root it carries is Sigstore's current one. -p:SourceCommitTime=<ISO 8601 time> sets it; outside a git checkout (or
+    without git) there is none, and an attestation from an unknown certificate authority is then always refused.
+  -->
+  <Target Name="AddSourceCommitTime" BeforeTargets="GetAssemblyAttributes">
+    <PropertyGroup>
+      <!-- Exec runs a batch file on Windows, where a literal % is written twice. -->
+      <_GitCommitTimeFormat>%25cI</_GitCommitTimeFormat>
+      <_GitCommitTimeFormat Condition="$([MSBuild]::IsOSPlatform('Windows'))">%25%25cI</_GitCommitTimeFormat>
+    </PropertyGroup>
+    <Exec Condition="'$(SourceCommitTime)' == ''" Command="git log -1 --format=$(_GitCommitTimeFormat)" WorkingDirectory="$(MSBuildProjectDirectory)"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true" EchoOff="true"
+          StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitCommitTime" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
+    </Exec>
+    <PropertyGroup>
+      <SourceCommitTime Condition="'$(SourceCommitTime)' == '' And '$(_GitExitCode)' == '0'">$(_GitCommitTime)</SourceCommitTime>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(SourceCommitTime)' != ''">
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>SourceCommitTime</_Parameter1>
+        <_Parameter2>$(SourceCommitTime)</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
+
   <!-- ONNX Runtime ships Android and iOS archives (110 MB) that a desktop app never loads. -->
   <Target Name="DropMobileOnnxRuntimeAssets" AfterTargets="ResolvePackageAssets">
     <ItemGroup>

@@ -16,14 +16,17 @@ namespace SemanticRouter.Desktop;
 /// <list type="bullet">
 /// <item>Windows: every executable image in the package (whatever its extension) must have a valid Authenticode
 /// signature (<c>WinVerifyTrust</c>); the main executable and the app's own assemblies (<c>SemanticRouter.*</c>) must be
-/// signed by the publisher, and the rest by the publisher or Microsoft. Every other file of the app must be as the
-/// publisher's signed list of files says (<see cref="UpdateFileList"/>), and the .NET host's files
-/// (<c>*.runtimeconfig.json</c>, <c>*.deps.json</c>) may not point it at code outside the package
-/// (<see cref="HostFileRefuses"/>).</item>
+/// signed by the publisher, and the rest by the publisher or Microsoft. Each program the publisher's signed list of
+/// files names (<see cref="UpdateFileList"/>) must be the one it names, apart from its signature; one it does not name
+/// (Velopack's own, which vpk adds after the list is made) must be signed by the publisher. Every other file of the app
+/// must be as the list says, and the .NET host's files (<c>*.runtimeconfig.json</c>, <c>*.deps.json</c>) may not point
+/// it at code outside the package (<see cref="HostFileRefuses"/>).</item>
 /// <item>macOS: the app bundle must pass <c>codesign --verify --deep --strict</c> with a Developer ID signature, and its
 /// team ID must be the publisher.</item>
 /// <item>Linux: the packages carry no signature, so every update is refused.</item>
 /// </list>
+/// Which files are the app's own is this app's to say, not the package's: its <c>.nuspec</c> must name this app
+/// (<see cref="AppId"/>) and its main executable, or the update is refused.
 /// </remarks>
 internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform platform, ICodeSignatures? signatures)
 {
@@ -43,6 +46,15 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
 
     /// <summary>Where the app's files are in a Velopack package.</summary>
     private const string AppFolder = "lib/app/";
+
+    /// <summary>
+    /// The app's package id (<c>deploy/package-installer.sh</c>, <c>--packId</c>), which its own files' names start with
+    /// (<c>SemanticRouter.dll</c>, <c>SemanticRouter.Core.dll</c>, …).
+    /// </summary>
+    internal const string AppId = "SemanticRouter";
+
+    /// <summary>The app's main executable on this platform (<c>--mainExe</c>), which Velopack starts after the update.</summary>
+    internal string MainExe => platform == Platform.Windows ? AppId + ".exe" : AppId;
 
     /// <summary>The publisher the policy names.</summary>
     public string Expected => publisher;
@@ -77,8 +89,16 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
         try
         {
             using ZipArchive zip = ZipFile.OpenRead(package);
+
+            // The package's own word for which app it is and what to start would decide which files must be the
+            // publisher's: another id makes SemanticRouter.*.dll anyone's, another main executable starts any signed program.
             (string id, string mainExe) = Manifest(zip);
-            return platform == Platform.Windows ? RefusesWindows(zip, id, mainExe, folder) : RefusesMacOS(zip, id, mainExe, folder);
+            if (id != AppId || mainExe != MainExe)
+            {
+                return $"its .nuspec names {id} ({mainExe}) as the app, not {AppId} ({MainExe})";
+            }
+
+            return platform == Platform.Windows ? RefusesWindows(zip, folder) : RefusesMacOS(zip, folder);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Xml.XmlException)
         {
@@ -100,8 +120,9 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
         }
     }
 
-    private string? RefusesWindows(ZipArchive zip, string id, string mainExe, string folder)
+    private string? RefusesWindows(ZipArchive zip, string folder)
     {
+        string mainExe = MainExe;
         ZipArchiveEntry[] files = [.. zip.Entries.Where(e => e.FullName.StartsWith(AppFolder, StringComparison.Ordinal) && !e.FullName.EndsWith('/'))];
         if (files.GroupBy(e => e.FullName, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1) is { } twice)
         {
@@ -119,6 +140,7 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
 
         // The main executable first, so the reason given is about the app when it is the one that is wrong.
         string? list = null;
+        List<(string Relative, string File, CodeSignature Signature)> programs = [];
         foreach (ZipArchiveEntry entry in code.OrderBy(e => e.FullName == AppFolder + mainExe ? 0 : 1))
         {
             string relative = entry.FullName[AppFolder.Length..];
@@ -132,14 +154,21 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
             // The app's own code must be the publisher's, and so must the list of its files. The rest is the
             // publisher's too (vpk signs every unsigned file with the release's certificate) or Microsoft's (the .NET
             // runtime, ONNX Runtime): a valid signature from anyone else is not enough, or a cheap code-signing
-            // certificate would let a tampered package through.
-            bool own = relative == mainExe || relative == UpdateFileList.FileName || Path.GetFileName(relative).StartsWith(id + ".", StringComparison.OrdinalIgnoreCase);
+            // certificate would let a tampered package through. Which files are the app's own is this app's to say.
+            bool own = relative == mainExe || relative == UpdateFileList.FileName || Path.GetFileName(relative).StartsWith(AppId + ".", StringComparison.OrdinalIgnoreCase);
             if (!Matches(signature) && (own || signature.Signer is not { } signer || !IsMicrosoft(signer)))
             {
                 return $"{relative} is signed by {Describe(signature)}, not by {publisher}{(own ? string.Empty : " or Microsoft")}";
             }
 
-            list = relative == UpdateFileList.FileName ? file : list;
+            if (relative == UpdateFileList.FileName)
+            {
+                list = file;
+            }
+            else
+            {
+                programs.Add((relative, file, signature));
+            }
         }
 
         // Every other file is covered by its SHA-256 in the signed list: the .NET host's runtimeconfig.json and
@@ -149,7 +178,17 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
             return $"its package has no {UpdateFileList.FileName}, the list of the files its signature covers";
         }
 
-        if (UpdateFileList.Refuses(list, files.Except(code).Select(e => (e.FullName[AppFolder.Length..], e)), Nuspec(zip)) is { } changed)
+        if (UpdateFileList.Load(list, out UpdateFileList.Contents listed) is { } unreadable)
+        {
+            return unreadable;
+        }
+
+        if (ProgramsRefuse(listed, programs) is { } swapped)
+        {
+            return swapped;
+        }
+
+        if (UpdateFileList.Refuses(listed, files.Except(code).Select(e => (e.FullName[AppFolder.Length..], e)), Nuspec(zip)) is { } changed)
         {
             return changed;
         }
@@ -165,6 +204,35 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Why the package's programs and libraries (<paramref name="programs"/>, each with its signature) are not the ones the
+    /// publisher's list names, or <see langword="null"/> when they are. A valid signature alone would let a program be
+    /// swapped for any other the publisher or Microsoft signed (an older build with a known flaw, another tool); the
+    /// list pins each to its build. One the list does not name was added after the list was made, as vpk adds Velopack's
+    /// own (<c>Squirrel.exe</c>, the execution stub), and is signed by the release's certificate: so it must be the publisher's.
+    /// </summary>
+    private string? ProgramsRefuse(UpdateFileList.Contents listed, IEnumerable<(string Relative, string File, CodeSignature Signature)> programs)
+    {
+        var expected = new Dictionary<string, string>(listed.Programs, StringComparer.Ordinal);
+        foreach ((string relative, string file, CodeSignature signature) in programs)
+        {
+            if (expected.Remove(relative, out string? digest))
+            {
+                if (!string.Equals(UpdateFileList.ProgramDigest(File.ReadAllBytes(file)), digest, StringComparison.OrdinalIgnoreCase))
+                {
+                    return $"{relative} is not the program its publisher listed";
+                }
+            }
+            else if (!Matches(signature))
+            {
+                return $"{relative} is not one of the programs its publisher listed, and is signed by {Describe(signature)}, not by {publisher}";
+            }
+        }
+
+        // A listed program the package lacks, or has as a data file instead.
+        return expected.Keys.Order(StringComparer.Ordinal).FirstOrDefault() is { } missing ? $"{missing} is missing from its package" : null;
     }
 
     private static readonly JsonDocumentOptions HostJson = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
@@ -287,9 +355,10 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
         return stream.ReadAtLeast(header, 2, throwOnEndOfStream: false) == 2 && header[0] == (byte)'M' && header[1] == (byte)'Z';
     }
 
-    private string? RefusesMacOS(ZipArchive zip, string id, string mainExe, string folder)
+    private string? RefusesMacOS(ZipArchive zip, string folder)
     {
         // The package holds the bundle's Contents folder: unpack it as an .app and let codesign check the whole bundle.
+        (string id, string mainExe) = (AppId, MainExe);
         string bundle = Path.Combine(folder, id + ".app");
         foreach (ZipArchiveEntry entry in zip.Entries.Where(e => e.FullName.StartsWith(AppFolder, StringComparison.Ordinal) && !e.FullName.EndsWith('/')))
         {
