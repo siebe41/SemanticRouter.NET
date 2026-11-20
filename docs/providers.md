@@ -496,13 +496,13 @@ When a backend speaks the client's protocol, the body passes through untouched (
 | Reasoning in the reply | read from `reasoning_content` | `thinking` blocks | reasoning summaries | n/a |
 | Structured output (`response_format`, `text.format`) | ✓ | a forced `structured_output` tool for a JSON schema; an instruction for JSON mode | ✓ | dropped |
 | `parallel_tool_calls: false` | ✓ | `disable_parallel_tool_use` | ✓ | dropped |
-| Stop reasons (length, refusal, tool use) | ✓ | ✓ (`refusal`, `pause_turn`) | ✓ (`incomplete`) | end of turn, or tool use with prompted tools |
+| Stop reasons (length, refusal, tool use, stop sequence) | ✓ (the stop sequence when the server names it: vLLM's `stop_reason`, SGLang's `matched_stop`) | ✓ (`refusal`, `pause_turn`) | ✓ (`incomplete`) | end of turn, or tool use with prompted tools |
 | Hosted tools (`web_search`, …) | dropped | dropped | ✓ | dropped |
 | Prompt caching | automatic | markers added above the model's minimum ([`PromptCaching`](#prompt-caching-on-translated-requests)) | automatic | n/a |
 | `cache_control` markers from an Anthropic client | dropped (the backend caches on its own) | ✓ | dropped (the backend caches on its own) | dropped |
 | `prompt_cache_key` | ✓ | not needed (the router adds cache markers) | ✓ | not needed |
 | Cached-token counts in the reply | `prompt_tokens_details.cached_tokens` | `cache_read_input_tokens`, `cache_creation_input_tokens` (also on a streamed `message_delta`) | `input_tokens_details.cached_tokens` | read from the CLI's usage (claude, codex) |
-| Protocol-only features (documents, `logprobs`, `n` > 1, audio, `previous_response_id`, reasoning items) | dropped | dropped | dropped | dropped |
+| Protocol-only features (documents, `logprobs`, `n` > 1, audio, `previous_response_id`, reasoning items, images inside tool results) | dropped | dropped | dropped | dropped |
 
 Notes:
 
@@ -510,6 +510,7 @@ Notes:
 - **Thinking and a schema don't mix.** Anthropic cannot think while a tool is forced, so a JSON-schema request to an Anthropic backend drops the reasoning request. Thinking also needs `max_tokens` above 1,024. While thinking is on, `temperature` and `top_p` are not sent.
 - **Declare `reasoning` only on models that accept it.** Servers that don't know `reasoning_effort` may reject the request.
 - **Empty turns are left out for Anthropic.** A turn with nothing the Messages API takes (an empty assistant message after a cancelled turn, say) is not sent, as the API rejects `"content": []`; the turns around it merge when they then share a role.
+- **A reply cut off during a tool call says so.** When the backend stopped at the output limit, the client gets `length` (`max_tokens`, `incomplete`) rather than a tool-use stop, so it does not run a call whose arguments may be cut short.
 
 ### Output limits on OpenAI reasoning models
 

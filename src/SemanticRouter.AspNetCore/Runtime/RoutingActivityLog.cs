@@ -188,10 +188,11 @@ public sealed class RoutingActivityEntry
 
     /// <summary>
     /// The models the request was sent to, in order (Dispatch mode). Failed attempts are included: the backend may have
-    /// received the request before it failed.
+    /// received the request before it failed. The dispatcher adds to it while the entry is already in the log, so the
+    /// list is safe to read, and to enumerate (a snapshot), while it grows.
     /// </summary>
     [System.Text.Json.Serialization.JsonObjectCreationHandling(System.Text.Json.Serialization.JsonObjectCreationHandling.Populate)]
-    public IList<string> SentTo { get; } = new List<string>();
+    public IList<string> SentTo { get; } = new SynchronizedList<string>();
 
     /// <summary>The memory notes found in the request (titles and ids, never their text), when memory sources are configured.</summary>
     public IReadOnlyList<MemoryReference> Memory { get; init; } = [];
@@ -201,6 +202,125 @@ public sealed class RoutingActivityEntry
     /// analysis is on (<see cref="ContextCostOptions.Enabled"/>). Token counts only, never text.
     /// </summary>
     public ContextBreakdown? Context { get; set; }
+}
+
+/// <summary>
+/// A list that one thread may change while others read it: every member takes a lock, and enumerating walks a snapshot,
+/// so serialising an entry whose request is still running never fails with "Collection was modified".
+/// </summary>
+internal sealed class SynchronizedList<T> : IList<T>
+{
+    private readonly List<T> _items = [];
+    private readonly Lock _gate = new();
+
+    public int Count
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _items.Count;
+            }
+        }
+    }
+
+    public bool IsReadOnly => false;
+
+    public T this[int index]
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _items[index];
+            }
+        }
+
+        set
+        {
+            lock (_gate)
+            {
+                _items[index] = value;
+            }
+        }
+    }
+
+    public void Add(T item)
+    {
+        lock (_gate)
+        {
+            _items.Add(item);
+        }
+    }
+
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _items.Clear();
+        }
+    }
+
+    public bool Contains(T item)
+    {
+        lock (_gate)
+        {
+            return _items.Contains(item);
+        }
+    }
+
+    public void CopyTo(T[] array, int arrayIndex)
+    {
+        lock (_gate)
+        {
+            _items.CopyTo(array, arrayIndex);
+        }
+    }
+
+    public int IndexOf(T item)
+    {
+        lock (_gate)
+        {
+            return _items.IndexOf(item);
+        }
+    }
+
+    public void Insert(int index, T item)
+    {
+        lock (_gate)
+        {
+            _items.Insert(index, item);
+        }
+    }
+
+    public bool Remove(T item)
+    {
+        lock (_gate)
+        {
+            return _items.Remove(item);
+        }
+    }
+
+    public void RemoveAt(int index)
+    {
+        lock (_gate)
+        {
+            _items.RemoveAt(index);
+        }
+    }
+
+    public IEnumerator<T> GetEnumerator()
+    {
+        T[] snapshot;
+        lock (_gate)
+        {
+            snapshot = [.. _items];
+        }
+
+        return ((IEnumerable<T>)snapshot).GetEnumerator();
+    }
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 /// <summary>

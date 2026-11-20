@@ -167,11 +167,16 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
     public Task EndToolCallAsync(CancellationToken cancellationToken) =>
         _openIndex >= 0 && _blocks[_openIndex].IsTool ? CloseBlockAsync(cancellationToken) : Task.CompletedTask;
 
-    public async Task CompleteAsync(ChatStopReason stopReason, ChatUsage usage, CancellationToken cancellationToken)
+    public Task CompleteAsync(ChatStopReason stopReason, ChatUsage usage, CancellationToken cancellationToken) =>
+        CompleteAsync(stopReason, usage, null, cancellationToken);
+
+    public async Task CompleteAsync(ChatStopReason stopReason, ChatUsage usage, string? stopSequence, CancellationToken cancellationToken)
     {
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
         bool anyTool = _blocks.Any(b => b.IsTool);
-        string stop = anyTool || stopReason == ChatStopReason.ToolUse
+
+        // A reply cut off at the limit keeps max_tokens even with a tool call: its input may be incomplete JSON.
+        string stop = (anyTool && stopReason != ChatStopReason.MaxTokens) || stopReason == ChatStopReason.ToolUse
             ? "tool_use"
             : stopReason switch
             {
@@ -181,6 +186,7 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
                 ChatStopReason.PauseTurn => "pause_turn",
                 _ => "end_turn",
             };
+        string? sequence = stop == "stop_sequence" ? stopSequence : null;
 
         if (_stream)
         {
@@ -206,7 +212,7 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
             {
                 w.WriteStartObject("delta");
                 w.WriteString("stop_reason", stop);
-                w.WriteNull("stop_sequence");
+                WriteStopSequence(w, sequence);
                 w.WriteEndObject();
                 w.WriteStartObject("usage");
                 w.WriteNumber("output_tokens", usage.OutputTokens ?? 0);
@@ -278,7 +284,7 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
 
             writer.WriteEndArray();
             writer.WriteString("stop_reason", stop);
-            writer.WriteNull("stop_sequence");
+            WriteStopSequence(writer, sequence);
             WriteUsage(writer, usage);
             writer.WriteEndObject();
         }
@@ -286,6 +292,18 @@ internal sealed class AnthropicResponseWriter : IChatResponseWriter
         _context.Response.StatusCode = StatusCodes.Status200OK;
         _context.Response.ContentType = "application/json";
         await _context.Response.Body.WriteAsync(json.WrittenMemory, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static void WriteStopSequence(Utf8JsonWriter writer, string? sequence)
+    {
+        if (sequence is null)
+        {
+            writer.WriteNull("stop_sequence");
+        }
+        else
+        {
+            writer.WriteString("stop_sequence", sequence);
+        }
     }
 
     private static void WriteUsage(Utf8JsonWriter writer, ChatUsage usage)

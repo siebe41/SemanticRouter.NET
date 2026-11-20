@@ -272,7 +272,7 @@ public sealed class ResponsesProtocolTests
              "usage":{"input_tokens":4,"output_tokens":2}}
             """, "application/json"), writer, CancellationToken.None);
 
-        writer.Events.Should().Equal("text:Hi", "tool:call_1:f", "args:{}", "end", "done:ToolUse:4/2/");
+        writer.Events.Should().Equal("text:Hi", "tool:call_1:f", "args:{}", "end", "done:MaxTokens:4/2/"); // cut off at the limit: the call may be incomplete
     }
 
     [Theory]
