@@ -46,6 +46,9 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private bool _noModel;
     private bool _noModelAnnounced;
     private bool _quitting;
+
+    // QuitAsync has finished and asked Avalonia to shut down.
+    private bool _quit;
     private TrayDigest _digest = TrayDigest.None;
     private DateTimeOffset _digestChecked;
     private readonly HashSet<string> _announced = new(StringComparer.Ordinal);
@@ -78,7 +81,17 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            desktop.ShutdownRequested += (_, _) => _ = QuitAsync();
+            desktop.ShutdownRequested += (_, e) =>
+            {
+                // Signing out, shutting down or the macOS Quit: hold the shutdown until the router has stopped and a
+                // downloaded update was handed over; QuitAsync shuts down when it is done. Shutdown() does not raise
+                // this event again, and a request after QuitAsync finished goes through.
+                if (!_quit)
+                {
+                    e.Cancel = true;
+                    _ = QuitAsync();
+                }
+            };
         }
 
         using (Stream png = AssetLoader.Open(new Uri("avares://SemanticRouter/Assets/icon.png")))
@@ -682,10 +695,22 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         if (_router.State == RouterState.Attached && _service.IsOn)
         {
             _switching = true;
-            ShowProblem(null);
-            UpdateMenu();
-            string? problem = await _service.RestartAsync(_router);
-            _switching = false;
+            string? problem;
+            try
+            {
+                ShowProblem(null);
+                UpdateMenu();
+                problem = await _service.RestartAsync(_router);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+            {
+                problem = ex.Message;
+            }
+            finally
+            {
+                _switching = false;
+            }
+
             ShowProblem(problem is null ? null : $"Background service: {problem}", notify: true);
             UpdateMenu();
         }
@@ -745,15 +770,52 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         }
 
         _quitting = true;
-        _about?.Close();
-        _settings?.Close();
-        _window?.CloseForGood();
-        await _router.DisposeAsync();
-        instance.Dispose();
+        try
+        {
+            // Each step is tried whatever the one before it did: a tray app left without its router and its
+            // single-instance pipe, which a Quit can no longer end, is worse than a step that failed.
+            await QuitStepAsync("closing the windows", () =>
+            {
+                _about?.Close();
+                _settings?.Close();
+                _window?.CloseForGood();
+                return Task.CompletedTask;
+            });
+            await QuitStepAsync("stopping the router", async () => await _router.DisposeAsync());
+            await QuitStepAsync("releasing the single-instance pipe and lock", () =>
+            {
+                instance.Dispose();
+                return Task.CompletedTask;
+            });
 
-        // A downloaded update is applied as the app exits (the background service stopped and started around it):
-        // when the person chose Restart to update, or on quit unless updates are only announced.
-        _ = _restartForUpdate ? await _updater.ApplyNowAsync(restartApp: true) : await _updater.ApplyOnQuitAsync();
-        (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
+            // A downloaded update is applied as the app exits (the background service stopped and started around it):
+            // when the person chose Restart to update, or on quit unless updates are only announced.
+            await QuitStepAsync("applying the update", async () =>
+                _ = _restartForUpdate ? await _updater.ApplyNowAsync(restartApp: true) : await _updater.ApplyOnQuitAsync());
+        }
+        finally
+        {
+            _quit = true;
+            (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
+        }
+    }
+
+    private async Task QuitStepAsync(string step, Func<Task> run)
+    {
+        try
+        {
+            await run();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            try
+            {
+                await log.WriteLineAsync($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} Quitting: {step} failed: {ex}");
+            }
+            catch (Exception failed) when (failed is IOException or ObjectDisposedException)
+            {
+                // The log itself failed (a full disk): quitting goes on.
+            }
+        }
     }
 }
