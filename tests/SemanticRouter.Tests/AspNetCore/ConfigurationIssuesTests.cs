@@ -30,6 +30,20 @@ public sealed class ConfigurationIssuesTests
         PathFor(document, "A budget must name exactly one of").Should().Be("Usage.Budgets.1.Model");
     }
 
+    [Theory]
+    [InlineData(nameof(ModelDefinition.CacheReadCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.CacheWriteCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.ApiCacheWriteCostPerMillionTokens))]
+    public void A_negative_price_points_at_the_price(string price)
+    {
+        var document = new RouterConfiguration();
+        var model = new ModelDefinition { Name = "priced", Connector = "openai", Tier = 2 };
+        typeof(ModelDefinition).GetProperty(price)!.SetValue(model, -1m);
+        document.Models.Add(model);
+
+        PathFor(document, "must not have a negative tier, context window or cost").Should().Be("Models.0." + price);
+    }
+
     [Fact]
     public void An_unnamed_or_repeated_memory_source_points_at_the_name_to_change()
     {

@@ -18,6 +18,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Fixed
 
+- Validation refuses a model with a negative `CacheReadCostPerMillionTokens` or `CacheWriteCostPerMillionTokens`, as it already refused the other prices, and the dashboard shows the error next to that price. A negative cache price used to lower the recorded spend and skew the cheapest-model ranking. (#403)
 - Dashboard: the memory map no longer highlights a link from the selected note to one the filter or search hides. (#354)
 - Dashboard: a theme file whose last declaration in a block leaves out the `;` keeps that token. It used to be dropped, reported as missing or replaced by the default theme's value. (#354)
 - Dashboard: a model **Discover models** suggests without a name is added under its id when that name is taken (`gpt-4o-2`). It used to be named `-2`. (#354)

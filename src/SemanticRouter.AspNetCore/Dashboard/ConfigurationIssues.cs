@@ -186,6 +186,12 @@ internal static partial class ConfigurationIssues
                     : model.ContextWindow < 0 ? nameof(ModelDefinition.ContextWindow)
                     : model.InputCostPerMillionTokens < 0 ? nameof(ModelDefinition.InputCostPerMillionTokens)
                     : model.OutputCostPerMillionTokens < 0 ? nameof(ModelDefinition.OutputCostPerMillionTokens)
+                    : model.CacheReadCostPerMillionTokens < 0 ? nameof(ModelDefinition.CacheReadCostPerMillionTokens)
+                    : model.CacheWriteCostPerMillionTokens < 0 ? nameof(ModelDefinition.CacheWriteCostPerMillionTokens)
+                    : model.ApiInputCostPerMillionTokens < 0 ? nameof(ModelDefinition.ApiInputCostPerMillionTokens)
+                    : model.ApiOutputCostPerMillionTokens < 0 ? nameof(ModelDefinition.ApiOutputCostPerMillionTokens)
+                    : model.ApiCacheReadCostPerMillionTokens < 0 ? nameof(ModelDefinition.ApiCacheReadCostPerMillionTokens)
+                    : model.ApiCacheWriteCostPerMillionTokens < 0 ? nameof(ModelDefinition.ApiCacheWriteCostPerMillionTokens)
                     : null
                     : rest.Contains("uses connector", StringComparison.Ordinal) ? nameof(ModelDefinition.Connector)
                     : FirstProperty(rest, typeof(ModelDefinition));
