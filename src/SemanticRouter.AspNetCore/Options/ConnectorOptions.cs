@@ -213,6 +213,18 @@ public sealed class ConnectorOptions
     /// </summary>
     public IList<string> ForwardHeaders { get; } = new List<string>();
 
+    /// <summary>
+    /// OpenAI-compatible: the field that carries the client's output limit on the requests the router translates (from
+    /// Anthropic and Responses clients), <c>max_tokens</c> or <c>max_completion_tokens</c>. <see langword="null"/>
+    /// (default): <c>max_completion_tokens</c> for a model that declares the <c>reasoning</c> capability on a server that
+    /// is not on this machine or the local network, as OpenAI's reasoning models (o-series, GPT-5) reject
+    /// <c>max_tokens</c>; <c>max_tokens</c> otherwise, which every local server reads.
+    /// </summary>
+    public string? MaxTokensParameter { get; set; }
+
+    /// <summary>The <see cref="MaxTokensParameter"/> values.</summary>
+    internal static readonly string[] MaxTokensParameters = ["max_tokens", "max_completion_tokens"];
+
     /// <summary>Anthropic: the <c>anthropic-version</c> header. Default <c>2023-06-01</c>.</summary>
     public string AnthropicVersion { get; set; } = "2023-06-01";
 

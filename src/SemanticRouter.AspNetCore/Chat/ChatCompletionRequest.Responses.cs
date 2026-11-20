@@ -226,6 +226,11 @@ public sealed partial class ChatCompletionRequest
                 bool images = false;
                 string output = item.TryGetProperty("output", out JsonElement value) ? ReadToolOutput(value, ref images) : string.Empty;
                 hasImages |= images;
+                if (images)
+                {
+                    protocolOnly.Add(DroppedFeatures.ToolResultImages);
+                }
+
                 AddTurn(turns, "user", [new ToolResultBlock { ToolUseId = item.GetString("call_id") ?? string.Empty, Content = output, IsError = false }]);
                 break;
 

@@ -469,3 +469,5 @@ static SemanticRouter.AspNetCore.ContextBreakdown.operator ==(SemanticRouter.Asp
 *REMOVED*static SemanticRouter.AspNetCore.ServiceStatus.operator ==(SemanticRouter.AspNetCore.ServiceStatus? left, SemanticRouter.AspNetCore.ServiceStatus? right) -> bool
 *REMOVED*static SemanticRouter.AspNetCore.UsageSummaries.Group(System.Collections.Generic.IEnumerable<SemanticRouter.AspNetCore.UsageRecord!>! records, SemanticRouter.AspNetCore.UsageGrouping by, System.TimeZoneInfo! zone) -> System.Collections.Generic.IReadOnlyList<SemanticRouter.AspNetCore.UsageGroup!>!
 *REMOVED*static SemanticRouter.AspNetCore.UsageSummaries.KeyOf(SemanticRouter.AspNetCore.UsageRecord! record, SemanticRouter.AspNetCore.UsageGrouping by, System.TimeZoneInfo! zone) -> string!
+SemanticRouter.AspNetCore.ConnectorOptions.MaxTokensParameter.get -> string?
+SemanticRouter.AspNetCore.ConnectorOptions.MaxTokensParameter.set -> void

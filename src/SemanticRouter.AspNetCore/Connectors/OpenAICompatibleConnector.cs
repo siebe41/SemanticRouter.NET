@@ -12,8 +12,8 @@ namespace SemanticRouter.AspNetCore;
 /// <summary>
 /// Reaches an HTTP chat API: any OpenAI-compatible <c>/v1/chat/completions</c> endpoint, or the Anthropic Messages API
 /// (<see cref="ConnectorTypes.Anthropic"/>). When the client speaks the backend's protocol the body is forwarded with
-/// only <c>model</c> rewritten and the response is streamed back verbatim, so tool calls, images and SSE pass through
-/// untouched. Otherwise the request is re-expressed in the backend's protocol and the reply is translated back,
+/// only <c>model</c> rewritten (and, on a streamed chat-completions request, usage asked for) and the response is
+/// streamed back verbatim, so tool calls, images and SSE pass through untouched. Otherwise the request is re-expressed in the backend's protocol and the reply is translated back,
 /// including streaming and tool calls.
 /// </summary>
 /// <remarks>
@@ -75,14 +75,16 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         bool passThrough = request.Chat.Protocol == Protocol;
         bool reasoning = request.Model.Capabilities.Contains("reasoning", StringComparer.OrdinalIgnoreCase);
         DroppedFeatures.Report(context, DroppedFeatures.ForTranslation(request.Chat, Protocol, reasoning));
+        bool usageAdded = false;
         ReadOnlyMemory<byte> body = passThrough
-            ? RewriteModel(request.RawBody, request.Model.Model, stripRelayedThinking: Protocol == ChatProtocol.Anthropic)
+            ? RewriteModel(
+                request.RawBody, request.Model.Model, stripRelayedThinking: Protocol == ChatProtocol.Anthropic, requestUsage: Protocol == ChatProtocol.OpenAI, out usageAdded)
             : Protocol switch
             {
                 ChatProtocol.Anthropic => AnthropicRequestBuilder.Build(
                     request.Chat, request.Model.Model, reasoning: reasoning, caching: _options.PromptCaching, cacheTtl: _options.CacheTtl),
                 ChatProtocol.Responses => ResponsesRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
-                _ => OpenAIRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
+                _ => OpenAIRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning, maxCompletionTokens: UsesMaxCompletionTokens(_options, reasoning)),
             };
 
         using var message = new HttpRequestMessage(HttpMethod.Post, _requestUri) { Content = new ReadOnlyMemoryContent(body) };
@@ -139,7 +141,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         var copied = new List<string>();
         try
         {
-            return await RelayAsync(request, context, response, passThrough, copied, stall.Token).ConfigureAwait(false);
+            return await RelayAsync(request, context, response, passThrough, usageAdded, copied, stall.Token).ConfigureAwait(false);
         }
         catch (UpstreamReplyException ex) when (!context.Response.HasStarted)
         {
@@ -184,7 +186,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
     }
 
     private async Task<ConnectorResult> RelayAsync(
-        ConnectorRequest request, HttpContext context, HttpResponseMessage response, bool passThrough, List<string> copied, CancellationToken cancellationToken)
+        ConnectorRequest request, HttpContext context, HttpResponseMessage response, bool passThrough, bool usageAdded, List<string> copied, CancellationToken cancellationToken)
     {
         using (response)
         {
@@ -217,7 +219,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
             if (passThrough)
             {
-                await CopyResponseAsync(context, response, request.Model.Name, copied, cancellationToken).ConfigureAwait(false);
+                await CopyResponseAsync(context, response, request.Model.Name, usageAdded, copied, cancellationToken).ConfigureAwait(false);
                 return ConnectorResult.Completed;
             }
 
@@ -256,13 +258,36 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
     }
 
     /// <summary>
+    /// Whether a translated request to an OpenAI-compatible backend carries its output limit as <c>max_completion_tokens</c>
+    /// (<see cref="ConnectorOptions.MaxTokensParameter"/>): when set so, or by default for a reasoning model on a server
+    /// that is not local. OpenAI's reasoning models reject <c>max_tokens</c>; local servers all read it.
+    /// </summary>
+    internal static bool UsesMaxCompletionTokens(ConnectorOptions options, bool reasoning) => options.MaxTokensParameter switch
+    {
+        "max_completion_tokens" => true,
+        "max_tokens" => false,
+        _ => reasoning && options.BaseAddress is { } address && !ConnectorProbe.IsLocalAddress(address),
+    };
+
+    /// <summary>
     /// Sets <c>model</c> on a pass-through body. With <paramref name="stripRelayedThinking"/>, also removes thinking
     /// blocks the router itself relayed from another backend: Anthropic would reject their signature.
     /// </summary>
-    internal static ReadOnlyMemory<byte> RewriteModel(ReadOnlyMemory<byte> body, string? model, bool stripRelayedThinking = false)
+    internal static ReadOnlyMemory<byte> RewriteModel(ReadOnlyMemory<byte> body, string? model, bool stripRelayedThinking = false) =>
+        RewriteModel(body, model, stripRelayedThinking, requestUsage: false, out _);
+
+    /// <summary>
+    /// As <see cref="RewriteModel(ReadOnlyMemory{byte}, string?, bool)"/>. With <paramref name="requestUsage"/>, a streamed
+    /// chat-completions body also gets <c>stream_options.include_usage</c>, without which the server reports no usage and
+    /// budgets never see the request; <paramref name="usageAdded"/> says the client did not ask for it, so the usage-only
+    /// final chunk is not relayed to it.
+    /// </summary>
+    internal static ReadOnlyMemory<byte> RewriteModel(
+        ReadOnlyMemory<byte> body, string? model, bool stripRelayedThinking, bool requestUsage, out bool usageAdded)
     {
+        usageAdded = false;
         bool strip = stripRelayedThinking && body.Span.IndexOf(System.Text.Encoding.UTF8.GetBytes(ThinkingBlock.RouterSignature)) >= 0;
-        if (string.IsNullOrEmpty(model) && !strip)
+        if (string.IsNullOrEmpty(model) && !strip && !requestUsage)
         {
             return body;
         }
@@ -274,6 +299,21 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
                 if (!string.IsNullOrEmpty(model))
                 {
                     json["model"] = model;
+                }
+
+                if (requestUsage && IsTrue(json["stream"]))
+                {
+                    if (json["stream_options"] is not JsonObject streamOptions)
+                    {
+                        streamOptions = new JsonObject();
+                        json["stream_options"] = streamOptions;
+                    }
+
+                    if (!IsTrue(streamOptions["include_usage"]))
+                    {
+                        streamOptions["include_usage"] = true;
+                        usageAdded = true;
+                    }
                 }
 
                 if (strip && json["messages"] is JsonArray messages)
@@ -293,10 +333,13 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         catch (JsonException)
         {
             // Not an object we can rewrite; forward the original bytes untouched.
+            usageAdded = false;
         }
 
         return body;
     }
+
+    private static bool IsTrue(JsonNode? node) => node is JsonValue value && value.TryGetValue(out bool flag) && flag;
 
     private void AddCredentials(HttpRequestMessage message)
     {
@@ -321,7 +364,8 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         }
     }
 
-    private async Task CopyResponseAsync(HttpContext context, HttpResponseMessage response, string modelName, List<string> copied, CancellationToken cancellationToken)
+    private async Task CopyResponseAsync(
+        HttpContext context, HttpResponseMessage response, string modelName, bool usageAdded, List<string> copied, CancellationToken cancellationToken)
     {
         HttpResponse outgoing = context.Response;
         outgoing.StatusCode = (int)response.StatusCode;
@@ -348,12 +392,12 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         {
             bool sse = response.Content.Headers.ContentType?.MediaType?.Equals("text/event-stream", StringComparison.OrdinalIgnoreCase) == true;
             UsageCapture? capture = UsageCapture.Of(context);
-            if ((_affinity is not null || capture is not null) && response.IsSuccessStatusCode)
+            if ((_affinity is not null || capture is not null || usageAdded) && response.IsSuccessStatusCode)
             {
                 IToolCallAffinity? affinity = _affinity;
                 await PassThroughToolCallScanner.CopyAsync(
                     upstream, outgoing.Body, sse, Protocol, id => affinity?.Remember(id, modelName), cancellationToken,
-                    capture is null ? null : capture.Observe).ConfigureAwait(false);
+                    capture is null ? null : capture.Observe, stripUsageChunk: usageAdded).ConfigureAwait(false);
             }
             else
             {

@@ -10,7 +10,12 @@ internal static class OpenAIRequestBuilder
     /// <param name="model">The backend model id.</param>
     /// <param name="stream">Overrides the request's streaming flag.</param>
     /// <param name="reasoning">The target model declares <c>reasoning</c>: send <c>reasoning_effort</c>.</param>
-    public static ReadOnlyMemory<byte> Build(ChatCompletionRequest request, string? model, bool? stream = null, bool reasoning = false)
+    /// <param name="maxCompletionTokens">
+    /// Write the output limit as <c>max_completion_tokens</c> instead of <c>max_tokens</c>: OpenAI's reasoning models
+    /// (o-series, GPT-5) reject <c>max_tokens</c>.
+    /// </param>
+    public static ReadOnlyMemory<byte> Build(
+        ChatCompletionRequest request, string? model, bool? stream = null, bool reasoning = false, bool maxCompletionTokens = false)
     {
         var buffer = new ArrayBufferWriter<byte>();
         using (var writer = new Utf8JsonWriter(buffer, ChatJsonOptions.Writer))
@@ -77,7 +82,7 @@ internal static class OpenAIRequestBuilder
 
             if (request.MaxTokens is { } maxTokens)
             {
-                writer.WriteNumber("max_tokens", maxTokens);
+                writer.WriteNumber(maxCompletionTokens ? "max_completion_tokens" : "max_tokens", maxTokens);
             }
 
             if (request.Temperature is { } temperature)
@@ -394,7 +399,9 @@ internal static class AnthropicRequestBuilder
 
             writer.WriteStartArray("messages");
             string? openRole = null;
-            foreach (ChatTurn turn in request.Turns.Where(t => t.Role != "system"))
+            // A turn with nothing the Messages API takes (no text after a cancelled turn, only thinking) is left out, as
+            // it rejects "content": []; leaving it out first lets the turns around it merge.
+            foreach (ChatTurn turn in request.Turns.Where(t => t.Role != "system" && t.Blocks.Any(IsWritten)))
             {
                 // The Messages API wants strictly alternating roles: merge consecutive same-role turns.
                 if (openRole == turn.Role)
@@ -560,6 +567,10 @@ internal static class AnthropicRequestBuilder
 
         writer.WriteEndObject();
     }
+
+    /// <summary>Whether <see cref="WriteBlocks"/> writes <paramref name="block"/>.</summary>
+    private static bool IsWritten(ContentBlock block) =>
+        block is TextBlock { Text.Length: > 0 } or ImageBlock or ToolUseBlock or ToolResultBlock;
 
     private static void WriteBlocks(Utf8JsonWriter writer, ChatTurn turn)
     {

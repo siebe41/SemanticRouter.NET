@@ -28,6 +28,13 @@ internal interface IChatResponseWriter
 
     /// <summary>Finishes the reply. Safe to call when nothing was written (an empty reply).</summary>
     Task CompleteAsync(ChatStopReason stopReason, ChatUsage usage, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Finishes the reply, naming the stop sequence that ended it when the backend said which. Only the Anthropic
+    /// protocol has a field for it; the others finish as <see cref="CompleteAsync(ChatStopReason, ChatUsage, CancellationToken)"/>.
+    /// </summary>
+    Task CompleteAsync(ChatStopReason stopReason, ChatUsage usage, string? stopSequence, CancellationToken cancellationToken) =>
+        CompleteAsync(stopReason, usage, cancellationToken);
 }
 
 /// <summary>Creates the right writer for a request.</summary>

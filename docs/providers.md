@@ -484,7 +484,7 @@ Both models get the same instructions; only the reading of the reply differs. Th
 
 ## What survives translation
 
-When a backend speaks the client's protocol, the body passes through untouched (only `model` is rewritten). Otherwise the request is translated, and anything the backend cannot carry is listed in the `X-Prompt-Route-Dropped` response header and the activity entry's `dropped` field.
+When a backend speaks the client's protocol, the body passes through untouched (only `model` is rewritten, and a streamed chat-completions request asks for usage with `stream_options.include_usage`, so budgets see it). Otherwise the request is translated, and anything the backend cannot carry is listed in the `X-Prompt-Route-Dropped` response header and the activity entry's `dropped` field.
 
 | Feature | OpenAI-compatible backend | Anthropic backend | Responses backend | CLI backend |
 |---|---|---|---|---|
@@ -492,22 +492,29 @@ When a backend speaks the client's protocol, the body passes through untouched (
 | Tools and tool results | ✓ | ✓ | ✓ | with `ToolCalling: Prompted` |
 | Codex custom tools and namespaces | as functions | as tools | ✓ | with `ToolCalling: Prompted` |
 | Reasoning request (`reasoning_effort`, `thinking`, `reasoning.effort`) | `reasoning_effort` on models with `reasoning` | `thinking` with a budget on models with `reasoning` | `reasoning.effort` on models with `reasoning` | dropped |
+| Output limit (`max_tokens`, `max_completion_tokens`, `max_output_tokens`) | `max_tokens`; `max_completion_tokens` for a model with `reasoning` on a server that is not local ([`MaxTokensParameter`](#output-limits-on-openai-reasoning-models)) | `max_tokens` (8,192 when the client set none) | `max_output_tokens` | not sent |
 | Reasoning in the reply | read from `reasoning_content` | `thinking` blocks | reasoning summaries | n/a |
 | Structured output (`response_format`, `text.format`) | ✓ | a forced `structured_output` tool for a JSON schema; an instruction for JSON mode | ✓ | dropped |
 | `parallel_tool_calls: false` | ✓ | `disable_parallel_tool_use` | ✓ | dropped |
-| Stop reasons (length, refusal, tool use) | ✓ | ✓ (`refusal`, `pause_turn`) | ✓ (`incomplete`) | end of turn, or tool use with prompted tools |
+| Stop reasons (length, refusal, tool use, stop sequence) | ✓ (the stop sequence when the server names it: vLLM's `stop_reason`, SGLang's `matched_stop`) | ✓ (`refusal`, `pause_turn`) | ✓ (`incomplete`) | end of turn, or tool use with prompted tools |
 | Hosted tools (`web_search`, …) | dropped | dropped | ✓ | dropped |
 | Prompt caching | automatic | markers added above the model's minimum ([`PromptCaching`](#prompt-caching-on-translated-requests)) | automatic | n/a |
 | `cache_control` markers from an Anthropic client | dropped (the backend caches on its own) | ✓ | dropped (the backend caches on its own) | dropped |
 | `prompt_cache_key` | ✓ | not needed (the router adds cache markers) | ✓ | not needed |
 | Cached-token counts in the reply | `prompt_tokens_details.cached_tokens` | `cache_read_input_tokens`, `cache_creation_input_tokens` (also on a streamed `message_delta`) | `input_tokens_details.cached_tokens` | read from the CLI's usage (claude, codex) |
-| Protocol-only features (documents, `logprobs`, `n` > 1, audio, `previous_response_id`, reasoning items) | dropped | dropped | dropped | dropped |
+| Protocol-only features (documents, `logprobs`, `n` > 1, audio, `previous_response_id`, reasoning items, images inside tool results) | dropped | dropped | dropped | dropped |
 
 Notes:
 
 - **Reasoning across protocols.** Reasoning a backend returns is shown to the client in its own format. An Anthropic client gets a `thinking` block signed `semantic-router-relayed`. Anthropic's API would reject that signature, so the router removes such blocks before a native Anthropic backend sees the conversation. Real Anthropic thinking blocks pass through.
 - **Thinking and a schema don't mix.** Anthropic cannot think while a tool is forced, so a JSON-schema request to an Anthropic backend drops the reasoning request. Thinking also needs `max_tokens` above 1,024. While thinking is on, `temperature` and `top_p` are not sent.
 - **Declare `reasoning` only on models that accept it.** Servers that don't know `reasoning_effort` may reject the request.
+- **Empty turns are left out for Anthropic.** A turn with nothing the Messages API takes (an empty assistant message after a cancelled turn, say) is not sent, as the API rejects `"content": []`; the turns around it merge when they then share a role.
+- **A reply cut off during a tool call says so.** When the backend stopped at the output limit, the client gets `length` (`max_tokens`, `incomplete`) rather than a tool-use stop, so it does not run a call whose arguments may be cut short.
+
+### Output limits on OpenAI reasoning models
+
+OpenAI's reasoning models (the o-series and GPT-5) reject `max_tokens` and take the limit as `max_completion_tokens`, while most local servers read only `max_tokens`. A request the router translates for an OpenAI-compatible connector (from Claude Code, say, which always sets `max_tokens`) therefore carries the limit as `max_completion_tokens` when the model declares the `reasoning` capability and the connector's server is not on this machine or the local network, and as `max_tokens` otherwise. Set the connector's `MaxTokensParameter` to `max_tokens` or `max_completion_tokens` to choose one for all its models: `max_completion_tokens` for an OpenAI reasoning model that does not declare `reasoning`, or `max_tokens` for a hosted server that does not know the newer name. Requests from OpenAI clients pass through with the name the client chose.
 
 ## Writing your own connector
 

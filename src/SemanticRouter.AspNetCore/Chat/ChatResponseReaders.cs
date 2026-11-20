@@ -60,6 +60,8 @@ internal static class OpenAIResponseReader
             ChatStopReason stop = ChatStopReason.EndTurn;
             ChatUsage usage = default;
             int openToolIndex = -1;
+            string? openToolId = null;
+            string? stopSequence = null;
             await foreach (string data in ServerSentEvents.ReadAsync(stream, cancellationToken).ConfigureAwait(false))
             {
                 if (data == "[DONE]")
@@ -114,7 +116,10 @@ internal static class OpenAIResponseReader
                             {
                                 int index = call.GetInt("index") ?? openToolIndex + 1;
                                 call.TryGetObject("function", out JsonElement function);
-                                if (index != openToolIndex)
+                                string? callId = call.GetString("id") is { Length: > 0 } given ? given : null;
+
+                                // Some servers send parallel calls all at index 0: a new id starts a new call too.
+                                if (index != openToolIndex || (callId is not null && openToolId is not null && callId != openToolId))
                                 {
                                     if (openToolIndex >= 0)
                                     {
@@ -122,10 +127,8 @@ internal static class OpenAIResponseReader
                                     }
 
                                     openToolIndex = index;
-                                    await writer.StartToolCallAsync(
-                                        call.GetString("id") is { Length: > 0 } id ? id : JsonHelpers.NewToolUseId(),
-                                        function.GetString("name") ?? string.Empty,
-                                        cancellationToken).ConfigureAwait(false);
+                                    openToolId = callId ?? JsonHelpers.NewToolUseId();
+                                    await writer.StartToolCallAsync(openToolId, function.GetString("name") ?? string.Empty, cancellationToken).ConfigureAwait(false);
                                 }
 
                                 if (function.GetString("arguments") is { Length: > 0 } arguments)
@@ -138,7 +141,7 @@ internal static class OpenAIResponseReader
 
                     if (choice.GetString("finish_reason") is { } finish)
                     {
-                        stop = MapFinishReason(finish);
+                        (stop, stopSequence) = MapFinishReason(finish, choice);
                     }
                 }
             }
@@ -148,7 +151,7 @@ internal static class OpenAIResponseReader
                 await writer.EndToolCallAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            await writer.CompleteAsync(stop, usage, cancellationToken).ConfigureAwait(false);
+            await writer.CompleteAsync(stop, usage, stopSequence, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -160,6 +163,7 @@ internal static class OpenAIResponseReader
         }
 
         ChatStopReason stop = ChatStopReason.EndTurn;
+        string? stopSequence = null;
         if (root.TryGetArray("choices", out JsonElement choices) && choices.GetArrayLength() > 0)
         {
             JsonElement choice = choices[0];
@@ -200,20 +204,26 @@ internal static class OpenAIResponseReader
 
             if (choice.GetString("finish_reason") is { } finish)
             {
-                stop = MapFinishReason(finish);
+                (stop, stopSequence) = MapFinishReason(finish, choice);
             }
         }
 
         ChatUsage usage = root.TryGetObject("usage", out JsonElement usageElement) ? ReadUsage(usageElement) : default;
-        await writer.CompleteAsync(stop, usage, cancellationToken).ConfigureAwait(false);
+        await writer.CompleteAsync(stop, usage, stopSequence, cancellationToken).ConfigureAwait(false);
     }
 
-    private static ChatStopReason MapFinishReason(string finish) => finish switch
+    /// <summary>
+    /// The stop reason, and the stop sequence that ended the reply when the server says which: vLLM puts it in the
+    /// choice's <c>stop_reason</c>, SGLang in <c>matched_stop</c> (a token id there is not a sequence the client gave).
+    /// OpenAI does not say, so its replies end with <see cref="ChatStopReason.EndTurn"/>.
+    /// </summary>
+    private static (ChatStopReason Stop, string? Sequence) MapFinishReason(string finish, JsonElement choice) => finish switch
     {
-        "tool_calls" or "function_call" => ChatStopReason.ToolUse,
-        "length" => ChatStopReason.MaxTokens,
-        "content_filter" => ChatStopReason.Refusal,
-        _ => ChatStopReason.EndTurn,
+        "tool_calls" or "function_call" => (ChatStopReason.ToolUse, null),
+        "length" => (ChatStopReason.MaxTokens, null),
+        "content_filter" => (ChatStopReason.Refusal, null),
+        "stop" when (choice.GetString("stop_reason") ?? choice.GetString("matched_stop")) is { Length: > 0 } sequence => (ChatStopReason.StopSequence, sequence),
+        _ => (ChatStopReason.EndTurn, null),
     };
 
     private static ChatUsage ReadUsage(JsonElement usage)
@@ -412,8 +422,13 @@ internal static class AnthropicResponseReader
 /// </summary>
 internal static class PassThroughToolCallScanner
 {
+    /// <summary>
+    /// Copies the reply, reporting tool-call ids and usage. With <c>stripUsageChunk</c> (the router asked for usage the
+    /// client did not, with <c>stream_options.include_usage</c>), the usage-only final chunk is read but not relayed.
+    /// </summary>
     public static async Task CopyAsync(
-        Stream upstream, Stream downstream, bool sse, ChatProtocol protocol, Action<string> onToolCall, CancellationToken cancellationToken, Action<ChatUsage>? onUsage = null)
+        Stream upstream, Stream downstream, bool sse, ChatProtocol protocol, Action<string> onToolCall, CancellationToken cancellationToken,
+        Action<ChatUsage>? onUsage = null, bool stripUsageChunk = false)
     {
         if (!sse)
         {
@@ -434,8 +449,23 @@ internal static class PassThroughToolCallScanner
         using var reader = new StreamReader(upstream);
         List<string>? held = [];
         UpstreamReplyException? failed = null;
+        bool skipBlank = false;
         while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
         {
+            if (skipBlank && line.Length == 0)
+            {
+                skipBlank = false; // the end of the event that was not relayed
+                continue;
+            }
+
+            skipBlank = false;
+            if (stripUsageChunk && IsUsageOnlyChunk(line))
+            {
+                _ = ScanJson(System.Text.Encoding.UTF8.GetBytes(line.AsSpan(5).TrimStart().ToString()), protocol, onToolCall, onUsage);
+                skipBlank = true;
+                continue;
+            }
+
             bool data = line.StartsWith("data:", StringComparison.Ordinal);
             UpstreamReplyException? error = data
                 && (line.Contains("\"id\"", StringComparison.Ordinal) || line.Contains("\"call_id\"", StringComparison.Ordinal)
@@ -482,6 +512,32 @@ internal static class PassThroughToolCallScanner
         foreach (string line in lines)
         {
             await downstream.WriteAsync(System.Text.Encoding.UTF8.GetBytes(line + "\n"), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Whether an SSE line is the chunk <c>stream_options.include_usage</c> adds at the end of a chat-completions stream:
+    /// no choices, and the usage.
+    /// </summary>
+    internal static bool IsUsageOnlyChunk(string line)
+    {
+        if (!line.StartsWith("data:", StringComparison.Ordinal)
+            || !(line.Contains("\"choices\":[]", StringComparison.Ordinal) || line.Contains("\"choices\": []", StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(line.AsSpan(5).TrimStart().ToString());
+            JsonElement root = document.RootElement;
+            return root.ValueKind == JsonValueKind.Object
+                   && root.TryGetArray("choices", out JsonElement choices) && choices.GetArrayLength() == 0
+                   && root.TryGetObject("usage", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
         }
     }
 
@@ -609,7 +665,8 @@ internal static class ResponsesResponseReader
                     bool keep = false;
                     switch (root.GetString("type"))
                     {
-                        case "response.output_text.delta" when root.GetString("delta") is { Length: > 0 } text:
+                        // A refusal is the reply's text, as in a JSON reply.
+                        case "response.output_text.delta" or "response.refusal.delta" when root.GetString("delta") is { Length: > 0 } text:
                             await writer.WriteTextAsync(text, cancellationToken).ConfigureAwait(false);
                             break;
 
@@ -753,19 +810,23 @@ internal static class ResponsesResponseReader
 
     private static ChatStopReason StopReasonOf(JsonElement response)
     {
-        if (response.TryGetArray("output", out JsonElement output)
-            && output.EnumerateArray().Any(i => i.GetString("type") is "function_call" or "custom_tool_call"))
-        {
-            return ChatStopReason.ToolUse;
-        }
-
-        return response.TryGetObject("incomplete_details", out JsonElement incomplete)
-            ? incomplete.GetString("reason") switch
+        // A reply cut off at the limit says so even with a tool call: its arguments may be incomplete.
+        ChatStopReason incomplete = response.TryGetObject("incomplete_details", out JsonElement details)
+            ? details.GetString("reason") switch
             {
                 "max_output_tokens" => ChatStopReason.MaxTokens,
                 "content_filter" => ChatStopReason.Refusal,
                 _ => ChatStopReason.EndTurn,
             }
             : ChatStopReason.EndTurn;
+        if (incomplete == ChatStopReason.MaxTokens)
+        {
+            return incomplete;
+        }
+
+        return response.TryGetArray("output", out JsonElement output)
+               && output.EnumerateArray().Any(i => i.GetString("type") is "function_call" or "custom_tool_call")
+            ? ChatStopReason.ToolUse
+            : incomplete;
     }
 }

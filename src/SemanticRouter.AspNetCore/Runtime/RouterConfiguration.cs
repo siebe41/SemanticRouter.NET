@@ -201,6 +201,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 errors.Add($"Connector '{name}' CacheTtl must be 5m or 1h.");
             }
 
+            if (connector.MaxTokensParameter is { Length: > 0 } maxTokensParameter && !ConnectorOptions.MaxTokensParameters.Contains(maxTokensParameter, StringComparer.Ordinal))
+            {
+                errors.Add($"Connector '{name}' MaxTokensParameter must be max_tokens or max_completion_tokens (or left out).");
+            }
+
             if (!Enum.IsDefined(connector.PromptedToolParsing))
             {
                 errors.Add($"Connector '{name}' PromptedToolParsing must be Lenient or Strict.");
