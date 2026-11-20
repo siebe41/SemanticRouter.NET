@@ -11,7 +11,8 @@ name: Release
 # describes and every package's licence) and THIRD-PARTY-NOTICES.txt are attached. Signatures and attestations use
 # short-lived Sigstore certificates issued to this workflow (GitHub OIDC), so no signing key is stored anywhere. The
 # jobs that hold the OIDC token build nothing; they sign and attest what the build jobs produced, after any code
-# signing.
+# signing. The attestation covers only what this run attached to the draft: the checksums job checks each asset
+# against the run's own artifacts and records, so a file someone else put on the draft is never attested.
 #
 # Nothing is public until everything is ready (docs/releases.md#the-order-of-a-release). Everything is built, signed,
 # checked and attached to a draft GitHub release first, which nobody but the maintainers sees and which the desktop
@@ -59,6 +60,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Only the repository owner releases: a v* tag pushed by anyone else publishes nothing, since every other job needs
       # this one. The "Cut a release" workflow (cut-release.yml) creates the tag with the owner's token, so its tag is the
@@ -605,8 +607,11 @@ jobs:
           printf '%s\n' "$notes" > notes.md
 
       # The release is created as a draft, which only the publish job makes public, once everything else is done. A
-      # version with a suffix (1.0.0-rc.1) is created as a prerelease: the desktop app's updater skips those. On a
-      # re-run, gh finds the draft by its tag and the archives replace the ones there.
+      # version with a suffix (1.0.0-rc.1) is created as a prerelease: the desktop app's updater skips those. This run
+      # creates it: a release for the tag that already exists on the run's first attempt was made by someone else (a
+      # draft planted before the tag, with assets of their choosing), and the run stops
+      # (docs/releases.md#when-a-release-fails). On a re-run (a later attempt), gh finds the draft this run created by
+      # its tag and the archives replace the ones there; whatever else is on it, the checksums job refuses to attest.
       - name: Attach to the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -615,9 +620,17 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             prerelease=(--prerelease)
           fi
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
+          draft="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          if [ -z "$draft" ]; then
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
               --notes-file notes.md --generate-notes --verify-tag --draft "${prerelease[@]}"
+          elif [ "$draft" != true ]; then
+            echo "::error::The release $GITHUB_REF_NAME is already published; this run attaches to a draft only."
+            exit 1
+          elif [ "$GITHUB_RUN_ATTEMPT" = 1 ]; then
+            echo "::error::A draft release for $GITHUB_REF_NAME exists already, but this run has not created one. Check who made it, delete it (gh release delete $GITHUB_REF_NAME) and re-run this job."
+            exit 1
+          fi
           gh release upload "$GITHUB_REF_NAME" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
 
   # The app each installer packages, published on the installer's own OS (as before the split), without secrets. Tar
@@ -661,13 +674,14 @@ jobs:
   # vpk, the packaging and signing tool itself, is the one tool installed. The Windows and macOS jobs sign when the
   # packages job found their platform's signing set up, and then check the signature before anything is uploaded
   # (docs/desktop.md#signing). vpk uploads into the draft release (--merge) and leaves it a draft: without --publish,
-  # the update feeds are public only when the publish job publishes the release. Each secret goes to the steps that use
-  # it, not to the job (deploy/workflow-secrets-check.sh): the token to the steps that fetch the previous release and
-  # upload, the signing credentials to the signing setup. vpk is installed before either, so its restore never runs
-  # next to them. Windows signs with an Azure login by OIDC, so no Azure secret is stored; but id-token: write is
-  # job-wide, so every step of installer-windows, the vpk install included, could ask for the token that signs. That
-  # job therefore runs only vpk, pinned actions and this repository's scripts, in the windows-signing environment that
-  # no other job uses, and logs out of Azure as soon as it has signed.
+  # the update feeds are public only when the publish job publishes the release. Before it uploads, each job records
+  # what it attaches (deploy/record-attached.sh) in an attached-* artifact; the checksums job attests nothing else.
+  # Each secret goes to the steps that use it, not to the job (deploy/workflow-secrets-check.sh): the token to the
+  # steps that fetch the previous release and upload, the signing credentials to the signing setup. vpk is installed
+  # before either, so its restore never runs next to them. Windows signs with an Azure login by OIDC, so no Azure
+  # secret is stored; but id-token: write is job-wide, so every step of installer-windows, the vpk install included,
+  # could ask for the token that signs. That job therefore runs only vpk, pinned actions and this repository's scripts,
+  # in the windows-signing environment that no other job uses, and logs out of Azure as soon as it has signed.
   installers:
     needs: [ desktop, installer-build ]
     runs-on: ubuntu-latest
@@ -699,15 +713,25 @@ jobs:
           sudo apt-get install -y --no-install-recommends squashfs-tools zstd
           dotnet tool install -g vpk --version 1.2.161
 
-      # The token fetches the previous release's package (for the delta) and uploads.
+      # The token fetches the previous release's package (for the delta) and uploads. What is attached is recorded
+      # first, for the checksums job, which attests nothing else (deploy/record-attached.sh).
       - name: Package and attach
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p published && tar -C published -xzf publish-linux-x64.tar.gz
           PUBLISH_DIR=published deploy/package-installer.sh linux-x64 "${GITHUB_REF_NAME#v}" installers/linux-x64
+          deploy/record-attached.sh installers/linux-x64 linux-x64 attached
           vpk upload github --outputDir installers/linux-x64 --channel linux-x64 \
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $RELEASE_PRE
+
+      # Kept 7 days, like the update packages below, so a failed checksums job can be re-run.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: attached-linux-x64
+          path: attached/*
+          if-no-files-found: error
+          retention-days: 7
 
       # For installer-sbom (with the previous release's full package, when one was downloaded for the delta).
       # Kept 7 days, so a failed installer-sbom can be re-run after the day the release was cut.
@@ -805,6 +829,11 @@ jobs:
         shell: pwsh
         run: deploy/installer-signature-check.ps1 -Installers installers/win-x64 -Version ($env:GITHUB_REF_NAME -replace '^v', '')
 
+      # For the checksums job, which attests nothing else (deploy/record-attached.sh).
+      - name: Record what is attached
+        shell: bash
+        run: deploy/record-attached.sh installers/win-x64 win-x64 attached
+
       - name: Attach
         shell: bash
         env:
@@ -812,6 +841,13 @@ jobs:
         run: |
           vpk upload github --outputDir installers/win-x64 --channel win-x64 \
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $RELEASE_PRE
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: attached-win-x64
+          path: attached/*
+          if-no-files-found: error
+          retention-days: 7
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -894,6 +930,13 @@ jobs:
             deploy/installer-signature-check.sh "installers/$rid" "${GITHUB_REF_NAME#v}" "$rid"
           done
 
+      # For the checksums job, which attests nothing else (deploy/record-attached.sh).
+      - name: Record what is attached
+        run: |
+          for rid in osx-arm64 osx-x64; do
+            deploy/record-attached.sh "installers/$rid" "$rid" attached
+          done
+
       - name: Attach
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -902,6 +945,13 @@ jobs:
             vpk upload github --outputDir "installers/$rid" --channel "$rid" \
               --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $RELEASE_PRE
           done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: attached-osx
+          path: attached/*
+          if-no-files-found: error
+          retention-days: 7
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -968,6 +1018,12 @@ jobs:
   # been pushed or published yet (the image, NuGet and publish jobs come after this one), but the attestation is
   # public: it goes to the public Sigstore log and the repository's attestations, and stays there if the version is
   # given up.
+  #
+  # Anyone with write access to the repository can change a draft's assets, so what the job attests is not simply
+  # what it finds on the draft (#404): the archives must match the desktop job's artifact, the installer jobs' files
+  # their records (deploy/record-attached.sh: the checksum of each file and the entries of each update feed), and
+  # every other asset is this job's own, from the run's artifacts. A file on the draft that this run did not attach,
+  # or one that differs, stops the release here, before the attestation.
   checksums:
     needs: [ packages, image-sbom, desktop, installers, installer-windows, installer-macos, installer-sbom ]
     runs-on: ubuntu-latest
@@ -990,13 +1046,79 @@ jobs:
           merge-multiple: true
           path: attach
 
-      - name: Checksums
+      # What the desktop job and the installer jobs attached to the draft.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop
+          path: desktop
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: attached-*
+          merge-multiple: true
+          path: attached
+
+      # Every asset on the draft is one this run attached, unchanged: a desktop job's file with the artifact's checksum,
+      # an installer job's file with the checksum it recorded, an update feed with the entries it recorded (vpk writes
+      # the feed as it uploads, so its bytes are not known in advance; parsed, refusing a key given twice, it must be
+      # the same). The NuGet packages and the SBOMs are replaced with this job's own copies. Nothing a run did not
+      # attach is ever attested, whoever else can write to the draft.
+      - name: The draft holds only what this run attached
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir release --clobber
-          cp attach/* release/
           rm -f release/SHA256SUMS
+          declare -A expected=()
+          problems=()
+          while read -r digest name; do
+            name="${name#\*}"
+            if [ -n "${expected[$name]:-}" ] && [ "${expected[$name]}" != "$digest" ]; then
+              problems+=("two jobs of this run attached a different $name")
+            fi
+            expected[$name]="$digest"
+          done < <( (cd desktop && sha256sum -- *) && cat attached/*.sha256 | tr -d '\r')
+          for file in release/*; do
+            name="${file#release/}"
+            if [ -f "attach/$name" ]; then
+              continue
+            elif [[ "$name" == releases.*.json ]] && [ -f "attached/$name" ]; then
+              python3 - "$file" "attached/$name" <<'EOF' || problems+=("$name does not list the packages this run attached")
+          import json, sys
+          def unique(pairs):
+              keys = [key for key, _ in pairs]
+              if len(keys) != len(set(keys)):
+                  raise ValueError("a key given twice")
+              return dict(pairs)
+          def feed(path):
+              with open(path, encoding="utf-8") as f:
+                  value = json.load(f, object_pairs_hook=unique)
+              return {**value, "Assets": sorted(json.dumps(asset, sort_keys=True) for asset in value["Assets"])}
+          sys.exit(0 if feed(sys.argv[1]) == feed(sys.argv[2]) else 1)
+          EOF
+            elif [ -z "${expected[$name]:-}" ]; then
+              problems+=("$name is not something this run attached")
+            elif [ "$(sha256sum < "$file" | cut -d ' ' -f 1)" != "${expected[$name]}" ]; then
+              problems+=("$name is not the file this run attached")
+            fi
+          done
+          for name in "${!expected[@]}"; do
+            [ -f "release/$name" ] || problems+=("$name, which this run attached, is missing")
+          done
+          for record in attached/releases.*.json; do
+            [ -f "release/${record#attached/}" ] || problems+=("${record#attached/}, which this run attached, is missing")
+          done
+          for problem in "${problems[@]}"; do
+            echo "::error::The draft release $GITHUB_REF_NAME: $problem."
+          done
+          if [ ${#problems[@]} -gt 0 ]; then
+            echo "::error::Nothing is attested or published. See docs/releases.md#when-a-release-fails."
+            exit 1
+          fi
+
+      - name: Checksums
+        run: |
+          cp attach/* release/
           (cd release && sha256sum -- * > SHA256SUMS)
           cat release/SHA256SUMS
 
@@ -1023,10 +1145,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" attach/* release/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
 
+      # For the publish job, which checks the draft against it once more.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sha256sums
+          path: release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
   # Last: the draft becomes the public release, and with it the desktop app's update feeds, which the updater reads
   # from published releases only. It runs only when everything else succeeded: every installer signed and checked, the
   # checksums and attestation attached, the image pushed and signed, and the NuGet packages pushed. It first checks
-  # that the draft has every channel's update feed, the notices and SHA256SUMS.
+  # that the draft has every channel's update feed, the notices and SHA256SUMS, and that its assets are still exactly
+  # the files the checksums job attested (its SHA256SUMS, from the run's artifact rather than the draft): an asset
+  # changed since then would fail `gh attestation verify` and the desktop app's update check.
   publish:
     needs: [ packages, checksums, image-sign, nuget ]
     runs-on: ubuntu-latest
@@ -1037,18 +1169,31 @@ jobs:
       WINDOWS_SIGNING: ${{ needs.packages.outputs.windows-signing }}
       MACOS_SIGNING: ${{ needs.packages.outputs.macos-signing }}
     steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sha256sums
+          path: attested
+
       - name: The draft is complete
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          assets="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir release
           missing=()
           for asset in SHA256SUMS THIRD-PARTY-NOTICES.txt \
             releases.linux-x64.json releases.win-x64.json releases.osx-arm64.json releases.osx-x64.json; do
-            grep -qxF "$asset" <<<"$assets" || missing+=("$asset")
+            [ -f "release/$asset" ] || missing+=("$asset")
           done
           if [ ${#missing[@]} -gt 0 ]; then
             echo "::error::The draft release $GITHUB_REF_NAME has no ${missing[*]}, so it is not published."
+            exit 1
+          fi
+          # The files the checksums job attested, no more and no fewer, unchanged.
+          attested="$(sed -E 's/^[0-9a-f]{64} [ *]//' attested/SHA256SUMS | sort)"
+          found="$(cd release && for name in *; do [ "$name" = SHA256SUMS ] || echo "$name"; done | sort)"
+          if ! cmp -s release/SHA256SUMS attested/SHA256SUMS || [ "$found" != "$attested" ] \
+            || ! (cd release && sha256sum --check --strict --quiet ../attested/SHA256SUMS); then
+            echo "::error::The draft release $GITHUB_REF_NAME changed after the checksums job attested it, so it is not published. See docs/releases.md#when-a-release-fails."
             exit 1
           fi
 
