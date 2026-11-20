@@ -14,6 +14,9 @@ namespace SemanticRouter.AspNetCore;
 /// unless <see cref="ConnectorOptions.AllowRemoteClients"/> is set the router does not send it requests from other
 /// machines, so the connector need not check that itself. Limits on concurrent runs and the queue
 /// (<see cref="ConnectorOptions.MaxConcurrency"/>, <see cref="ConnectorOptions.MaxQueue"/>) are the connector's to apply.
+/// A connector that implements <see cref="IDisposable"/> is disposed as soon as another configuration replaces the one
+/// that created it, while requests that started on it may still be running or waiting for it: it must stay usable for
+/// them (for example, by not disposing a <see cref="SemaphoreSlim"/> that limits concurrency).
 /// </remarks>
 public interface IChatConnectorFactory
 {

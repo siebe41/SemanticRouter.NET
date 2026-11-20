@@ -15,7 +15,8 @@ namespace SemanticRouter.AspNetCore;
 /// messages are reported as <see cref="ModelFailureKind.QuotaExceeded"/>, so the router falls through to the next model
 /// until the cooldown expires.
 /// </remarks>
-internal sealed partial class CliChatConnector : IChatConnector, IDisposable
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "The concurrency gate is never disposed: requests that started before a configuration change still release it (#388).")]
+internal sealed partial class CliChatConnector : IChatConnector
 {
     // A CLI is signed in to one account, so its quota errors are account-wide (every model on the connector cools
     // down) unless the message names a per-model limit: Claude's "You've hit your Opus limit" or Codex's
@@ -27,6 +28,8 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     private readonly ICliProcessRunner _runner;
     private readonly IToolCallAffinity? _affinity;
     private readonly ILogger _logger;
+    // Never disposed: a configuration change retires this connector while requests may still hold or wait for the gate,
+    // and SemaphoreSlim.Release throws on a disposed semaphore. Without AvailableWaitHandle there is nothing to free.
     private readonly SemaphoreSlim _gate;
     private readonly string _executable;
     private readonly string[] _quotaPatterns;
@@ -67,6 +70,9 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
     }
 
     public string Name { get; }
+
+    /// <summary>Requests waiting for a free process right now.</summary>
+    internal int Waiting => Volatile.Read(ref _waiting);
 
     public async Task<ConnectorResult> SendAsync(ConnectorRequest request, HttpContext context, CancellationToken cancellationToken)
     {
@@ -137,8 +143,6 @@ internal sealed partial class CliChatConnector : IChatConnector, IDisposable
             }
         }
     }
-
-    public void Dispose() => _gate.Dispose();
 
     private async Task<ConnectorResult> RunAsync(
         ConnectorRequest request, HttpContext context, string workingDirectory, CancellationToken cancellationToken)

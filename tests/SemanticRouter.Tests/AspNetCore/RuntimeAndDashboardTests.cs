@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Tests.Support;
 using static SemanticRouter.Tests.Support.TestEmbeddings;
@@ -224,6 +225,59 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         JsonNode probe = await ReadNodeAsync(await client.PostAsJsonAsync("/router/api/embeddings/test", new { text = "x" }));
         probe["ok"]!.GetValue<bool>().Should().BeTrue();
         probe["dimensions"]!.GetValue<int>().Should().Be(HashingEmbeddingProvider.DefaultDimensions);
+    }
+
+    [Fact]
+    public async Task Applying_a_configuration_while_a_cli_request_runs_and_another_waits_lets_both_finish()
+    {
+        // #388: the retired runtime's CLI connector must stay usable for the requests that started on it.
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Cli = new FakeCliProcessRunner(_ => new FakeCliProcess([ClaudeStream.Delta("Hi"), ClaudeStream.Success("Hi")], until: release.Task));
+        var logs = new CapturingLoggerProvider();
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+            },
+            services: s =>
+            {
+                s.AddLogging(b => b.AddProvider(logs));
+                s.PostConfigure<SemanticRouterConnectorsOptions>(c => c.Connectors["claude"].MaxConcurrency = 1);
+            },
+            withCli: true);
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        provider.Current.Connectors.TryGet("claude", out IChatConnector connector).Should().BeTrue();
+        var cli = (CliChatConnector)connector;
+        const string CliJson = """{"model":"claude-cli","messages":[{"role":"user","content":"hello there"}]}""";
+
+        Task<HttpResponseMessage> running = client.PostAsync("/v1/chat/completions", Json(CliJson));
+        await WaitUntilAsync(() => Cli.Invocations.Count == 1);
+        Task<HttpResponseMessage> waiting = client.PostAsync("/v1/chat/completions", Json(CliJson));
+        await WaitUntilAsync(() => cli.Waiting == 1);
+
+        provider.Apply(provider.Current.Configuration.Clone(), persist: false);
+        release.SetResult();
+        HttpResponseMessage[] responses = await Task.WhenAll(running, waiting).WaitAsync(TimeSpan.FromSeconds(30));
+
+        foreach (HttpResponseMessage response in responses)
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            (await response.Content.ReadAsStringAsync()).Should().Contain("Hi");
+        }
+
+        Services.GetRequiredService<RoutingActivityLog>().Recent().Select(e => e.Outcome).Should().Equal("served", "served");
+        Cli.Invocations.Should().HaveCount(2).And.OnlyContain(i => !Directory.Exists(i.WorkingDirectory), "each scratch directory is deleted");
+        logs.All.Should().NotContain(nameof(ObjectDisposedException)).And.NotContainAny("unhandled", "Unhandled");
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (!condition())
+        {
+            await Task.Delay(10, timeout.Token);
+        }
     }
 
     [Fact]
