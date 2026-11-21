@@ -144,7 +144,7 @@ internal sealed class ProtectedFileSecretStore : IRouterSecretStore
             return new Dictionary<string, string>(StringComparer.Ordinal);
         }
 
-        string json = File.ReadAllText(_path);
+        string json = AtomicFile.ReadAllText(_path);
         return string.IsNullOrWhiteSpace(json)
             ? new Dictionary<string, string>(StringComparer.Ordinal)
             : new Dictionary<string, string>(

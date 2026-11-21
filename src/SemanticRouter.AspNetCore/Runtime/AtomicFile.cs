@@ -53,6 +53,29 @@ internal static class AtomicFile
     }
 
     /// <summary>
+    /// Reads a file that <see cref="WriteAllText"/> may be replacing at the same moment, in another thread or process.
+    /// It is opened with <see cref="FileShare.Delete"/>, so the read does not stop a rename over it, and on Windows, where
+    /// a rename holds the file for a moment, the read is tried again briefly instead of failing.
+    /// </summary>
+    public static string ReadAllText(string path)
+    {
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                return reader.ReadToEnd();
+            }
+            catch (Exception ex) when (OperatingSystem.IsWindows() && attempt < 10
+                                       && ex is (IOException and not FileNotFoundException and not DirectoryNotFoundException) or UnauthorizedAccessException)
+            {
+                Thread.Sleep(20 * attempt);
+            }
+        }
+    }
+
+    /// <summary>
     /// Copies <paramref name="source"/> to <paramref name="destination"/> the same way (owner-only, replaced in one step),
     /// byte for byte. Returns <see langword="false"/> when there is no <paramref name="source"/>.
     /// </summary>

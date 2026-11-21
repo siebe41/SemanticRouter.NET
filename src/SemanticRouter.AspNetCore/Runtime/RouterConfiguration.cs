@@ -975,7 +975,7 @@ public sealed class JsonFileRouterConfigurationStore : IRouterConfigurationStore
                 return null;
             }
 
-            string json = File.ReadAllText(_path);
+            string json = AtomicFile.ReadAllText(_path);
             return string.IsNullOrWhiteSpace(json) ? null : RouterConfiguration.FromJson(json);
         }
     }

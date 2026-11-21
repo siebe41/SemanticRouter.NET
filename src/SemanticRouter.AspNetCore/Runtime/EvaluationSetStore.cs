@@ -54,7 +54,7 @@ internal sealed class JsonLinesEvaluationSetStore : IEvaluationSetStore
     {
         lock (_gate)
         {
-            return File.Exists(_path) ? EvaluationSet.Parse(File.ReadAllText(_path)) : [];
+            return File.Exists(_path) ? EvaluationSet.Parse(AtomicFile.ReadAllText(_path)) : [];
         }
     }
 

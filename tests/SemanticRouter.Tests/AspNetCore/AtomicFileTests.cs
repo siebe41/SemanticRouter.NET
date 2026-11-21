@@ -58,7 +58,9 @@ public sealed class AtomicFileTests : IDisposable
         string target = Directory.CreateDirectory(Path.Combine(_directory, "a-folder")).FullName;
         File.WriteAllText(Path.Combine(target, "inside.txt"), "kept");
 
-        FluentActions.Invoking(() => AtomicFile.WriteAllText(target, "x")).Should().Throw<IOException>();
+        // A folder in the way: Unix reports an IOException, Windows denies access.
+        Exception? thrown = Record.Exception(() => AtomicFile.WriteAllText(target, "x"));
+        (thrown is IOException or UnauthorizedAccessException).Should().BeTrue($"the write fails, but threw {thrown?.GetType().Name ?? "nothing"}");
 
         File.ReadAllText(Path.Combine(target, "inside.txt")).Should().Be("kept");
         Files().Should().BeEmpty("the temporary file is removed");
