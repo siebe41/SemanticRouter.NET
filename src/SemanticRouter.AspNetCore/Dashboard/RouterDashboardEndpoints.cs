@@ -674,6 +674,7 @@ public static partial class RouterDashboardEndpoints
         EvaluationApi.Map(api, ApiJson, Actor);
         TuningApi.Map(api, ApiJson, Actor);
         ReplayApi.Map(api, ApiJson);
+        ForecastApi.Map(api, ApiJson);
         TemplateDefaultsApi.Map(api, ApiJson, Actor);
         ReliabilityApi.Map(api, ApiJson);
         DigestApi.Map(api, ApiJson);

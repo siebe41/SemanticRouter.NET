@@ -5,6 +5,7 @@ import { WARNING_FINDINGS, contextDetail, findingBadge } from './context.js';
 import { $, adminOnly, h, metricsOnly, num, readOnly, state, views } from './core.js';
 import { digestCard, noticesCard } from './digest.js';
 import { endpointsCard } from './endpoints.js';
+import { forecastCard } from './forecast.js';
 import { openAttr } from './fields.js';
 import { count, fullStamp, plural, reasonHtml, reasonLabel, sourceLabel, stamp, tierChip, usd } from './labels.js';
 import { learnedBadge, learnedCard } from './learned.js';
@@ -33,6 +34,7 @@ views.overview = () => {
     ${templateDefaultsCard()}
     ${digestCard() || countersRow(s)}
     ${modelsCard(s)}
+    ${forecastCard()}
     ${metricsOnly() ? '' : `<div class="card section">
       <div class="card-head"><h2>Recent activity</h2><span class="spacer"></span><a href="#/activity" class="small">all activity →</a></div>
       ${renderActivityTable(state.activity.slice(0, 8))}

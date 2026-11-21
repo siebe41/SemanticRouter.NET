@@ -519,3 +519,47 @@ test('the Overview offers the new defaults of what a template upgrade kept', asy
   await expect(page.locator('#template-defaults')).toHaveCount(0);
   expect(posted).toEqual([['use', 'Middleware.ModelAliases.*opus*'], ['keep', 'Routes[quick-answers]']]);
 });
+
+test('the Overview forecasts each subscription and budget, with the routes to shift and a way to check it', async ({ page }) => {
+  const now = Date.now();
+  const at = (hours) => new Date(now + hours * 3600_000).toISOString();
+  const limit = (source, cycles, confidence) => ({ value: 1_000_000, source, learned: 998_000, cycles, learnedMin: 990_000, learnedMax: 999_000, confidence });
+  const connector = (c) => ({ subscription: true, unit: 'Tokens', limit: limit(null, 0, 'none'), period: null, periodSource: null, cycleStart: null, nextReset: null, limitedUntil: null, used: null, usedShare: null, pacePerHour: 0, runsOutAt: null, runsOutEarliest: null, runsOutLatest: null, shareAtReset: null, backtest: null, limitHits: 0, routes: [], clients: [], upgrades: [], notes: [], summary: '', ...c });
+  const move = (route, fromTier, tier, model, local) => ({ route, fromTier, tier, model, local });
+  const forecast = {
+    generatedAt: at(0), timeZone: 'UTC', whatIf: '#/whatif',
+    connectors: [
+      connector({
+        connector: 'claude', status: 'Hot', limit: limit('learned', 4, 'high'), period: '7.00:00:00', periodSource: 'learned', cycleStart: at(-40), nextReset: at(128),
+        used: 400_000, usedShare: 0.4, pacePerHour: 9000, runsOutAt: at(66), runsOutEarliest: at(62), runsOutLatest: at(70), shareAtReset: 1.6,
+        backtest: { cycles: 4, meanAbsoluteErrorHours: 1.2, meanRelativeError: 0.05 }, limitHits: 4,
+        routes: [{ key: 'coding', requests: 30, amount: 300_000, share: 0.75, moveTo: move('coding', 3, 2, 'local-small', true) }, { key: 'smalltalk', requests: 50, amount: 100_000, share: 0.25, moveTo: move('smalltalk', 1, 1, 'local-small', true) }],
+        clients: [{ key: 'laptop', requests: 60, amount: 320_000, share: 0.8 }, { key: 'ci', requests: 20, amount: 80_000, share: 0.2 }],
+      }),
+      connector({
+        connector: 'codex', status: 'Cold', limit: limit('configured', 0, 'configured'), cycleStart: at(-24), nextReset: at(48), used: 100_000, usedShare: 0.1, pacePerHour: 2000, shareAtReset: 0.2,
+        upgrades: [{ route: 'smalltalk', tier: 1, requests: 120, amount: 50_000, amountUntilReset: 14_000, fits: true, servedBy: ['local-small'], moveTo: move('smalltalk', 1, 4, 'codex-cli', false) }],
+      }),
+      connector({ connector: 'copilot', status: 'Unknown', notes: ['No usage limit hit recorded yet, and none set by hand (Usage:Quotas), so there is no limit to forecast against.'] }),
+    ],
+    budgets: [{ name: 'daily-cloud', covers: 'connector cloud', period: 'Day', periodEnd: at(10), unit: 'Usd', used: 3.2, limit: 5, pacePerHour: 0.4, runsOutAt: at(4.5), shareAtEnd: 1.4, status: 'Hot' }],
+  };
+  await page.route('**/router/api/forecast', (r) => r.fulfill({ json: forecast }));
+  await open(page, 'overview');
+  const card = page.locator('#forecast');
+  await expect(card.locator('h2')).toHaveText('Quota forecast');
+  const claude = card.locator('tr[data-connector="claude"]');
+  await expect(claude).toContainText('runs out before the reset');
+  await expect(claude).toContainText('limit learned from 4 cycles (high confidence)');
+  await expect(claude).toContainText('400k tokens of 1.0M tokens');
+  await expect(card).toContainText('Driving it: coding 75% (tier 2 would send it to local-small, local)');
+  await expect(card).toContainText('Clients: laptop 80%, ci 20%.');
+  await expect(card.locator('tr[data-connector="codex"]')).toContainText('limit set by hand (Usage:Quotas)');
+  await expect(card).toContainText('About 80% unused before');
+  await expect(card).toContainText('these routes could move up: smalltalk');
+  await expect(card.locator('tr[data-connector="copilot"]')).toContainText('no forecast yet');
+  await expect(card).toContainText('No usage limit hit recorded yet');
+  await expect(card.locator('tr[data-budget="daily-cloud"]')).toContainText('$3.20 of $5.00');
+  await card.getByRole('link', { name: 'Check a change on What if →' }).first().click();
+  await expect(page.locator('#view h1')).toHaveText('What if');
+});

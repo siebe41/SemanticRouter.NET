@@ -51,6 +51,7 @@ export const state = {
   usage: { window: '7d', by: 'model', data: null, loading: false },
   evaluation: { text: null, location: null, count: 0, report: null, busy: false, health: null, compare: null, addFor: null, add: {}, form: { provider: 'OpenAICompatible', endpoint: '', model: '', apiKey: '', dimensions: 512 } },
   replay: { days: 7, shownDays: 7, report: null, errors: null, busy: false, draftChanges: 0 }, // What if
+  forecast: { data: null, at: 0 }, // GET api/forecast (Overview), and when it was asked
   label: null,         // the Activity "label this prompt" form
   report: null,        // the Feedback form: kind, Activity entry, the text typed so far
   profileTester: { prompt: '', results: null, busy: false },

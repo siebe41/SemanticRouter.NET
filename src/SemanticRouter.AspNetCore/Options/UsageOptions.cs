@@ -48,6 +48,35 @@ public sealed class BudgetDefinition
     public decimal? MaxCostUsd { get; set; }
 }
 
+/// <summary>
+/// The usage limit of one connector's account, set by hand for the quota forecast (<see cref="UsageOptions.Quotas"/>).
+/// A subscription does not publish its limit, so without one the forecast learns it from the times the connector ran out.
+/// It only informs the forecast: the router does not stop at it (a budget does that).
+/// </summary>
+public sealed class UsageQuota
+{
+    /// <summary>
+    /// Tokens (input, output and cache, as budgets count them) per period. Set this or <see cref="MaxRequests"/>, or
+    /// neither to keep learning the limit while setting the <see cref="Period"/>.
+    /// </summary>
+    public long? MaxTokens { get; set; }
+
+    /// <summary>Requests per period, for a plan that counts requests (premium requests, messages).</summary>
+    public long? MaxRequests { get; set; }
+
+    /// <summary>
+    /// How long the limit lasts before it resets, e.g. <c>7.00:00:00</c> for a weekly limit or <c>05:00:00</c>; at least
+    /// an hour. Without it the forecast learns it from the resets it saw, when they repeat at a fixed interval.
+    /// </summary>
+    public TimeSpan? Period { get; set; }
+
+    /// <summary>
+    /// A moment the limit reset (e.g. last Tuesday 9:00 with its offset); later resets are whole <see cref="Period"/>s
+    /// after it. Without it, the latest reset the router saw.
+    /// </summary>
+    public DateTimeOffset? PeriodStart { get; set; }
+}
+
 /// <summary>Usage accounting and budgets. Bound from <c>SemanticRouter:Usage</c>.</summary>
 public sealed class UsageOptions
 {
@@ -65,6 +94,12 @@ public sealed class UsageOptions
 
     /// <summary>Spending limits.</summary>
     public IList<BudgetDefinition> Budgets { get; } = new List<BudgetDefinition>();
+
+    /// <summary>
+    /// Usage limits set by hand per connector name, for the quota forecast (<c>GET api/forecast</c>). Empty by default:
+    /// the forecast learns each subscription's limit from the times it ran out.
+    /// </summary>
+    public IDictionary<string, UsageQuota> Quotas { get; } = new Dictionary<string, UsageQuota>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Context cost analysis: where each request's input tokens go, and what to trim.</summary>
     public ContextCostOptions Context { get; set; } = new();

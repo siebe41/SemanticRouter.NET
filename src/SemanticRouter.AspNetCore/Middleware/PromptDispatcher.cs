@@ -312,7 +312,7 @@ internal sealed partial class PromptDispatcher
                     if (!blameless)
                     {
                         CoolDown(runtime, model, result, cooledDuringRequest);
-                        _incidents?.Failed(connector.Name, result.FailureKind, failure);
+                        _incidents?.Failed(connector.Name, result.FailureKind, failure, result.RetryAt);
                     }
 
                     LogFailover(_logger, model.Name, result.FailureKind, failure);
