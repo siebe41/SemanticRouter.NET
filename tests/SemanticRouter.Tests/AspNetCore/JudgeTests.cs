@@ -370,6 +370,34 @@ public sealed class JudgeTests : RouterHostTest
         ledger.Summarize(now.AddHours(-1), now.AddHours(1), UsageGrouping.Client).Single(g => g.Key == AnswerJudge.UsageLabel).Totals.Requests.Should().Be(1);
     }
 
+    [Theory]
+    [InlineData("cloud-judge", true, "max_completion_tokens", false)]
+    [InlineData("cloud-judge", false, "max_tokens", true)]
+    [InlineData("judge", true, "max_tokens", false)]
+    public async Task A_reasoning_judge_on_a_cloud_server_is_asked_with_max_completion_tokens(string judge, bool reasoning, string limit, bool temperature)
+    {
+        HttpClient client = await StartJudgedAsync(
+            j => (j.Enabled, j.SampleRate, j.Model) = (true, 1, judge),
+            routing: o =>
+            {
+                if (reasoning)
+                {
+                    o.Models.Single(m => m.Name == judge).Capabilities.Add("reasoning");
+                }
+            });
+
+        await AskAsync(client);
+
+        StubHttpMessageHandler backend = judge == "judge" ? LocalHttp : CloudHttp;
+        string upstream = judge == "judge" ? "judge-32b" : "cloud-judge-1";
+        using JsonDocument sent = JsonDocument.Parse(backend.Requests.Single(r => r.Body.Contains($"\"model\":\"{upstream}\"", StringComparison.Ordinal)).Body);
+        JsonElement root = sent.RootElement;
+        root.GetProperty(limit).GetInt32().Should().Be(300);
+        root.TryGetProperty(limit == "max_tokens" ? "max_completion_tokens" : "max_tokens", out _).Should().BeFalse();
+        root.TryGetProperty("temperature", out _).Should().Be(temperature, "reasoning models accept only the default temperature");
+        Latest.Grade.Should().NotBeNull("the judge answered");
+    }
+
     [Fact]
     public async Task Only_cheap_answers_to_the_routers_own_decisions_are_graded()
     {

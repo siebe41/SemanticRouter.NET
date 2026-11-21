@@ -355,16 +355,26 @@ internal sealed partial class AnswerJudge : IDisposable
     /// <summary>Sends the grading request through the dispatcher, as an OpenAI chat-completions call to the judge model.</summary>
     private async Task<string?> AskAsync(RouterRuntime runtime, ModelDefinition judge, Job job, CancellationToken cancellationToken)
     {
+        // The request passes through to an OpenAI-compatible judge as written, so it follows the rule a translated request
+        // does (#397): OpenAI's reasoning models reject max_tokens, and any temperature but the default.
+        bool reasoning = judge.Capabilities.Contains("reasoning", StringComparer.OrdinalIgnoreCase);
+        bool maxCompletionTokens = runtime.Configuration.Connectors.TryGetValue(judge.Connector, out ConnectorOptions? connector)
+                                   && connector.Protocol == ChatProtocol.OpenAI
+                                   && OpenAICompatibleConnector.UsesMaxCompletionTokens(connector, reasoning);
         var request = new JsonObject
         {
             ["model"] = judge.Name,
             ["stream"] = false,
-            ["temperature"] = 0,
-            ["max_tokens"] = 300,
-            ["messages"] = new JsonArray(
-                new JsonObject { ["role"] = "system", ["content"] = Instructions },
-                new JsonObject { ["role"] = "user", ["content"] = $"<request>\n{job.Prompt}\n</request>\n\n<answer>\n{job.Answer}\n</answer>" }),
         };
+        if (!reasoning)
+        {
+            request["temperature"] = 0;
+        }
+
+        request[maxCompletionTokens ? "max_completion_tokens" : "max_tokens"] = 300;
+        request["messages"] = new JsonArray(
+            new JsonObject { ["role"] = "system", ["content"] = Instructions },
+            new JsonObject { ["role"] = "user", ["content"] = $"<request>\n{job.Prompt}\n</request>\n\n<answer>\n{job.Answer}\n</answer>" });
         byte[] body = JsonSerializer.SerializeToUtf8Bytes(request);
         ChatCompletionRequest chat;
         using (JsonDocument document = JsonDocument.Parse(body))
