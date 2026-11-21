@@ -7,11 +7,11 @@ const { test: base, expect } = require('@playwright/test');
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'semantic-router.json'), 'utf8')
   .replace(/__STUB__/g, `http://127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`));
 
-const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'service', 'json', 'audit', 'feedback'];
+const PAGES = ['overview', 'live', 'activity', 'memory', 'usage', 'learned', 'tiers', 'routes', 'evaluate', 'whatif', 'models', 'connectors', 'routing', 'profiles', 'embeddings', 'gateway', 'clients', 'service', 'json', 'audit', 'feedback'];
 // The rail's sections and the tabs each one shows, in order (SECTIONS in js/core.js).
 const SECTIONS = {
   Monitor: ['Overview', 'Live', 'Activity', 'Usage', 'Memory'],
-  Routing: ['Tiers', 'Routes', 'Rules', 'Profiles', 'Evaluate', 'Router learned'],
+  Routing: ['Tiers', 'Routes', 'Rules', 'Profiles', 'Evaluate', 'What if', 'Router learned'],
   Providers: ['Models', 'Connectors', 'Embeddings'],
   Gateway: ['Settings', 'Connect clients'],
   Admin: ['Service', 'JSON', 'Audit log'],
@@ -521,6 +521,17 @@ test('router learned runs tuning, pauses and resumes learning', async ({ page })
   await expect(page.locator('#view')).toContainText('applies changes');
   await open(page, 'overview');
   await expect(page.locator('#view')).toContainText('Router learned');
+});
+
+test('what if replays recent requests through the draft', async ({ page, request }) => {
+  await route(request, 'hello there, how are you');
+  await open(page, 'whatif');
+  await expect(page.locator('#view')).toContainText('no changes');
+  await page.locator('[data-action="replay-run"]').click();
+  await expect(page.locator('#view h2', { hasText: 'Recent requests' })).toBeVisible();
+  const moved = page.locator('#view .card.stat', { hasText: 'would move' }).first();
+  await expect(moved.locator('.value')).toHaveText('0');
+  await expect(page.locator('#view')).toContainText('Connector');
 });
 
 test('the theme picker switches themes and remembers the choice', async ({ page }) => {

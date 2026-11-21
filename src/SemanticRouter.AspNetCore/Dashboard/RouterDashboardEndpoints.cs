@@ -673,6 +673,7 @@ public static partial class RouterDashboardEndpoints
         SetupApi.Map(api);
         EvaluationApi.Map(api, ApiJson, Actor);
         TuningApi.Map(api, ApiJson, Actor);
+        ReplayApi.Map(api, ApiJson);
         TemplateDefaultsApi.Map(api, ApiJson, Actor);
         ReliabilityApi.Map(api, ApiJson);
         DigestApi.Map(api, ApiJson);
@@ -970,7 +971,7 @@ public static partial class RouterDashboardEndpoints
     /// filled in from the running configuration. When it cannot be read, the 400 to answer with instead: a field whose
     /// value does not fit (<c>"Timeout": "5m"</c>) is named, with the format it needs.
     /// </summary>
-    private static async Task<(RouterConfiguration? Candidate, IResult? Problem)> ReadConfigurationAsync(HttpContext context, RouterRuntimeProvider provider)
+    internal static async Task<(RouterConfiguration? Candidate, IResult? Problem)> ReadConfigurationAsync(HttpContext context, RouterRuntimeProvider provider)
     {
         long limit = provider.Current.Configuration.Middleware.MaxRequestBodyBytes;
         if (await ReadTextAsync(context, limit).ConfigureAwait(false) is not { } raw)
@@ -1079,7 +1080,7 @@ public static partial class RouterDashboardEndpoints
     }
 
     /// <summary>The validation outcome, with each error tied to its field.</summary>
-    private static ValidationResult Validation(IReadOnlyList<string> errors, RouterConfiguration candidate) =>
+    internal static ValidationResult Validation(IReadOnlyList<string> errors, RouterConfiguration candidate) =>
         new(errors) { Issues = ConfigurationIssues.Locate(errors, candidate) };
 
     /// <summary>The 409 for a change made against a version that is no longer running.</summary>

@@ -50,6 +50,7 @@ export const state = {
   trends: { window: '24h', data: null, loading: false },
   usage: { window: '7d', by: 'model', data: null, loading: false },
   evaluation: { text: null, location: null, count: 0, report: null, busy: false, health: null, compare: null, addFor: null, add: {}, form: { provider: 'OpenAICompatible', endpoint: '', model: '', apiKey: '', dimensions: 512 } },
+  replay: { days: 7, shownDays: 7, report: null, errors: null, busy: false, draftChanges: 0 }, // What if
   label: null,         // the Activity "label this prompt" form
   report: null,        // the Feedback form: kind, Activity entry, the text typed so far
   profileTester: { prompt: '', results: null, busy: false },
@@ -104,7 +105,7 @@ export const METRICS_VIEWS = ['overview', 'usage'];
  */
 export const SECTIONS = [
   { id: 'monitor', pages: [['overview', 'Overview'], ['live', 'Live'], ['activity', 'Activity'], ['usage', 'Usage'], ['memory', 'Memory']] },
-  { id: 'routing', pages: [['tiers', 'Tiers'], ['routes', 'Routes'], ['routing', 'Rules'], ['profiles', 'Profiles'], ['evaluate', 'Evaluate'], ['learned', 'Router learned']] },
+  { id: 'routing', pages: [['tiers', 'Tiers'], ['routes', 'Routes'], ['routing', 'Rules'], ['profiles', 'Profiles'], ['evaluate', 'Evaluate'], ['whatif', 'What if'], ['learned', 'Router learned']] },
   { id: 'providers', pages: [['models', 'Models'], ['connectors', 'Connectors'], ['embeddings', 'Embeddings']] },
   { id: 'gateway', pages: [['gateway', 'Settings'], ['clients', 'Connect clients']] },
   { id: 'admin', pages: [['service', 'Service'], ['json', 'JSON'], ['audit', 'Audit log']] },

@@ -14,6 +14,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Added
 
+- What-if replay: the dashboard's **What if** page (`POST api/replay`) replays recent requests and the evaluation set through the draft configuration and shows which would move to another tier, route or model, the change in requests per tier and per connector (subscriptions marked) and the estimated cost change, before you apply it. It calls no model and keeps no prompt text beyond what `State:StorePrompts` already keeps. (#373)
 - Context cost analysis: every routed request's input is broken down into system prompt, tool definitions, injected blocks, history, tool results, images and the new ask, and flagged when one of them is large (a long system prompt, many or unused tools, a large or repeated tool result, a long history, a nearly full context window, no prompt-cache hits), with what to do about it. The activity entry keeps the breakdown and its input cost (`context`), the Usage page's **Context** card adds a window up and splits its input cost by part, and **Analyze a request** (`POST api/context/analyze`) breaks a pasted request down and prices it on every model. Thresholds are under `Usage:Context`; `Usage:Context:Enabled` turns it off. (#348)
 
 ### Changed
