@@ -12,3 +12,8 @@ c30150a37c639a4d642b661b5c8ca8e2d4455f1d:tests/SemanticRouter.Tests/AspNetCore/R
 
 # Throwaway gateway key for the CI container smoke test; it only exists inside that container.
 343ec29bd411c85a4f7be37be5424bc6eee4e0ea:.github/workflows/ci.yml:curl-auth-header:297
+
+# Fake values in two Copilot tests (sk-copilot-test-secret-…, sk-resolved-key-…) in commit cab7db1 of the branch
+# ccr-95c50923-ikg1wo; the scan reads every branch. The same tests on main use values the rule does not match.
+cab7db16395659760293724cb806c5992918fd8e:tests/SemanticRouter.Tests/Copilot/CopilotRuntimeProcessTests.cs:generic-api-key:23
+cab7db16395659760293724cb806c5992918fd8e:tests/SemanticRouter.Tests/Copilot/CopilotConnectorTests.cs:generic-api-key:292
