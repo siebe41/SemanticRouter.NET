@@ -140,7 +140,7 @@ The tray menu:
 
 When something [needs a decision](dashboard.md#digest-and-notifications), the app also shows a system notification, once per notice (Notification Center on macOS, `notify-send` on Linux, a toast on Windows). `Notifications:Enabled: false` in the router's configuration turns them off. On Linux (libnotify 0.7.10 or later) a click on a notification opens what it is about: the dashboard page for a notice, the setup, or About for an update; on macOS and Windows a click does nothing yet. When something you asked for fails (turning the background service on or off, restarting it, downloading an update), the app says so in a notification as well as in the tray menu and Settings. A router with no enabled model gets a notification too, once (not on the first start, when the dashboard opens on the setup anyway), and again if every model is later turned off.
 
-`SemanticRouter --quit` quits a running app from a script. Signing out or shutting down quits the app the same way: the operating system waits while the app stops its router and hands over a downloaded update.
+`SemanticRouter --quit` quits a running app from a script. Signing out or shutting down quits the app the same way: the operating system waits while the app stops its router and hands over a downloaded update. Quitting waits at most 10 seconds for the router to stop, so a request that will not end does not keep the app (or the sign-out) waiting.
 
 ## The app and the background service
 

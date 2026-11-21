@@ -680,6 +680,22 @@ public sealed class DesktopTests : IDisposable
     }
 
     [Fact]
+    public async Task Quitting_waits_for_the_router_to_stop_only_so_long()
+    {
+        // A router that never stops (a request that will not end) used to stall Quit and the end of the session (#396).
+        var never = new TaskCompletionSource();
+        var watch = Stopwatch.StartNew();
+
+        (await QuitLimits.StopWithinAsync(() => never.Task, TimeSpan.FromMilliseconds(200))).Should().BeFalse();
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5));
+
+        (await QuitLimits.StopWithinAsync(() => Task.Delay(10), TimeSpan.FromSeconds(10))).Should().BeTrue();
+        await FluentActions.Awaiting(() => QuitLimits.StopWithinAsync(() => Task.FromException(new IOException("stop failed")), TimeSpan.FromSeconds(10)))
+            .Should().ThrowAsync<IOException>("a stop that fails in time is reported as the step's failure");
+        QuitLimits.RouterStop.Should().BeLessThanOrEqualTo(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
     public void The_tray_says_when_the_router_runs_without_a_model()
     {
         TrayDigest.NoModelEnabled("""{"models":[],"gateway":{"mode":"Dispatch"}}""").Should().BeTrue();

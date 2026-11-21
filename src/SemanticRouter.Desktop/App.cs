@@ -83,9 +83,12 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             desktop.ShutdownRequested += (_, e) =>
             {
-                // Signing out, shutting down or the macOS Quit: hold the shutdown until the router has stopped and a
-                // downloaded update was handed over; QuitAsync shuts down when it is done. Shutdown() does not raise
-                // this event again, and a request after QuitAsync finished goes through.
+                // Signing out, shutting down or the macOS Quit: hold the shutdown until the router has stopped (within
+                // QuitLimits.RouterStop) and a downloaded update was handed over; QuitAsync shuts down when it is done.
+                // Shutdown() does not raise this event again, and a request after QuitAsync finished goes through.
+                // Avalonia documents that a cancelled request holds up a Windows or macOS session end, but 12.1.6 does
+                // not make public which kind of request this is (ShutdownRequestedEventArgs.IsOSShutdown is internal),
+                // so the hold is bounded instead of skipped.
                 if (!_quit)
                 {
                     e.Cancel = true;
@@ -781,7 +784,15 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
                 _window?.CloseForGood();
                 return Task.CompletedTask;
             });
-            await QuitStepAsync("stopping the router", async () => await _router.DisposeAsync());
+
+            // A router that does not stop in time (a request that will not end) does not keep the app from quitting.
+            await QuitStepAsync("stopping the router", async () =>
+            {
+                if (!await QuitLimits.StopWithinAsync(() => _router.DisposeAsync().AsTask(), QuitLimits.RouterStop))
+                {
+                    LogQuitting($"the router did not stop within {QuitLimits.RouterStop.TotalSeconds:0} s; quitting without waiting for it");
+                }
+            });
             await QuitStepAsync("releasing the single-instance pipe and lock", () =>
             {
                 instance.Dispose();
@@ -808,14 +819,46 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            try
-            {
-                await log.WriteLineAsync($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} Quitting: {step} failed: {ex}");
-            }
-            catch (Exception failed) when (failed is IOException or ObjectDisposedException)
-            {
-                // The log itself failed (a full disk): quitting goes on.
-            }
+            LogQuitting($"{step} failed: {ex}");
         }
+    }
+
+    private void LogQuitting(string message)
+    {
+        try
+        {
+            log.WriteLine($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} Quitting: {message}");
+        }
+        catch (Exception failed) when (failed is IOException or ObjectDisposedException)
+        {
+            // The log itself failed (a full disk): quitting goes on.
+        }
+    }
+}
+
+/// <summary>How long quitting waits for the app's router to stop before it goes on without it.</summary>
+internal static class QuitLimits
+{
+    /// <summary>Quit from the menu, <c>--quit</c>, the macOS Quit, a sign-out or an OS shutdown.</summary>
+    public static readonly TimeSpan RouterStop = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Runs <paramref name="stop"/> and waits for it at most <paramref name="limit"/>: <see langword="false"/> when it
+    /// did not finish in time (it carries on, unobserved). A failure of <paramref name="stop"/> within the limit is thrown.
+    /// </summary>
+    public static async Task<bool> StopWithinAsync(Func<Task> stop, TimeSpan limit)
+    {
+        Task stopping = stop();
+        using var timer = new CancellationTokenSource();
+        if (await Task.WhenAny(stopping, Task.Delay(limit, timer.Token)).ConfigureAwait(false) != stopping)
+        {
+            // Observe a later failure, so it is not reported as an unobserved task exception.
+            _ = stopping.ContinueWith(t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            return false;
+        }
+
+        await timer.CancelAsync().ConfigureAwait(false);
+        await stopping.ConfigureAwait(false);
+        return true;
     }
 }
