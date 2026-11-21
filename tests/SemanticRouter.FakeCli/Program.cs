@@ -7,11 +7,13 @@ using System.Text.RegularExpressions;
 //   args-json    Plain-text reply: the arguments as a JSON array, then stdin.
 //   cat          Plain-text reply: stdin, then a line "(done)".
 //   quota        Writes a quota message to stderr and exits with code 3.
+//   noisy-quota  Writes 4 MB of stderr without a line break, then the quota message, and exits with code 3.
 //   slow         Sleeps, then creates the file named by FAKE_CLI_MARKER (which must not happen once killed).
 //   claude-agent A simulated Claude Code agent for latency benchmarks: after FAKE_CLI_STARTUP_MS (default 1500) it streams
 //                a reply word by word, FAKE_CLI_WORD_MS apart (default 30). Without a tool result in the prompt the reply
 //                explains its plan and ends in a call fenced with the run's tool_call label; with one, it answers.
 //   claude-status What the router's setup asks a Claude Code it finds: `--version`, and `auth status` (signed in).
+//   env-file     Stands in for the Copilot SDK's runtime: writes the environment it got to FAKE_CLI_MARKER and exits.
 Console.OutputEncoding = new UTF8Encoding(false);
 Console.InputEncoding = new UTF8Encoding(false);
 string mode = Environment.GetEnvironmentVariable("FAKE_CLI_MODE") ?? "cat";
@@ -54,6 +56,25 @@ switch (mode)
         return 0;
     }
 
+    case "env-file":
+    {
+        // Stands in for the Copilot runtime the SDK starts: records the environment it got in FAKE_CLI_MARKER, then
+        // exits without speaking the SDK's protocol (so starting the client fails, as the test expects).
+        string reportFile = Environment.GetEnvironmentVariable("FAKE_CLI_MARKER") ?? throw new InvalidOperationException("FAKE_CLI_MARKER is not set");
+        var report = new Dictionary<string, object?>
+        {
+            ["copilotHome"] = Environment.GetEnvironmentVariable("COPILOT_HOME"),
+            ["hasPath"] = Environment.GetEnvironmentVariable("PATH") is { Length: > 0 },
+            ["inherited"] = Environment.GetEnvironmentVariables().Keys.Cast<string>()
+                .Where(n => n.StartsWith("SR_TEST_", StringComparison.OrdinalIgnoreCase) || n.StartsWith("ROUTER_", StringComparison.OrdinalIgnoreCase)
+                    || n.StartsWith("SemanticRouter__", StringComparison.OrdinalIgnoreCase))
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToArray(),
+        };
+        await File.WriteAllTextAsync(reportFile, JsonSerializer.Serialize(report));
+        return 1;
+    }
+
     case "args-json":
     {
         string input = await ReadStdinAsync();
@@ -66,6 +87,18 @@ switch (mode)
         return 0;
 
     case "quota":
+        await Console.Error.WriteLineAsync("Error: You have exceeded your daily quota");
+        return 3;
+
+    case "noisy-quota":
+        // Megabytes of standard error without a line break, then the quota message.
+        string noise = new('x', 64 * 1024);
+        for (int i = 0; i < 64; i++)
+        {
+            await Console.Error.WriteAsync(noise);
+        }
+
+        await Console.Error.WriteLineAsync();
         await Console.Error.WriteLineAsync("Error: You have exceeded your daily quota");
         return 3;
 

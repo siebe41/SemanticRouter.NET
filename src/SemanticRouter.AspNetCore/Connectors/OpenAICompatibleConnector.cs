@@ -12,8 +12,8 @@ namespace SemanticRouter.AspNetCore;
 /// <summary>
 /// Reaches an HTTP chat API: any OpenAI-compatible <c>/v1/chat/completions</c> endpoint, or the Anthropic Messages API
 /// (<see cref="ConnectorTypes.Anthropic"/>). When the client speaks the backend's protocol the body is forwarded with
-/// only <c>model</c> rewritten and the response is streamed back verbatim, so tool calls, images and SSE pass through
-/// untouched. Otherwise the request is re-expressed in the backend's protocol and the reply is translated back,
+/// only <c>model</c> rewritten (and, on a streamed chat-completions request, usage asked for) and the response is
+/// streamed back verbatim, so tool calls, images and SSE pass through untouched. Otherwise the request is re-expressed in the backend's protocol and the reply is translated back,
 /// including streaming and tool calls.
 /// </summary>
 /// <remarks>
@@ -42,6 +42,9 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
     private readonly ILogger _logger;
     private readonly SecretRedactor _redactor;
     private readonly Uri _requestUri;
+
+    // Set once the backend refused the stream_options the router adds and accepted the same request without them.
+    private volatile bool _streamOptionsRejected;
 
     public OpenAICompatibleConnector(
         string name,
@@ -75,16 +78,108 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         bool passThrough = request.Chat.Protocol == Protocol;
         bool reasoning = request.Model.Capabilities.Contains("reasoning", StringComparer.OrdinalIgnoreCase);
         DroppedFeatures.Report(context, DroppedFeatures.ForTranslation(request.Chat, Protocol, reasoning));
+        bool usageAdded = false;
+        bool stripThinking = Protocol == ChatProtocol.Anthropic;
         ReadOnlyMemory<byte> body = passThrough
-            ? RewriteModel(request.RawBody, request.Model.Model, stripRelayedThinking: Protocol == ChatProtocol.Anthropic)
+            ? RewriteModel(
+                request.RawBody, request.Model.Model, stripRelayedThinking: stripThinking, requestUsage: Protocol == ChatProtocol.OpenAI && !_streamOptionsRejected, out usageAdded)
             : Protocol switch
             {
                 ChatProtocol.Anthropic => AnthropicRequestBuilder.Build(
                     request.Chat, request.Model.Model, reasoning: reasoning, caching: _options.PromptCaching, cacheTtl: _options.CacheTtl),
                 ChatProtocol.Responses => ResponsesRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
-                _ => OpenAIRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning),
+                _ => OpenAIRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning, maxCompletionTokens: UsesMaxCompletionTokens(_options, reasoning)),
             };
 
+        (HttpResponseMessage? response, ConnectorResult? failure) = await SendUpstreamAsync(body, context, passThrough, cancellationToken).ConfigureAwait(false);
+        if (response is null)
+        {
+            return failure.GetValueOrDefault();
+        }
+
+        if (usageAdded && (int)response.StatusCode is 400 or 422)
+        {
+            // The router added stream_options itself, and a backend that rejects fields it does not know (some Azure
+            // api-versions, strict servers) refused the request: send it again as the client wrote it, so a request that
+            // works without the router still works through it. When that one is accepted, the field was the cause, and
+            // later requests to this connector leave it out (their usage then goes uncounted, as before).
+            int rejected = (int)response.StatusCode;
+            response.Dispose();
+            ReadOnlyMemory<byte> plain = RewriteModel(
+                request.RawBody, request.Model.Model, stripRelayedThinking: stripThinking, requestUsage: false, out _);
+            (response, failure) = await SendUpstreamAsync(plain, context, passThrough, cancellationToken).ConfigureAwait(false);
+            if (response is null)
+            {
+                return failure.GetValueOrDefault();
+            }
+
+            usageAdded = false;
+            if (response.IsSuccessStatusCode)
+            {
+                _streamOptionsRejected = true;
+                LogStreamOptionsRejected(_logger, Name, rejected);
+            }
+        }
+
+        // From here on the reply is read as it arrives: a backend that stops sending is given up on (StallTimeout).
+        using var stall = new StallGuard(_options.EffectiveStallTimeout, cancellationToken);
+        response.Content = stall.Guard(response.Content);
+        var copied = new List<string>();
+        try
+        {
+            return await RelayAsync(request, context, response, passThrough, usageAdded, copied, stall.Token).ConfigureAwait(false);
+        }
+        catch (UpstreamReplyException ex) when (!context.Response.HasStarted)
+        {
+            // A 200 that reported an error instead of an answer (e.g. Anthropic's overloaded_error as the first event), and
+            // nothing reached the client: undo what was set for it, and let the next model answer. Once the reply has
+            // started, the dispatcher ends it with an error and cools the model down.
+            foreach (string header in copied)
+            {
+                context.Response.Headers.Remove(header);
+            }
+
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            LogUpstreamFailure(_logger, Name, AddressDisplay.Show(_requestUri)!, _redactor.Redact(ex.Message));
+            return ex.Failure;
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested
+                                   && (stall.Stalled || ex is IOException or HttpRequestException))
+        {
+            if (context.Response.HasStarted)
+            {
+                // Too late to fail over: the dispatcher ends the reply with an error and cools the model down.
+                if (stall.Stalled)
+                {
+                    throw new TimeoutException(stall.Describe(), ex);
+                }
+
+                throw;
+            }
+
+            string why = stall.Stalled ? stall.Describe()
+                : ex is UpstreamLimitException ? ex.Message
+                : $"connection dropped ({_redactor.Redact(ex.Message)})";
+
+            // Nothing reached the client: undo what was set for it, and let the next model answer.
+            foreach (string header in copied)
+            {
+                context.Response.Headers.Remove(header);
+            }
+
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            LogUpstreamFailure(_logger, Name, AddressDisplay.Show(_requestUri)!, why);
+            return ConnectorResult.Failed(ModelFailureKind.Unavailable, why);
+        }
+    }
+
+    /// <summary>
+    /// Sends <paramref name="body"/> and waits for the reply's headers. Returns the reply, or, when the backend could not
+    /// be reached in time, the failure to report instead.
+    /// </summary>
+    private async Task<(HttpResponseMessage? Response, ConnectorResult? Failure)> SendUpstreamAsync(
+        ReadOnlyMemory<byte> body, HttpContext context, bool passThrough, CancellationToken cancellationToken)
+    {
         using var message = new HttpRequestMessage(HttpMethod.Post, _requestUri) { Content = new ReadOnlyMemoryContent(body) };
         message.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         if (passThrough)
@@ -112,65 +207,28 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         }
 
         HttpClient client = _httpClientFactory.CreateClient(HttpClientNamePrefix + Name);
-        HttpResponseMessage response;
-        using (var headersTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-        {
-            headersTimeout.CancelAfter(_options.EffectiveTimeout);
-            try
-            {
-                response = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, headersTimeout.Token)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException
-                                       && !cancellationToken.IsCancellationRequested)
-            {
-                // Expected operational failures (server down, timeout): one line, no stack trace.
-                string error = ex is OperationCanceledException ? "timed out" : _redactor.Redact(ex.Message);
-                LogUpstreamFailure(_logger, Name, AddressDisplay.Show(message.RequestUri)!, error);
-                return ConnectorResult.Failed(
-                    ModelFailureKind.Unavailable,
-                    ex is OperationCanceledException ? "timed out" : $"unreachable ({error})");
-            }
-        }
-
-        // From here on the reply is read as it arrives: a backend that stops sending is given up on (StallTimeout).
-        using var stall = new StallGuard(_options.EffectiveStallTimeout, cancellationToken);
-        response.Content = stall.Guard(response.Content);
-        var copied = new List<string>();
+        using var headersTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        headersTimeout.CancelAfter(_options.EffectiveTimeout);
         try
         {
-            return await RelayAsync(request, context, response, passThrough, copied, stall.Token).ConfigureAwait(false);
+            HttpResponseMessage response = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, headersTimeout.Token)
+                .ConfigureAwait(false);
+            return (response, null);
         }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested
-                                   && (stall.Stalled || ex is IOException or HttpRequestException))
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException
+                                   && !cancellationToken.IsCancellationRequested)
         {
-            if (context.Response.HasStarted)
-            {
-                // Too late to fail over: the dispatcher ends the reply with an error and cools the model down.
-                if (stall.Stalled)
-                {
-                    throw new TimeoutException(stall.Describe(), ex);
-                }
-
-                throw;
-            }
-
-            string why = stall.Stalled ? stall.Describe() : $"connection dropped ({_redactor.Redact(ex.Message)})";
-
-            // Nothing reached the client: undo what was set for it, and let the next model answer.
-            foreach (string header in copied)
-            {
-                context.Response.Headers.Remove(header);
-            }
-
-            context.Response.StatusCode = StatusCodes.Status200OK;
-            LogUpstreamFailure(_logger, Name, AddressDisplay.Show(message.RequestUri)!, why);
-            return ConnectorResult.Failed(ModelFailureKind.Unavailable, why);
+            // Expected operational failures (server down, timeout): one line, no stack trace.
+            string error = ex is OperationCanceledException ? "timed out" : _redactor.Redact(ex.Message);
+            LogUpstreamFailure(_logger, Name, AddressDisplay.Show(message.RequestUri)!, error);
+            return (null, ConnectorResult.Failed(
+                ModelFailureKind.Unavailable,
+                ex is OperationCanceledException ? "timed out" : $"unreachable ({error})"));
         }
     }
 
     private async Task<ConnectorResult> RelayAsync(
-        ConnectorRequest request, HttpContext context, HttpResponseMessage response, bool passThrough, List<string> copied, CancellationToken cancellationToken)
+        ConnectorRequest request, HttpContext context, HttpResponseMessage response, bool passThrough, bool usageAdded, List<string> copied, CancellationToken cancellationToken)
     {
         using (response)
         {
@@ -194,7 +252,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             if (passThrough && !response.IsSuccessStatusCode)
             {
                 // Relay the backend's error in its own shape, but never a key it may have echoed back.
-                string error = _redactor.Redact(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+                string error = _redactor.Redact(await UpstreamLimits.ReadErrorBodyAsync(response.Content, cancellationToken).ConfigureAwait(false));
                 context.Response.StatusCode = status;
                 context.Response.ContentType = response.Content.Headers.ContentType?.ToString() ?? "application/json";
                 await context.Response.WriteAsync(error, cancellationToken).ConfigureAwait(false);
@@ -203,7 +261,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
             if (passThrough)
             {
-                await CopyResponseAsync(context, response, request.Model.Name, copied, cancellationToken).ConfigureAwait(false);
+                await CopyResponseAsync(context, response, request.Model.Name, usageAdded, copied, cancellationToken).ConfigureAwait(false);
                 return ConnectorResult.Completed;
             }
 
@@ -242,13 +300,36 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
     }
 
     /// <summary>
+    /// Whether a translated request to an OpenAI-compatible backend carries its output limit as <c>max_completion_tokens</c>
+    /// (<see cref="ConnectorOptions.MaxTokensParameter"/>): when set so, or by default for a reasoning model on a server
+    /// that is not local. OpenAI's reasoning models reject <c>max_tokens</c>; local servers all read it.
+    /// </summary>
+    internal static bool UsesMaxCompletionTokens(ConnectorOptions options, bool reasoning) => options.MaxTokensParameter switch
+    {
+        "max_completion_tokens" => true,
+        "max_tokens" => false,
+        _ => reasoning && options.BaseAddress is { } address && !ConnectorProbe.IsLocalAddress(address),
+    };
+
+    /// <summary>
     /// Sets <c>model</c> on a pass-through body. With <paramref name="stripRelayedThinking"/>, also removes thinking
     /// blocks the router itself relayed from another backend: Anthropic would reject their signature.
     /// </summary>
-    internal static ReadOnlyMemory<byte> RewriteModel(ReadOnlyMemory<byte> body, string? model, bool stripRelayedThinking = false)
+    internal static ReadOnlyMemory<byte> RewriteModel(ReadOnlyMemory<byte> body, string? model, bool stripRelayedThinking = false) =>
+        RewriteModel(body, model, stripRelayedThinking, requestUsage: false, out _);
+
+    /// <summary>
+    /// As <see cref="RewriteModel(ReadOnlyMemory{byte}, string?, bool)"/>. With <paramref name="requestUsage"/>, a streamed
+    /// chat-completions body also gets <c>stream_options.include_usage</c>, without which the server reports no usage and
+    /// budgets never see the request; <paramref name="usageAdded"/> says the client did not ask for it, so the usage-only
+    /// final chunk is not relayed to it.
+    /// </summary>
+    internal static ReadOnlyMemory<byte> RewriteModel(
+        ReadOnlyMemory<byte> body, string? model, bool stripRelayedThinking, bool requestUsage, out bool usageAdded)
     {
+        usageAdded = false;
         bool strip = stripRelayedThinking && body.Span.IndexOf(System.Text.Encoding.UTF8.GetBytes(ThinkingBlock.RouterSignature)) >= 0;
-        if (string.IsNullOrEmpty(model) && !strip)
+        if (string.IsNullOrEmpty(model) && !strip && !requestUsage)
         {
             return body;
         }
@@ -260,6 +341,21 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
                 if (!string.IsNullOrEmpty(model))
                 {
                     json["model"] = model;
+                }
+
+                if (requestUsage && IsTrue(json["stream"]))
+                {
+                    if (json["stream_options"] is not JsonObject streamOptions)
+                    {
+                        streamOptions = new JsonObject();
+                        json["stream_options"] = streamOptions;
+                    }
+
+                    if (!IsTrue(streamOptions["include_usage"]))
+                    {
+                        streamOptions["include_usage"] = true;
+                        usageAdded = true;
+                    }
                 }
 
                 if (strip && json["messages"] is JsonArray messages)
@@ -279,10 +375,13 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         catch (JsonException)
         {
             // Not an object we can rewrite; forward the original bytes untouched.
+            usageAdded = false;
         }
 
         return body;
     }
+
+    private static bool IsTrue(JsonNode? node) => node is JsonValue value && value.TryGetValue(out bool flag) && flag;
 
     private void AddCredentials(HttpRequestMessage message)
     {
@@ -307,7 +406,8 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         }
     }
 
-    private async Task CopyResponseAsync(HttpContext context, HttpResponseMessage response, string modelName, List<string> copied, CancellationToken cancellationToken)
+    private async Task CopyResponseAsync(
+        HttpContext context, HttpResponseMessage response, string modelName, bool usageAdded, List<string> copied, CancellationToken cancellationToken)
     {
         HttpResponse outgoing = context.Response;
         outgoing.StatusCode = (int)response.StatusCode;
@@ -315,6 +415,13 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         foreach (KeyValuePair<string, HeaderStringValues> header in response.Headers.NonValidated.Concat(response.Content.Headers.NonValidated))
         {
             if (HopByHopHeaders.Contains(header.Key))
+            {
+                continue;
+            }
+
+            // Without the usage-only chunk the router asked for, the body is shorter than the backend's length: a
+            // Content-Length copied from it would make the server fail the reply after it started.
+            if (usageAdded && string.Equals(header.Key, "Content-Length", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -334,12 +441,12 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         {
             bool sse = response.Content.Headers.ContentType?.MediaType?.Equals("text/event-stream", StringComparison.OrdinalIgnoreCase) == true;
             UsageCapture? capture = UsageCapture.Of(context);
-            if ((_affinity is not null || capture is not null) && response.IsSuccessStatusCode)
+            if ((_affinity is not null || capture is not null || usageAdded) && response.IsSuccessStatusCode)
             {
                 IToolCallAffinity? affinity = _affinity;
                 await PassThroughToolCallScanner.CopyAsync(
                     upstream, outgoing.Body, sse, Protocol, id => affinity?.Remember(id, modelName), cancellationToken,
-                    capture is null ? null : capture.Observe).ConfigureAwait(false);
+                    capture is null ? null : capture.Observe, stripUsageChunk: usageAdded).ConfigureAwait(false);
             }
             else
             {
@@ -352,7 +459,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
     private static async Task RelayErrorAsync(
         HttpContext context, HttpResponseMessage response, ChatProtocol clientProtocol, SecretRedactor redactor, CancellationToken cancellationToken)
     {
-        string upstreamBody = redactor.Redact(await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+        string upstreamBody = redactor.Redact(await UpstreamLimits.ReadErrorBodyAsync(response.Content, cancellationToken).ConfigureAwait(false));
         string detail = ExtractErrorMessage(upstreamBody) ?? (upstreamBody.Length > 500 ? upstreamBody[..500] : upstreamBody);
         await ProtocolErrors.WriteAsync(
             context, clientProtocol, (int)response.StatusCode, "Upstream request rejected", detail, cancellationToken).ConfigureAwait(false);
@@ -387,7 +494,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             return latest;
         }
 
-        string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        string body = await UpstreamLimits.ReadErrorBodyAsync(response.Content, cancellationToken).ConfigureAwait(false);
         return QuotaResetParser.TryParse(body.Length > 2000 ? body[..2000] : body, now, null, out DateTimeOffset fromBody) ? fromBody : null;
     }
 
@@ -425,6 +532,9 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: HTTP {Status}, {Advice}. Trying the next model.")]
     private static partial void LogUpstreamRejectedCredentials(ILogger logger, string connector, int status, string advice);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: the backend answered HTTP {Status} to stream_options.include_usage and accepted the request without it; streamed pass-through requests to it no longer ask for usage, so budgets do not count them.")]
+    private static partial void LogStreamOptionsRejected(ILogger logger, string connector, int status);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: upstream returned HTTP {Status}; trying the next model.")]
     private static partial void LogUpstreamStatus(ILogger logger, string connector, int status);

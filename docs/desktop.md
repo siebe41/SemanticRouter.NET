@@ -140,7 +140,7 @@ The tray menu:
 
 When something [needs a decision](dashboard.md#digest-and-notifications), the app also shows a system notification, once per notice (Notification Center on macOS, `notify-send` on Linux, a toast on Windows). `Notifications:Enabled: false` in the router's configuration turns them off. On Linux (libnotify 0.7.10 or later) a click on a notification opens what it is about: the dashboard page for a notice, the setup, or About for an update; on macOS and Windows a click does nothing yet. When something you asked for fails (turning the background service on or off, restarting it, downloading an update), the app says so in a notification as well as in the tray menu and Settings. A router with no enabled model gets a notification too, once (not on the first start, when the dashboard opens on the setup anyway), and again if every model is later turned off.
 
-`SemanticRouter --quit` quits a running app from a script.
+`SemanticRouter --quit` quits a running app from a script. Signing out or shutting down quits the app the same way: the operating system waits while the app stops its router and hands over a downloaded update. Quitting waits at most 10 seconds for the router to stop, so a request that will not end does not keep the app (or the sign-out) waiting.
 
 ## The app and the background service
 
@@ -169,11 +169,12 @@ For scripts and installers, without the tray:
 
 ## Where things live
 
-Everything is in the router's [configuration directory](host.md#where-things-live), shared with the tool. On Windows with the default directory, `logs/` and `webview/` are in the local data directory, `%LOCALAPPDATA%\semantic-router`, instead ([Windows and roaming profiles](host.md#windows-and-roaming-profiles)):
+Everything is in the router's [configuration directory](host.md#where-things-live), shared with the tool. On Windows with the default directory, `logs/`, `webview/` and `desktop.lock` are in the local data directory, `%LOCALAPPDATA%\semantic-router`, instead ([Windows and roaming profiles](host.md#windows-and-roaming-profiles)):
 
 | File or folder | What it holds |
 |---|---|
 | `desktop.json` | The app's own settings: where the dashboard opens, where its window was, whether the welcome window was shown, and the two update switches. |
+| `desktop.lock` | Locked while the app runs, so a second launch, even one at the same moment, hands over to it (opens the dashboard, or quits it with `--quit`) instead of starting another app. Empty; the lock ends with the app, however it ends. |
 | `logs/semantic-router.log` | What the router logged (the app has no console). Rolled over to `.1` past 10 MB. |
 | `webview/` | The app window's web view profile (WebView2 on Windows, WebKitGTK on Linux; on macOS the system keeps WKWebView's data under `~/Library`): the dashboard's sign-in cookie, its `localStorage` (the theme and a dismissed banner) and the web view's caches. The router marks its API answers `no-store`, so no prompt preview, configuration or learned example is cached, and the HTTP cache is emptied each time the app window first opens. |
 

@@ -113,7 +113,8 @@ internal static class TemplateMigration
     /// <summary>
     /// Upgrades the configuration file and the evaluation set next to it, as the router does on every start. Returns the
     /// upgrade, for the configuration history and the settings it kept, or <see langword="null"/> when nothing changed. A file that cannot be read or
-    /// parsed is left for the router to report; one whose upgrade would not validate is left as it is, and said so.
+    /// parsed is left for the router to report; one whose upgrade would not validate is left as it is, and said so. Before
+    /// the file is rewritten, a copy of it is kept at <see cref="BackupFileFor"/>.
     /// </summary>
     public static async Task<TemplateUpgrade?> UpgradeFilesAsync(string configurationFile, TextWriter output)
     {
@@ -147,8 +148,12 @@ internal static class TemplateMigration
             return null;
         }
 
+        // The rewrite drops comments and properties the router does not know, and it runs before the configuration history
+        // exists: the file as it was is kept next to it first, and without that copy it is not rewritten.
+        string backup = BackupFileFor(configurationFile);
         try
         {
+            AtomicFile.Copy(configurationFile, backup);
             store.Save(upgrade.Document);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -163,7 +168,7 @@ internal static class TemplateMigration
             return null;
         }
 
-        await output.WriteLineAsync($"Updated {configurationFile} to the current template ({upgrade.Describe()}).").ConfigureAwait(false);
+        await output.WriteLineAsync($"Updated {configurationFile} to the current template ({upgrade.Describe()}). The file as it was is in {backup}.").ConfigureAwait(false);
         if (upgrade.Kept.Count > 0)
         {
             await output.WriteLineAsync("Settings you had changed that the template changed too were kept; the dashboard's Overview offers the new defaults.").ConfigureAwait(false);
@@ -171,6 +176,12 @@ internal static class TemplateMigration
 
         return upgrade;
     }
+
+    /// <summary>
+    /// Where <see cref="UpgradeFilesAsync"/> keeps the configuration file as it was before an upgrade rewrites it:
+    /// <c>semantic-router.json.bak</c> next to it, replaced by the next upgrade.
+    /// </summary>
+    public static string BackupFileFor(string configurationFile) => configurationFile + ".bak";
 
     /// <summary>
     /// Replaces an evaluation set that is still exactly one an earlier <c>init</c> wrote with the current one, and says
@@ -191,8 +202,7 @@ internal static class TemplateMigration
             {
                 if (mine == Lines(EvaluationTemplate(version)))
                 {
-                    File.WriteAllText(file, EvaluationTemplate(Current));
-                    OwnerOnly.Restrict(file);
+                    AtomicFile.WriteAllText(file, EvaluationTemplate(Current));
                     return $"Updated {file} to the current sample prompts (it held the ones of template {version.ToString(CultureInfo.InvariantCulture)}).";
                 }
             }

@@ -108,7 +108,8 @@ internal sealed class OpenAIResponseWriter : IChatResponseWriter
     public async Task CompleteAsync(ChatStopReason stopReason, ChatUsage usage, CancellationToken cancellationToken)
     {
         await EnsureStartedAsync(cancellationToken).ConfigureAwait(false);
-        string finishReason = _toolCalls.Count > 0 || stopReason == ChatStopReason.ToolUse
+        // A reply cut off at the limit stays "length" even with a tool call: its arguments may be incomplete JSON.
+        string finishReason = (_toolCalls.Count > 0 && stopReason != ChatStopReason.MaxTokens) || stopReason == ChatStopReason.ToolUse
             ? "tool_calls"
             : stopReason switch
             {

@@ -16,7 +16,13 @@ namespace SemanticRouter.Connectors.Copilot;
 /// Like the subscription CLI connectors it only answers requests from this machine unless
 /// <see cref="ConnectorOptions.AllowRemoteClients"/> is set (see docs/TERMS.md), limits concurrency, and reports quota and
 /// rate limits as <see cref="ModelFailureKind.QuotaExceeded"/> so the router fails over until the cooldown ends.
+/// <para>
+/// Disposing it (another configuration replaced the one that made it) only lets go of its hold on the Copilot runtime: it
+/// stays usable, requests that are running or waiting keep theirs, and the runtime stops once none is left
+/// (<see cref="CopilotConnectorFactory"/>).
+/// </para>
 /// </remarks>
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "The concurrency gate is never disposed: requests that started before a configuration change still release it (#388).")]
 internal sealed partial class CopilotChatConnector : IChatConnector, IModelDiscovery, IDisposable
 {
     // Account-wide limits: every model on the connector cools down. Other quota and rate limits are per model
@@ -24,29 +30,41 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
     private static readonly string[] AccountWideCodes = ["user_weekly_rate_limited", "user_global_rate_limited", "integration_rate_limited"];
 
     private readonly ConnectorOptions _options;
-    private readonly ICopilotBackend _backend;
+    private readonly Func<BackendLease> _acquire;
     private readonly ILogger _logger;
     private readonly TimeProvider _time;
+    // Never disposed: a configuration change retires this connector while requests may still hold or wait for the gate,
+    // and SemaphoreSlim.Release throws on a disposed semaphore. Without AvailableWaitHandle there is nothing to free.
     private readonly SemaphoreSlim _gate;
+    private BackendLease? _held;
     private int _waiting;
 
-    public CopilotChatConnector(string name, ConnectorOptions options, ICopilotBackend backend, ILogger logger, TimeProvider? time = null)
+    /// <summary>
+    /// A connector whose runtime comes from <paramref name="acquire"/>: it holds one lease until it is disposed, and each
+    /// request or model listing takes one of its own while it runs.
+    /// </summary>
+    public CopilotChatConnector(string name, ConnectorOptions options, Func<BackendLease> acquire, ILogger logger, TimeProvider? time = null)
     {
         Name = name;
         _options = options;
-        _backend = backend;
+        _acquire = acquire;
         _logger = logger;
         _time = time ?? TimeProvider.System;
         _gate = new SemaphoreSlim(Math.Max(1, options.MaxConcurrency));
+        _held = acquire();
     }
 
     public string Name { get; }
+
+    /// <summary>Lets go of the connector's hold on its runtime. It stays usable: a later request takes a hold of its own.</summary>
+    public void Dispose() => Interlocked.Exchange(ref _held, null)?.Dispose();
 
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken)
     {
         try
         {
-            return await _backend.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+            using BackendLease lease = _acquire();
+            return await lease.Backend.ListModelsAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or Win32Exception && !cancellationToken.IsCancellationRequested)
         {
@@ -90,7 +108,9 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
 
         try
         {
-            return await RunAsync(request, context, cancellationToken).ConfigureAwait(false);
+            // Held until the turn is over, so a configuration change meanwhile does not stop the runtime under it.
+            using BackendLease lease = _acquire();
+            return await RunAsync(lease.Backend, request, context, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -98,9 +118,7 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
         }
     }
 
-    public void Dispose() => _gate.Dispose();
-
-    private async Task<ConnectorResult> RunAsync(ConnectorRequest request, HttpContext context, CancellationToken cancellationToken)
+    private async Task<ConnectorResult> RunAsync(ICopilotBackend backend, ConnectorRequest request, HttpContext context, CancellationToken cancellationToken)
     {
         ChatCompletionRequest chat = request.Chat;
         bool reasoning = chat.Reasoning is not null;
@@ -109,26 +127,33 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
         var turn = new CopilotTurn(request.Model.Model, system, prompt, chat.Tools, reasoning);
         IChatResponseWriter writer = ChatResponseWriterFactory.Create(context, chat, request.Model, context.RequestServices?.GetService<IToolCallAffinity>());
 
-        using var firstOutput = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        firstOutput.CancelAfter(_options.EffectiveTimeout);
+        // Until the first output: Timeout. After it: StallTimeout between two updates, as for a CLI's lines. The runtime
+        // sends nothing when it dies or hangs mid-reply, so without this a turn would hold its slot until the client left.
+        using var guard = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        guard.CancelAfter(_options.EffectiveTimeout);
+        bool committed = false;
         int calls = 0;
         int? input = null, output = null, cached = null, written = null;
         try
         {
-            await foreach (CopilotUpdate update in _backend.RunAsync(turn, firstOutput.Token).ConfigureAwait(false))
+            await foreach (CopilotUpdate update in backend.RunAsync(turn, guard.Token).ConfigureAwait(false))
             {
+                if (committed || IsOutput(update))
+                {
+                    // The client owns the stream now. Waiting for the client to take a piece is not the runtime stalling.
+                    committed = true;
+                    guard.CancelAfter(Timeout.InfiniteTimeSpan);
+                }
+
                 switch (update)
                 {
                     case CopilotUpdate.Text text when text.Delta.Length > 0:
-                        firstOutput.CancelAfter(Timeout.InfiniteTimeSpan); // the client owns the stream now
                         await writer.WriteTextAsync(text.Delta, cancellationToken).ConfigureAwait(false);
                         break;
                     case CopilotUpdate.Thinking thinking when thinking.Delta.Length > 0:
-                        firstOutput.CancelAfter(Timeout.InfiniteTimeSpan);
                         await writer.WriteThinkingAsync(thinking.Delta, cancellationToken).ConfigureAwait(false);
                         break;
                     case CopilotUpdate.ToolCall call:
-                        firstOutput.CancelAfter(Timeout.InfiniteTimeSpan);
                         await writer.StartToolCallAsync(call.Id, call.Name, cancellationToken).ConfigureAwait(false);
                         await writer.WriteToolCallArgumentsAsync(call.ArgumentsJson, cancellationToken).ConfigureAwait(false);
                         await writer.EndToolCallAsync(cancellationToken).ConfigureAwait(false);
@@ -140,14 +165,26 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
                         cached = Sum(cached, usage.CacheReadTokens);
                         written = Sum(written, usage.CacheWriteTokens);
                         break;
-                    case CopilotUpdate.Error error when !writer.HasStarted:
+                    case CopilotUpdate.Error error when !context.Response.HasStarted:
                         return Failure(error);
                     case CopilotUpdate.Error error:
-                        LogMidStreamFailure(_logger, Name, error.Type, error.Message);
-                        await writer.CompleteAsync(ChatStopReason.EndTurn, default, cancellationToken).ConfigureAwait(false);
-                        return ConnectorResult.Completed;
+                        // Too late to fail over: the dispatcher ends the reply with an error and cools the model down.
+                        throw new UpstreamReplyException(Failure(error));
+                }
+
+                if (committed)
+                {
+                    guard.CancelAfter(_options.EffectiveStallTimeout);
                 }
             }
+        }
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && committed)
+        {
+            // The reply started, then the runtime went quiet for longer than StallTimeout: the turn is abandoned (the
+            // backend checks whether the runtime is still alive), and the dispatcher fails over if nothing reached the
+            // client yet, or ends the reply with an error and cools the model down.
+            LogStalled(_logger, Name, _options.EffectiveStallTimeout);
+            throw new TimeoutException("stalled: no output for " + StallGuard.Duration(_options.EffectiveStallTimeout), ex);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && !writer.HasStarted)
         {
@@ -156,15 +193,15 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or Win32Exception or FileNotFoundException && !cancellationToken.IsCancellationRequested)
         {
-            if (writer.HasStarted)
+            var failure = ConnectorResult.Failed(ModelFailureKind.Unavailable, "Copilot runtime: " + ex.Message);
+            if (context.Response.HasStarted)
             {
                 LogMidStreamFailure(_logger, Name, ex.GetType().Name, ex.Message);
-                await writer.CompleteAsync(ChatStopReason.EndTurn, default, cancellationToken).ConfigureAwait(false);
-                return ConnectorResult.Completed;
+                throw new UpstreamReplyException(failure, innerException: ex);
             }
 
             LogRuntimeFailed(_logger, Name, ex.Message);
-            return ConnectorResult.Failed(ModelFailureKind.Unavailable, "Copilot runtime: " + ex.Message);
+            return failure;
         }
 
         if (!writer.HasStarted && calls == 0)
@@ -214,6 +251,11 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
 
     private static int? Sum(int? total, int? add) => add is null ? total : (total ?? 0) + add;
 
+    /// <summary>Whether <paramref name="update"/> is something the client receives (not usage or an empty delta).</summary>
+    private static bool IsOutput(CopilotUpdate update) => update is CopilotUpdate.Text { Delta.Length: > 0 }
+        or CopilotUpdate.Thinking { Delta.Length: > 0 }
+        or CopilotUpdate.ToolCall;
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: Copilot reported {Detail}")]
     private static partial void LogFailed(ILogger logger, string connector, string detail);
 
@@ -222,6 +264,9 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: no output within {Timeout}; trying the next model.")]
     private static partial void LogTimedOut(ILogger logger, string connector, TimeSpan timeout);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: the Copilot runtime sent nothing for {Stall} after the reply started; giving up on it.")]
+    private static partial void LogStalled(ILogger logger, string connector, TimeSpan stall);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: failed mid-stream ({Kind}): {Error}")]
     private static partial void LogMidStreamFailure(ILogger logger, string connector, string kind, string error);

@@ -129,8 +129,7 @@ internal sealed class ConversationTracker
     public void Record(string key, int requiredTier, bool raisedByFloor, bool followUp, string? model, ConversationRoutingOptions options)
     {
         DateTimeOffset now = _time.GetUtcNow();
-        State state = _conversations.GetOrAdd(key, _ => new State { Peak = requiredTier, At = now });
-        lock (state)
+        Write(key, now, requiredTier, state =>
         {
             if (Expire(state, now, options) || (!raisedByFloor && requiredTier >= state.Peak))
             {
@@ -143,7 +142,7 @@ internal sealed class ConversationTracker
 
             state.Model = model ?? state.Model;
             state.At = now;
-        }
+        });
 
         _conversationPruning.Written(_conversations, LastActive, options.IdleTimeout);
     }
@@ -169,13 +168,12 @@ internal sealed class ConversationTracker
     public void Choose(string key, Callout? choice, ConversationRoutingOptions options)
     {
         DateTimeOffset now = _time.GetUtcNow();
-        State state = _conversations.GetOrAdd(key, _ => new State { At = now });
-        lock (state)
+        Write(key, now, peak: 0, state =>
         {
             Expire(state, now, options);
             state.Choice = choice;
             state.At = now;
-        }
+        });
     }
 
     /// <summary>The conversation's last decision (not counting tool-loop turns), for feedback on it; <see langword="null"/> when unknown or idle.</summary>
@@ -196,12 +194,11 @@ internal sealed class ConversationTracker
     public void Decided(string key, DecisionRecord decision, ConversationRoutingOptions options)
     {
         DateTimeOffset now = _time.GetUtcNow();
-        State state = _conversations.GetOrAdd(key, _ => new State { At = now });
-        lock (state)
+        Write(key, now, peak: 0, state =>
         {
             Expire(state, now, options);
             (state.Last, state.ToolErrorTurns, state.At) = (decision, 0, now);
-        }
+        });
     }
 
     /// <summary>
@@ -217,6 +214,11 @@ internal sealed class ConversationTracker
 
         lock (state)
         {
+            if (state.Retired)
+            {
+                return 0; // the pruning took it out: as if it were gone
+            }
+
             state.ToolErrorTurns = failed ? state.ToolErrorTurns + 1 : 0;
             return state.ToolErrorTurns;
         }
@@ -232,6 +234,11 @@ internal sealed class ConversationTracker
 
         lock (state)
         {
+            if (state.Retired)
+            {
+                return; // the pruning took it out: as if it were gone
+            }
+
             DateTimeOffset now = _time.GetUtcNow();
             Expire(state, now, options);
             state.Model = model ?? state.Model;
@@ -265,8 +272,32 @@ internal sealed class ConversationTracker
         }
     }
 
-    private sealed class State
+    /// <summary>
+    /// Runs <paramref name="write"/> on <paramref name="key"/>'s state, holding its lock: a new one (at
+    /// <paramref name="peak"/>) when there is none, or when the pruning retired the one there, so the write is not lost
+    /// with it.
+    /// </summary>
+    private void Write(string key, DateTimeOffset now, int peak, Action<State> write)
     {
+        while (true)
+        {
+            State state = _conversations.GetOrAdd(key, static (_, start) => new State { Peak = start.Peak, At = start.Now }, (Peak: peak, Now: now));
+            lock (state)
+            {
+                if (!state.Retired)
+                {
+                    write(state);
+                    return;
+                }
+            }
+
+            _conversations.TryRemove(new KeyValuePair<string, State>(key, state));
+        }
+    }
+
+    private sealed class State : IPrunableEntry
+    {
+        public bool Retired;
         public int Peak;
         public int TurnsBelow;
         public string? Model;
@@ -274,5 +305,14 @@ internal sealed class ConversationTracker
         public DecisionRecord? Last;
         public int ToolErrorTurns;
         public DateTimeOffset At;
+
+        public bool TryRetire(DateTimeOffset seen)
+        {
+            lock (this)
+            {
+                Retired |= At <= seen;
+                return Retired;
+            }
+        }
     }
 }

@@ -11,8 +11,9 @@ namespace SemanticRouter.AspNetCore;
 /// <see cref="ModelSelectionOptions.MaxAttempts"/>. Models whose budget is spent are not tried. Each attempt is a
 /// <c>semantic_router.attempt</c> span; the usage the backend reports is recorded in the activity entry, the usage
 /// ledger and the metrics. A request that ends early is recorded too: <c>cancelled</c> when the client went away, and
-/// <c>failed</c>, with the model cooled down, when the backend stopped after the reply had started (the client gets an
-/// error event, or a broken connection for a reply that is not streamed).
+/// <c>failed</c>, with the model cooled down, when the backend stopped or reported an error after the reply had started
+/// (the client gets an error event, or a broken connection for a reply that is not streamed). A connector that fails
+/// unexpectedly is handled the same way, without cooling the model down: the fault is the router's.
 /// </summary>
 internal sealed partial class PromptDispatcher
 {
@@ -155,6 +156,7 @@ internal sealed partial class PromptDispatcher
             current.Started = _time.GetTimestamp();
 
             ConnectorResult result;
+            bool blameless = false;
             using (Activity? span = RouterTelemetry.Source.StartActivity("semantic_router.attempt"))
             {
                 span?.SetTag("semantic_router.model", model.Name);
@@ -174,27 +176,52 @@ internal sealed partial class PromptDispatcher
                     EndedEarly("cancelled", "the client went away before the reply was finished");
                     return;
                 }
-                catch (Exception ex) when (ex is IOException or HttpRequestException or TimeoutException)
+                catch (Exception ex)
                 {
-                    string why = ex is TimeoutException ? ex.Message : $"connection dropped ({runtime.Redactor.Redact(ex.Message)})";
+                    // The backend failed (dropped the connection, stalled, or reported an error inside a reply it began as
+                    // a success), or the connector itself failed unexpectedly. The latter is the router's fault, not the
+                    // model's: it is logged with its stack trace, and the model is not cooled down for it.
+                    blameless = ex is not (IOException or HttpRequestException or TimeoutException or UpstreamReplyException);
+                    ConnectorResult failure = ex switch
+                    {
+                        UpstreamReplyException upstream => upstream.Failure,
+                        TimeoutException => ConnectorResult.Failed(ModelFailureKind.Unavailable, ex.Message),
+                        IOException or HttpRequestException => ConnectorResult.Failed(ModelFailureKind.Unavailable, $"connection dropped ({runtime.Redactor.Redact(ex.Message)})"),
+                        _ => ConnectorResult.Failed(ModelFailureKind.Unavailable, $"the connector failed ({ex.GetType().Name}: {runtime.Redactor.Redact(ex.Message)})"),
+                    };
+                    if (blameless)
+                    {
+                        LogConnectorCrashed(_logger, ex, model.Name, connector.Name);
+                    }
+
                     if (!context.Response.HasStarted)
                     {
                         // Nothing reached the client yet: the next model can still answer.
-                        result = ConnectorResult.Failed(ModelFailureKind.Unavailable, why);
+                        context.Response.StatusCode = StatusCodes.Status200OK;
+                        result = failure;
                     }
                     else
                     {
                         // Too late to fail over: say so in the client's protocol, and hold it against the model.
+                        string why = runtime.Redactor.Redact(failure.Detail ?? "failed");
                         span?.SetTag("semantic_router.outcome", "Interrupted");
                         span?.SetTag("semantic_router.failure.detail", why);
                         span?.SetStatus(ActivityStatusCode.Error, "interrupted");
-                        ReportFailure(model, ConnectorResult.Failed(ModelFailureKind.Unavailable, why));
-                        _incidents?.Failed(connector.Name, ModelFailureKind.Unavailable, why);
-                        _metrics.RecordFailover(model.Name, ModelFailureKind.Unavailable);
+                        if (!blameless)
+                        {
+                            CoolDown(runtime, model, failure, cooledDuringRequest);
+                            _incidents?.Failed(connector.Name, failure.FailureKind, why);
+                            _metrics.RecordFailover(model.Name, failure.FailureKind);
+                        }
+
                         _metrics.RecordRequest(model.Name, connector.Name, "failed", _time.GetElapsedTime(started));
                         LogInterrupted(_logger, model.Name, connector.Name, why);
                         EndedEarly("failed", $"{model.Name}: stopped mid-reply: {why}");
-                        await ProtocolErrors.EndStreamWithErrorAsync(context, chat, $"{model.Name} stopped mid-reply: {why}").ConfigureAwait(false);
+                        if (ex is not UpstreamReplyException { ClientNotified: true })
+                        {
+                            await ProtocolErrors.EndStreamWithErrorAsync(context, chat, $"{model.Name} stopped mid-reply: {why}").ConfigureAwait(false);
+                        }
+
                         return;
                     }
                 }
@@ -281,19 +308,13 @@ internal sealed partial class PromptDispatcher
                     return;
 
                 case ConnectorOutcome.Failed:
-                    ReportFailure(model, result);
-                    if (result.AffectsAllConnectorModels)
+                    string failure = runtime.Redactor.Redact(result.Detail ?? "failed");
+                    if (!blameless)
                     {
-                        foreach (ModelDefinition sibling in runtime.Router.Models.Where(m =>
-                                     m != model && string.Equals(m.Connector, model.Connector, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            ReportFailure(sibling, result);
-                            cooledDuringRequest.Add(sibling.Name);
-                        }
+                        CoolDown(runtime, model, result, cooledDuringRequest);
+                        _incidents?.Failed(connector.Name, result.FailureKind, failure);
                     }
 
-                    string failure = runtime.Redactor.Redact(result.Detail ?? "failed");
-                    _incidents?.Failed(connector.Name, result.FailureKind, failure);
                     LogFailover(_logger, model.Name, result.FailureKind, failure);
                     _metrics.RecordFailover(model.Name, result.FailureKind);
                     attempts.Add($"{model.Name}: {failure}");
@@ -329,14 +350,37 @@ internal sealed partial class PromptDispatcher
             activity.Budget = budgetsHit.Count > 0 ? string.Join(", ", budgetsHit.Distinct(StringComparer.OrdinalIgnoreCase)) : null;
         }
 
-        if (notServable)
+        // The outcome is recorded; a client that went away meanwhile simply does not get the answer.
+        try
         {
-            await ProtocolErrors.WriteNotServableAsync(context, chat.Protocol, detail, context.RequestAborted).ConfigureAwait(false);
-            return;
-        }
+            if (notServable)
+            {
+                await ProtocolErrors.WriteNotServableAsync(context, chat.Protocol, detail, CancellationToken.None).ConfigureAwait(false);
+                return;
+            }
 
-        await PromptRoutingMiddleware.WriteProblemAsync(
-            context, chat.Protocol, StatusCodes.Status503ServiceUnavailable, "No model available", detail).ConfigureAwait(false);
+            await ProtocolErrors.WriteAsync(
+                context, chat.Protocol, StatusCodes.Status503ServiceUnavailable, "No model available", detail, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception) when (context.RequestAborted.IsCancellationRequested)
+        {
+            LogClientGone(_logger);
+        }
+    }
+
+    /// <summary>Cools <paramref name="model"/> down for <paramref name="failure"/>, and its connector's other models when the whole account is limited.</summary>
+    private void CoolDown(RouterRuntime runtime, ModelDefinition model, ConnectorResult failure, HashSet<string> cooledDuringRequest)
+    {
+        ReportFailure(model, failure);
+        if (failure.AffectsAllConnectorModels)
+        {
+            foreach (ModelDefinition sibling in runtime.Router.Models.Where(m =>
+                         m != model && string.Equals(m.Connector, model.Connector, StringComparison.OrdinalIgnoreCase)))
+            {
+                ReportFailure(sibling, failure);
+                cooledDuringRequest.Add(sibling.Name);
+            }
+        }
     }
 
     /// <summary>
@@ -477,6 +521,12 @@ internal sealed partial class PromptDispatcher
     [LoggerMessage(Level = LogLevel.Information, Message = "The client went away while {Model} ({Connector}) was answering.")]
     private static partial void LogCancelled(ILogger logger, string model, string connector);
 
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Model {Model} ({Connector}) stopped mid-reply: {Detail}. The client got an error; the model cools down.")]
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Model {Model} ({Connector}) stopped mid-reply: {Detail}. The client got an error.")]
     private static partial void LogInterrupted(ILogger logger, string model, string connector, string detail);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "The connector serving {Model} ({Connector}) failed unexpectedly; the model is not cooled down for it.")]
+    private static partial void LogConnectorCrashed(ILogger logger, Exception exception, string model, string connector);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "The client went away before it got the router's error response.")]
+    private static partial void LogClientGone(ILogger logger);
 }

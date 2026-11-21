@@ -50,7 +50,7 @@ internal sealed record ModelReliability
 /// that started the task. A model is never left out of every route it can serve. The figures are recomputed in the
 /// background at most once a minute; <see cref="IsReliable"/> only looks them up.
 /// </remarks>
-internal sealed class ModelReliabilityTracker : IModelReliability
+internal sealed class ModelReliabilityTracker : IModelReliability, IDisposable
 {
     private const string Tools = "tools";
     private static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(1);
@@ -64,7 +64,7 @@ internal sealed class ModelReliabilityTracker : IModelReliability
     private readonly Dictionary<string, Exclusion> _exclusions = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, DateTimeOffset> _since = new(StringComparer.OrdinalIgnoreCase);
     private Snapshot _snapshot = new(DateTimeOffset.MinValue, [], new Dictionary<string, Exclusion>(StringComparer.OrdinalIgnoreCase));
-    private int _refreshing;
+    private readonly SingleFlight _refresh = new();
 
     public ModelReliabilityTracker(IServiceProvider services, RoutingActivityLog activity, RoutingFeedbackLog feedback, TimeProvider? time = null)
     {
@@ -89,24 +89,17 @@ internal sealed class ModelReliabilityTracker : IModelReliability
 
         DateTimeOffset now = _time.GetUtcNow();
         Snapshot snapshot = Volatile.Read(ref _snapshot);
-        if (now - snapshot.At >= RefreshEvery && Interlocked.CompareExchange(ref _refreshing, 1, 0) == 0)
+        if (now - snapshot.At >= RefreshEvery)
         {
-            _ = Task.Run(() =>
-            {
-                try
-                {
-                    Refresh();
-                }
-                finally
-                {
-                    Volatile.Write(ref _refreshing, 0);
-                }
-            });
+            _refresh.TryStart(() => Refresh());
         }
 
         bool Left(string work) => snapshot.Exclusions.TryGetValue(Key(model.Name, work), out Exclusion? exclusion) && exclusion.Until > now;
         return !(route is not null && Left(RouteWork(route))) && !(capabilities.Contains(Tools, StringComparer.OrdinalIgnoreCase) && Left(Tools));
     }
+
+    /// <summary>Starts no more refreshes, and waits for the one under way: it reads the state store, which closes next.</summary>
+    public void Dispose() => _refresh.Dispose();
 
     /// <summary>Every model on every kind of work it did in the window, and the ones left out; recomputed now.</summary>
     public IReadOnlyList<ModelReliability> Refresh()

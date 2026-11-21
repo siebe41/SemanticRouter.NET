@@ -221,12 +221,51 @@ public interface IUsageLedger
 /// ranges asked for most recently (a budget's current period) are kept up to date as records arrive, so a budget check
 /// does not add up the period's records on every request.
 /// </summary>
+/// <remarks>
+/// At most <see cref="MaxRecords"/> records are kept one by one. Beyond that the oldest quarter is folded into
+/// quarter-hour summaries, one per quarter hour and model, connector, route, client, location and profile, so a busy
+/// router's memory stays bounded while its totals stay exact: every period the router asks about (a day, a month, in
+/// any time zone) starts on a quarter hour. A range that starts or ends within a summary's quarter hour counts it
+/// whole. <see cref="Records"/> returns a summary as one record holding its tokens and costs.
+/// </remarks>
 internal sealed class InMemoryUsageLedger : IUsageLedger
 {
+    /// <summary>The most records kept one by one: 100,000, some 20 MB.</summary>
+    public const int MaxRecords = 100_000;
+
     private static readonly TimeSpan Retention = TimeSpan.FromDays(40);
+    private static readonly long SummaryTicks = TimeSpan.FromMinutes(15).Ticks;
+    private readonly int _maxRecords;
     private readonly List<UsageRecord> _records = [];
+    private readonly Dictionary<SummaryKey, Summary> _summaries = [];
     private readonly RunningUsageTotals<UsageModelTotalsBuilder> _running = new();
     private readonly Lock _gate = new();
+    private long _recorded;
+    private long _oldestSummaryTicks = long.MaxValue;
+
+    public InMemoryUsageLedger()
+        : this(MaxRecords)
+    {
+    }
+
+    /// <summary>A ledger that keeps at most <paramref name="maxRecords"/> records one by one, for tests.</summary>
+    internal InMemoryUsageLedger(int maxRecords)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxRecords, 4);
+        _maxRecords = maxRecords;
+    }
+
+    /// <summary>The records kept one by one and the summaries of older ones, for tests.</summary>
+    internal (int Records, int Summaries) Held
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return (_records.Count, _summaries.Count);
+            }
+        }
+    }
 
     /// <inheritdoc />
     public void Record(UsageRecord record)
@@ -235,13 +274,14 @@ internal sealed class InMemoryUsageLedger : IUsageLedger
         lock (_gate)
         {
             _records.Add(record);
-            if (_records.Count % 1000 == 0)
+            if (++_recorded % 1000 == 0)
             {
-                DateTimeOffset oldest = record.Timestamp - Retention;
-                if (_records.RemoveAll(r => r.Timestamp < oldest) > 0)
-                {
-                    _running.Clear(); // a range reaching back past the retention lost records
-                }
+                Expire(record.Timestamp - Retention);
+            }
+
+            if (_records.Count > _maxRecords)
+            {
+                Fold(_maxRecords / 4);
             }
 
             foreach ((UsageRange range, UsageModelTotalsBuilder totals) in _running.Entries)
@@ -264,7 +304,7 @@ internal sealed class InMemoryUsageLedger : IUsageLedger
         var range = new UsageRange(since, until, model, connector, profile);
         lock (_gate)
         {
-            return _records.Where(range.Covers).ToArray();
+            return [.. _summaries.Values.Select(s => s.Sum).Where(range.Covers), .. _records.Where(range.Covers)];
         }
     }
 
@@ -276,17 +316,119 @@ internal sealed class InMemoryUsageLedger : IUsageLedger
         lock (_gate)
         {
             return by == UsageGrouping.Model
-                ? _running.GetOrAdd(range, r => UsageModelTotalsBuilder.Of(_records.Where(r.Covers), by, TimeZoneInfo.Local)).ToList()
-                : UsageModelTotalsBuilder.Of(_records.Where(range.Covers), by, zone ?? TimeZoneInfo.Local).ToList();
+                ? _running.GetOrAdd(range, r => Build(r, by, TimeZoneInfo.Local)).ToList()
+                : Build(range, by, zone ?? TimeZoneInfo.Local).ToList();
         }
     }
 
     /// <inheritdoc />
     public IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null)
     {
+        IReadOnlyList<UsageModelTotals> totals;
         lock (_gate)
         {
-            return UsageSummaries.Group(_records.Where(r => r.Timestamp >= since && r.Timestamp < until), by, zone ?? TimeZoneInfo.Local);
+            totals = Build(new UsageRange(since, until, null, null, null), by, zone ?? TimeZoneInfo.Local).ToList();
+        }
+
+        return UsageSummaries.Group(totals, by);
+    }
+
+    /// <summary>The records and summaries in <paramref name="range"/>, added up per group and model.</summary>
+    private UsageModelTotalsBuilder Build(UsageRange range, UsageGrouping by, TimeZoneInfo zone)
+    {
+        UsageModelTotalsBuilder builder = UsageModelTotalsBuilder.Of(_records.Where(range.Covers), by, zone);
+        foreach (Summary summary in _summaries.Values)
+        {
+            if (range.Covers(summary.Sum))
+            {
+                builder.Add(UsageSummaries.KeyOf(summary.Sum, by, zone), summary.Sum.Model, summary.Totals);
+            }
+        }
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Drops what is older than <paramref name="oldest"/>. Records arrive about in time order, so only the run of expired
+    /// ones at the start is looked at; one recorded out of order goes at a later check, or with its summary.
+    /// </summary>
+    private void Expire(DateTimeOffset oldest)
+    {
+        int expired = 0;
+        while (expired < _records.Count && _records[expired].Timestamp < oldest)
+        {
+            expired++;
+        }
+
+        _records.RemoveRange(0, expired);
+        bool dropped = expired > 0;
+        if (_oldestSummaryTicks + SummaryTicks <= oldest.UtcTicks)
+        {
+            foreach (SummaryKey key in _summaries.Keys.Where(k => k.Start + SummaryTicks <= oldest.UtcTicks).ToArray())
+            {
+                _summaries.Remove(key);
+                dropped = true;
+            }
+
+            _oldestSummaryTicks = _summaries.Count == 0 ? long.MaxValue : _summaries.Keys.Min(k => k.Start);
+        }
+
+        if (dropped)
+        {
+            _running.Clear(); // a range reaching back past the retention lost usage
+        }
+    }
+
+    /// <summary>
+    /// Folds the first <paramref name="count"/> records into quarter-hour summaries. The totals do not change, so the
+    /// running totals stay as they are.
+    /// </summary>
+    private void Fold(int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            UsageRecord record = _records[i];
+            long start = record.Timestamp.UtcTicks - (record.Timestamp.UtcTicks % SummaryTicks);
+            var key = new SummaryKey(start, record.Model, record.Connector, record.Route, record.Client, record.IsLocal, record.Profile);
+            if (_summaries.TryGetValue(key, out Summary? summary))
+            {
+                summary.Add(record);
+            }
+            else
+            {
+                _summaries[key] = new Summary(record with { Timestamp = new DateTimeOffset(start, TimeSpan.Zero) });
+                _oldestSummaryTicks = Math.Min(_oldestSummaryTicks, start);
+            }
+        }
+
+        _records.RemoveRange(0, count);
+    }
+
+    private readonly record struct SummaryKey(long Start, string Model, string Connector, string? Route, string? Client, bool IsLocal, string? Profile);
+
+    /// <summary>The records of one quarter hour that share everything but their tokens and costs.</summary>
+    private sealed class Summary(UsageRecord first)
+    {
+        /// <summary>Their tokens and costs added up, stamped with the start of the quarter hour.</summary>
+        public UsageRecord Sum { get; private set; } = first;
+
+        public long Requests { get; private set; } = 1;
+
+        public UsageTotals Totals => UsageTotals.Zero.Add(Sum) with { Requests = Requests };
+
+        public void Add(UsageRecord record)
+        {
+            Sum = Sum with
+            {
+                InputTokens = Sum.InputTokens + record.InputTokens,
+                OutputTokens = Sum.OutputTokens + record.OutputTokens,
+                CacheReadTokens = Sum.CacheReadTokens + record.CacheReadTokens,
+                CacheWriteTokens = Sum.CacheWriteTokens + record.CacheWriteTokens,
+                CostUsd = Sum.CostUsd + record.CostUsd,
+                ReferenceCostUsd = Sum.ReferenceCostUsd + record.ReferenceCostUsd,
+                SubscriptionValueUsd = Sum.SubscriptionValueUsd + record.SubscriptionValueUsd,
+            };
+            Requests++;
         }
     }
 }

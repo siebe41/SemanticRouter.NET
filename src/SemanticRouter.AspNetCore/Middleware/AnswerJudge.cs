@@ -41,13 +41,15 @@ internal sealed partial class AnswerJudge : IDisposable
     private readonly IServiceProvider _services;
     private readonly TimeProvider _time;
     private readonly IStateValueStore? _store;
+    private readonly BackgroundSaver? _saver;
     private readonly ILogger _logger;
     private readonly Channel<Job> _queue = Channel.CreateBounded<Job>(new BoundedChannelOptions(QueueLength) { SingleReader = true });
     private readonly CancellationTokenSource _stopping = new();
     private readonly Lock _gate = new();
     private readonly Task _worker;
+    private readonly Task _loaded;
     private DateOnly _day;
-    private int _today = -1;
+    private int _today = -1; // until today's count is read, in the background
     private int _pending;
 
     public AnswerJudge(
@@ -68,6 +70,13 @@ internal sealed partial class AnswerJudge : IDisposable
         _feedback = feedback;
         _time = time ?? TimeProvider.System;
         _store = store;
+        if (store is not null)
+        {
+            _saver = new BackgroundSaver(SavedCount, value => store.Save(StoreKey, value), ex => LogCountNotSaved(_logger, ex.Message));
+        }
+
+        // Read off the request path: the count comes from the store and from a day's activity.
+        _loaded = Task.Run(LoadToday);
         _worker = Task.Run(WorkAsync);
     }
 
@@ -79,9 +88,10 @@ internal sealed partial class AnswerJudge : IDisposable
     {
         get
         {
+            _loaded.Wait(TimeSpan.FromSeconds(30));
             lock (_gate)
             {
-                return Count(_time.GetUtcNow());
+                return Count(_time.GetUtcNow(), out int today) ? today : 0;
             }
         }
     }
@@ -100,9 +110,10 @@ internal sealed partial class AnswerJudge : IDisposable
             return false;
         }
 
+        // While today's count is still being read (just after a start), the limit is kept by Enqueue.
         lock (_gate)
         {
-            return Count(_time.GetUtcNow()) < options.DailyLimit && Random.NextDouble() < options.SampleRate;
+            return (!Count(_time.GetUtcNow(), out int today) || today < options.DailyLimit) && Random.NextDouble() < options.SampleRate;
         }
     }
 
@@ -132,9 +143,9 @@ internal sealed partial class AnswerJudge : IDisposable
         lock (_gate)
         {
             DateTimeOffset now = _time.GetUtcNow();
-            if (Count(now) >= options.DailyLimit)
+            if (!Count(now, out int today) || today >= options.DailyLimit)
             {
-                return false;
+                return false; // over the limit, or today's count is still being read and the limit cannot be kept
             }
 
             if (!_queue.Writer.TryWrite(new Job(entry, Clip(prompt, options.MaxCharacters), Clip(answer, options.MaxCharacters), highestTier, JudgeAgreement.KeyOf(prompt), remote)))
@@ -144,10 +155,20 @@ internal sealed partial class AnswerJudge : IDisposable
 
             _today++;
             _pending++;
-            _store?.Save(StoreKey, string.Create(CultureInfo.InvariantCulture, $"{_day:yyyy-MM-dd} {_today}"));
         }
 
+        // Saved in the background, outside the lock: a request does not wait for the store.
+        _saver?.Request();
         return true;
+    }
+
+    /// <summary>Today's count as the store keeps it (<c>yyyy-MM-dd count</c>).</summary>
+    private string SavedCount()
+    {
+        lock (_gate)
+        {
+            return string.Create(CultureInfo.InvariantCulture, $"{_day:yyyy-MM-dd} {_today}");
+        }
     }
 
     /// <summary>Waits until every queued answer is graded (tests).</summary>
@@ -162,6 +183,9 @@ internal sealed partial class AnswerJudge : IDisposable
 
     public void Dispose()
     {
+        // Today's count is read from the state store, which closes next: wait for it, as for the save.
+        ((IAsyncResult)_loaded).AsyncWaitHandle.WaitOne(SingleFlight.StopWait);
+        _saver?.Flush(TimeSpan.FromSeconds(5));
         _queue.Writer.TryComplete();
         _stopping.Cancel();
         try
@@ -193,29 +217,58 @@ internal sealed partial class AnswerJudge : IDisposable
             : null;
 
     /// <summary>
-    /// Today's count of judge calls. After a start it comes from the state store (every call made today, graded or
-    /// not), or else from the entries graded so far today. Call under the lock.
+    /// Today's count of judge calls into <paramref name="today"/>; <see langword="false"/> while it is still being read
+    /// (<see cref="LoadToday"/>). Call under the lock.
     /// </summary>
-    private int Count(DateTimeOffset now)
+    private bool Count(DateTimeOffset now, out int today)
     {
-        var day = DateOnly.FromDateTime(now.UtcDateTime);
+        today = 0;
         if (_today < 0)
         {
-            DateTimeOffset start = new(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-            int graded = _activity.Between(start, now.AddSeconds(1)).Count(e => e.Grade is not null);
-            int saved = _store?.Load(StoreKey) is { } value && value.Split(' ') is [var date, var count]
-                && date == day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) && int.TryParse(count, CultureInfo.InvariantCulture, out int calls)
-                ? calls
-                : 0;
-            _today = Math.Max(graded, saved);
-            _day = day;
+            return false;
         }
-        else if (day != _day)
+
+        var day = DateOnly.FromDateTime(now.UtcDateTime);
+        if (day != _day)
         {
             (_today, _day) = (0, day);
         }
 
-        return _today;
+        today = _today;
+        return true;
+    }
+
+    /// <summary>
+    /// Reads today's count of judge calls, in the background, outside the lock: from the state store (every call made
+    /// today, graded or not), or else from the entries graded so far today.
+    /// </summary>
+    private void LoadToday()
+    {
+        DateTimeOffset now = _time.GetUtcNow();
+        var day = DateOnly.FromDateTime(now.UtcDateTime);
+        int calls = 0;
+        try
+        {
+            DateTimeOffset start = new(day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+            int graded = _activity.Between(start, now.AddSeconds(1)).Count(e => e.Grade is not null);
+            int saved = _store?.Load(StoreKey) is { } value && value.Split(' ') is [var date, var count]
+                && date == day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) && int.TryParse(count, CultureInfo.InvariantCulture, out int stored)
+                ? stored
+                : 0;
+            calls = Math.Max(graded, saved);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            LogCountNotRead(_logger, ex.Message);
+        }
+
+        lock (_gate)
+        {
+            if (_today < 0)
+            {
+                (_today, _day) = (calls, day);
+            }
+        }
     }
 
     private static string Clip(string text, int max) => text.Length <= max ? text : text[..max] + " …";
@@ -230,8 +283,10 @@ internal sealed partial class AnswerJudge : IDisposable
                 {
                     await GradeAsync(job, _stopping.Token).ConfigureAwait(false);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
+                catch (Exception ex) when (ex is not OutOfMemoryException && !(ex is OperationCanceledException && _stopping.IsCancellationRequested))
                 {
+                    // A cancellation that is not the router stopping (a connector's own timeout) fails this job only:
+                    // the worker goes on to the next.
                     LogFailed(_logger, job.Entry.Id, ex.Message);
                 }
                 finally
@@ -240,7 +295,7 @@ internal sealed partial class AnswerJudge : IDisposable
                 }
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (_stopping.IsCancellationRequested)
         {
             // Stopping.
         }
@@ -302,16 +357,26 @@ internal sealed partial class AnswerJudge : IDisposable
     /// <summary>Sends the grading request through the dispatcher, as an OpenAI chat-completions call to the judge model.</summary>
     private async Task<string?> AskAsync(RouterRuntime runtime, ModelDefinition judge, Job job, CancellationToken cancellationToken)
     {
+        // The request passes through to an OpenAI-compatible judge as written, so it follows the rule a translated request
+        // does (#397): OpenAI's reasoning models reject max_tokens, and any temperature but the default.
+        bool reasoning = judge.Capabilities.Contains("reasoning", StringComparer.OrdinalIgnoreCase);
+        bool maxCompletionTokens = runtime.Configuration.Connectors.TryGetValue(judge.Connector, out ConnectorOptions? connector)
+                                   && connector.Protocol == ChatProtocol.OpenAI
+                                   && OpenAICompatibleConnector.UsesMaxCompletionTokens(connector, reasoning);
         var request = new JsonObject
         {
             ["model"] = judge.Name,
             ["stream"] = false,
-            ["temperature"] = 0,
-            ["max_tokens"] = 300,
-            ["messages"] = new JsonArray(
-                new JsonObject { ["role"] = "system", ["content"] = Instructions },
-                new JsonObject { ["role"] = "user", ["content"] = $"<request>\n{job.Prompt}\n</request>\n\n<answer>\n{job.Answer}\n</answer>" }),
         };
+        if (!reasoning)
+        {
+            request["temperature"] = 0;
+        }
+
+        request[maxCompletionTokens ? "max_completion_tokens" : "max_tokens"] = 300;
+        request["messages"] = new JsonArray(
+            new JsonObject { ["role"] = "system", ["content"] = Instructions },
+            new JsonObject { ["role"] = "user", ["content"] = $"<request>\n{job.Prompt}\n</request>\n\n<answer>\n{job.Answer}\n</answer>" });
         byte[] body = JsonSerializer.SerializeToUtf8Bytes(request);
         ChatCompletionRequest chat;
         using (JsonDocument document = JsonDocument.Parse(body))
@@ -403,4 +468,10 @@ internal sealed partial class AnswerJudge : IDisposable
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Grading request {Id} failed: {Error}.")]
     private static partial void LogFailed(ILogger logger, long id, string error);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The judge's count of today's calls could not be read ({Error}); it counts from 0.")]
+    private static partial void LogCountNotRead(ILogger logger, string error);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "The judge's count of today's calls could not be saved: {Error}.")]
+    private static partial void LogCountNotSaved(ILogger logger, string error);
 }

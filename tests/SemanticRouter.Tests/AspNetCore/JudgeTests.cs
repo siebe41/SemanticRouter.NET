@@ -47,7 +47,8 @@ public sealed class JudgeTests : RouterHostTest
     private AnswerJudge Judge => Services.GetRequiredService<AnswerJudge>();
 
     private Task<HttpClient> StartJudgedAsync(
-        Action<JudgeOptions> judge, Action<PromptRouterMiddlewareOptions>? middleware = null, Action<SemanticRouterOptions>? routing = null) =>
+        Action<JudgeOptions> judge, Action<PromptRouterMiddlewareOptions>? middleware = null, Action<SemanticRouterOptions>? routing = null,
+        Action<IServiceCollection>? services = null) =>
         StartAsync(
             o =>
             {
@@ -67,7 +68,11 @@ public sealed class JudgeTests : RouterHostTest
                 o.Models.Add(cloud);
                 routing?.Invoke(o);
             },
-            services: s => s.AddSingleton<TimeProvider>(_time).AddSingleton<IModelResidency>(new OnlyLoaded("qwen3-8b")));
+            services: s =>
+            {
+                s.AddSingleton<TimeProvider>(_time).AddSingleton<IModelResidency>(new OnlyLoaded("qwen3-8b"));
+                services?.Invoke(s);
+            });
 
     /// <summary>LM Studio with only the small model loaded, so it answers and the 32B judge loads only to grade.</summary>
     private sealed class OnlyLoaded(string model) : IModelResidency
@@ -213,6 +218,47 @@ public sealed class JudgeTests : RouterHostTest
         store.Values[AnswerJudge.StoreKey].Should().Be("2026-10-07 2");
     }
 
+    [Fact]
+    public async Task A_cancellation_that_is_not_the_router_stopping_fails_one_grade_not_the_judge()
+    {
+        // Issue #391: such an exception ended the judge's worker for good, and nothing was graded again.
+        var activity = new CancellingActivityStore();
+        HttpClient client = await StartJudgedAsync(
+            j => (j.Enabled, j.SampleRate) = (true, 1),
+            services: s => s.AddSingleton<IRoutingActivityStore>(activity));
+
+        await AskAsync(client, "first question");
+        await AskAsync(client, "second question");
+
+        JudgeCalls(LocalHttp, "judge-32b").Should().Be(2, "the judge went on after the first grade failed");
+        activity.Revised.Should().Be(2);
+        Latest.Grade.Should().Be(2);
+    }
+
+    /// <summary>An activity store whose first revision throws a cancellation of its own.</summary>
+    private sealed class CancellingActivityStore : IRoutingActivityStore
+    {
+        private int _revised;
+
+        public int Revised => Volatile.Read(ref _revised);
+
+        public void Append(RoutingActivityEntry entry)
+        {
+        }
+
+        public void Replace(RoutingActivityEntry entry)
+        {
+            if (Interlocked.Increment(ref _revised) == 1)
+            {
+                throw new OperationCanceledException("a store's own timeout");
+            }
+        }
+
+        public IReadOnlyList<RoutingActivityEntry> Recent(int limit) => [];
+
+        public IReadOnlyList<RoutingActivityEntry> Between(DateTimeOffset since, DateTimeOffset until, int limit) => [];
+    }
+
     private sealed class MemoryStateValues : IStateValueStore
     {
         public Dictionary<string, string> Values { get; } = [];
@@ -322,6 +368,34 @@ public sealed class JudgeTests : RouterHostTest
         judged.CostUsd.Should().Be(1020 * 3m / 1_000_000);
         ledger.Summarize(now.AddHours(-1), now.AddHours(1), UsageGrouping.Route).Select(g => g.Key).Should().Contain(AnswerJudge.UsageLabel);
         ledger.Summarize(now.AddHours(-1), now.AddHours(1), UsageGrouping.Client).Single(g => g.Key == AnswerJudge.UsageLabel).Totals.Requests.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("cloud-judge", true, "max_completion_tokens", false)]
+    [InlineData("cloud-judge", false, "max_tokens", true)]
+    [InlineData("judge", true, "max_tokens", false)]
+    public async Task A_reasoning_judge_on_a_cloud_server_is_asked_with_max_completion_tokens(string judge, bool reasoning, string limit, bool temperature)
+    {
+        HttpClient client = await StartJudgedAsync(
+            j => (j.Enabled, j.SampleRate, j.Model) = (true, 1, judge),
+            routing: o =>
+            {
+                if (reasoning)
+                {
+                    o.Models.Single(m => m.Name == judge).Capabilities.Add("reasoning");
+                }
+            });
+
+        await AskAsync(client);
+
+        StubHttpMessageHandler backend = judge == "judge" ? LocalHttp : CloudHttp;
+        string upstream = judge == "judge" ? "judge-32b" : "cloud-judge-1";
+        using JsonDocument sent = JsonDocument.Parse(backend.Requests.Single(r => r.Body.Contains($"\"model\":\"{upstream}\"", StringComparison.Ordinal)).Body);
+        JsonElement root = sent.RootElement;
+        root.GetProperty(limit).GetInt32().Should().Be(300);
+        root.TryGetProperty(limit == "max_tokens" ? "max_completion_tokens" : "max_tokens", out _).Should().BeFalse();
+        root.TryGetProperty("temperature", out _).Should().Be(temperature, "reasoning models accept only the default temperature");
+        Latest.Grade.Should().NotBeNull("the judge answered");
     }
 
     [Fact]

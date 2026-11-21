@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Tests.Support;
 using static SemanticRouter.Tests.Support.TestEmbeddings;
@@ -224,6 +225,181 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         JsonNode probe = await ReadNodeAsync(await client.PostAsJsonAsync("/router/api/embeddings/test", new { text = "x" }));
         probe["ok"]!.GetValue<bool>().Should().BeTrue();
         probe["dimensions"]!.GetValue<int>().Should().Be(HashingEmbeddingProvider.DefaultDimensions);
+    }
+
+    [Fact]
+    public async Task Applying_a_configuration_while_a_cli_request_runs_and_another_waits_lets_both_finish()
+    {
+        // #388: the retired runtime's CLI connector must stay usable for the requests that started on it.
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Cli = new FakeCliProcessRunner(_ => new FakeCliProcess([ClaudeStream.Delta("Hi"), ClaudeStream.Success("Hi")], until: release.Task));
+        var logs = new CapturingLoggerProvider();
+        HttpClient client = await StartAsync(
+            o =>
+            {
+                o.Mode = PromptRouterMode.Dispatch;
+                o.PathPrefixes.Add("/v1/chat/completions");
+            },
+            services: s =>
+            {
+                s.AddLogging(b => b.AddProvider(logs));
+                s.PostConfigure<SemanticRouterConnectorsOptions>(c => c.Connectors["claude"].MaxConcurrency = 1);
+            },
+            withCli: true);
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        provider.Current.Connectors.TryGet("claude", out IChatConnector connector).Should().BeTrue();
+        var cli = (CliChatConnector)connector;
+        const string CliJson = """{"model":"claude-cli","messages":[{"role":"user","content":"hello there"}]}""";
+
+        Task<HttpResponseMessage> running = client.PostAsync("/v1/chat/completions", Json(CliJson));
+        await WaitUntilAsync(() => Cli.Invocations.Count == 1);
+        Task<HttpResponseMessage> waiting = client.PostAsync("/v1/chat/completions", Json(CliJson));
+        await WaitUntilAsync(() => cli.Waiting == 1);
+
+        provider.Apply(provider.Current.Configuration.Clone(), persist: false);
+        release.SetResult();
+        HttpResponseMessage[] responses = await Task.WhenAll(running, waiting).WaitAsync(TimeSpan.FromSeconds(30));
+
+        foreach (HttpResponseMessage response in responses)
+        {
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            (await response.Content.ReadAsStringAsync()).Should().Contain("Hi");
+        }
+
+        Services.GetRequiredService<RoutingActivityLog>().Recent().Select(e => e.Outcome).Should().Equal("served", "served");
+        Cli.Invocations.Should().HaveCount(2).And.OnlyContain(i => !Directory.Exists(i.WorkingDirectory), "each scratch directory is deleted");
+        logs.All.Should().NotContain(nameof(ObjectDisposedException)).And.NotContainAny("unhandled", "Unhandled");
+    }
+
+    [Fact]
+    public async Task A_configuration_the_store_rejects_neither_prunes_stored_state_nor_reconfigures_the_trackers()
+    {
+        // #393: building a candidate runtime must not touch the state every runtime shares.
+        var retention = new RecordingRetention();
+        var store = new FailingStore();
+        await StartDispatchAsync(s =>
+        {
+            s.AddSingleton<IRouterConfigurationStore>(store);
+            s.AddSingleton<IStateRetention>(retention);
+        });
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        var health = (ModelHealthTracker)Services.GetRequiredService<IModelHealth>();
+        RouterRuntime running = provider.Current;
+        ModelDefinition local = running.Configuration.Models.Single(m => m.Name == "local");
+        retention.Applied.Should().ContainSingle("the start-up configuration's retention is applied once");
+
+        RouterConfiguration next = running.Configuration.Clone();
+        next.State.Retention.UsageDays = 1;
+        next.Selection.FailureCooldown = TimeSpan.FromHours(1);
+        provider.Invoking(p => p.Apply(next, persist: true)).Should().Throw<IOException>();
+
+        provider.Current.Should().BeSameAs(running);
+        retention.Applied.Should().ContainSingle("nothing is pruned under a configuration that was not accepted");
+        health.ReportFailure(local, ModelFailureKind.Unavailable);
+        health.GetCooldowns()[local.Name].Should().BeBefore(DateTimeOffset.UtcNow.AddMinutes(5), "the running configuration's 30 s cooldown still applies");
+
+        // Accepted (applied without saving): now the new settings are put to use.
+        provider.Apply(next, persist: false);
+        retention.Applied.Should().HaveCount(2);
+        retention.Applied[^1].UsageDays.Should().Be(1);
+        health.ReportFailure(local, ModelFailureKind.Unavailable);
+        health.GetCooldowns()[local.Name].Should().BeAfter(DateTimeOffset.UtcNow.AddMinutes(30));
+
+        // A reset hands them the application's own settings again.
+        provider.ResetToBaseline();
+        retention.Applied.Should().HaveCount(3);
+        retention.Applied[^1].UsageDays.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_configuration_the_store_rejects_leaves_the_secret_store_as_it_was()
+    {
+        var store = new FailingStore();
+        var secrets = new SecretsTests.MemorySecretStore();
+        secrets.SetSecret("connectors/extra/ApiKey", "sk-saved-before");
+        await StartDispatchAsync(s =>
+        {
+            s.AddSingleton<IRouterConfigurationStore>(store);
+            s.AddSingleton<IRouterSecretStore>(secrets);
+        });
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        RouterRuntime running = provider.Current;
+
+        RouterConfiguration next = running.Configuration.Clone();
+        next.Connectors["extra"] = new ConnectorOptions { BaseAddress = new Uri("https://api.example.com"), ApiKey = "sk-typed-but-not-saved" };
+        next.Middleware.GatewayKeys["laptop"] = "gw-typed-but-not-saved-0123456789abcdef";
+        provider.Invoking(p => p.Apply(next, persist: true)).Should().Throw<IOException>();
+
+        provider.Current.Should().BeSameAs(running);
+        secrets.Values.Should().Equal(
+            new Dictionary<string, string> { ["connectors/extra/ApiKey"] = "sk-saved-before" },
+            "a restart must not pick up secrets of a configuration that was not saved");
+        next.Connectors["extra"].ApiKey.Should().Be("sk-typed-but-not-saved", "the caller's document is not changed");
+    }
+
+    [Fact]
+    public async Task A_step_of_activation_that_fails_leaves_the_configuration_applied_and_the_change_finished()
+    {
+        var retention = new RecordingRetention();
+        var logs = new CapturingLoggerProvider();
+        await StartDispatchAsync(s =>
+        {
+            s.AddLogging(b => b.AddProvider(logs));
+            s.AddSingleton<IStateRetention>(retention);
+        });
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        RouterRuntime running = provider.Current;
+        RouterRuntime? announced = null;
+        provider.Changed += r => announced = r;
+        retention.Fail = true; // e.g. pruning hit an error nobody expected
+
+        RouterConfiguration next = running.Configuration.Clone();
+        next.State.Retention.UsageDays = 1;
+        RouterRuntime applied = provider.Apply(next, persist: false);
+
+        provider.Current.Should().BeSameAs(applied);
+        announced.Should().BeSameAs(applied, "the listeners hear of the change");
+        logs.All.Should().Contain("handing its settings to the state retention failed")
+            .And.Contain($"Router configuration v{applied.Version} applied");
+
+        retention.Fail = false;
+        provider.ResetToBaseline();
+        retention.Applied.Should().HaveCount(2, "the next change hands its settings on as usual");
+    }
+
+    private sealed class RecordingRetention : IStateRetention
+    {
+        public List<StateRetentionOptions> Applied { get; } = [];
+
+        public bool Fail { get; set; }
+
+        public void Apply(StateRetentionOptions retention)
+        {
+            if (Fail)
+            {
+                throw new ArgumentOutOfRangeException(nameof(retention), "A prune failed in a way nobody expected.");
+            }
+
+            Applied.Add(retention);
+        }
+    }
+
+    private sealed class FailingStore : IRouterConfigurationStore
+    {
+        public string Location => "/read-only/semantic-router.json";
+
+        public RouterConfiguration? Load() => null;
+
+        public void Save(RouterConfiguration configuration) => throw new IOException("The disk is full.");
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        while (!condition())
+        {
+            await Task.Delay(10, timeout.Token);
+        }
     }
 
     [Fact]

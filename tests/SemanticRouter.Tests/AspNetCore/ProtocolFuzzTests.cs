@@ -99,7 +99,14 @@ public sealed partial class ProtocolFuzzTests(ITestOutputHelper output)
                     ChatProtocol.Responses => ResponsesResponseReader.RelayAsync(response, writer, CancellationToken.None),
                     _ => OpenAIResponseReader.RelayAsync(response, writer, CancellationToken.None),
                 };
-                await relay;
+                try
+                {
+                    await relay;
+                }
+                catch (UpstreamReplyException)
+                {
+                    // An error event: a clean failure, which the dispatcher fails over or ends the reply on (#389).
+                }
 
                 // What reached the client is well-formed in its protocol: one JSON document, or SSE frames of JSON.
                 string text = Encoding.UTF8.GetString(written.ToArray());
@@ -134,8 +141,24 @@ public sealed partial class ProtocolFuzzTests(ITestOutputHelper output)
             return (body, (Func<Task>)(async () =>
             {
                 var downstream = new MemoryStream();
-                await PassThroughToolCallScanner.CopyAsync(new MemoryStream(Encoding.UTF8.GetBytes(body)), downstream, sse, protocol, _ => { }, CancellationToken.None, _ => { });
-                Encoding.UTF8.GetString(downstream.ToArray()).Should().Be(sse ? Lines(body) : body, "a pass-through reply reaches the client unchanged (SSE line by line)");
+                UpstreamReplyException? failed = null;
+                try
+                {
+                    await PassThroughToolCallScanner.CopyAsync(new MemoryStream(Encoding.UTF8.GetBytes(body)), downstream, sse, protocol, _ => { }, CancellationToken.None, _ => { });
+                }
+                catch (UpstreamReplyException ex)
+                {
+                    failed = ex;
+                }
+
+                if (failed is { ClientNotified: false })
+                {
+                    downstream.Length.Should().Be(0, "an error in place of the reply is held back, so the next model can answer");
+                }
+                else
+                {
+                    Encoding.UTF8.GetString(downstream.ToArray()).Should().Be(body, "a pass-through reply reaches the client byte for byte");
+                }
                 using JsonDocument? document = sse ? null : JsonDocument.Parse(body);
                 if (document is not null)
                 {
@@ -286,19 +309,6 @@ public sealed partial class ProtocolFuzzTests(ITestOutputHelper output)
     [GeneratedRegex(@"^\[/?(?:user|assistant|system|developer|tool|tool_use|tool_result)(?: error)?\]", RegexOptions.IgnoreCase)]
     private static partial Regex TurnMarker();
 
-    /// <summary>The body as the line-by-line SSE copy forwards it: every line ended with a line feed.</summary>
-    private static string Lines(string body)
-    {
-        var lines = new StringBuilder();
-        using var reader = new StringReader(body);
-        while (reader.ReadLine() is { } line)
-        {
-            lines.Append(line).Append('\n');
-        }
-
-        return lines.ToString();
-    }
-
     private static void ValidJson(ReadOnlyMemory<byte> json)
     {
         using JsonDocument _ = JsonDocument.Parse(json);
@@ -418,6 +428,7 @@ public sealed partial class ProtocolFuzzTests(ITestOutputHelper output)
                 JsonNode.Parse("""{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]}}]}""")!,
                 JsonNode.Parse("""{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}""")!,
                 JsonNode.Parse("""{"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}""")!,
+                JsonNode.Parse("""{"error":{"message":"busy","type":"server_error","code":null}}""")!,
             ],
             [ChatProtocol.Anthropic] =
             [

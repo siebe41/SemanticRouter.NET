@@ -105,4 +105,47 @@ public sealed class UsageTotalsTests
         watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(1), "1,000 checks against 200,000 records");
         gate.Status(configuration.Usage).Single().CostUsedUsd.Should().Be(201_000 * 0.003m);
     }
+
+    [Fact]
+    public void Past_its_cap_the_ledger_folds_old_records_into_summaries_with_the_same_totals()
+    {
+        var bounded = new InMemoryUsageLedger(maxRecords: 100);
+        var reference = new InMemoryUsageLedger();
+        for (int i = 6000; i >= 0; i--)
+        {
+            UsageRecord record = Request(i) with { Route = i % 5 == 0 ? "code" : null, Client = i % 7 == 0 ? "laptop" : null, IsLocal = i % 6 == 0 };
+            bounded.Record(record);
+            reference.Record(record);
+        }
+
+        bounded.Held.Records.Should().BeLessThanOrEqualTo(100);
+        bounded.Held.Summaries.Should().BePositive();
+
+        DateTimeOffset now = _time.GetUtcNow();
+        DateTimeOffset today = new(now.UtcDateTime.Date, TimeSpan.Zero);
+        TimeZoneInfo plus545 = TimeZoneInfo.CreateCustomTimeZone("UTC+05:45", TimeSpan.FromMinutes(345), "UTC+05:45", "UTC+05:45");
+        (DateTimeOffset Since, DateTimeOffset Until)[] periods =
+        [
+            (DateTimeOffset.MinValue, DateTimeOffset.MaxValue),
+            (today, today.AddDays(1)),
+            (today.AddDays(-2), today.AddDays(-1)),
+            (today.AddDays(-3).AddMinutes(-345), today.AddDays(-2).AddMinutes(-345)), // a day in UTC+05:45
+        ];
+        foreach ((DateTimeOffset since, DateTimeOffset until) in periods)
+        {
+            bounded.Total(since, until).Should().Be(reference.Total(since, until));
+            bounded.Total(since, until, model: "cloud", connector: "c").Should().Be(reference.Total(since, until, model: "cloud", connector: "c"));
+            bounded.Total(since, until, profile: "work").Should().Be(reference.Total(since, until, profile: "work"));
+            foreach (UsageGrouping by in Enum.GetValues<UsageGrouping>())
+            {
+                foreach (TimeZoneInfo zone in new[] { TimeZoneInfo.Utc, plus545 })
+                {
+                    bounded.Summarize(since, until, by, zone).Should().Equal(reference.Summarize(since, until, by, zone), $"grouped by {by} in {zone.Id}");
+                }
+            }
+        }
+
+        bounded.Records(DateTimeOffset.MinValue, DateTimeOffset.MaxValue).Aggregate(UsageTotals.Zero, (t, r) => t.Add(r)).TotalTokens
+            .Should().Be(reference.Total(DateTimeOffset.MinValue, DateTimeOffset.MaxValue).TotalTokens, "a summary is returned as one record holding its tokens");
+    }
 }
