@@ -271,6 +271,139 @@ public sealed class EarlyEndTests : RouterHostTest
         outcomes.Should().Contain("failed", "the finished entry was handed to the store (#390)");
     }
 
+    [Fact]
+    public async Task Feedback_that_fails_still_finishes_and_stores_the_entry()
+    {
+        LocalHttp = StubHttpMessageHandler.Json("""{"choices":[{"message":{"role":"assistant","content":"Hi"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}""");
+        HttpClient client = await StartDispatchAsync(services: s => s.AddSingleton<IRoutingFeedbackStore>(new BrokenFeedbackStore()));
+        List<string> outcomes = WatchActivity();
+
+        _ = await (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).Content.ReadAsStringAsync();
+        try
+        {
+            // The same prompt again: feedback on the first answer, which the broken store throws on.
+            HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+            _ = await response.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException)
+        {
+            // The exception reaches the host, which deals with the request as it does with any other.
+        }
+
+        RoutingActivityEntry retry = Services.GetRequiredService<RoutingActivityLog>().Recent()[0];
+        retry.TotalMilliseconds.Should().NotBeNull("the entry is finished (#390)");
+        outcomes.Count(o => o == "failed").Should().Be(1, "the finished entry was handed to the store");
+    }
+
+    [Fact]
+    public async Task A_request_that_ends_in_an_exception_leaves_the_warm_caches_alone()
+    {
+        // The backend reports its usage (2k tokens read from its cache), then breaks off; writing the error that ends the
+        // reply fails as well, so the request ends in an exception after the model was recorded as serving it.
+        const string WithUsage = """data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hel"}}],"usage":{"prompt_tokens":3000,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":2048}}}""" + "\n\n";
+        LocalHttp = Streams(Ending.Crash, WithUsage);
+        var caches = new RecordingWarmCaches();
+        bool escaped = false;
+        HttpClient client = await StartDispatchAsync(
+            services: s => s.AddSingleton<IWarmCacheStore>(caches),
+            beforeRouter: app => app.Use(async (context, next) =>
+            {
+                context.Response.Body = new BreaksOnError(context.Response.Body);
+                try
+                {
+                    await next(context);
+                }
+                catch (InvalidOperationException)
+                {
+                    escaped = true;
+                    throw;
+                }
+            }));
+
+        try
+        {
+            HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(StreamJson));
+            _ = await response.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException)
+        {
+            // The exception reaches the host.
+        }
+
+        RoutingActivityEntry entry = Services.GetRequiredService<RoutingActivityLog>().Recent().Single();
+        (entry.Outcome, entry.ServedBy, entry.CacheReadTokens).Should().Be(("failed", "local", 2048));
+        escaped.Should().BeTrue("the request ended in an exception");
+        caches.Remembered.Should().BeEmpty("a faulted request updates no warm-cache state (#390)");
+    }
+
+    /// <summary>A response body that fails, in a way nobody expected, when the router writes the error that ends a reply.</summary>
+    private sealed class BreaksOnError(Stream inner) : Stream
+    {
+        public override bool CanRead => false;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => true;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            Encoding.UTF8.GetString(buffer.Span).Contains("mid-reply", StringComparison.Ordinal)
+                ? throw new InvalidOperationException("the response writer broke")
+                : inner.WriteAsync(buffer, cancellationToken);
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override void Write(byte[] buffer, int offset, int count) => WriteAsync(buffer, offset, count, CancellationToken.None).GetAwaiter().GetResult();
+
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+
+        public override void Flush() => inner.Flush();
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    /// <summary>A feedback store that throws, though it should not.</summary>
+    private sealed class BrokenFeedbackStore : IRoutingFeedbackStore
+    {
+        public void Add(RoutingFeedback feedback) => throw new InvalidOperationException("the feedback store is broken");
+
+        public IReadOnlyList<RoutingFeedback> Recent(int limit) => [];
+
+        public IReadOnlyList<RoutingFeedback> Between(DateTimeOffset since, DateTimeOffset until, int limit) => [];
+    }
+
+    /// <summary>Warm caches that record what they are told.</summary>
+    private sealed class RecordingWarmCaches : IWarmCacheStore
+    {
+        public List<(string Conversation, WarmCache Cache)> Remembered { get; } = [];
+
+        public IReadOnlyList<WarmCache> Lookup(string conversation) => [];
+
+        public void Remember(string conversation, WarmCache cache)
+        {
+            lock (Remembered)
+            {
+                Remembered.Add((conversation, cache));
+            }
+        }
+
+        public void Forget(string conversation, string? model = null)
+        {
+        }
+    }
+
     /// <summary>A usage ledger whose store has failed.</summary>
     private sealed class BrokenLedger : IUsageLedger
     {

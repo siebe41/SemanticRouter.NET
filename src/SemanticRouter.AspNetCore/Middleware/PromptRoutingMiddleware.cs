@@ -401,11 +401,6 @@ internal sealed partial class PromptRoutingMiddleware
                 : null,
         });
 
-        if (feedback)
-        {
-            RecordFeedback(runtime, entry, client, chat, prompt, conversationKey, previousTurn, repeated is { Repeat: false } ? retried : null, callout, classifiedTurn, highestTier);
-        }
-
         routeSpan?.SetTag("semantic_router.request_id", entry.Id);
         routeSpan?.SetTag("semantic_router.tier", result.RequiredTier);
         routeSpan?.SetTag("semantic_router.reason", result.Reason.ToString());
@@ -430,6 +425,12 @@ internal sealed partial class PromptRoutingMiddleware
         bool faulted = true;
         try
         {
+            if (feedback)
+            {
+                // Inside: the entry is published, so it is finished whatever happens from here.
+                RecordFeedback(runtime, entry, client, chat, prompt, conversationKey, previousTurn, repeated is { Repeat: false } ? retried : null, callout, classifiedTurn, highestTier);
+            }
+
             using (_logger.BeginScope(new Dictionary<string, object> { ["RouteRequestId"] = entry.Id }))
             {
                 if (answer is not null)
@@ -535,7 +536,7 @@ internal sealed partial class PromptRoutingMiddleware
                     }
                 }
 
-                if (conversationKey is not null && entry.ServedBy is { } servedBy && _warmCaches is not null && conversation.Enabled && conversation.StickToModel)
+                if (!faulted && conversationKey is not null && entry.ServedBy is { } servedBy && _warmCaches is not null && conversation.Enabled && conversation.StickToModel)
                 {
                     RememberCache(conversationKey, servedBy, entry, routedAt, CacheLifetime(runtime, servedBy, chat) ?? conversation.CacheLifetime);
                 }
