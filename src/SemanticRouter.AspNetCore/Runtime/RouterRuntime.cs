@@ -584,14 +584,31 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
     /// swapped in: the health, latency, cache and residency trackers, and the state store's retention (which deletes what
     /// is past it). Called under the lock, so the shared state always follows the runtime that is current.
     /// </summary>
+    /// <remarks>
+    /// The runtime is live (and saved) by now, so a step that fails is logged and the others still run: the caller then
+    /// finishes the change (retires the previous runtime, warms the new one up, tells the listeners) rather than report
+    /// an error for a configuration that is in use.
+    /// </remarks>
     private void Activate(RouterRuntime runtime)
     {
         RouterConfiguration configuration = runtime.Configuration;
-        (_services.GetService<IModelHealth>() as ModelHealthTracker)?.Configure(configuration.Selection);
-        (_services.GetService<IModelLatency>() as ModelLatencyTracker)?.Configure(configuration.Selection);
-        (_services.GetService<IModelCacheShare>() as ModelCacheTracker)?.Configure(configuration.Selection);
-        (_services.GetService<IModelResidency>() as ModelResidencyTracker)?.Configure(runtime.Resolved);
-        _services.GetService<IStateRetention>()?.Apply(configuration.State.Retention);
+        ActivateStep("the health tracker", () => (_services.GetService<IModelHealth>() as ModelHealthTracker)?.Configure(configuration.Selection));
+        ActivateStep("the latency tracker", () => (_services.GetService<IModelLatency>() as ModelLatencyTracker)?.Configure(configuration.Selection));
+        ActivateStep("the cache tracker", () => (_services.GetService<IModelCacheShare>() as ModelCacheTracker)?.Configure(configuration.Selection));
+        ActivateStep("the residency tracker", () => (_services.GetService<IModelResidency>() as ModelResidencyTracker)?.Configure(runtime.Resolved));
+        ActivateStep("the state retention", () => _services.GetService<IStateRetention>()?.Apply(configuration.State.Retention));
+    }
+
+    private void ActivateStep(string what, Action step)
+    {
+        try
+        {
+            step();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            LogActivateFailed(_logger, what, ex);
+        }
     }
 
     private RouterRuntime Build(
@@ -825,6 +842,9 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         Level = LogLevel.Warning,
         Message = "Saving secrets in plain text to {Location}: {Settings}. Prefer ${{env:VARIABLE}} references, user-secrets or environment variables, or register a secret store with UseSecretFile().")]
     private static partial void LogLiteralSecretsSaved(ILogger logger, string location, string settings);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "The router configuration is applied, but handing its settings to {Step} failed; it keeps the previous ones until the next change.")]
+    private static partial void LogActivateFailed(ILogger logger, string step, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not record the configuration in the history.")]
     private static partial void LogHistoryFailed(ILogger logger, Exception exception);

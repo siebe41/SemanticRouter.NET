@@ -311,11 +311,51 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         retention.Applied[^1].UsageDays.Should().BeNull();
     }
 
+    [Fact]
+    public async Task A_step_of_activation_that_fails_leaves_the_configuration_applied_and_the_change_finished()
+    {
+        var retention = new RecordingRetention();
+        var logs = new CapturingLoggerProvider();
+        await StartDispatchAsync(s =>
+        {
+            s.AddLogging(b => b.AddProvider(logs));
+            s.AddSingleton<IStateRetention>(retention);
+        });
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        RouterRuntime running = provider.Current;
+        RouterRuntime? announced = null;
+        provider.Changed += r => announced = r;
+        retention.Fail = true; // e.g. pruning hit an error nobody expected
+
+        RouterConfiguration next = running.Configuration.Clone();
+        next.State.Retention.UsageDays = 1;
+        RouterRuntime applied = provider.Apply(next, persist: false);
+
+        provider.Current.Should().BeSameAs(applied);
+        announced.Should().BeSameAs(applied, "the listeners hear of the change");
+        logs.All.Should().Contain("handing its settings to the state retention failed")
+            .And.Contain($"Router configuration v{applied.Version} applied");
+
+        retention.Fail = false;
+        provider.ResetToBaseline();
+        retention.Applied.Should().HaveCount(2, "the next change hands its settings on as usual");
+    }
+
     private sealed class RecordingRetention : IStateRetention
     {
         public List<StateRetentionOptions> Applied { get; } = [];
 
-        public void Apply(StateRetentionOptions retention) => Applied.Add(retention);
+        public bool Fail { get; set; }
+
+        public void Apply(StateRetentionOptions retention)
+        {
+            if (Fail)
+            {
+                throw new ArgumentOutOfRangeException(nameof(retention), "A prune failed in a way nobody expected.");
+            }
+
+            Applied.Add(retention);
+        }
     }
 
     private sealed class FailingStore : IRouterConfigurationStore
