@@ -153,11 +153,30 @@ internal sealed partial class DashboardAudit(IAuditLog log, TimeProvider time, I
         return result;
     }
 
-    private void Record(HttpContext context, int status)
+    /// <summary>
+    /// Records a request the access check refused, as the filter does: when the caller is known or presented a wrong
+    /// token. For endpoints that check access themselves (the MCP server), not through the dashboard's filters.
+    /// </summary>
+    public void Refused(HttpContext context, int status) => Record(context, status);
+
+    /// <summary>
+    /// Records one action taken in a request that carries several (an MCP tool call), as <paramref name="summary"/>
+    /// (no prompt text or secrets), when the caller is known.
+    /// </summary>
+    public void Action(HttpContext context, int status, string summary)
+    {
+        if (DashboardAccess.ActorOf(context) is not null)
+        {
+            Record(context, status, summary);
+        }
+    }
+
+    private void Record(HttpContext context, int status, string? action = null)
     {
         Endpoint? endpoint = context.GetEndpoint();
         string method = context.Request.Method;
-        bool audited = (!HttpMethods.IsGet(method) && !HttpMethods.IsHead(method))
+        bool audited = action is not null
+            || (!HttpMethods.IsGet(method) && !HttpMethods.IsHead(method))
             || endpoint?.Metadata.GetMetadata<DashboardWriteMetadata>() is not null
             || endpoint?.Metadata.GetMetadata<DashboardAuditMetadata>() is not null;
         bool wrongToken = DashboardAccess.PresentedWrongToken(context);
@@ -167,11 +186,11 @@ internal sealed partial class DashboardAudit(IAuditLog log, TimeProvider time, I
             return;
         }
 
-        string summary = context.Items.TryGetValue(SummaryKey, out object? set) && set is string text
+        string summary = action ?? (context.Items.TryGetValue(SummaryKey, out object? set) && set is string text
             ? text
             : wrongToken && actor is null
                 ? "refused a wrong token"
-                : endpoint?.Metadata.GetMetadata<DashboardAuditMetadata>()?.Summary ?? $"{method} {RouteOf(endpoint) ?? context.Request.Path.Value}";
+                : endpoint?.Metadata.GetMetadata<DashboardAuditMetadata>()?.Summary ?? $"{method} {RouteOf(endpoint) ?? context.Request.Path.Value}");
         if (context.Items.TryGetValue(DetailKey, out object? detail) && detail is string more && status < 400)
         {
             summary += ": " + more;
