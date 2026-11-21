@@ -44,6 +44,21 @@ public sealed class ConfigurationIssuesTests
         PathFor(repeated, "listed more than once").Should().Be("Memory.Sources.1.Name", "the second one is the one to rename");
     }
 
+    [Theory]
+    [InlineData(nameof(ModelDefinition.CacheReadCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.CacheWriteCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.ApiInputCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.ApiCacheWriteCostPerMillionTokens))]
+    public void A_negative_price_points_at_that_price(string price)
+    {
+        var document = new RouterConfiguration();
+        var model = new ModelDefinition { Name = "m", Connector = "test", Tier = 1 };
+        typeof(ModelDefinition).GetProperty(price)!.SetValue(model, -1m);
+        document.Models.Add(model);
+
+        PathFor(document, "negative tier, context window or cost").Should().Be("Models.0." + price);
+    }
+
     [Fact]
     public void A_repeated_tier_level_points_at_the_second_tier()
     {

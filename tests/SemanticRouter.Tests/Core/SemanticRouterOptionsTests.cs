@@ -63,6 +63,25 @@ public class SemanticRouterOptionsTests
     }
 
     [Theory]
+    [InlineData(nameof(ModelDefinition.InputCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.OutputCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.CacheReadCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.CacheWriteCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.ApiInputCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.ApiOutputCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.ApiCacheReadCostPerMillionTokens))]
+    [InlineData(nameof(ModelDefinition.ApiCacheWriteCostPerMillionTokens))]
+    public void A_negative_price_is_rejected(string price)
+    {
+        SemanticRouterOptions options = Options(Route("chat", 1, "a"));
+        ModelDefinition model = Model("m", 1);
+        typeof(ModelDefinition).GetProperty(price)!.SetValue(model, -1m);
+        options.Models.Add(model);
+
+        options.GetValidationErrors().Should().ContainSingle(e => e.Contains("must not have a negative tier, context window or cost"));
+    }
+
+    [Theory]
     [InlineData(0.0, 0)]
     [InlineData(0.5, 2)]
     [InlineData(0.65, 3)]
