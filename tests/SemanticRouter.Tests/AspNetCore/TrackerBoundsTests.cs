@@ -127,6 +127,103 @@ public sealed class TrackerBoundsTests
         limiter.Pruning.Visited.Should().BeLessThan(10L * Keys);
     }
 
+    [Fact]
+    public void A_sign_in_failure_counted_while_the_pruning_removes_the_address_is_not_lost()
+    {
+        // #402: the entries are changed in place, so removing "the entry as it was read" removed one written since too.
+        var time = new ManualTimeProvider();
+        var throttle = new SignInThrottle(time, maxFailures: 1);
+        for (int i = 0; i < 1100; i++)
+        {
+            throttle.Failed(From(IPAddress.Parse($"10.0.{i / 256}.{i % 256}")));
+        }
+
+        time.Advance(SignInThrottle.Window + TimeSpan.FromMinutes(1));
+        HttpContext racing = From(IPAddress.Parse("10.0.0.0"));
+        bool raced = false;
+        throttle.Pruning.Removing = key =>
+        {
+            if (key == "10.0.0.0" && !raced)
+            {
+                raced = true;
+                throttle.Failed(racing); // lands after the sweep read the address as idle, before it is removed
+            }
+        };
+
+        for (int i = 0; i < 64; i++)
+        {
+            throttle.Failed(From(IPAddress.Parse($"10.1.0.{i}")));
+        }
+
+        raced.Should().BeTrue("the sweep ran");
+        throttle.Count.Should().Be(65, "the idle addresses went");
+        throttle.RetryAfter(racing).Should().NotBeNull("the failure counted during the sweep is kept");
+    }
+
+    [Fact]
+    public void A_request_charged_while_the_pruning_removes_the_client_is_not_lost()
+    {
+        var time = new ManualTimeProvider();
+        var limiter = new ClientRateLimiter(time);
+        var limit = new RateLimitOptions { RequestsPerMinute = 1 };
+        for (int i = 0; i < 1100; i++)
+        {
+            limiter.TryAdmit($"10.0.{i / 256}.{i % 256}", limit, 1);
+        }
+
+        time.Advance(TimeSpan.FromHours(2));
+        bool raced = false;
+        limiter.Pruning.Removing = key =>
+        {
+            if (key == "10.0.0.0" && !raced)
+            {
+                raced = true;
+                limiter.TryAdmit("10.0.0.0", limit, 1).Admitted.Should().BeTrue();
+            }
+        };
+
+        for (int i = 0; i < 64; i++)
+        {
+            limiter.TryAdmit($"10.1.0.{i}", limit, 1);
+        }
+
+        raced.Should().BeTrue("the sweep ran");
+        limiter.Count.Should().Be(65, "the idle clients went");
+        limiter.TryAdmit("10.0.0.0", limit, 1).Admitted.Should().BeFalse("the request admitted during the sweep still counts against the limit");
+    }
+
+    [Fact]
+    public void A_turn_recorded_while_the_pruning_removes_the_conversation_is_not_lost()
+    {
+        var time = new ManualTimeProvider();
+        var tracker = new ConversationTracker(time);
+        var options = new ConversationRoutingOptions();
+        for (int i = 0; i < 4200; i++)
+        {
+            tracker.Record("old " + i, 2, raisedByFloor: false, followUp: false, "local", options);
+        }
+
+        time.Advance(options.IdleTimeout + TimeSpan.FromMinutes(1));
+        bool raced = false;
+        tracker.Pruning.Removing = key =>
+        {
+            if (key == "old 0" && !raced)
+            {
+                raced = true;
+                tracker.Record("old 0", 4, raisedByFloor: false, followUp: false, "cloud", options);
+            }
+        };
+
+        for (int i = 0; i < 64; i++)
+        {
+            tracker.Record("new " + i, 2, raisedByFloor: false, followUp: false, "local", options);
+        }
+
+        raced.Should().BeTrue("the sweep ran");
+        tracker.Count.Should().Be(65);
+        tracker.Lookup("old 0", "and what about the other one?", options).Floor.Should().Be(4, "the turn recorded during the sweep is kept");
+    }
+
     [Theory]
     [InlineData("203.0.113.7", "203.0.113.7")]
     [InlineData("::ffff:203.0.113.7", "203.0.113.7")]

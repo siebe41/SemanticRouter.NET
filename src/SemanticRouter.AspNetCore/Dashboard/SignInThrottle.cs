@@ -48,27 +48,51 @@ internal sealed class SignInThrottle(TimeProvider time, int maxFailures = SignIn
     public void Failed(HttpContext context)
     {
         DateTimeOffset now = time.GetUtcNow();
-        _failures.GetOrAdd(ClientAddressKey.KeyOf(context), static (_, at) => new Failures(at), now).Add(now);
+        string key = ClientAddressKey.KeyOf(context);
+        Failures failures;
+        while (!(failures = _failures.GetOrAdd(key, static (_, at) => new Failures(at), now)).TryAdd(now))
+        {
+            // The pruning took it out between the two steps: count the failure in a fresh one.
+            _failures.TryRemove(new KeyValuePair<string, Failures>(key, failures));
+        }
+
         _pruning.Written(_failures, static f => f.Last, Window);
     }
 
     /// <summary>One address's failures within the window.</summary>
-    private sealed class Failures(DateTimeOffset created)
+    private sealed class Failures(DateTimeOffset created) : IPrunableEntry
     {
         private readonly Queue<DateTimeOffset> _times = new();
         private readonly Lock _gate = new();
         private long _lastTicks = created.UtcTicks;
+        private bool _retired;
 
         /// <summary>When the address last failed (or was first seen); read without the lock by the pruning.</summary>
         public DateTimeOffset Last => new(Interlocked.Read(ref _lastTicks), TimeSpan.Zero);
 
-        public void Add(DateTimeOffset now)
+        /// <summary>Counts a failure; <see langword="false"/> when the pruning retired this entry, so the caller uses a fresh one.</summary>
+        public bool TryAdd(DateTimeOffset now)
         {
             lock (_gate)
             {
+                if (_retired)
+                {
+                    return false;
+                }
+
                 Expire(now);
                 _times.Enqueue(now);
                 Interlocked.Exchange(ref _lastTicks, now.UtcTicks);
+                return true;
+            }
+        }
+
+        public bool TryRetire(DateTimeOffset seen)
+        {
+            lock (_gate)
+            {
+                _retired |= Last <= seen;
+                return _retired;
             }
         }
 

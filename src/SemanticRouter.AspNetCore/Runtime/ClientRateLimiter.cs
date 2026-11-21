@@ -183,7 +183,7 @@ internal sealed class ClientRateLimiter
         lock (_gate)
         {
             var status = new List<RateLimitStatus>();
-            foreach ((string client, Usage usage) in _clients.OrderBy(c => c.Key, StringComparer.OrdinalIgnoreCase))
+            foreach ((string client, Usage usage) in _clients.Where(c => !c.Value.Retired).OrderBy(c => c.Key, StringComparer.OrdinalIgnoreCase))
             {
                 usage.Prune(now);
                 if (LimitFor(options, client, usage.Remote) is { } limit)
@@ -225,17 +225,36 @@ internal sealed class ClientRateLimiter
     private Usage UsageOf(string client, DateTimeOffset now)
     {
         // Clients without a key are counted per address; the pruning after each write keeps the table bounded. Seen from
-        // the start, so a sweep running beside it cannot take the new entry for an idle one.
-        Usage usage = _clients.GetOrAdd(client, static (_, at) => new Usage { LastSeen = at }, now);
+        // the start, so a sweep running beside it cannot take the new entry for an idle one. Called holding _gate, which
+        // the pruning holds to retire an entry: one it retired is not written to (the write would be lost with it).
+        Usage usage;
+        while ((usage = _clients.GetOrAdd(client, static (_, state) => new Usage(state.Gate) { LastSeen = state.At }, (Gate: _gate, At: now))).Retired)
+        {
+            _clients.TryRemove(new KeyValuePair<string, Usage>(client, usage));
+        }
+
         usage.Prune(now);
         return usage;
     }
 
     private readonly record struct Entry(DateTimeOffset At, long Tokens, bool Request);
 
-    private sealed class Usage
+    /// <summary>One client's use in the window. Changed only holding the limiter's lock (<paramref name="gate"/>).</summary>
+    private sealed class Usage(Lock gate) : IPrunableEntry
     {
         private long _lastSeenTicks;
+
+        /// <summary>Whether the pruning took this entry out: it is replaced, not written to.</summary>
+        public bool Retired { get; private set; }
+
+        public bool TryRetire(DateTimeOffset seen)
+        {
+            lock (gate)
+            {
+                Retired |= LastSeen <= seen;
+                return Retired;
+            }
+        }
 
         public Queue<Entry> Entries { get; } = new();
 
