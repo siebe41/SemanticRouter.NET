@@ -22,7 +22,13 @@ internal sealed record HostSettings
     /// <summary>What <c>semantic-router service</c> can do.</summary>
     public static readonly IReadOnlyList<string> ServiceActions = ["install", "uninstall", "start", "stop", "restart", "status"];
 
-    /// <summary><c>run</c> (default), <c>init</c>, <c>doctor</c>, <c>models</c>, <c>service</c>, <c>help</c> or <c>version</c>.</summary>
+    /// <summary>The command that triages a "Routed to the wrong tier" issue (<see cref="MisrouteTriage"/>).</summary>
+    public const string TriageCommand = "triage-misroute";
+
+    /// <summary>
+    /// <c>run</c> (default), <c>init</c>, <c>doctor</c>, <c>models</c>, <c>service</c>, <c>triage-misroute</c>, <c>help</c>
+    /// or <c>version</c>.
+    /// </summary>
     public string Command { get; init; } = "run";
 
     /// <summary>Where <c>semantic-router.json</c>, its secrets file and an optional <c>appsettings.json</c> live.</summary>
@@ -72,6 +78,21 @@ internal sealed record HostSettings
     /// <summary><c>service start</c>: return as soon as the router is started, without waiting for it to listen.</summary>
     public bool NoWait { get; init; }
 
+    /// <summary><c>triage-misroute</c>: the file with the issue body, or <c>-</c> for standard input.</summary>
+    public string? TriageInput { get; init; }
+
+    /// <summary><c>triage-misroute --json</c>: print JSON instead of the Markdown comment.</summary>
+    public bool Json { get; init; }
+
+    /// <summary><c>triage-misroute --router-version</c>: use this release's template instead of the reported one.</summary>
+    public string? TriageRouterVersion { get; init; }
+
+    /// <summary><c>triage-misroute --embeddings</c>: <c>Hashing</c>, <c>Onnx</c> or <c>Onnx:&lt;model&gt;</c> instead of the reported ones.</summary>
+    public string? TriageEmbeddings { get; init; }
+
+    /// <summary><c>triage-misroute --issue</c>: the issue number, named in the proposed evaluation line.</summary>
+    public int? TriageIssue { get; init; }
+
     /// <summary>
     /// <c>SEMANTIC_ROUTER_KEYS_DIR</c>: the folder for the data-protection keys that decrypt the secrets file;
     /// <see langword="null"/> for ASP.NET Core's default (see <see cref="KeyRing"/>).
@@ -91,7 +112,9 @@ internal sealed record HostSettings
     {
         environment ??= Environment.GetEnvironmentVariable;
         string command = "run";
-        string? directory = null, connector = null, serviceAction = null;
+        string? directory = null, connector = null, serviceAction = null, triageInput = null, triageVersion = null, triageEmbeddings = null;
+        int? triageIssue = null;
+        bool json = false;
         bool force = false, noDetect = false, yes = false, noCli = false, dryRun = false, noWait = false;
         var hostArguments = new List<string>();
         string? error = null;
@@ -102,7 +125,7 @@ internal sealed record HostSettings
             string arg = args[i];
             switch (arg)
             {
-                case "run" or "init" or "doctor" or "models" or "service" or "help" or "version" when i == 0:
+                case "run" or "init" or "doctor" or "models" or "service" or TriageCommand or "help" or "version" when i == 0:
                     command = arg;
                     break;
                 case "-h" or "--help" or "-?":
@@ -140,6 +163,35 @@ internal sealed record HostSettings
                 case "--no-wait" when command == "service":
                     noWait = true;
                     break;
+                case "--json" when command == TriageCommand:
+                    json = true;
+                    break;
+                case "--router-version" or "--embeddings" or "--issue" when command == TriageCommand:
+                    if (i + 1 >= args.Count || args[i + 1].StartsWith('-'))
+                    {
+                        error = $"{arg} needs a value.";
+                    }
+                    else
+                    {
+                        string value = args[++i];
+                        switch (arg)
+                        {
+                            case "--router-version":
+                                triageVersion = value;
+                                error ??= MisrouteReport.Release(value) is null ? "--router-version needs a release version, e.g. 0.6.1." : null;
+                                break;
+                            case "--embeddings":
+                                triageEmbeddings = value;
+                                error ??= TriageEmbeddingsError(value);
+                                break;
+                            default:
+                                triageIssue = int.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int issue) && issue > 0 ? issue : null;
+                                error ??= triageIssue is null ? "--issue needs an issue number." : null;
+                                break;
+                        }
+                    }
+
+                    break;
                 case "--config-dir":
                     if (i + 1 >= args.Count)
                     {
@@ -172,6 +224,10 @@ internal sealed record HostSettings
                     {
                         serviceAction = arg;
                     }
+                    else if (command == TriageCommand && triageInput is null && (arg == "-" || !arg.StartsWith('-')))
+                    {
+                        triageInput = arg;
+                    }
                     else
                     {
                         hostArguments.Add(arg);
@@ -186,6 +242,11 @@ internal sealed record HostSettings
             error = serviceAction is null
                 ? $"service needs an action: {string.Join(", ", ServiceActions)}."
                 : $"Unknown service action '{serviceAction}'. Use {string.Join(", ", ServiceActions)}.";
+        }
+
+        if (command == TriageCommand && error is null && string.IsNullOrWhiteSpace(triageInput))
+        {
+            error = $"{TriageCommand} needs the issue body: a file, or - to read standard input.";
         }
 
         // "--config-dir=" or an empty argument names no directory (Path.GetFullPath would throw on it).
@@ -210,10 +271,27 @@ internal sealed record HostSettings
             ServiceAction = serviceAction,
             DryRun = dryRun,
             NoWait = noWait,
+            TriageInput = triageInput,
+            Json = json,
+            TriageRouterVersion = triageVersion,
+            TriageEmbeddings = triageEmbeddings,
+            TriageIssue = triageIssue,
             KeysDirectory = environment(KeysVariable) is { Length: > 0 } keys ? keys : null,
             HostArguments = hostArguments,
             Error = error,
         };
+    }
+
+    /// <summary>Why <c>--embeddings</c> <paramref name="value"/> cannot be used, or <see langword="null"/>.</summary>
+    private static string? TriageEmbeddingsError(string value)
+    {
+        string[] parts = value.Split(':', 2, StringSplitOptions.TrimEntries);
+        bool hashing = string.Equals(parts[0], AspNetCore.EmbeddingProviderKinds.Hashing, StringComparison.OrdinalIgnoreCase) && parts.Length == 1;
+        bool onnx = string.Equals(parts[0], Embeddings.Onnx.OnnxEmbeddings.Provider, StringComparison.OrdinalIgnoreCase)
+            && (parts.Length == 1 || Embeddings.Onnx.OnnxEmbeddingModels.Find(parts[1]) is not null);
+        return hashing || onnx
+            ? null
+            : $"--embeddings takes Hashing, Onnx or Onnx:<model> ({string.Join(", ", Embeddings.Onnx.OnnxEmbeddingModels.Known.Select(m => m.Name))}).";
     }
 
     /// <summary>
