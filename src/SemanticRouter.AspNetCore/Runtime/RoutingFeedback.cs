@@ -129,8 +129,8 @@ internal sealed class RoutingFeedbackLog
             }
         }
 
-        // Logs sharing a store take blocks of ids from it, the first one now; without one (or when it failed) this log
-        // counts on. No feedback waits for the store.
+        // Logs sharing a store take blocks of ids from it, the first one now and the next ones in the background; without
+        // one (or when it failed) this log counts on.
         _ids = new IdBlocks(store is null ? null : store.ReserveIds, newest + 1);
     }
 
@@ -139,21 +139,33 @@ internal sealed class RoutingFeedbackLog
     {
         ArgumentNullException.ThrowIfNull(feedback);
         RoutingFeedback stored;
-        lock (_lock)
+        while (true)
         {
-            if (_forgotten.Contains(feedback.EntryId) || !_seen.Add((feedback.EntryId, feedback.Kind)))
+            IdWait wait;
+            lock (_lock)
             {
-                return false;
+                if (_forgotten.Contains(feedback.EntryId) || _seen.Contains((feedback.EntryId, feedback.Kind)))
+                {
+                    return false;
+                }
+
+                if (_ids.TryNext(out long id, out wait))
+                {
+                    _seen.Add((feedback.EntryId, feedback.Kind));
+                    stored = feedback with { Id = id };
+                    _recent.AddFirst(stored);
+                    while (_recent.Count > _capacity)
+                    {
+                        RoutingFeedback dropped = _recent.Last!.Value;
+                        _recent.RemoveLast();
+                        _seen.Remove((dropped.EntryId, dropped.Kind));
+                    }
+
+                    break;
+                }
             }
 
-            stored = feedback with { Id = _ids.Next() };
-            _recent.AddFirst(stored);
-            while (_recent.Count > _capacity)
-            {
-                RoutingFeedback dropped = _recent.Last!.Value;
-                _recent.RemoveLast();
-                _seen.Remove((dropped.EntryId, dropped.Kind));
-            }
+            wait.Wait(); // the block ran out before the next one arrived: waited for outside the lock, then asked again
         }
 
         _store?.Add(stored);

@@ -398,10 +398,10 @@ public readonly record struct ActivityPurgeResult
 /// </summary>
 public sealed class RoutingActivityLog
 {
-    // Ids are reserved from a shared store this many at a time, so routers sharing it never hand out the same one. Enough
-    // for half a second at a few thousand requests a second: the next block is asked for in the background halfway
-    // through this one, since a reservation can wait for another writer of the file (IdBlocks). A restart leaves at most
-    // two blocks unused.
+    // Ids are reserved from a shared store this many at a time, so routers sharing it never hand out the same one. The
+    // next block is asked for in the background as soon as one is taken, since a reservation can wait for another writer
+    // of the file (IdBlocks); ids wait for it only when a whole block runs out first. A restart leaves at most two blocks
+    // unused.
     internal const int IdBlock = 1024;
     private const int DefaultCapacity = 500;
     private readonly RoutingActivityEntry?[] _entries;
@@ -588,13 +588,23 @@ public sealed class RoutingActivityLog
 
     /// <summary>
     /// Reserves an id for a new entry. Each call returns another one, and logs sharing a store never get the same one:
-    /// the store hands out blocks of them (<see cref="IRoutingActivityStore.ReserveIds"/>). Never waits for the store.
+    /// the store hands out blocks of them (<see cref="IRoutingActivityStore.ReserveIds"/>), the next one in the
+    /// background. Waits for the store only when a whole block ran out before the next one arrived.
     /// </summary>
     public long Reserve()
     {
-        lock (_gate)
+        while (true)
         {
-            return _ids.Next();
+            IdWait wait;
+            lock (_gate)
+            {
+                if (_ids.TryNext(out long id, out wait))
+                {
+                    return id;
+                }
+            }
+
+            wait.Wait(); // outside the lock: reading the log does not wait for the store
         }
     }
 
