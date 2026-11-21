@@ -324,36 +324,37 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
             RouterConfigurationSource runtimeSource = persist && _store is not null ? RouterConfigurationSource.Store : RouterConfigurationSource.Memory;
             RouterConfiguration document = configuration.Clone();
-            if (persist && _store is not null)
+            if (persist && _store is not null && _secrets is null && document.LiteralSecretSettings() is { Count: > 0 } literal)
             {
-                if (_secrets is not null)
-                {
-                    IReadOnlyList<string> moved = document.MoveSecretsToStore(_secrets);
-                    if (moved.Count > 0)
-                    {
-                        notes.Add($"Moved {moved.Count} secret(s) to the secret store ({_secrets.Location}); the saved file refers to them: {string.Join(", ", moved)}.");
-                    }
-                }
-                else if (document.LiteralSecretSettings() is { Count: > 0 } literal)
-                {
-                    LogLiteralSecretsSaved(_logger, _store.Location, string.Join(", ", literal));
-                    notes.Add(
-                        $"{string.Join(", ", literal)} {(literal.Count == 1 ? "is" : "are")} saved in plain text in {_store.Location}. " +
-                        "Use ${env:VARIABLE} references, keep keys in user-secrets or environment variables (leave the field empty), " +
-                        "or register a secret store (UseSecretFile) so typed keys are kept out of the file.");
-                }
+                LogLiteralSecretsSaved(_logger, _store.Location, string.Join(", ", literal));
+                notes.Add(
+                    $"{string.Join(", ", literal)} {(literal.Count == 1 ? "is" : "are")} saved in plain text in {_store.Location}. " +
+                    "Use ${env:VARIABLE} references, keep keys in user-secrets or environment variables (leave the field empty), " +
+                    "or register a secret store (UseSecretFile) so typed keys are kept out of the file.");
             }
 
+            // Built with the typed secrets as they are (a reference to the store would resolve to the same value), so a
+            // document the build rejects leaves the secret store as it was.
             runtime = Build(document, runtimeSource, notes, source, actor);
             if (persist && _store is not null)
             {
+                SecretMoves? moves = _secrets is null ? null : new SecretMoves(_secrets);
                 try
                 {
+                    // The secrets go to the store only now, just before the document that refers to them is saved: a
+                    // restart reads them from there.
+                    if (moves is not null && document.MoveSecretsToStore(moves) is { Count: > 0 } moved)
+                    {
+                        notes.Add($"Moved {moved.Count} secret(s) to the secret store ({moves.Location}); the saved file refers to them: {string.Join(", ", moved)}.");
+                    }
+
                     _store.Save(document);
                 }
                 catch
                 {
-                    // Rejected: the running configuration stays, and nothing of the new one was put to use.
+                    // Rejected: the running configuration stays, and nothing of the new one was put to use, nor left in
+                    // the secret store for a restart to pick up.
+                    moves?.Undo(_logger);
                     runtime.Dispose();
                     throw;
                 }
@@ -371,6 +372,63 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
         previous?.Dispose();
         Changed?.Invoke(runtime);
         return runtime;
+    }
+
+    /// <summary>
+    /// The secret store as <see cref="RouterConfiguration.MoveSecretsToStore"/> writes to it during one apply, recording
+    /// what each secret it replaces held before, so a document that is then not saved can be taken back out of it.
+    /// </summary>
+    private sealed class SecretMoves(IRouterSecretStore store) : IRouterSecretStore
+    {
+        private readonly List<(string Name, string? Before)> _replaced = [];
+
+        public string Location => store.Location;
+
+        public string? GetSecret(string name) => store.GetSecret(name);
+
+        public void SetSecret(string name, string value)
+        {
+            Remember(name);
+            store.SetSecret(name, value);
+        }
+
+        public void RemoveSecret(string name)
+        {
+            Remember(name);
+            store.RemoveSecret(name);
+        }
+
+        /// <summary>Puts back what the secrets held before, the last change first; one that cannot be is logged.</summary>
+        public void Undo(ILogger logger)
+        {
+            for (int i = _replaced.Count - 1; i >= 0; i--)
+            {
+                (string name, string? before) = _replaced[i];
+                try
+                {
+                    if (before is null)
+                    {
+                        store.RemoveSecret(name);
+                    }
+                    else
+                    {
+                        store.SetSecret(name, before);
+                    }
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    LogSecretNotRestored(logger, name, store.Location, ex);
+                }
+            }
+        }
+
+        private void Remember(string name)
+        {
+            if (!_replaced.Exists(r => r.Name == name))
+            {
+                _replaced.Add((name, store.GetSecret(name)));
+            }
+        }
     }
 
     /// <summary>
@@ -845,6 +903,9 @@ internal sealed partial class RouterRuntimeProvider : IDisposable
 
     [LoggerMessage(Level = LogLevel.Error, Message = "The router configuration is applied, but handing its settings to {Step} failed; it keeps the previous ones until the next change.")]
     private static partial void LogActivateFailed(ILogger logger, string step, Exception exception);
+
+    [LoggerMessage(Level = LogLevel.Error, Message = "The configuration was not saved, and secret {Name} in {Location} could not be put back as it was; a restart uses the value that was not saved.")]
+    private static partial void LogSecretNotRestored(ILogger logger, string name, string location, Exception exception);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not record the configuration in the history.")]
     private static partial void LogHistoryFailed(ILogger logger, Exception exception);

@@ -312,6 +312,32 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_configuration_the_store_rejects_leaves_the_secret_store_as_it_was()
+    {
+        var store = new FailingStore();
+        var secrets = new SecretsTests.MemorySecretStore();
+        secrets.SetSecret("connectors/extra/ApiKey", "sk-saved-before");
+        await StartDispatchAsync(s =>
+        {
+            s.AddSingleton<IRouterConfigurationStore>(store);
+            s.AddSingleton<IRouterSecretStore>(secrets);
+        });
+        RouterRuntimeProvider provider = Services.GetRequiredService<RouterRuntimeProvider>();
+        RouterRuntime running = provider.Current;
+
+        RouterConfiguration next = running.Configuration.Clone();
+        next.Connectors["extra"] = new ConnectorOptions { BaseAddress = new Uri("https://api.example.com"), ApiKey = "sk-typed-but-not-saved" };
+        next.Middleware.GatewayKeys["laptop"] = "gw-typed-but-not-saved-0123456789abcdef";
+        provider.Invoking(p => p.Apply(next, persist: true)).Should().Throw<IOException>();
+
+        provider.Current.Should().BeSameAs(running);
+        secrets.Values.Should().Equal(
+            new Dictionary<string, string> { ["connectors/extra/ApiKey"] = "sk-saved-before" },
+            "a restart must not pick up secrets of a configuration that was not saved");
+        next.Connectors["extra"].ApiKey.Should().Be("sk-typed-but-not-saved", "the caller's document is not changed");
+    }
+
+    [Fact]
     public async Task A_step_of_activation_that_fails_leaves_the_configuration_applied_and_the_change_finished()
     {
         var retention = new RecordingRetention();
