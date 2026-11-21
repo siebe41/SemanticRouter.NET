@@ -132,6 +132,7 @@ public sealed partial class ChatCompletionRequest
 
         var turns = new List<ChatTurn>();
         bool hasImages = false;
+        bool toolResultImages = false;
 
         if (root.TryGetArray("messages", out JsonElement array))
         {
@@ -146,12 +147,15 @@ public sealed partial class ChatCompletionRequest
                 var blocks = new List<ContentBlock>();
                 if (role == "tool")
                 {
+                    bool resultImages = false;
                     var result = new ToolResultBlock
                     {
                         ToolUseId = message.GetString("tool_call_id") ?? string.Empty,
-                        Content = message.TryGetProperty("content", out JsonElement toolContent) ? ReadOpenAIContent(toolContent, null, ref hasImages) : string.Empty,
+                        Content = message.TryGetProperty("content", out JsonElement toolContent) ? ReadOpenAIContent(toolContent, null, ref resultImages) : string.Empty,
                         IsError = false,
                     };
+                    hasImages |= resultImages;
+                    toolResultImages |= resultImages;
 
                     // The results of parallel calls are one user turn, as in the Anthropic protocol, so all of them count as answered.
                     if (turns.Count > 0 && turns[^1].Role == "user" && turns[^1].IsToolResultOnly)
@@ -265,6 +269,11 @@ public sealed partial class ChatCompletionRequest
             protocolOnly.Add("audio");
         }
 
+        if (toolResultImages)
+        {
+            protocolOnly.Add(DroppedFeatures.ToolResultImages);
+        }
+
         return Finish(new ChatCompletionRequest
         {
             Protocol = ChatProtocol.OpenAI,
@@ -297,6 +306,7 @@ public sealed partial class ChatCompletionRequest
 
         var turns = new List<ChatTurn>();
         bool hasImages = false;
+        bool toolResultImages = false;
 
         if (root.TryGetProperty("system", out JsonElement system))
         {
@@ -320,7 +330,7 @@ public sealed partial class ChatCompletionRequest
                 var blocks = new List<ContentBlock>();
                 if (message.TryGetProperty("content", out JsonElement content))
                 {
-                    ReadAnthropicContent(content, blocks, ref hasImages);
+                    ReadAnthropicContent(content, blocks, ref hasImages, ref toolResultImages);
                 }
 
                 turns.Add(new ChatTurn { Role = role, Blocks = blocks });
@@ -376,6 +386,11 @@ public sealed partial class ChatCompletionRequest
         if (root.TryGetArray("mcp_servers", out _))
         {
             protocolOnly.Add("mcp_servers");
+        }
+
+        if (toolResultImages)
+        {
+            protocolOnly.Add(DroppedFeatures.ToolResultImages);
         }
 
         ReasoningRequest? reasoning = root.TryGetObject("thinking", out JsonElement thinking) && thinking.GetString("type") is "enabled" or "adaptive"
@@ -606,7 +621,7 @@ public sealed partial class ChatCompletionRequest
     private static string? ReadCacheControl(JsonElement element) =>
         element.TryGetObject("cache_control", out JsonElement marker) ? marker.GetRawText() : null;
 
-    private static void ReadAnthropicContent(JsonElement content, List<ContentBlock> blocks, ref bool hasImages)
+    private static void ReadAnthropicContent(JsonElement content, List<ContentBlock> blocks, ref bool hasImages, ref bool toolResultImages)
     {
         if (content.ValueKind == JsonValueKind.String)
         {
@@ -665,6 +680,7 @@ public sealed partial class ChatCompletionRequest
                         ? ReadToolResultContent(resultContent, ref nestedImages)
                         : string.Empty;
                     hasImages |= nestedImages;
+                    toolResultImages |= nestedImages;
                     blocks.Add(new ToolResultBlock
                     {
                         ToolUseId = part.GetString("tool_use_id") ?? string.Empty,

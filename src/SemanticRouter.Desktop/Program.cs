@@ -61,12 +61,19 @@ internal static class Program
         }
 
         // Already running for this directory: hand over (open the dashboard, or quit) and leave. A sign-in start
-        // while it runs does nothing.
-        var instance = new SingleInstance(directory);
+        // while it runs does nothing. The lock decides which of two launches at the same moment is the app.
+        var instance = new SingleInstance(directory, options.Host.LocalDataDirectory);
         string command = options.Quit ? SingleInstance.Quit : options.Background ? SingleInstance.Ping : SingleInstance.Show;
-        if (instance.TrySendAsync(command, TimeSpan.FromSeconds(1)).GetAwaiter().GetResult() || options.Quit)
+        SingleInstance.Claim claim = instance.ClaimAsync(command, TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();
+        if (claim != SingleInstance.Claim.Primary || options.Quit)
         {
             instance.Dispose();
+            if (claim == SingleInstance.Claim.NoAnswer)
+            {
+                Console.Error.WriteLine($"Another SemanticRouter app for {directory} is running but does not answer; try again in a moment.");
+                return 1;
+            }
+
             return 0;
         }
 

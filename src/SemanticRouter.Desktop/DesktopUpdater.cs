@@ -358,7 +358,24 @@ internal sealed class DesktopUpdater(
         }
 
         string[] args = RestartArguments(restartApp, serviceOn, hostArguments ?? []);
-        updates.ApplyAfterExit(update, restart: args.Length > 0 || restartApp, args);
+        try
+        {
+            updates.ApplyAfterExit(update, restart: args.Length > 0 || restartApp, args);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Nothing will apply the update or start the service again after this process exits: start it now.
+            Problem = $"Update {update.Version} could not be handed to the updater: {ex.Message}";
+            log.WriteLine($"{Now} {Problem}");
+            if (serviceOn)
+            {
+                ServiceOutcome restarted = await platform!.StartAsync().ConfigureAwait(false);
+                log.WriteLine($"{Now} Starting the background service again: {(restarted.Succeeded ? "started" : restarted.Detail)}");
+            }
+
+            return false;
+        }
+
         log.WriteLine($"{Now} Applying update {update.Version} as the app exits.");
         return true;
     }

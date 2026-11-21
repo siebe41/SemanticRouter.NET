@@ -666,6 +666,7 @@ public sealed class SqliteStateTests : IDisposable
         first.Failed("claude", ModelFailureKind.QuotaExceeded, "limit reached");
         _time.Advance(TimeSpan.FromDays(1));
         first.Failed("claude", ModelFailureKind.QuotaExceeded, "limit reached again");
+        first.Dispose(); // stopping saves what waits
 
         var restarted = new ConnectorIncidents(_time, new SqliteStateValues(Open()));
 
@@ -673,6 +674,7 @@ public sealed class SqliteStateTests : IDisposable
         restarted.LimitDays().Should().Equal(("claude", 2, "limit reached again"));
 
         restarted.Served("lmstudio");
+        restarted.Dispose();
         new ConnectorIncidents(_time, new SqliteStateValues(Open())).Failing().Should().BeEmpty("serving again clears it, on disk too");
     }
 
@@ -779,6 +781,67 @@ public sealed class SqliteStateTests : IDisposable
         activity.Recent(1000).Should().HaveCount(100, "reading waits for this router's writes");
         ledger.Total(Since, Until).Requests.Should().Be(100);
         database.Dropped.Should().Be(0);
+    }
+
+    [Fact]
+    public void An_exception_nobody_expected_on_the_writer_thread_drops_that_write_and_the_writer_carries_on()
+    {
+        // Issue #395: the writer is a thread of its own, so an exception that escaped it would end the process.
+        SqliteRouterDatabase database = Open();
+        var cooldowns = new SqliteCooldownStore(database);
+        DateTimeOffset until = _time.GetUtcNow().AddMinutes(5);
+
+        database.Write("a write that breaks oddly", _ => throw new InvalidCastException("not a long"));
+        database.Write("a write whose callback breaks", _ => { }, done: _ => throw new FormatException("not a number"));
+        cooldowns.SaveCooldown("claude", until);
+        database.WaitForWrites();
+
+        new SqliteCooldownStore(Open()).LoadCooldowns().Should().ContainKey("claude", "the writer saved what came after");
+        database.Dropped.Should().Be(1, "only the write that threw is lost");
+        _logs.All.Should().Contain("a write that breaks oddly").And.Contain("not a long");
+
+        database.Write("another write that breaks oddly", _ => throw new OverflowException("too large"));
+        cooldowns.SaveCooldown("gpt", until);
+        database.WaitForWrites();
+        new SqliteCooldownStore(Open()).LoadCooldowns().Should().ContainKeys("claude", "gpt");
+        database.Dropped.Should().Be(2);
+    }
+
+    [Fact]
+    public void A_refresh_while_the_writer_is_busy_keeps_the_cooldowns_this_router_just_changed()
+    {
+        // Issue #394: cooldowns are saved in the background and loaded without waiting, so a refresh found the file
+        // without a cooldown just set (and ended it), or with one just cleared (and brought it back).
+        SqliteRouterDatabase database = Open();
+        var store = new SqliteCooldownStore(database);
+        var tracker = new ModelHealthTracker(Selection, new ModelHealthTrackerDependencies { Time = _time, Store = store });
+        ModelDefinition claude = Model("claude", 4);
+        ModelDefinition gpt = Model("gpt", 4);
+        tracker.ReportFailure(gpt, ModelFailureKind.QuotaExceeded);
+        database.WaitForWrites();
+
+        using var busy = new ManualResetEventSlim();
+        database.Write("a write that takes its time", _ => busy.Wait(TimeSpan.FromSeconds(30)));
+        try
+        {
+            tracker.ReportFailure(claude, ModelFailureKind.QuotaExceeded);
+            tracker.ReportSuccess(gpt);
+            _time.Advance(tracker.RefreshInterval);
+
+            tracker.IsAvailable(claude).Should().BeFalse("the refresh sees the cooldown waiting to be saved");
+            tracker.IsAvailable(gpt).Should().BeTrue("the refresh sees the removal waiting to be saved");
+            store.LoadCooldowns().Keys.Should().BeEquivalentTo(["claude"]);
+        }
+        finally
+        {
+            busy.Set();
+        }
+
+        database.WaitForWrites();
+        new SqliteCooldownStore(Open()).LoadCooldowns().Keys.Should().BeEquivalentTo(["claude"]);
+
+        store.ClearCooldowns();
+        store.LoadCooldowns().Should().BeEmpty("a clear waiting to be saved holds too");
     }
 
     [Fact]
@@ -1054,6 +1117,8 @@ public sealed class SqliteStateTests : IDisposable
         b.Record(Request());
         Settle();
         a.Record(Request());
+        a.Total(Since, Until, connector: "c").Requests.Should().BeGreaterThanOrEqualTo(2, "its own record counts before it is saved; b's within the refresh interval at most");
+        Settle();
         a.Total(Since, Until, connector: "c").Requests.Should().Be(3, "a row it did not write came before its own, so it reads the rows it missed");
         b.Total(Since, Until, connector: "c").CostUsd.Should().Be(0.75m);
     }
@@ -1210,6 +1275,65 @@ public sealed class DurableStateHostTests : RouterHostTest
 
     private static async Task<string> LastPreviewAsync(HttpClient client) =>
         JsonNode.Parse(await client.GetStringAsync("/router/api/activity"))!["entries"]!.AsArray()[0]!["promptPreview"]!.GetValue<string>();
+
+    [Fact]
+    public async Task Requests_do_not_wait_for_a_busy_state_writer()
+    {
+        // Issue #391: the budget check waited for the writer (up to twice the busy timeout plus 5 s), and the latency and
+        // cache-share figures after an apply were read from the file by the request.
+        HttpClient client = await StartDurableAsync(services: s => s.Configure<UsageOptions>(u =>
+        {
+            u.Budgets.Add(new BudgetDefinition { Name = "local-daily", Model = "local", MaxTokens = 1_000_000 });
+            u.Budgets.Add(new BudgetDefinition { Name = "cloud-daily", Connector = "anthropic", MaxCostUsd = 100 });
+        }));
+        (await client.PostAsync("/v1/chat/completions", Chat("hello before"))).StatusCode.Should().Be(HttpStatusCode.OK);
+        await WaitForStoredActivityAsync(1);
+
+        SqliteRouterDatabase database = Services.GetRequiredService<SqliteRouterDatabase>();
+        using var busy = new ManualResetEventSlim();
+        database.Write("a write that takes its time (another router holds the file)", _ => busy.Wait(TimeSpan.FromSeconds(60)));
+        try
+        {
+            // As after an apply: the figures are worked out afresh.
+            Services.GetRequiredService<ModelLatencyTracker>().Configure(new ModelSelectionOptions());
+            Services.GetRequiredService<ModelCacheTracker>().Configure(new ModelSelectionOptions());
+
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < 3; i++)
+            {
+                (await client.PostAsync("/v1/chat/completions", Chat("hello " + i))).StatusCode.Should().Be(HttpStatusCode.OK);
+            }
+
+            timer.Stop();
+            timer.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(4), "no request waits for the writer");
+
+            IUsageLedger ledger = Services.GetRequiredService<IUsageLedger>();
+            timer.Restart();
+            UsageTotals before = ledger.Total(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), model: "local");
+            ledger.Record(new UsageRecord
+            {
+                Timestamp = DateTimeOffset.UtcNow,
+                Model = "local",
+                Connector = "lmstudio",
+                IsLocal = true,
+                InputTokens = 1000,
+                OutputTokens = 500,
+                CacheReadTokens = 0,
+                CacheWriteTokens = 0,
+                CostUsd = 0,
+                ReferenceCostUsd = 0,
+            });
+            ledger.Total(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), model: "local").Requests
+                .Should().Be(before.Requests + 1, "a budget counts what waits to be saved");
+            timer.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(4), "without waiting for it");
+        }
+        finally
+        {
+            busy.Set();
+        }
+
+        await WaitForStoredActivityAsync(4);
+    }
 
     [Fact]
     public async Task Concurrent_requests_get_distinct_ids_and_each_its_own_stored_entry()
@@ -1469,6 +1593,7 @@ public sealed class DurableStateHostTests : RouterHostTest
         });
         Services.GetRequiredService<RoutingFeedbackLog>().Recent().Should().ContainSingle().Which.Detail.Should().Contain("purge-marker 4c1d");
         Services.GetRequiredService<ConnectorIncidents>().Failing().Should().ContainSingle().Which.Detail.Should().Contain("purge-marker 4c1d");
+        Services.GetRequiredService<ConnectorIncidents>().Flush(TimeSpan.FromSeconds(10)).Should().BeTrue("incidents are saved in the background");
         DatabaseFiles().Should().Contain("purge-marker 4c1d");
 
         JsonNode purge = JsonNode.Parse(await (await client.DeleteAsync("/router/api/activity")).Content.ReadAsStringAsync())!;

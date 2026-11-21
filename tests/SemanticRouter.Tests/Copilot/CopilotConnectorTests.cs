@@ -146,6 +146,36 @@ public sealed class CopilotConnectorTests : RouterHostTest
         _copilot.Turns.Should().ContainSingle("the second Copilot model was cooling down too");
     }
 
+    [Fact]
+    public async Task An_error_after_the_reply_started_ends_it_with_an_error_and_cools_the_account_down()
+    {
+        _copilot.Script(new CopilotUpdate.Text("Hello"), new CopilotUpdate.Error("rate_limit", "user_weekly_rate_limited", 429, "Weekly limit reached."));
+        HttpClient client = await StartCopilotAsync();
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(
+            """{"model":"auto","stream":true,"messages":[{"role":"user","content":"say hello"}]}"""));
+        string sse = await response.Content.ReadAsStringAsync();
+
+        sse.Should().Contain("\"content\":\"Hello\"").And.Contain("copilot-gpt stopped mid-reply: rate_limit (user_weekly_rate_limited): Weekly limit reached.");
+        sse.Should().NotContain("\"finish_reason\":\"stop\"", "a cut-off reply is not passed off as a finished one (#389)");
+        RoutingActivityEntry entry = Services.GetRequiredService<RoutingActivityLog>().Recent(1).Single();
+        (entry.Outcome, entry.ServedBy).Should().Be(("failed", "copilot-gpt"));
+        Services.GetRequiredService<IModelHealth>().GetCooldowns().Keys.Should().Contain(["copilot-gpt", "copilot-claude"], "the account-wide limit cools every Copilot model");
+    }
+
+    [Fact]
+    public async Task An_error_after_output_on_a_reply_that_is_not_streamed_fails_over()
+    {
+        _copilot.Script(new CopilotUpdate.Text("Hel"), new CopilotUpdate.Error("quota", "quota_exceeded", 402, "You have used your premium requests."));
+        _copilot.Script(new CopilotUpdate.Text("Hello from Claude."));
+        HttpClient client = await StartCopilotAsync();
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+
+        response.Headers.GetValues("X-Prompt-Route-Model").Should().Equal(["copilot-claude"], "nothing had reached the client yet");
+        (await response.Content.ReadAsStringAsync()).Should().Contain("Hello from Claude.").And.NotContain("\"Hel\"");
+    }
+
     [Theory]
     [InlineData("authentication", 401, "Not signed in.")]
     [InlineData("query", null, "Execution failed: InvalidArg, No GitHub OAuth token or Copilot HMAC key provided")] // what runtime 1.0.93 sends
@@ -229,6 +259,15 @@ public sealed class CopilotConnectorTests : RouterHostTest
         await factory.DisposeAsync();
 
         created.Should().Be(2);
+    }
+
+    [Fact]
+    public void A_replaced_configuration_does_not_dispose_the_connector_its_requests_still_use()
+    {
+        // #388: the catalog disposes the IDisposable connectors of a retired runtime while its requests still hold the
+        // concurrency gate, so the Copilot connector must not be one of them.
+        typeof(CopilotChatConnector).Should().NotImplement<IDisposable>();
+        typeof(CliChatConnector).Should().NotImplement<IDisposable>();
     }
 
     [Fact]

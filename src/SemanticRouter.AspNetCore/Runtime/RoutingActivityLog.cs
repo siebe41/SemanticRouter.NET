@@ -188,10 +188,11 @@ public sealed class RoutingActivityEntry
 
     /// <summary>
     /// The models the request was sent to, in order (Dispatch mode). Failed attempts are included: the backend may have
-    /// received the request before it failed.
+    /// received the request before it failed. The dispatcher adds to it while the entry is already in the log, so the
+    /// list is safe to read, and to enumerate (a snapshot), while it grows.
     /// </summary>
     [System.Text.Json.Serialization.JsonObjectCreationHandling(System.Text.Json.Serialization.JsonObjectCreationHandling.Populate)]
-    public IList<string> SentTo { get; } = new List<string>();
+    public IList<string> SentTo { get; } = new SynchronizedList<string>();
 
     /// <summary>The memory notes found in the request (titles and ids, never their text), when memory sources are configured.</summary>
     public IReadOnlyList<MemoryReference> Memory { get; init; } = [];
@@ -201,6 +202,125 @@ public sealed class RoutingActivityEntry
     /// analysis is on (<see cref="ContextCostOptions.Enabled"/>). Token counts only, never text.
     /// </summary>
     public ContextBreakdown? Context { get; set; }
+}
+
+/// <summary>
+/// A list that one thread may change while others read it: every member takes a lock, and enumerating walks a snapshot,
+/// so serialising an entry whose request is still running never fails with "Collection was modified".
+/// </summary>
+internal sealed class SynchronizedList<T> : IList<T>
+{
+    private readonly List<T> _items = [];
+    private readonly Lock _gate = new();
+
+    public int Count
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _items.Count;
+            }
+        }
+    }
+
+    public bool IsReadOnly => false;
+
+    public T this[int index]
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _items[index];
+            }
+        }
+
+        set
+        {
+            lock (_gate)
+            {
+                _items[index] = value;
+            }
+        }
+    }
+
+    public void Add(T item)
+    {
+        lock (_gate)
+        {
+            _items.Add(item);
+        }
+    }
+
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _items.Clear();
+        }
+    }
+
+    public bool Contains(T item)
+    {
+        lock (_gate)
+        {
+            return _items.Contains(item);
+        }
+    }
+
+    public void CopyTo(T[] array, int arrayIndex)
+    {
+        lock (_gate)
+        {
+            _items.CopyTo(array, arrayIndex);
+        }
+    }
+
+    public int IndexOf(T item)
+    {
+        lock (_gate)
+        {
+            return _items.IndexOf(item);
+        }
+    }
+
+    public void Insert(int index, T item)
+    {
+        lock (_gate)
+        {
+            _items.Insert(index, item);
+        }
+    }
+
+    public bool Remove(T item)
+    {
+        lock (_gate)
+        {
+            return _items.Remove(item);
+        }
+    }
+
+    public void RemoveAt(int index)
+    {
+        lock (_gate)
+        {
+            _items.RemoveAt(index);
+        }
+    }
+
+    public IEnumerator<T> GetEnumerator()
+    {
+        T[] snapshot;
+        lock (_gate)
+        {
+            snapshot = [.. _items];
+        }
+
+        return ((IEnumerable<T>)snapshot).GetEnumerator();
+    }
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 /// <summary>
@@ -279,19 +399,16 @@ public readonly record struct ActivityPurgeResult
 public sealed class RoutingActivityLog
 {
     // Ids are reserved from a shared store this many at a time, so routers sharing it never hand out the same one. Enough
-    // for half a second at a few thousand requests a second: the next block is asked for halfway through this one, and
-    // a reservation can wait for another writer of the file. A restart leaves at most two blocks unused.
+    // for half a second at a few thousand requests a second: the next block is asked for in the background halfway
+    // through this one, since a reservation can wait for another writer of the file (IdBlocks). A restart leaves at most
+    // two blocks unused.
     internal const int IdBlock = 1024;
     private const int DefaultCapacity = 500;
     private readonly RoutingActivityEntry?[] _entries;
     private readonly IRoutingActivityStore? _store;
     private readonly Lock _gate = new();
     private readonly List<(DateTimeOffset Since, DateTimeOffset Until, long Below)> _purges = [];
-    private long _next;
-    private long _blockEnd;
-
-    // The next block of ids, asked for while the current one is half used: a request does not wait for the store.
-    private Task<long>? _nextBlock;
+    private readonly IdBlocks _ids;
     private long _added;
 
     /// <summary>Creates an in-memory log keeping the latest 500 entries.</summary>
@@ -317,6 +434,7 @@ public sealed class RoutingActivityLog
     {
         _entries = new RoutingActivityEntry?[Math.Max(10, capacity)];
         _store = store;
+        long next = 0;
         if (store?.Recent(_entries.Length) is { Count: > 0 } stored)
         {
             // Oldest first into the slots. Ids may have gaps (a request that never finished, ids a router reserved and
@@ -324,8 +442,11 @@ public sealed class RoutingActivityLog
             RoutingActivityEntry[] oldestFirst = [.. stored.OrderBy(e => e.Id).TakeLast(_entries.Length)];
             oldestFirst.CopyTo(_entries, 0);
             _added = oldestFirst.Length;
-            _next = oldestFirst[^1].Id + 1;
+            next = oldestFirst[^1].Id + 1;
         }
+
+        // The first block of ids is reserved now, at start-up, so no request waits for the store.
+        _ids = new IdBlocks(store is null ? null : store.ReserveIds, next);
     }
 
     /// <summary>
@@ -349,7 +470,7 @@ public sealed class RoutingActivityLog
         {
             lock (_gate)
             {
-                return _next;
+                return _ids.Upcoming;
             }
         }
     }
@@ -426,7 +547,7 @@ public sealed class RoutingActivityLog
         lock (_gate)
         {
             // Entries with lower ids may still be running or waiting for the judge: they must not come back.
-            _purges.Add((since, until, _next));
+            _purges.Add((since, until, _ids.Upcoming));
             for (int i = 0; i < _entries.Length; i++)
             {
                 if (_entries[i] is { } entry && entry.Timestamp >= since && entry.Timestamp < until)
@@ -467,26 +588,13 @@ public sealed class RoutingActivityLog
 
     /// <summary>
     /// Reserves an id for a new entry. Each call returns another one, and logs sharing a store never get the same one:
-    /// the store hands out blocks of them (<see cref="IRoutingActivityStore.ReserveIds"/>).
+    /// the store hands out blocks of them (<see cref="IRoutingActivityStore.ReserveIds"/>). Never waits for the store.
     /// </summary>
     public long Reserve()
     {
         lock (_gate)
         {
-            if (_next >= _blockEnd)
-            {
-                // A store that only this log uses (or that failed) reserves nothing: then the log counts on.
-                long first = _nextBlock is { } ahead ? ahead.GetAwaiter().GetResult() : _store?.ReserveIds(IdBlock) ?? -1;
-                _nextBlock = null;
-                _next = first >= 0 ? first : _next;
-                _blockEnd = _next + IdBlock;
-            }
-            else if (_store is { } store && _nextBlock is null && _blockEnd - _next == IdBlock / 2)
-            {
-                _nextBlock = Task.Run(() => store.ReserveIds(IdBlock));
-            }
-
-            return _next++;
+            return _ids.Next();
         }
     }
 

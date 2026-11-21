@@ -303,6 +303,47 @@ public sealed class TemplateMigrationTests : IDisposable
     }
 
     [Fact]
+    public async Task An_upgrade_keeps_the_file_as_it_was_next_to_it()
+    {
+        // #400: the rewrite drops comments and unknown properties, before the configuration history exists.
+        string json = AsReleased(1).ToJson();
+        string mine = "// my notes\n" + json.Insert(json.IndexOf('{', StringComparison.Ordinal) + 1, "\n  \"MyOwnSetting\": 42,");
+        await File.WriteAllTextAsync(ConfigurationFile, mine);
+        var output = new StringWriter();
+
+        TemplateUpgrade? upgraded = await TemplateMigration.UpgradeFilesAsync(ConfigurationFile, output);
+
+        upgraded.Should().NotBeNull();
+        string backup = TemplateMigration.BackupFileFor(ConfigurationFile);
+        backup.Should().Be(ConfigurationFile + ".bak");
+        (await File.ReadAllTextAsync(backup)).Should().Be(mine, "the copy is the file byte for byte");
+        (await File.ReadAllTextAsync(ConfigurationFile)).Should().NotContain("my notes");
+        output.ToString().Should().Contain($"The file as it was is in {backup}.");
+        Directory.GetFiles(_directory).Select(Path.GetFileName).Should().BeEquivalentTo(["semantic-router.json", "semantic-router.json.bak"], "no temporary file stays behind");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.GetUnixFileMode(backup).Should().Be(UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+
+        (await TemplateMigration.UpgradeFilesAsync(ConfigurationFile, new StringWriter())).Should().BeNull("the file is stamped now");
+        (await File.ReadAllTextAsync(backup)).Should().Be(mine, "only an upgrade replaces the copy");
+    }
+
+    [Fact]
+    public async Task Without_a_copy_the_file_is_not_upgraded()
+    {
+        string mine = AsReleased(1).ToJson();
+        await File.WriteAllTextAsync(ConfigurationFile, mine);
+        Directory.CreateDirectory(TemplateMigration.BackupFileFor(ConfigurationFile));
+        var output = new StringWriter();
+
+        (await TemplateMigration.UpgradeFilesAsync(ConfigurationFile, output)).Should().BeNull();
+
+        (await File.ReadAllTextAsync(ConfigurationFile)).Should().Be(mine);
+        output.ToString().Should().Contain($"{ConfigurationFile} could not be brought up to template {TemplateMigration.Current}");
+    }
+
+    [Fact]
     public void An_evaluation_set_someone_changed_is_kept()
     {
         string evaluation = Path.Combine(_directory, "semantic-router.evaluation.jsonl");

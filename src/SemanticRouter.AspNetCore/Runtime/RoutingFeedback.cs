@@ -111,23 +111,27 @@ internal sealed class RoutingFeedbackLog
     private readonly HashSet<(long, FeedbackKind)> _seen = [];
     private readonly HashSet<long> _forgotten = [];
     private readonly Lock _lock = new();
-    private long _nextId; // the last id handed out
-    private long _blockEnd;
+    private readonly IdBlocks _ids;
 
     /// <summary>Creates a log keeping the latest <paramref name="capacity"/> items, seeded from <paramref name="store"/>.</summary>
     public RoutingFeedbackLog(int capacity = 2000, IRoutingFeedbackStore? store = null)
     {
         _capacity = capacity;
         _store = store;
+        long newest = 0;
         if (store is not null)
         {
             foreach (RoutingFeedback feedback in store.Recent(capacity).Reverse())
             {
                 _recent.AddFirst(feedback);
                 _seen.Add((feedback.EntryId, feedback.Kind));
-                _nextId = Math.Max(_nextId, feedback.Id);
+                newest = Math.Max(newest, feedback.Id);
             }
         }
+
+        // Logs sharing a store take blocks of ids from it, the first one now; without one (or when it failed) this log
+        // counts on. No feedback waits for the store.
+        _ids = new IdBlocks(store is null ? null : store.ReserveIds, newest + 1);
     }
 
     /// <summary>Records feedback; returns <see langword="false"/> when the decision already has feedback of that kind.</summary>
@@ -142,15 +146,7 @@ internal sealed class RoutingFeedbackLog
                 return false;
             }
 
-            if (_nextId + 1 >= _blockEnd)
-            {
-                // Logs sharing a store take blocks of ids from it; without one (or when it failed) this log counts on.
-                long first = _store?.ReserveIds(RoutingActivityLog.IdBlock) ?? -1;
-                _nextId = first >= 0 ? first - 1 : _nextId;
-                _blockEnd = _nextId + 1 + RoutingActivityLog.IdBlock;
-            }
-
-            stored = feedback with { Id = ++_nextId };
+            stored = feedback with { Id = _ids.Next() };
             _recent.AddFirst(stored);
             while (_recent.Count > _capacity)
             {

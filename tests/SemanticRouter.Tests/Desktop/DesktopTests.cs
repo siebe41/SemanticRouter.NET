@@ -348,6 +348,63 @@ public sealed class DesktopTests : IDisposable
     }
 
     [Fact]
+    public async Task Of_launches_at_the_same_moment_only_one_becomes_the_app()
+    {
+        // #396: each used to find nobody listening on the pipe yet, and both started.
+        string directory = Path.Combine(_directory, Guid.NewGuid().ToString("N"));
+        SingleInstance[] launches = [.. Enumerable.Range(0, 8).Select(_ => new SingleInstance(directory))];
+        try
+        {
+            using var start = new Barrier(launches.Length);
+            bool[] locked = await Task.WhenAll(launches.Select(l => Task.Run(() =>
+            {
+                start.SignalAndWait();
+                return l.TryLock();
+            })));
+
+            locked.Count(l => l).Should().Be(1);
+            File.Exists(Path.Combine(directory, SingleInstance.LockFileName)).Should().BeTrue();
+
+            // Once the app quits, the next launch takes over.
+            SingleInstance app = launches[Array.IndexOf(locked, true)];
+            app.Dispose();
+            app.Dispose(); // QuitAsync and the end of Main may both dispose it
+            using var next = new SingleInstance(directory);
+            next.TryLock().Should().BeTrue();
+        }
+        finally
+        {
+            foreach (SingleInstance launch in launches)
+            {
+                launch.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public async Task A_launch_that_finds_the_lock_taken_waits_for_the_app_to_listen_then_hands_over()
+    {
+        string directory = Path.Combine(_directory, Guid.NewGuid().ToString("N"));
+        string local = Path.Combine(_directory, Guid.NewGuid().ToString("N"));
+        using var app = new SingleInstance(directory, local);
+        (await app.ClaimAsync(SingleInstance.Show, TimeSpan.FromSeconds(5))).Should().Be(SingleInstance.Claim.Primary);
+        File.Exists(Path.Combine(local, SingleInstance.LockFileName)).Should().BeTrue("the lock is in the local data directory");
+
+        using var impatient = new SingleInstance(directory, local);
+        (await impatient.ClaimAsync(SingleInstance.Show, TimeSpan.FromMilliseconds(300))).Should().Be(SingleInstance.Claim.NoAnswer, "the app holds the lock but does not listen yet");
+
+        var received = new TaskCompletionSource<string>();
+        using var second = new SingleInstance(directory, local);
+        Task<SingleInstance.Claim> claim = second.ClaimAsync(SingleInstance.Show, TimeSpan.FromSeconds(20));
+        await Task.Delay(300);
+        app.Listen(command => received.TrySetResult(command));
+
+        (await claim.WaitAsync(TimeSpan.FromSeconds(30))).Should().Be(SingleInstance.Claim.HandedOver);
+        (await received.Task.WaitAsync(TimeSpan.FromSeconds(10))).Should().Be(SingleInstance.Show);
+        second.TryLock().Should().BeFalse("the app still holds the lock");
+    }
+
+    [Fact]
     public void The_login_shell_path_is_found_between_markers_and_merged_without_repeats()
     {
         ShellEnvironment.Extract("motd noise\n__SEMANTIC_ROUTER_PATH__/a:/b__SEMANTIC_ROUTER_PATH__ trailing").Should().Be("/a:/b");

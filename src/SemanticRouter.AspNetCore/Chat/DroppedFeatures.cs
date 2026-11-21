@@ -9,6 +9,12 @@ namespace SemanticRouter.AspNetCore;
 /// </summary>
 internal sealed class DroppedFeatures
 {
+    /// <summary>
+    /// Images inside a tool result: translated requests and prompts carry a tool result as text, so the parsers list
+    /// this among a request's <see cref="ChatCompletionRequest.ProtocolOnlyFeatures"/>.
+    /// </summary>
+    public const string ToolResultImages = "tool_result images";
+
     private readonly List<string> _names = [];
 
     public IReadOnlyList<string> Names => _names;

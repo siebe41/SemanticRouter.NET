@@ -460,6 +460,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `BaseAddress`, `RequestPath` | HTTP | –, `/v1/chat/completions` (`/v1/messages` for Anthropic, `/v1/responses` for Responses) | |
 | `ApiKey`, `Headers` | HTTP | | Bearer token (`x-api-key` for Anthropic) and extra headers. Keep keys in user-secrets or environment variables, or write a reference: `"${env:OPENAI_API_KEY}"`, `"${secret:…}"`. |
 | `ForwardHeaders[]` | HTTP | `[]` | Client request headers to relay upstream (e.g. `anthropic-beta`). Authorization headers never are. |
+| `MaxTokensParameter` | OpenAI-compatible | automatic | `max_tokens` or `max_completion_tokens`: the field that carries the output limit on translated requests. Left out, `max_completion_tokens` for a model with `reasoning` on a server that is not local (OpenAI's reasoning models reject `max_tokens`), `max_tokens` otherwise. See [Output limits on OpenAI reasoning models](docs/providers.md#output-limits-on-openai-reasoning-models). |
 | `AnthropicVersion` | Anthropic | `2023-06-01` | Sent as `anthropic-version`. |
 | `PromptCaching` | Anthropic | `Auto` | `Auto`: requests translated from OpenAI and Responses clients get cache markers (end of the system prompt, plus automatic caching for the conversation) when the prompt is above the model's cacheable minimum. `Off`: none. See [Prompt caching on translated requests](docs/providers.md#prompt-caching-on-translated-requests). |
 | `CacheTtl` | Anthropic | `5m` | `5m` or `1h`: how long those cache entries live, and so how long conversation routing counts them warm. A one-hour entry costs 2× the input price to write instead of 1.25×. |
@@ -647,7 +648,7 @@ The tests cover:
 - in-process `TestServer` runs of both middleware modes, including failover, quota cooldowns, local-only routing and the remote-client guard;
 - all three protocols: parsing, translation in each direction (JSON and SSE), the Anthropic and Responses front doors end to end (with a recorded Codex request against every backend type), thinking, structured output and dropped-feature reporting, tool-turn affinity, model aliases, prompted tool calling, and the dashboard's admin API, configuration store and hot reload.
 
-No network, model or vendor CLI is needed. CI runs the suite on Linux, Windows and macOS, and builds and smoke-tests the container image. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
+No network, model or vendor CLI is needed: the tests that run the real ONNX embedding models (`Category=Model`) download them from huggingface.co (57 MB, once), so `dotnet test` skips them and says why. Run them with `SEMANTIC_ROUTER_MODEL_TESTS=1 dotnet test --filter Category=Model`; `SEMANTIC_ROUTER_TEST_MODELS` sets where the models are kept. CI runs the suite on Linux, Windows and macOS, and builds and smoke-tests the container image. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every pull request, on `main`, and weekly so new advisories surface without a push:
 

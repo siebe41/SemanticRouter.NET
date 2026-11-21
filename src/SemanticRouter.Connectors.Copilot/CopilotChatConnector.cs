@@ -17,7 +17,8 @@ namespace SemanticRouter.Connectors.Copilot;
 /// <see cref="ConnectorOptions.AllowRemoteClients"/> is set (see docs/TERMS.md), limits concurrency, and reports quota and
 /// rate limits as <see cref="ModelFailureKind.QuotaExceeded"/> so the router fails over until the cooldown ends.
 /// </remarks>
-internal sealed partial class CopilotChatConnector : IChatConnector, IModelDiscovery, IDisposable
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "The concurrency gate is never disposed: requests that started before a configuration change still release it (#388).")]
+internal sealed partial class CopilotChatConnector : IChatConnector, IModelDiscovery
 {
     // Account-wide limits: every model on the connector cools down. Other quota and rate limits are per model
     // (Copilot's included models keep working when premium requests run out).
@@ -27,6 +28,8 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
     private readonly ICopilotBackend _backend;
     private readonly ILogger _logger;
     private readonly TimeProvider _time;
+    // Never disposed: a configuration change retires this connector while requests may still hold or wait for the gate,
+    // and SemaphoreSlim.Release throws on a disposed semaphore. Without AvailableWaitHandle there is nothing to free.
     private readonly SemaphoreSlim _gate;
     private int _waiting;
 
@@ -98,8 +101,6 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
         }
     }
 
-    public void Dispose() => _gate.Dispose();
-
     private async Task<ConnectorResult> RunAsync(ConnectorRequest request, HttpContext context, CancellationToken cancellationToken)
     {
         ChatCompletionRequest chat = request.Chat;
@@ -140,12 +141,11 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
                         cached = Sum(cached, usage.CacheReadTokens);
                         written = Sum(written, usage.CacheWriteTokens);
                         break;
-                    case CopilotUpdate.Error error when !writer.HasStarted:
+                    case CopilotUpdate.Error error when !context.Response.HasStarted:
                         return Failure(error);
                     case CopilotUpdate.Error error:
-                        LogMidStreamFailure(_logger, Name, error.Type, error.Message);
-                        await writer.CompleteAsync(ChatStopReason.EndTurn, default, cancellationToken).ConfigureAwait(false);
-                        return ConnectorResult.Completed;
+                        // Too late to fail over: the dispatcher ends the reply with an error and cools the model down.
+                        throw new UpstreamReplyException(Failure(error));
                 }
             }
         }
@@ -156,15 +156,15 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or Win32Exception or FileNotFoundException && !cancellationToken.IsCancellationRequested)
         {
-            if (writer.HasStarted)
+            var failure = ConnectorResult.Failed(ModelFailureKind.Unavailable, "Copilot runtime: " + ex.Message);
+            if (context.Response.HasStarted)
             {
                 LogMidStreamFailure(_logger, Name, ex.GetType().Name, ex.Message);
-                await writer.CompleteAsync(ChatStopReason.EndTurn, default, cancellationToken).ConfigureAwait(false);
-                return ConnectorResult.Completed;
+                throw new UpstreamReplyException(failure, innerException: ex);
             }
 
             LogRuntimeFailed(_logger, Name, ex.Message);
-            return ConnectorResult.Failed(ModelFailureKind.Unavailable, "Copilot runtime: " + ex.Message);
+            return failure;
         }
 
         if (!writer.HasStarted && calls == 0)
