@@ -19,6 +19,7 @@ SemanticRouter.NET routes each prompt to a local model, a subscription CLI (Clau
 | `src/SemanticRouter.AspNetCore` | The router itself: DI, routing middleware, connectors, dispatch, the embedded dashboard (`Dashboard/`, plain JS in `wwwroot/`), runtime and tuning |
 | `src/SemanticRouter.Embeddings.Onnx` | In-process sentence embeddings (ONNX Runtime) |
 | `src/SemanticRouter.Storage.Sqlite` | Durable state in one SQLite file |
+| `src/SemanticRouter.Mcp` | The router's MCP server (classify, explain, usage, health, proposed tuning), off by default |
 | `src/SemanticRouter.Connectors.Copilot` | GitHub Copilot connector (its SDK's permission API is experimental; see the version bound in CONTRIBUTING) |
 | `src/SemanticRouter.Hosting` | Shared hosting glue for the host and the desktop app |
 | `src/SemanticRouter.Host` | The ready-to-run router app and container image |
