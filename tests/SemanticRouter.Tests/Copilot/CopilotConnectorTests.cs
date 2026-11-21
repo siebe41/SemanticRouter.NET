@@ -28,7 +28,10 @@ public sealed class CopilotConnectorTests : RouterHostTest
     }
 
     private Task<HttpClient> StartCopilotAsync(
-        bool withFactory = true, Action<ConnectorOptions>? connector = null, Func<Dictionary<string, string?>>? inherited = null) =>
+        bool withFactory = true,
+        Action<ConnectorOptions>? connector = null,
+        Func<Dictionary<string, string?>>? inherited = null,
+        Func<ICopilotBackend>? backends = null) =>
         StartAsync(
             o =>
             {
@@ -58,7 +61,7 @@ public sealed class CopilotConnectorTests : RouterHostTest
                         (_, environment) =>
                         {
                             _environments.Add(environment);
-                            return _copilot;
+                            return backends?.Invoke() ?? _copilot;
                         },
                         inherited));
                 }
@@ -274,6 +277,67 @@ public sealed class CopilotConnectorTests : RouterHostTest
     }
 
     [Fact]
+    public async Task A_runtime_stops_once_no_connector_or_request_uses_it()
+    {
+        // #399 keyed runtimes by their environment: one replaced by a changed environment must not keep running.
+        var made = new List<TrackedCopilot>();
+        var factory = new CopilotConnectorFactory(
+            NullLoggerFactory.Instance, (_, _) => { var backend = new TrackedCopilot(); made.Add(backend); return backend; }, () => new() { ["PATH"] = "/usr/bin" });
+        var edited = new ConnectorOptions { Type = CopilotConnector.Type };
+        edited.EnvironmentVariables["NODE_EXTRA_CA_CERTS"] = "/etc/corporate-root.pem";
+
+        IChatConnector first = factory.Create("copilot", new ConnectorOptions { Type = CopilotConnector.Type });
+        IChatConnector reloaded = factory.Create("copilot", new ConnectorOptions { Type = CopilotConnector.Type });
+        (first as IDisposable)?.Dispose();
+        made.Should().ContainSingle();
+        made[0].Disposed.Task.IsCompleted.Should().BeFalse("the reloaded configuration's connector uses the same runtime");
+
+        // A model listing is running when the environment changes and the connector it runs on is retired.
+        made[0].Listing = new TaskCompletionSource<IReadOnlyList<string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<IReadOnlyList<string>> running = ((IModelDiscovery)reloaded).ListModelsAsync(CancellationToken.None);
+        IChatConnector changed = factory.Create("copilot", edited);
+        (reloaded as IDisposable)?.Dispose();
+        made.Should().HaveCount(2);
+        await Task.Delay(50);
+        made[0].Disposed.Task.IsCompleted.Should().BeFalse("a listing still runs on it");
+
+        made[0].Listing!.SetResult(["gpt-5"]);
+        (await running).Should().Equal("gpt-5");
+        await made[0].Disposed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // The retired connector still works: it gets a runtime of its own for the call, stopped afterwards.
+        (await ((IModelDiscovery)reloaded).ListModelsAsync(CancellationToken.None)).Should().BeEmpty();
+        made.Should().HaveCount(3);
+        await made[2].Disposed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        made[1].Disposed.Task.IsCompleted.Should().BeFalse("the running configuration's connector uses it");
+        await factory.DisposeAsync();
+        made[1].Disposed.Task.IsCompleted.Should().BeTrue();
+        GC.KeepAlive(changed);
+    }
+
+    [Fact]
+    public async Task Discover_for_a_draft_with_another_environment_stops_the_runtime_it_started()
+    {
+        var made = new List<TrackedCopilot>();
+        HttpClient client = await StartCopilotAsync(
+            inherited: () => new() { ["PATH"] = "/usr/bin", ["SR_TEST_COPY"] = "draft-copilot-value-0123" },
+            backends: () => { var backend = new TrackedCopilot(); made.Add(backend); return backend; });
+
+        // The draft's key is a secret, so the variable holding it stays out of the draft runtime's environment.
+        HttpResponseMessage response = await client.PostAsJsonAsync("/router/api/connectors/discover", new
+        {
+            name = "copilot-draft",
+            settings = new { Type = CopilotConnector.Type, ApiKey = "draft-copilot-value-0123" },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        made.Should().HaveCount(2, "the running connector's runtime, and one for the draft's environment");
+        await made[1].Disposed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        made[0].Disposed.Task.IsCompleted.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task A_runtime_that_goes_quiet_mid_reply_is_given_up_on_and_frees_its_slot()
     {
         // The runtime sends no event when it dies or hangs after the first delta (#399).
@@ -371,8 +435,8 @@ public sealed class CopilotConnectorTests : RouterHostTest
     public void A_replaced_configuration_does_not_dispose_the_connector_its_requests_still_use()
     {
         // #388: the catalog disposes the IDisposable connectors of a retired runtime while its requests still hold the
-        // concurrency gate, so the Copilot connector must not be one of them.
-        typeof(CopilotChatConnector).Should().NotImplement<IDisposable>();
+        // concurrency gate. The CLI connector is not one of them; the Copilot connector's Dispose only lets go of its
+        // hold on the runtime (A_runtime_stops_once_no_connector_or_request_uses_it).
         typeof(CliChatConnector).Should().NotImplement<IDisposable>();
     }
 
@@ -401,6 +465,25 @@ public sealed class CopilotConnectorTests : RouterHostTest
         SetupApi.SetupPreset copilot = SetupApi.Presets(replacements).Single(p => p.Id == "copilot");
         (copilot.Name, copilot.Connector.Type).Should().Be(("copilot", CopilotConnector.Type));
         SetupApi.Presets().Single(p => p.Id == "copilot").Connector.Preset.Should().Be(CliPreset.GitHubCopilot, "without the package, the CLI preset");
+    }
+
+    /// <summary>A runtime that records when it is stopped; its model listing waits for <see cref="Listing"/> when set.</summary>
+    private sealed class TrackedCopilot : ICopilotBackend, IAsyncDisposable
+    {
+        public TaskCompletionSource Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<IReadOnlyList<string>>? Listing { get; set; }
+
+        public Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken) =>
+            Listing?.Task ?? Task.FromResult<IReadOnlyList<string>>([]);
+
+        public IAsyncEnumerable<CopilotUpdate> RunAsync(CopilotTurn turn, CancellationToken cancellationToken) => AsyncEnumerable.Empty<CopilotUpdate>();
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed.TrySetResult();
+            return ValueTask.CompletedTask;
+        }
     }
 
     /// <summary>Plays back one scripted turn per call and records what it was asked.</summary>

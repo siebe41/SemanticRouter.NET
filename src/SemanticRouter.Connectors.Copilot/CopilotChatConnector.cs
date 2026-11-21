@@ -16,40 +16,55 @@ namespace SemanticRouter.Connectors.Copilot;
 /// Like the subscription CLI connectors it only answers requests from this machine unless
 /// <see cref="ConnectorOptions.AllowRemoteClients"/> is set (see docs/TERMS.md), limits concurrency, and reports quota and
 /// rate limits as <see cref="ModelFailureKind.QuotaExceeded"/> so the router fails over until the cooldown ends.
+/// <para>
+/// Disposing it (another configuration replaced the one that made it) only lets go of its hold on the Copilot runtime: it
+/// stays usable, requests that are running or waiting keep theirs, and the runtime stops once none is left
+/// (<see cref="CopilotConnectorFactory"/>).
+/// </para>
 /// </remarks>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "The concurrency gate is never disposed: requests that started before a configuration change still release it (#388).")]
-internal sealed partial class CopilotChatConnector : IChatConnector, IModelDiscovery
+internal sealed partial class CopilotChatConnector : IChatConnector, IModelDiscovery, IDisposable
 {
     // Account-wide limits: every model on the connector cools down. Other quota and rate limits are per model
     // (Copilot's included models keep working when premium requests run out).
     private static readonly string[] AccountWideCodes = ["user_weekly_rate_limited", "user_global_rate_limited", "integration_rate_limited"];
 
     private readonly ConnectorOptions _options;
-    private readonly ICopilotBackend _backend;
+    private readonly Func<BackendLease> _acquire;
     private readonly ILogger _logger;
     private readonly TimeProvider _time;
     // Never disposed: a configuration change retires this connector while requests may still hold or wait for the gate,
     // and SemaphoreSlim.Release throws on a disposed semaphore. Without AvailableWaitHandle there is nothing to free.
     private readonly SemaphoreSlim _gate;
+    private BackendLease? _held;
     private int _waiting;
 
-    public CopilotChatConnector(string name, ConnectorOptions options, ICopilotBackend backend, ILogger logger, TimeProvider? time = null)
+    /// <summary>
+    /// A connector whose runtime comes from <paramref name="acquire"/>: it holds one lease until it is disposed, and each
+    /// request or model listing takes one of its own while it runs.
+    /// </summary>
+    public CopilotChatConnector(string name, ConnectorOptions options, Func<BackendLease> acquire, ILogger logger, TimeProvider? time = null)
     {
         Name = name;
         _options = options;
-        _backend = backend;
+        _acquire = acquire;
         _logger = logger;
         _time = time ?? TimeProvider.System;
         _gate = new SemaphoreSlim(Math.Max(1, options.MaxConcurrency));
+        _held = acquire();
     }
 
     public string Name { get; }
+
+    /// <summary>Lets go of the connector's hold on its runtime. It stays usable: a later request takes a hold of its own.</summary>
+    public void Dispose() => Interlocked.Exchange(ref _held, null)?.Dispose();
 
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken)
     {
         try
         {
-            return await _backend.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+            using BackendLease lease = _acquire();
+            return await lease.Backend.ListModelsAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException or Win32Exception && !cancellationToken.IsCancellationRequested)
         {
@@ -93,7 +108,9 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
 
         try
         {
-            return await RunAsync(request, context, cancellationToken).ConfigureAwait(false);
+            // Held until the turn is over, so a configuration change meanwhile does not stop the runtime under it.
+            using BackendLease lease = _acquire();
+            return await RunAsync(lease.Backend, request, context, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -101,7 +118,7 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
         }
     }
 
-    private async Task<ConnectorResult> RunAsync(ConnectorRequest request, HttpContext context, CancellationToken cancellationToken)
+    private async Task<ConnectorResult> RunAsync(ICopilotBackend backend, ConnectorRequest request, HttpContext context, CancellationToken cancellationToken)
     {
         ChatCompletionRequest chat = request.Chat;
         bool reasoning = chat.Reasoning is not null;
@@ -119,7 +136,7 @@ internal sealed partial class CopilotChatConnector : IChatConnector, IModelDisco
         int? input = null, output = null, cached = null, written = null;
         try
         {
-            await foreach (CopilotUpdate update in _backend.RunAsync(turn, guard.Token).ConfigureAwait(false))
+            await foreach (CopilotUpdate update in backend.RunAsync(turn, guard.Token).ConfigureAwait(false))
             {
                 if (committed || IsOutput(update))
                 {
