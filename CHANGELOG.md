@@ -7,6 +7,10 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 ### Security
 
 - The container image, the `semantic-router` tool and the desktop app are built on .NET 10.0.15 (from 10.0.13), which fixes CVE-2026-70197, the .NET Brotli advisory CVE-2026-111497, and the ASP.NET Core advisories CVE-2026-114146, CVE-2026-114147 and CVE-2026-114149. (#377)
+- The Copilot SDK connector no longer starts its runtime with the router's full environment: the router's settings, provider keys and variables holding its secrets are left out, as for the CLI connectors, and the connector's `EnvironmentVariables` and `RemoveEnvironmentVariables` now apply. (#399)
+- Failed dashboard sign-ins, wrong gateway keys and per-address rate limits count an IPv6 address by its /64 and keep at most 10,000 addresses each, so a client cannot get a fresh allowance per address or grow the tables without end. (#402)
+- The router no longer reads without limit from a backend or a CLI: error bodies are cut at 64 KiB, event-stream lines and events at 16 MiB, translated JSON replies at 64 MiB, and a CLI's standard error is kept to its first and last 32 K characters. (#402)
+- `/v1/messages/count_tokens`, the dashboard's context analysis, and the configuration and draft-connector endpoints enforce `Middleware:MaxRequestBodyBytes`, also for bodies sent without a length. (#402)
 
 ### Added
 
@@ -18,6 +22,9 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 
 ### Fixed
 
+- Passed-through event streams are relayed byte for byte, line endings included, and a passed-through non-streamed reply is held only up to 64 MiB: a longer one streams to the client as it arrives. (#402)
+- A Copilot runtime that goes quiet after the reply has started is given up on after `StallTimeout` instead of holding a connector slot until the client disconnects, and a Copilot runtime that has died is replaced on the next request. (#399)
+- Without `UseSqliteState`, the in-memory usage ledger no longer grows without bound: beyond its newest 100,000 requests it keeps quarter-hour totals, and budgets and the Usage page add up the same. (#402)
 - Configuration validation rejects a negative `CacheReadCostPerMillionTokens` or `CacheWriteCostPerMillionTokens`, as it already did for the other prices. A negative cache price was accepted and lowered recorded spend and budgets, and the dashboard now marks the price that is negative (cache and `Api*` prices included). (#413)
 - The configuration, `semantic-router.host.json` and `semantic-router.instance.json` are replaced in one step, through a temporary file of their own that is owner-only from the start and flushed to disk, so a crash or a second writer (the desktop app, the background service and `init` at once) never leaves one truncated. Before a newer release's template fixes rewrite `semantic-router.json`, which drops its comments and unknown properties, the file as it was is kept as `semantic-router.json.bak`. Forgetting a conversation's warm prompt cache on one model no longer drops a cache recorded on another model at the same moment. (#400)
 - A backend that answers `200` and then reports an error is no longer passed off as a finished answer. An error event first in the stream (Anthropic `error` such as `overloaded_error`, an OpenAI `{"error": …}` chunk, Responses `error` or `response.failed`) or an error body fails over to the next model; one after the reply started, and a CLI or Copilot run that fails after it began to answer, ends the reply with an error in the client's protocol, records the request as `failed` and cools the model down (for `QuotaCooldown` when it was a rate or usage limit). These used to end as a complete `end_turn` answer, with the model reported healthy. (#389)
