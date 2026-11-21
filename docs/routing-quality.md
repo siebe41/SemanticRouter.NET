@@ -143,6 +143,24 @@ Retries and corrections only show the answers people pushed back on. An optional
 
 Pick a judge stronger than the models it grades; grading its own answers is skipped.
 
+## What-if replay
+
+Before applying a change, see which recent requests it would move. The dashboard's **What if** page (Routing) replays recent requests and the evaluation set through your draft and through the running configuration, side by side, and lists:
+
+- the requests that would land on another tier, route or model (the 200 most recent of them, with the totals counting all);
+- requests per tier and per connector, now and with the draft, with subscription connectors (a CLI) marked, so you see the change in calls against each subscription;
+- the estimated cost change: each replayed request's reported tokens priced at the model each side would pick, at each side's prices. Another model would answer at another length, so it is an estimate; requests without token counts are left out and counted;
+- for the evaluation set, how many prompts reach the tier they are labelled with, now and with the draft.
+
+How it works and what it leaves out:
+
+- **No model is called.** Each side gets a classifier and model selector of its own, built from its configuration off to the side; the running router is not touched and nothing is applied. Each route utterance and prompt is embedded once, even when both sides classify it; a draft with other embedding settings embeds with those.
+- **Per message.** Both sides route every prompt as a conversation's first turn: no conversation floor, sticky model, warm cache, retry escalation, cooldown or measured latency. A model's active hours apply as they did when the request came in. So a configuration replayed against itself moves nothing.
+- **No new prompt retention.** A request can be replayed only when its activity entry holds the whole prompt: `State:StorePrompts` (`Redacted`, the default, or `On`) keeps the first 160 characters. Longer prompts, requests with no kept prompt, and requests the classifier did not route (a requested model, a tool result, a callout, a client side request) are counted and left out, and the page says how many. A request that was local-only stays local-only, so its prompt is not sent to embeddings that leave the machine.
+- At most the 2,000 most recent replayable requests from the window (1, 7, 30 or 90 days) are replayed.
+
+When the result looks right, **Apply** in the top bar applies the draft as usual: it is kept in the [configuration history](dashboard.md#apply-save-revert) and can be rolled back.
+
 ## Automatic tuning
 
 Calibration finds better thresholds, but someone has to run it and apply the result. Automatic tuning does that by itself, in small steps, and shows every change it makes so you can undo it (`Tuning`, on by default):
@@ -254,8 +272,9 @@ It is off by default: a client that legitimately repeats a prompt (a "regenerate
 | `POST api/tuning/pause`, `POST api/tuning/resume` | Pause or resume learning. |
 | `GET api/reliability` | Each model's turns and share with feedback per route and with tools, the share of the other models on the same work, and the models left out (`excludedSince`, `excludedUntil`, `detail`). |
 | `POST api/reliability/reset` | `{"model": "…", "route": "…"}` (or `"capability": "tools"`, or neither for everything): offer the model again with a fresh count. |
+| `POST api/replay?days=7&evaluation=true` | What-if replay: the body is a candidate configuration document (as `PUT api/config` takes it, `***` keeping a stored secret). Returns `requests` (`inWindow`, `replayed`, `notClassified`, `promptNotKept`, `promptTruncated`, `beyondLimit`), `moved` and `moves` (each with `before` and `after`: `tier`, `route`, `reason`, `model`, `connector`, `subscription`), `tiers`, `connectors`, `cost` (`beforeUsd`, `afterUsd`, `deltaUsd`, `priced`, `unpriced`), `evaluation` and `embedded`. Admin role; an invalid document gets the same 400 as `POST api/config/validate`. |
 
-Changing the set, adding utterances, evaluating and comparing providers (which embed every prompt in the set), route health (which embeds every utterance) every tuning action (run, undo, apply, dismiss, pause) and resetting a model's reliability count need the admin role. Reading what tuning learned and the reliability figures is open to the read-only role.
+Changing the set, adding utterances, evaluating and comparing providers (which embed every prompt in the set), route health (which embeds every utterance), a what-if replay (which embeds the replayed prompts and the utterances), every tuning action (run, undo, apply, dismiss, pause) and resetting a model's reliability count need the admin role. Reading what tuning learned and the reliability figures is open to the read-only role.
 
 From code, the same pieces are in `SemanticRouter.Core`: `EvaluationSet.Parse`, `RoutingEvaluator` (`PrepareAsync`, `Evaluate`, `Calibrate`), `ThresholdTuner` (the bounded, guarded steps automatic tuning takes) and `RouteHealthAnalyzer`.
 
