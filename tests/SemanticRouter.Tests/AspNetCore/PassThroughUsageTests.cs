@@ -62,6 +62,27 @@ public sealed class PassThroughUsageTests : RouterHostTest
     }
 
     [Fact]
+    public async Task The_backends_content_length_is_not_relayed_when_the_usage_chunk_is_held_back()
+    {
+        StubHttpMessageHandler sized = Upstream();
+        StubHttpMessageHandler upstream = new((request, body) =>
+        {
+            HttpResponseMessage reply = sized.Respond(request, body);
+            long? length = reply.Content.Headers.ContentLength; // computed from the content, then sent as a header
+            reply.Content.Headers.ContentLength = length;
+            return reply;
+        });
+        LocalHttp = upstream;
+        HttpClient client = await StartDispatchAsync();
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(Streamed));
+        byte[] relayed = await response.Content.ReadAsByteArrayAsync();
+
+        Encoding.UTF8.GetString(relayed).Should().NotContain("\"choices\":[]");
+        (response.Content.Headers.ContentLength ?? relayed.Length).Should().Be(relayed.Length, "the body is shorter than the backend's");
+    }
+
+    [Fact]
     public async Task A_client_that_asked_for_usage_gets_the_usage_chunk()
     {
         StubHttpMessageHandler upstream = Upstream();

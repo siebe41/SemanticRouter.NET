@@ -419,6 +419,13 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
                 continue;
             }
 
+            // Without the usage-only chunk the router asked for, the body is shorter than the backend's length: a
+            // Content-Length copied from it would make the server fail the reply after it started.
+            if (usageAdded && string.Equals(header.Key, "Content-Length", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             // "Server" holds space-separated product tokens, which a parsed header splits into separate values.
             copied.Add(header.Key);
             outgoing.Headers[header.Key] = string.Equals(header.Key, "Server", StringComparison.OrdinalIgnoreCase)
