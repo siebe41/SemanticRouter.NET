@@ -77,6 +77,73 @@ public sealed class PassThroughUsageTests : RouterHostTest
         Services.GetRequiredService<RoutingActivityLog>().Recent().Single().OutputTokens.Should().Be(3);
     }
 
+    // A strict server: rejects any field it does not know, as some Azure api-versions do with stream_options.
+    private static StubHttpMessageHandler Strict(HttpStatusCode rejection) => new((request, body) =>
+        JsonNode.Parse(body)!.AsObject().ContainsKey("stream_options")
+            ? new HttpResponseMessage(rejection)
+            {
+                Content = new StringContent("""{"error":{"message":"Unrecognized request argument supplied: stream_options"}}""", Encoding.UTF8, "application/json"),
+            }
+            : Upstream().Respond(request, body));
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.UnprocessableEntity)]
+    public async Task A_backend_that_rejects_the_added_stream_options_still_answers_and_is_not_asked_again(HttpStatusCode rejection)
+    {
+        StubHttpMessageHandler upstream = Strict(rejection);
+        LocalHttp = upstream;
+        HttpClient client = await StartDispatchAsync();
+
+        HttpResponseMessage first = await client.PostAsync("/v1/chat/completions", Json(Streamed));
+        string relayed = await first.Content.ReadAsStringAsync();
+
+        first.StatusCode.Should().Be(HttpStatusCode.OK, "the request worked before the router asked for usage");
+        relayed.Should().Contain("\"content\":\"Hi\"").And.EndWith("data: [DONE]\n\n");
+        upstream.Requests.Should().HaveCount(2);
+        JsonNode.Parse(upstream.Requests[1].Body)!.AsObject().ContainsKey("stream_options").Should().BeFalse("the retry is the client's request");
+
+        HttpResponseMessage second = await client.PostAsync("/v1/chat/completions", Json(Streamed));
+        second.StatusCode.Should().Be(HttpStatusCode.OK);
+        upstream.Requests.Should().HaveCount(3, "the connector remembers that the backend does not accept the field");
+        JsonNode.Parse(upstream.Requests[2].Body)!.AsObject().ContainsKey("stream_options").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_rejection_the_field_did_not_cause_is_relayed_and_usage_is_still_asked_for()
+    {
+        StubHttpMessageHandler upstream = new((_, _) => new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("""{"error":{"message":"messages is too long"}}""", Encoding.UTF8, "application/json"),
+        });
+        LocalHttp = upstream;
+        HttpClient client = await StartDispatchAsync();
+
+        HttpResponseMessage first = await client.PostAsync("/v1/chat/completions", Json(Streamed));
+        first.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await first.Content.ReadAsStringAsync()).Should().Contain("messages is too long");
+        upstream.Requests.Should().HaveCount(2, "the request is tried once without the field");
+
+        await client.PostAsync("/v1/chat/completions", Json(Streamed));
+        upstream.Requests.Should().HaveCount(4);
+        JsonNode.Parse(upstream.Requests[2].Body)!["stream_options"].Should().NotBeNull("the field was not the cause, so it is still sent");
+    }
+
+    [Fact]
+    public async Task A_client_that_sent_stream_options_itself_gets_the_rejection_without_a_retry()
+    {
+        StubHttpMessageHandler upstream = Strict(HttpStatusCode.BadRequest);
+        LocalHttp = upstream;
+        HttpClient client = await StartDispatchAsync();
+
+        HttpResponseMessage response = await client.PostAsync(
+            "/v1/chat/completions",
+            Json(Streamed.Replace("\"stream\":true", "\"stream\":true,\"stream_options\":{\"include_usage\":true}", StringComparison.Ordinal)));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        upstream.Requests.Should().ContainSingle();
+    }
+
     [Theory]
     [InlineData("""{"model":"m","stream":true,"messages":[]}""", """{"include_usage":true}""", true)]
     [InlineData("""{"model":"m","stream":true,"stream_options":{"include_usage":false,"include_obfuscation":false},"messages":[]}""", """{"include_usage":true,"include_obfuscation":false}""", true)]

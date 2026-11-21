@@ -71,7 +71,7 @@ A connector either passes the client's body through or translates it.
 
 | Client speaks | Backend speaks | What happens |
 |---|---|---|
-| OpenAI | OpenAI-compatible | Body forwarded with only `model` rewritten, plus `stream_options.include_usage` on a streamed request so usage is reported; response streamed back byte for byte, without the usage-only chunk when the client did not ask for it. |
+| OpenAI | OpenAI-compatible | Body forwarded with only `model` rewritten, plus `stream_options.include_usage` on a streamed request so usage is reported (sent again without it, once, when the backend answers 400 or 422 to it, and then left out for that connector); response streamed back byte for byte, without the usage-only chunk when the client did not ask for it. |
 | Anthropic | Anthropic connector | Same, plus `x-api-key`, `anthropic-version` and the configured `ForwardHeaders`. |
 | Anthropic | OpenAI-compatible | `OpenAIRequestBuilder` re-expresses the request (system prompt, `tool_use` to `tool_calls`, tool results to `tool` messages, images, stop sequences); `OpenAIResponseReader` reads the JSON or SSE reply and drives an `IChatResponseWriter` that writes Anthropic JSON or events. |
 | OpenAI | Anthropic connector | The mirror image through `AnthropicRequestBuilder` and `AnthropicResponseReader`; consecutive same-role turns are merged because the Messages API requires alternation, and `max_tokens` gets a default. |

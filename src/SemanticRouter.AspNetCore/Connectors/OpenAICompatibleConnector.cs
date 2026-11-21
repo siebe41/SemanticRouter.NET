@@ -43,6 +43,9 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
     private readonly SecretRedactor _redactor;
     private readonly Uri _requestUri;
 
+    // Set once the backend refused the stream_options the router adds and accepted the same request without them.
+    private volatile bool _streamOptionsRejected;
+
     public OpenAICompatibleConnector(
         string name,
         ConnectorOptions options,
@@ -76,9 +79,10 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         bool reasoning = request.Model.Capabilities.Contains("reasoning", StringComparer.OrdinalIgnoreCase);
         DroppedFeatures.Report(context, DroppedFeatures.ForTranslation(request.Chat, Protocol, reasoning));
         bool usageAdded = false;
+        bool stripThinking = Protocol == ChatProtocol.Anthropic;
         ReadOnlyMemory<byte> body = passThrough
             ? RewriteModel(
-                request.RawBody, request.Model.Model, stripRelayedThinking: Protocol == ChatProtocol.Anthropic, requestUsage: Protocol == ChatProtocol.OpenAI, out usageAdded)
+                request.RawBody, request.Model.Model, stripRelayedThinking: stripThinking, requestUsage: Protocol == ChatProtocol.OpenAI && !_streamOptionsRejected, out usageAdded)
             : Protocol switch
             {
                 ChatProtocol.Anthropic => AnthropicRequestBuilder.Build(
@@ -87,51 +91,33 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
                 _ => OpenAIRequestBuilder.Build(request.Chat, request.Model.Model, reasoning: reasoning, maxCompletionTokens: UsesMaxCompletionTokens(_options, reasoning)),
             };
 
-        using var message = new HttpRequestMessage(HttpMethod.Post, _requestUri) { Content = new ReadOnlyMemoryContent(body) };
-        message.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        if (passThrough)
+        (HttpResponseMessage? response, ConnectorResult? failure) = await SendUpstreamAsync(body, context, passThrough, cancellationToken).ConfigureAwait(false);
+        if (response is null)
         {
-            foreach (string? accept in context.Request.Headers.Accept)
-            {
-                message.Headers.TryAddWithoutValidation("Accept", accept);
-            }
+            return failure.GetValueOrDefault();
         }
 
-        AddCredentials(message);
-        foreach (string header in _options.ForwardHeaders)
+        if (usageAdded && (int)response.StatusCode is 400 or 422)
         {
-            if (!NeverForwarded.Contains(header) && context.Request.Headers.TryGetValue(header, out var values))
+            // The router added stream_options itself, and a backend that rejects fields it does not know (some Azure
+            // api-versions, strict servers) refused the request: send it again as the client wrote it, so a request that
+            // works without the router still works through it. When that one is accepted, the field was the cause, and
+            // later requests to this connector leave it out (their usage then goes uncounted, as before).
+            int rejected = (int)response.StatusCode;
+            response.Dispose();
+            ReadOnlyMemory<byte> plain = RewriteModel(
+                request.RawBody, request.Model.Model, stripRelayedThinking: stripThinking, requestUsage: false, out _);
+            (response, failure) = await SendUpstreamAsync(plain, context, passThrough, cancellationToken).ConfigureAwait(false);
+            if (response is null)
             {
-                message.Headers.Remove(header);
-                message.Headers.TryAddWithoutValidation(header, values.ToArray());
+                return failure.GetValueOrDefault();
             }
-        }
 
-        foreach ((string header, string value) in _options.Headers)
-        {
-            message.Headers.Remove(header);
-            message.Headers.TryAddWithoutValidation(header, value);
-        }
-
-        HttpClient client = _httpClientFactory.CreateClient(HttpClientNamePrefix + Name);
-        HttpResponseMessage response;
-        using (var headersTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-        {
-            headersTimeout.CancelAfter(_options.EffectiveTimeout);
-            try
+            usageAdded = false;
+            if ((int)response.StatusCode is not (400 or 422))
             {
-                response = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, headersTimeout.Token)
-                    .ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException
-                                       && !cancellationToken.IsCancellationRequested)
-            {
-                // Expected operational failures (server down, timeout): one line, no stack trace.
-                string error = ex is OperationCanceledException ? "timed out" : _redactor.Redact(ex.Message);
-                LogUpstreamFailure(_logger, Name, AddressDisplay.Show(message.RequestUri)!, error);
-                return ConnectorResult.Failed(
-                    ModelFailureKind.Unavailable,
-                    ex is OperationCanceledException ? "timed out" : $"unreachable ({error})");
+                _streamOptionsRejected = true;
+                LogStreamOptionsRejected(_logger, Name, rejected);
             }
         }
 
@@ -154,7 +140,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             }
 
             context.Response.StatusCode = StatusCodes.Status200OK;
-            LogUpstreamFailure(_logger, Name, AddressDisplay.Show(message.RequestUri)!, _redactor.Redact(ex.Message));
+            LogUpstreamFailure(_logger, Name, AddressDisplay.Show(_requestUri)!, _redactor.Redact(ex.Message));
             return ex.Failure;
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested
@@ -182,8 +168,62 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             }
 
             context.Response.StatusCode = StatusCodes.Status200OK;
-            LogUpstreamFailure(_logger, Name, AddressDisplay.Show(message.RequestUri)!, why);
+            LogUpstreamFailure(_logger, Name, AddressDisplay.Show(_requestUri)!, why);
             return ConnectorResult.Failed(ModelFailureKind.Unavailable, why);
+        }
+    }
+
+    /// <summary>
+    /// Sends <paramref name="body"/> and waits for the reply's headers. Returns the reply, or, when the backend could not
+    /// be reached in time, the failure to report instead.
+    /// </summary>
+    private async Task<(HttpResponseMessage? Response, ConnectorResult? Failure)> SendUpstreamAsync(
+        ReadOnlyMemory<byte> body, HttpContext context, bool passThrough, CancellationToken cancellationToken)
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, _requestUri) { Content = new ReadOnlyMemoryContent(body) };
+        message.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        if (passThrough)
+        {
+            foreach (string? accept in context.Request.Headers.Accept)
+            {
+                message.Headers.TryAddWithoutValidation("Accept", accept);
+            }
+        }
+
+        AddCredentials(message);
+        foreach (string header in _options.ForwardHeaders)
+        {
+            if (!NeverForwarded.Contains(header) && context.Request.Headers.TryGetValue(header, out var values))
+            {
+                message.Headers.Remove(header);
+                message.Headers.TryAddWithoutValidation(header, values.ToArray());
+            }
+        }
+
+        foreach ((string header, string value) in _options.Headers)
+        {
+            message.Headers.Remove(header);
+            message.Headers.TryAddWithoutValidation(header, value);
+        }
+
+        HttpClient client = _httpClientFactory.CreateClient(HttpClientNamePrefix + Name);
+        using var headersTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        headersTimeout.CancelAfter(_options.EffectiveTimeout);
+        try
+        {
+            HttpResponseMessage response = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, headersTimeout.Token)
+                .ConfigureAwait(false);
+            return (response, null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException
+                                   && !cancellationToken.IsCancellationRequested)
+        {
+            // Expected operational failures (server down, timeout): one line, no stack trace.
+            string error = ex is OperationCanceledException ? "timed out" : _redactor.Redact(ex.Message);
+            LogUpstreamFailure(_logger, Name, AddressDisplay.Show(message.RequestUri)!, error);
+            return (null, ConnectorResult.Failed(
+                ModelFailureKind.Unavailable,
+                ex is OperationCanceledException ? "timed out" : $"unreachable ({error})"));
         }
     }
 
@@ -485,6 +525,9 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: HTTP {Status}, {Advice}. Trying the next model.")]
     private static partial void LogUpstreamRejectedCredentials(ILogger logger, string connector, int status, string advice);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: the backend answered HTTP {Status} to stream_options.include_usage and accepted the request without it; streamed pass-through requests to it no longer ask for usage, so budgets do not count them.")]
+    private static partial void LogStreamOptionsRejected(ILogger logger, string connector, int status);
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Connector {Connector}: upstream returned HTTP {Status}; trying the next model.")]
     private static partial void LogUpstreamStatus(ILogger logger, string connector, int status);
