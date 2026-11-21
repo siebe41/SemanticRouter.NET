@@ -4,7 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!--
-      The five library packages, at build time only (Directory.Build.targets): every public type and member is listed
+      The six library packages, at build time only (Directory.Build.targets): every public type and member is listed
       in the project's PublicAPI.Shipped.txt or PublicAPI.Unshipped.txt (CONTRIBUTING.md, Public API and package
       validation). Not a dependency of the packages.
     -->
@@ -27,6 +27,13 @@
       and dependencies).
     -->
     <PackageVersion Include="GitHub.Copilot.SDK" Version="[1.0.34, 1.1.0)" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      SemanticRouter.Mcp only: the official C# SDK for the Model Context Protocol (Apache-2.0), its Streamable HTTP
+      server. An open lower bound: the router's MCP server uses none of the SDK's APIs marked experimental (MCPEXP*).
+    -->
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="2.4.0" />
   </ItemGroup>
   <ItemGroup>
     <!-- SemanticRouter.Desktop only: the tray icon and the dashboard window (the platform's own web view). -->

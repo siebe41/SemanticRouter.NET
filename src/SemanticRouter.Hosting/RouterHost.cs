@@ -94,6 +94,7 @@ internal static partial class RouterHost
             .UseSecretFile()
             .AddOnnxEmbeddings(onnx => onnx.ModelsDirectory ??= LocalData.ModelsDirectory(settings))
             .AddCopilotConnector()
+            .AddRouterMcpServer() // served only with SemanticRouter:Mcp:Enabled
             .UseSqliteState(LocalData.StateFile(settings));
 
         builder.Services.AddSingleton<IRouterSetupDetector, SetupDetector>(); // the dashboard's first-run setup finds what init would
@@ -117,6 +118,7 @@ internal static partial class RouterHost
         app.MapAnthropicTokenCount();
         app.MapPromptClassification();
         app.MapRouterDashboard("/router");
+        app.MapRouterMcp("/router/mcp"); // after the dashboard, whose sign-in and audit log it shares
         app.MapRouterDashboardRedirect("/router");
         return app;
     }

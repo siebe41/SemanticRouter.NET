@@ -20,6 +20,7 @@ Nothing else is contacted:
 
 - **The dashboard** loads its scripts, styles and fonts from the router itself and sends `Content-Security-Policy: default-src 'self'; …`, so the browser refuses requests to any other host. The link to the project on GitHub is only followed when you click it.
 - **The desktop app** shows the dashboard from the router it runs, and reads the weekly digest from it for the tray.
+- **The MCP server** (`/router/mcp`, off unless `Mcp:Enabled`) is an endpoint the router serves, not a connection it makes. Its tools call no model: `classify` and `propose_tuning` embed prompts through the **Embeddings** row above, as the dashboard's classify and **What if** do.
 - **Building from source** sends no Avalonia build telemetry: `Directory.Build.targets` replaces its telemetry target. The .NET SDK has its own; set `DOTNET_CLI_TELEMETRY_OPTOUT=1` to turn it off (see [Contributing](../CONTRIBUTING.md)).
 
 ## ONNX Runtime telemetry

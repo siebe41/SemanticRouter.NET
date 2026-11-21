@@ -4,6 +4,7 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Embeddings.Onnx;
+using SemanticRouter.Mcp;
 using SemanticRouter.Storage.Sqlite;
 
 namespace SemanticRouter.Tests.AspNetCore;
@@ -23,6 +24,7 @@ public sealed class PublicApiNamespaceTests
         ["SemanticRouter.Storage.Sqlite"] = (typeof(SqliteStateOptions).Assembly, "SemanticRouter.Storage.Sqlite"),
         ["SemanticRouter.Embeddings.Onnx"] = (typeof(OnnxEmbeddingOptions).Assembly, "SemanticRouter.Embeddings.Onnx"),
         ["SemanticRouter.Connectors.Copilot"] = (typeof(CopilotConnectorBuilderExtensions).Assembly, "SemanticRouter.Connectors.Copilot"),
+        ["SemanticRouter.Mcp"] = (typeof(RouterMcpOptions).Assembly, "SemanticRouter.Mcp"),
     };
 
     public static TheoryData<string> Packages() => new(Assemblies.Keys);

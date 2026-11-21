@@ -209,6 +209,59 @@ curl http://localhost:5080/v1/messages -H 'Content-Type: application/json' -H 'a
 curl -s http://localhost:5080/semantic-router/classify -H 'Content-Type: application/json' -d '{"prompt":"why does this deadlock?"}'
 ```
 
+## The router's MCP server
+
+Agents can also talk *about* the router over MCP: ask where a prompt would go, why a request went where it did, what has been spent and which connectors are failing, and propose tuning for you to apply. The server is part of the router (the `SemanticRouter.Mcp` package; the `semantic-router` tool and the desktop app include it) and is **off by default**:
+
+```jsonc
+"SemanticRouter": {
+  "Mcp": {
+    "Enabled": true,          // serve /router/mcp (Streamable HTTP); otherwise the path answers 404
+    "AllowProposals": false   // offer propose_tuning to admin callers
+  }
+}
+```
+
+Both are read at start-up (`SemanticRouter__Mcp__Enabled=true` in the environment works too). In your own application: `.AddRouterMcpServer()` on `AddSemanticPromptRouting(…)`, and `app.MapRouterMcp("/router/mcp")` after `MapRouterDashboard`.
+
+| Tool | Role | What it answers |
+|---|---|---|
+| `classify` | Admin | Where a prompt would go, without sending it: what `POST api/classify` answers (tier, route and similarity, route scores, the models in the order they would be tried with their estimated cost), plus a decision line. Admin only, as on the admin API: it embeds the prompt. |
+| `explain_request` | ReadOnly | One request by its id (the `X-Prompt-Route-Id` response header, or the Activity page): its entry exactly as `GET api/activity` gives the Activity page, the decision line the Report form uses, why the model was chosen, the learned change that moved it and the feedback it drew. Only the recent requests the Activity page holds (the last 500 in memory); it reads no stored history. |
+| `usage` | Metrics | Tokens, requests and cost at current prices for `day`, `week`, `month`, `30d` or `7d`, in total and by model, connector, route and client, with the budgets. |
+| `health` | Metrics | Each connector's state, failures and latency as the Endpoints card shows them (without the last error for the metrics role), and the models cooling down with when each is tried again: a provider's usage-limit reset, when it named one. |
+| `propose_tuning` | Admin, with `AllowProposals` | One change: the default threshold, a route's threshold, an utterance for a route, or the model a route prefers. It replays the last days of requests and the evaluation set through the configuration with the change (as the **What if** page does) and records it as a **suggestion** on the Router learned page, marked "Proposed over MCP by …" with the agent's reason and the replay's outcome. It never applies anything: a person clicks **Apply** or **Dismiss** there. A change that is not one of these four kinds is refused; make it in the dashboard's draft and try it on the **What if** page. |
+
+Callers sign in exactly as on the [admin API](dashboard.md#access-and-security): loopback clients are admin without a token (unless `RequireTokenForLocalClients`), other callers send a dashboard token as `Authorization: Bearer <token>`, and a user an authenticating proxy names gets the role it maps them to. A caller sees only the tools its [role](dashboard.md#roles) may call, wrong tokens are throttled per address, cross-site browser requests are refused, the machine policy's `Dashboard: Off` or `ReadOnly` applies, and `classify` and `propose_tuning` calls are written to the [audit log](dashboard.md#audit-log) (`MCP: classified a prompt`, `MCP: proposed a tuning change: …`). Each request stands alone (stateless Streamable HTTP); nothing is kept between calls.
+
+**Claude Code:**
+
+```bash
+claude mcp add --transport http semantic-router http://localhost:5080/router/mcp
+# from another machine, with a dashboard token (ReadOnlyToken or MetricsToken for fewer tools)
+claude mcp add --transport http semantic-router https://router.home.lan/router/mcp --header "Authorization: Bearer $ROUTER_ADMIN_TOKEN"
+```
+
+**Codex CLI** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.semantic-router]
+url = "http://localhost:5080/router/mcp"
+# bearer_token_env_var = "ROUTER_ADMIN_TOKEN"   # from another machine
+```
+
+**VS Code and GitHub Copilot** (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "semantic-router": { "type": "http", "url": "http://localhost:5080/router/mcp" }
+  }
+}
+```
+
+There is no stdio transport yet; every client above speaks Streamable HTTP.
+
 ## Keep it local
 
 Subscription CLI connectors only answer loopback clients (`AllowRemoteClients: false`), and the dashboard's admin API does too unless a dashboard token is configured (see [Access and security](dashboard.md#access-and-security)). Bind the router to `localhost` when it fronts your personal subscriptions; see [Subscription CLI terms](TERMS.md).

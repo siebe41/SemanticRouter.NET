@@ -37,6 +37,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SemanticRouter.Hosting", "s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SemanticRouter.Desktop", "src\SemanticRouter.Desktop\SemanticRouter.Desktop.csproj", "{7FC627B7-D03F-45AB-9A2C-53A5E105266C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SemanticRouter.Mcp", "src\SemanticRouter.Mcp\SemanticRouter.Mcp.csproj", "{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -203,6 +205,18 @@ Global
 		{7FC627B7-D03F-45AB-9A2C-53A5E105266C}.Release|x64.Build.0 = Release|Any CPU
 		{7FC627B7-D03F-45AB-9A2C-53A5E105266C}.Release|x86.ActiveCfg = Release|Any CPU
 		{7FC627B7-D03F-45AB-9A2C-53A5E105266C}.Release|x86.Build.0 = Release|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Debug|x64.Build.0 = Debug|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Debug|x86.Build.0 = Debug|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Release|x64.ActiveCfg = Release|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Release|x64.Build.0 = Release|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Release|x86.ActiveCfg = Release|Any CPU
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -221,5 +235,6 @@ Global
 		{1736E375-2E11-4EF2-990E-8F5E069C5690} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{08FAA74C-5E13-4AFB-AD14-01B318E7F7ED} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{7FC627B7-D03F-45AB-9A2C-53A5E105266C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{FC5C22BA-674B-49CB-9DCC-42E4B9F1C11C} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

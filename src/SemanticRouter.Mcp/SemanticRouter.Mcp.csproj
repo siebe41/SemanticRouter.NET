@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SemanticRouter.Mcp</RootNamespace>
+    <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>An MCP server for SemanticRouter: lets Claude Code, Copilot, Codex and other agents ask where a prompt would go, explain a routed request, read usage and connector health, and propose tuning for a person to apply, behind the dashboard's sign-in.</Description>
+    <PackageTags>$(PackageTags);mcp;model-context-protocol</PackageTags>
+    <!-- No release on nuget.org yet, so nothing to validate against (Directory.Build.targets). Remove after the first release. -->
+    <DisablePackageBaselineValidation>true</DisablePackageBaselineValidation>
+    <!-- The desktop app references it through SemanticRouter.Hosting: restored for the app's runtimes too, built once (Directory.Build.props). -->
+    <RuntimeIdentifiers>$(DesktopRuntimeIdentifiers)</RuntimeIdentifiers>
+    <IsRidAgnostic>true</IsRidAgnostic>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SemanticRouter.AspNetCore\SemanticRouter.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SemanticRouter.Tests" />
+  </ItemGroup>
+
+</Project>
