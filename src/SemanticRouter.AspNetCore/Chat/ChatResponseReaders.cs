@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text.Json;
 
 namespace SemanticRouter.AspNetCore;
@@ -5,12 +6,15 @@ namespace SemanticRouter.AspNetCore;
 /// <summary>Reads <c>data:</c> lines from a server-sent events stream.</summary>
 internal static class ServerSentEvents
 {
-    /// <summary>Yields each event's data payload (multi-line data joined with newlines).</summary>
+    /// <summary>
+    /// Yields each event's data payload (multi-line data joined with newlines). A line or an event longer than
+    /// <see cref="UpstreamLimits.MaxLineLength"/> ends the stream with an <see cref="UpstreamLimitException"/>.
+    /// </summary>
     public static async IAsyncEnumerable<string> ReadAsync(Stream stream, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var reader = new StreamReader(stream);
         var data = new System.Text.StringBuilder();
-        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        await foreach (string line in ReadLinesAsync(reader, UpstreamLimits.MaxLineLength, cancellationToken).ConfigureAwait(false))
         {
             if (line.Length == 0)
             {
@@ -25,6 +29,11 @@ internal static class ServerSentEvents
 
             if (line.StartsWith("data:", StringComparison.Ordinal))
             {
+                if (data.Length + line.Length > UpstreamLimits.MaxLineLength)
+                {
+                    throw TooLong("an event");
+                }
+
                 if (data.Length > 0)
                 {
                     data.Append('\n');
@@ -39,6 +48,64 @@ internal static class ServerSentEvents
             yield return data.ToString();
         }
     }
+
+    /// <summary>
+    /// Lines as <see cref="TextReader.ReadLineAsync(CancellationToken)"/> reads them (ended by <c>\n</c>, <c>\r</c> or
+    /// <c>\r\n</c>), but none longer than <paramref name="maxLength"/>: a longer one throws
+    /// <see cref="UpstreamLimitException"/> instead of being buffered without end.
+    /// </summary>
+    internal static async IAsyncEnumerable<string> ReadLinesAsync(
+        TextReader reader, int maxLength, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        char[] buffer = new char[8192];
+        var line = new System.Text.StringBuilder();
+        bool afterCarriageReturn = false;
+        int read;
+        while ((read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            int start = 0;
+            for (int i = 0; i < read; i++)
+            {
+                char c = buffer[i];
+                if (c == '\n' && afterCarriageReturn)
+                {
+                    // The second half of a "\r\n".
+                    afterCarriageReturn = false;
+                    start = i + 1;
+                    continue;
+                }
+
+                afterCarriageReturn = c == '\r';
+                if (c is '\r' or '\n')
+                {
+                    Append(line, buffer, start, i - start, maxLength);
+                    yield return line.ToString();
+                    line = line.Capacity > 64 * 1024 ? new System.Text.StringBuilder() : line.Clear();
+                    start = i + 1;
+                }
+            }
+
+            Append(line, buffer, start, read - start, maxLength);
+        }
+
+        if (line.Length > 0)
+        {
+            yield return line.ToString();
+        }
+    }
+
+    private static void Append(System.Text.StringBuilder line, char[] buffer, int start, int count, int maxLength)
+    {
+        if (line.Length + count > maxLength)
+        {
+            throw TooLong("a line");
+        }
+
+        line.Append(buffer, start, count);
+    }
+
+    private static UpstreamLimitException TooLong(string what) =>
+        new($"{what} of the reply is longer than {UpstreamLimits.MaxLineLength / (1024 * 1024)} Mi characters");
 }
 
 /// <summary>Relays an OpenAI chat-completions response (JSON or SSE) through a protocol writer.</summary>
@@ -52,7 +119,7 @@ internal static class OpenAIResponseReader
         {
             if (!sse)
             {
-                using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                using JsonDocument document = await JsonDocument.ParseAsync(UpstreamLimits.Limit(stream, UpstreamLimits.MaxReplyBytes), cancellationToken: cancellationToken).ConfigureAwait(false);
                 await RelayJsonAsync(document.RootElement, writer, cancellationToken).ConfigureAwait(false);
                 return;
             }
@@ -60,6 +127,8 @@ internal static class OpenAIResponseReader
             ChatStopReason stop = ChatStopReason.EndTurn;
             ChatUsage usage = default;
             int openToolIndex = -1;
+            string? openServerId = null; // the id the server gave the open call, if it gave one yet
+            string? stopSequence = null;
             await foreach (string data in ServerSentEvents.ReadAsync(stream, cancellationToken).ConfigureAwait(false))
             {
                 if (data == "[DONE]")
@@ -80,6 +149,11 @@ internal static class OpenAIResponseReader
                 using (document)
                 {
                     JsonElement root = document.RootElement;
+                    if (UpstreamReplyException.TryFind(root, ChatProtocol.OpenAI, out UpstreamReplyException? failed))
+                    {
+                        throw failed;
+                    }
+
                     if (root.TryGetObject("usage", out JsonElement usageElement))
                     {
                         usage = ReadUsage(usageElement);
@@ -109,7 +183,12 @@ internal static class OpenAIResponseReader
                             {
                                 int index = call.GetInt("index") ?? openToolIndex + 1;
                                 call.TryGetObject("function", out JsonElement function);
-                                if (index != openToolIndex)
+                                string? callId = call.GetString("id") is { Length: > 0 } given ? given : null;
+
+                                // Some servers send parallel calls all at index 0: an id other than the one the server
+                                // sent for the open call starts a new call too. An id that only arrives in a later delta
+                                // of a call that started without one belongs to that call.
+                                if (index != openToolIndex || (callId is not null && openServerId is not null && callId != openServerId))
                                 {
                                     if (openToolIndex >= 0)
                                     {
@@ -117,10 +196,12 @@ internal static class OpenAIResponseReader
                                     }
 
                                     openToolIndex = index;
-                                    await writer.StartToolCallAsync(
-                                        call.GetString("id") is { Length: > 0 } id ? id : JsonHelpers.NewToolUseId(),
-                                        function.GetString("name") ?? string.Empty,
-                                        cancellationToken).ConfigureAwait(false);
+                                    openServerId = callId;
+                                    await writer.StartToolCallAsync(callId ?? JsonHelpers.NewToolUseId(), function.GetString("name") ?? string.Empty, cancellationToken).ConfigureAwait(false);
+                                }
+                                else
+                                {
+                                    openServerId ??= callId;
                                 }
 
                                 if (function.GetString("arguments") is { Length: > 0 } arguments)
@@ -133,7 +214,7 @@ internal static class OpenAIResponseReader
 
                     if (choice.GetString("finish_reason") is { } finish)
                     {
-                        stop = MapFinishReason(finish);
+                        (stop, stopSequence) = MapFinishReason(finish, choice);
                     }
                 }
             }
@@ -143,13 +224,19 @@ internal static class OpenAIResponseReader
                 await writer.EndToolCallAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            await writer.CompleteAsync(stop, usage, cancellationToken).ConfigureAwait(false);
+            await writer.CompleteAsync(stop, usage, stopSequence, cancellationToken).ConfigureAwait(false);
         }
     }
 
     private static async Task RelayJsonAsync(JsonElement root, IChatResponseWriter writer, CancellationToken cancellationToken)
     {
+        if (UpstreamReplyException.TryFind(root, ChatProtocol.OpenAI, out UpstreamReplyException? failed))
+        {
+            throw failed;
+        }
+
         ChatStopReason stop = ChatStopReason.EndTurn;
+        string? stopSequence = null;
         if (root.TryGetArray("choices", out JsonElement choices) && choices.GetArrayLength() > 0)
         {
             JsonElement choice = choices[0];
@@ -190,20 +277,26 @@ internal static class OpenAIResponseReader
 
             if (choice.GetString("finish_reason") is { } finish)
             {
-                stop = MapFinishReason(finish);
+                (stop, stopSequence) = MapFinishReason(finish, choice);
             }
         }
 
         ChatUsage usage = root.TryGetObject("usage", out JsonElement usageElement) ? ReadUsage(usageElement) : default;
-        await writer.CompleteAsync(stop, usage, cancellationToken).ConfigureAwait(false);
+        await writer.CompleteAsync(stop, usage, stopSequence, cancellationToken).ConfigureAwait(false);
     }
 
-    private static ChatStopReason MapFinishReason(string finish) => finish switch
+    /// <summary>
+    /// The stop reason, and the stop sequence that ended the reply when the server says which: vLLM puts it in the
+    /// choice's <c>stop_reason</c>, SGLang in <c>matched_stop</c> (a token id there is not a sequence the client gave).
+    /// OpenAI does not say, so its replies end with <see cref="ChatStopReason.EndTurn"/>.
+    /// </summary>
+    private static (ChatStopReason Stop, string? Sequence) MapFinishReason(string finish, JsonElement choice) => finish switch
     {
-        "tool_calls" or "function_call" => ChatStopReason.ToolUse,
-        "length" => ChatStopReason.MaxTokens,
-        "content_filter" => ChatStopReason.Refusal,
-        _ => ChatStopReason.EndTurn,
+        "tool_calls" or "function_call" => (ChatStopReason.ToolUse, null),
+        "length" => (ChatStopReason.MaxTokens, null),
+        "content_filter" => (ChatStopReason.Refusal, null),
+        "stop" when (choice.GetString("stop_reason") ?? choice.GetString("matched_stop")) is { Length: > 0 } sequence => (ChatStopReason.StopSequence, sequence),
+        _ => (ChatStopReason.EndTurn, null),
     };
 
     private static ChatUsage ReadUsage(JsonElement usage)
@@ -230,7 +323,7 @@ internal static class AnthropicResponseReader
         {
             if (!sse)
             {
-                using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                using JsonDocument document = await JsonDocument.ParseAsync(UpstreamLimits.Limit(stream, UpstreamLimits.MaxReplyBytes), cancellationToken: cancellationToken).ConfigureAwait(false);
                 await RelayJsonAsync(document.RootElement, writer, cancellationToken).ConfigureAwait(false);
                 return;
             }
@@ -318,9 +411,9 @@ internal static class AnthropicResponseReader
 
                             break;
 
-                        case "error":
-                            // Mid-stream upstream error: end the reply cleanly with what was received.
-                            break;
+                        case "error" when UpstreamReplyException.TryFind(root, ChatProtocol.Anthropic, out UpstreamReplyException? failed):
+                            // An upstream error (overloaded, rate limited) is not a finished reply, however much came before it.
+                            throw failed;
                     }
                 }
             }
@@ -337,6 +430,11 @@ internal static class AnthropicResponseReader
 
     private static async Task RelayJsonAsync(JsonElement root, IChatResponseWriter writer, CancellationToken cancellationToken)
     {
+        if (UpstreamReplyException.TryFind(root, ChatProtocol.Anthropic, out UpstreamReplyException? failed))
+        {
+            throw failed;
+        }
+
         if (root.TryGetArray("content", out JsonElement content))
         {
             foreach (JsonElement block in content.EnumerateArray())
@@ -390,51 +488,327 @@ internal static class AnthropicResponseReader
 
 /// <summary>
 /// Watches a response that is being passed through untouched and records the tool-call ids it contains, so a
-/// follow-up request carrying their results can be pinned to the same model.
+/// follow-up request carrying their results can be pinned to the same model. A reply that reports an error instead of
+/// an answer throws <see cref="UpstreamReplyException"/>: before anything is sent when the error comes first (a JSON
+/// reply, or a stream's first event), so the next model can answer; otherwise once the stream, the backend's own error
+/// event included, has reached the client.
 /// </summary>
+/// <remarks>
+/// The bytes reach the client unchanged, and what is held or looked at is bounded. A JSON reply is held until it is
+/// complete, so that an error in place of the answer can still go to the next model, unless it is longer than
+/// <see cref="UpstreamLimits.MaxReplyBytes"/>: then it streams on as it arrives and is not scanned. An event stream is
+/// relayed line by line, each line with the line break it came with; a line longer than
+/// <see cref="UpstreamLimits.MaxLineLength"/> is relayed as it arrives and not scanned. A reply too large to scan still
+/// reaches the client whole; only its tool-call ids and usage are not recorded (usage is then estimated).
+/// </remarks>
 internal static class PassThroughToolCallScanner
 {
-    public static async Task CopyAsync(
-        Stream upstream, Stream downstream, bool sse, ChatProtocol protocol, Action<string> onToolCall, CancellationToken cancellationToken, Action<ChatUsage>? onUsage = null)
+    private const int ChunkSize = 16 * 1024;
+
+    /// <summary>The most of an event stream that is held back before its first data line: 64 KiB.</summary>
+    internal const int HoldLimit = 64 * 1024;
+
+    /// <summary>How long the start of an event stream is held back at most: 5 seconds, longer than an error takes to come.</summary>
+    internal static readonly TimeSpan HoldTime = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Copies the reply, reporting tool-call ids and usage. With <c>stripUsageChunk</c> (the router asked for usage the
+    /// client did not, with <c>stream_options.include_usage</c>), the usage-only final chunk is read but not relayed.
+    /// </summary>
+    public static Task CopyAsync(
+        Stream upstream, Stream downstream, bool sse, ChatProtocol protocol, Action<string> onToolCall, CancellationToken cancellationToken,
+        Action<ChatUsage>? onUsage = null, bool stripUsageChunk = false) =>
+        CopyAsync(upstream, downstream, sse, protocol, onToolCall, onUsage, stripUsageChunk, TimeProvider.System, cancellationToken);
+
+    /// <summary>As above, with the clock that times how long the start of an event stream is held back.</summary>
+    internal static async Task CopyAsync(
+        Stream upstream, Stream downstream, bool sse, ChatProtocol protocol, Action<string> onToolCall, Action<ChatUsage>? onUsage,
+        bool stripUsageChunk, TimeProvider time, CancellationToken cancellationToken)
     {
+        byte[] chunk = new byte[ChunkSize];
+        int read;
         if (!sse)
         {
-            using var buffer = new MemoryStream();
-            await upstream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
-            buffer.Position = 0;
-            await buffer.CopyToAsync(downstream, cancellationToken).ConfigureAwait(false);
-            ScanJson(buffer.GetBuffer().AsMemory(0, (int)buffer.Length), protocol, onToolCall, onUsage);
+            using var body = new MemoryStream();
+            while ((read = await upstream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                if (body.Length + read > UpstreamLimits.MaxReplyBytes)
+                {
+                    // Too large to hold, and far larger than an error reply: what is held goes first, the rest as it arrives.
+                    await downstream.WriteAsync(body.GetBuffer().AsMemory(0, (int)body.Length), cancellationToken).ConfigureAwait(false);
+                    await downstream.WriteAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    await upstream.CopyToAsync(downstream, cancellationToken).ConfigureAwait(false);
+                    await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                body.Write(chunk, 0, read);
+            }
+
+            if (ScanJson(body.GetBuffer().AsMemory(0, (int)body.Length), protocol, onToolCall, onUsage) is { } error)
+            {
+                throw error; // nothing has reached the client yet
+            }
+
+            await downstream.WriteAsync(body.GetBuffer().AsMemory(0, (int)body.Length), cancellationToken).ConfigureAwait(false);
+            await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        // Line-oriented copy: forward every line as soon as it arrives, inspecting the data lines on the way past.
-        using var reader = new StreamReader(upstream);
-        while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
+        var relay = new EventStreamRelay(downstream, protocol, onToolCall, onUsage, stripUsageChunk, time);
+        while ((read = await upstream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
         {
-            await downstream.WriteAsync(System.Text.Encoding.UTF8.GetBytes(line + "\n"), cancellationToken).ConfigureAwait(false);
-            if (line.Length == 0)
+            await relay.FeedAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+        }
+
+        await relay.EndAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Splits an event stream into lines (ended by <c>\n</c>, <c>\r</c> or <c>\r\n</c>), relays each with the bytes it
+    /// came with and scans its data lines. What comes before the first data line (an <c>event:</c> line, comments) is held
+    /// back until that line shows the reply is not an error, but no more than <see cref="HoldLimit"/> bytes of it and no
+    /// longer than <see cref="HoldTime"/>: keep-alive comments a backend sends while a model thinks still reach the client,
+    /// so a client that waits for a first byte does not give up.
+    /// </summary>
+    private sealed class EventStreamRelay(
+        Stream downstream, ChatProtocol protocol, Action<string> onToolCall, Action<ChatUsage>? onUsage, bool stripUsageChunk, TimeProvider time)
+    {
+        // The line being read, its line break included once that has arrived.
+        private ArrayBufferWriter<byte> _line = new();
+
+        // The line ended in "\r" at the end of a chunk, so the "\n" of a "\r\n" may start the next one.
+        private bool _afterCarriageReturn;
+
+        // The line is longer than UpstreamLimits.MaxLineLength: it is relayed as it arrives and not scanned.
+        private bool _tooLong;
+
+        private List<byte[]>? _held = [];
+        private long _heldBytes;
+        private long _heldSince;
+        private UpstreamReplyException? _failed;
+        private bool _skipBlank;
+
+        public async Task FeedAsync(ReadOnlyMemory<byte> data, CancellationToken cancellationToken)
+        {
+            if (_afterCarriageReturn)
             {
-                await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
-                continue;
+                _afterCarriageReturn = false;
+                if (data.Span[0] == (byte)'\n')
+                {
+                    await AddAsync(data[..1], cancellationToken).ConfigureAwait(false);
+                    data = data[1..];
+                }
+
+                await EndLineAsync(cancellationToken).ConfigureAwait(false);
             }
 
-            if (line.StartsWith("data:", StringComparison.Ordinal)
-                && (line.Contains("\"id\"", StringComparison.Ordinal) || line.Contains("\"call_id\"", StringComparison.Ordinal)
-                    || (onUsage is not null && line.Contains("\"usage\"", StringComparison.Ordinal))))
+            while (!data.IsEmpty)
             {
-                ScanJson(System.Text.Encoding.UTF8.GetBytes(line.AsSpan(5).TrimStart().ToString()), protocol, onToolCall, onUsage);
+                int end = data.Span.IndexOfAny((byte)'\r', (byte)'\n');
+                if (end < 0)
+                {
+                    await AddAsync(data, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+
+                int length = end + 1;
+                if (data.Span[end] == (byte)'\r')
+                {
+                    if (length == data.Length)
+                    {
+                        await AddAsync(data, cancellationToken).ConfigureAwait(false);
+                        _afterCarriageReturn = true;
+                        return;
+                    }
+
+                    if (data.Span[length] == (byte)'\n')
+                    {
+                        length++;
+                    }
+                }
+
+                await AddAsync(data[..length], cancellationToken).ConfigureAwait(false);
+                await EndLineAsync(cancellationToken).ConfigureAwait(false);
+                data = data[length..];
             }
         }
 
-        await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
+        /// <summary>Relays the last line and what is still held, and reports an error the stream carried after it started.</summary>
+        public async Task EndAsync(CancellationToken cancellationToken)
+        {
+            _afterCarriageReturn = false;
+            if (_line.WrittenCount > 0 || _tooLong)
+            {
+                await EndLineAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await WriteHeldAsync(cancellationToken).ConfigureAwait(false);
+            await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            if (_failed is not null)
+            {
+                // The client has the backend's own error event; the reply still did not finish.
+                throw new UpstreamReplyException(_failed.Failure, clientNotified: true);
+            }
+        }
+
+        private async Task AddAsync(ReadOnlyMemory<byte> part, CancellationToken cancellationToken)
+        {
+            if (!_tooLong && _line.WrittenCount + part.Length > UpstreamLimits.MaxLineLength)
+            {
+                // Too long to hold: what was held, and the line so far, go to the client now.
+                _tooLong = true;
+                _skipBlank = false;
+                await WriteHeldAsync(cancellationToken).ConfigureAwait(false);
+                await downstream.WriteAsync(_line.WrittenMemory, cancellationToken).ConfigureAwait(false);
+                Reset();
+            }
+
+            if (_tooLong)
+            {
+                await downstream.WriteAsync(part, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            _line.Write(part.Span);
+        }
+
+        private async Task EndLineAsync(CancellationToken cancellationToken)
+        {
+            if (_tooLong)
+            {
+                _tooLong = false;
+                await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                return;
+            }
+
+            ReadOnlyMemory<byte> raw = _line.WrittenMemory;
+            ReadOnlyMemory<byte> text = raw.TrimEnd("\r\n"u8);
+            try
+            {
+                if (_skipBlank && text.IsEmpty)
+                {
+                    _skipBlank = false; // the end of the event that was not relayed
+                    return;
+                }
+
+                _skipBlank = false;
+                if (stripUsageChunk && IsUsageOnlyChunk(System.Text.Encoding.UTF8.GetString(text.Span)))
+                {
+                    _ = ScanJson(text[5..], protocol, onToolCall, onUsage);
+                    _skipBlank = true;
+                    return;
+                }
+
+                ReadOnlySpan<byte> line = text.Span;
+                bool data = line.StartsWith("data:"u8);
+                UpstreamReplyException? error = data
+                    && (line.IndexOf("\"id\""u8) >= 0 || line.IndexOf("\"call_id\""u8) >= 0 || line.IndexOf("\"error\""u8) >= 0
+                        || (onUsage is not null && line.IndexOf("\"usage\""u8) >= 0))
+                    ? ScanJson(text[5..], protocol, onToolCall, onUsage) // JSON allows the whitespace that may follow "data:"
+                    : null;
+                if (_held is not null)
+                {
+                    if (error is not null)
+                    {
+                        throw error; // nothing has reached the client yet
+                    }
+
+                    if (_held.Count == 0)
+                    {
+                        _heldSince = time.GetTimestamp();
+                    }
+
+                    _held.Add(raw.ToArray());
+                    _heldBytes += raw.Length;
+                    if (data || _heldBytes > HoldLimit || time.GetElapsedTime(_heldSince) >= HoldTime)
+                    {
+                        await WriteHeldAsync(cancellationToken).ConfigureAwait(false);
+                        await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    }
+
+                    return;
+                }
+
+                _failed ??= error;
+                await downstream.WriteAsync(raw, cancellationToken).ConfigureAwait(false);
+                if (text.IsEmpty)
+                {
+                    await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                Reset();
+            }
+        }
+
+        private async Task WriteHeldAsync(CancellationToken cancellationToken)
+        {
+            if (_held is null)
+            {
+                return;
+            }
+
+            foreach (byte[] line in _held)
+            {
+                await downstream.WriteAsync(line, cancellationToken).ConfigureAwait(false);
+            }
+
+            _held = null;
+        }
+
+        private void Reset()
+        {
+            if (_line.Capacity > 64 * 1024)
+            {
+                _line = new ArrayBufferWriter<byte>();
+            }
+            else
+            {
+                _line.ResetWrittenCount();
+            }
+        }
     }
 
-    private static void ScanJson(ReadOnlyMemory<byte> json, ChatProtocol protocol, Action<string> onToolCall, Action<ChatUsage>? onUsage)
+    /// <summary>
+    /// Whether an SSE line is the chunk <c>stream_options.include_usage</c> adds at the end of a chat-completions stream:
+    /// no choices, and the usage.
+    /// </summary>
+    internal static bool IsUsageOnlyChunk(string line)
+    {
+        if (!line.StartsWith("data:", StringComparison.Ordinal)
+            || !(line.Contains("\"choices\":[]", StringComparison.Ordinal) || line.Contains("\"choices\": []", StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(line.AsSpan(5).TrimStart().ToString());
+            JsonElement root = document.RootElement;
+            return root.ValueKind == JsonValueKind.Object
+                   && root.TryGetArray("choices", out JsonElement choices) && choices.GetArrayLength() == 0
+                   && root.TryGetObject("usage", out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Reports the tool calls and usage in one reply or event, and returns the error it reports instead of an answer, if any.</summary>
+    private static UpstreamReplyException? ScanJson(ReadOnlyMemory<byte> json, ChatProtocol protocol, Action<string> onToolCall, Action<ChatUsage>? onUsage)
     {
         try
         {
             using JsonDocument document = JsonDocument.Parse(json);
             JsonElement root = document.RootElement;
+            if (UpstreamReplyException.TryFind(root, protocol, out UpstreamReplyException? error))
+            {
+                return error;
+            }
+
             if (onUsage is not null && root.ValueKind == JsonValueKind.Object && UsageCapture.Find(root, protocol) is { } usage)
             {
                 onUsage(usage);
@@ -494,6 +868,8 @@ internal static class PassThroughToolCallScanner
         {
             // Not JSON (e.g. "[DONE]"): nothing to record.
         }
+
+        return null;
     }
 }
 
@@ -511,7 +887,7 @@ internal static class ResponsesResponseReader
         {
             if (!sse)
             {
-                using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+                using JsonDocument document = await JsonDocument.ParseAsync(UpstreamLimits.Limit(stream, UpstreamLimits.MaxReplyBytes), cancellationToken: cancellationToken).ConfigureAwait(false);
                 await RelayJsonAsync(document.RootElement, writer, cancellationToken).ConfigureAwait(false);
                 return;
             }
@@ -536,10 +912,17 @@ internal static class ResponsesResponseReader
                     }
 
                     JsonElement root = document.RootElement;
+                    if (UpstreamReplyException.TryFind(root, ChatProtocol.Responses, out UpstreamReplyException? failed))
+                    {
+                        document.Dispose();
+                        throw failed;
+                    }
+
                     bool keep = false;
                     switch (root.GetString("type"))
                     {
-                        case "response.output_text.delta" when root.GetString("delta") is { Length: > 0 } text:
+                        // A refusal is the reply's text, as in a JSON reply.
+                        case "response.output_text.delta" or "response.refusal.delta" when root.GetString("delta") is { Length: > 0 } text:
                             await writer.WriteTextAsync(text, cancellationToken).ConfigureAwait(false);
                             break;
 
@@ -587,7 +970,7 @@ internal static class ResponsesResponseReader
                             openCall = null;
                             break;
 
-                        case "response.completed" or "response.incomplete" or "response.failed" when root.TryGetObject("response", out JsonElement finished):
+                        case "response.completed" or "response.incomplete" when root.TryGetObject("response", out JsonElement finished):
                             finalDocument?.Dispose();
                             finalDocument = document;
                             final = finished;
@@ -632,6 +1015,11 @@ internal static class ResponsesResponseReader
 
     private static async Task RelayJsonAsync(JsonElement root, IChatResponseWriter writer, CancellationToken cancellationToken)
     {
+        if (UpstreamReplyException.TryFind(root, ChatProtocol.Responses, out UpstreamReplyException? failed))
+        {
+            throw failed;
+        }
+
         if (root.TryGetArray("output", out JsonElement output))
         {
             foreach (JsonElement item in output.EnumerateArray())
@@ -678,19 +1066,23 @@ internal static class ResponsesResponseReader
 
     private static ChatStopReason StopReasonOf(JsonElement response)
     {
-        if (response.TryGetArray("output", out JsonElement output)
-            && output.EnumerateArray().Any(i => i.GetString("type") is "function_call" or "custom_tool_call"))
-        {
-            return ChatStopReason.ToolUse;
-        }
-
-        return response.TryGetObject("incomplete_details", out JsonElement incomplete)
-            ? incomplete.GetString("reason") switch
+        // A reply cut off at the limit says so even with a tool call: its arguments may be incomplete.
+        ChatStopReason incomplete = response.TryGetObject("incomplete_details", out JsonElement details)
+            ? details.GetString("reason") switch
             {
                 "max_output_tokens" => ChatStopReason.MaxTokens,
                 "content_filter" => ChatStopReason.Refusal,
                 _ => ChatStopReason.EndTurn,
             }
             : ChatStopReason.EndTurn;
+        if (incomplete == ChatStopReason.MaxTokens)
+        {
+            return incomplete;
+        }
+
+        return response.TryGetArray("output", out JsonElement output)
+               && output.EnumerateArray().Any(i => i.GetString("type") is "function_call" or "custom_tool_call")
+            ? ChatStopReason.ToolUse
+            : incomplete;
     }
 }

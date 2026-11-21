@@ -201,6 +201,11 @@ public sealed class RouterConfiguration : SemanticRouterOptions
                 errors.Add($"Connector '{name}' CacheTtl must be 5m or 1h.");
             }
 
+            if (connector.MaxTokensParameter is { Length: > 0 } maxTokensParameter && !ConnectorOptions.MaxTokensParameters.Contains(maxTokensParameter, StringComparer.Ordinal))
+            {
+                errors.Add($"Connector '{name}' MaxTokensParameter must be max_tokens or max_completion_tokens (or left out).");
+            }
+
             if (!Enum.IsDefined(connector.PromptedToolParsing))
             {
                 errors.Add($"Connector '{name}' PromptedToolParsing must be Lenient or Strict.");
@@ -970,7 +975,7 @@ public sealed class JsonFileRouterConfigurationStore : IRouterConfigurationStore
                 return null;
             }
 
-            string json = File.ReadAllText(_path);
+            string json = AtomicFile.ReadAllText(_path);
             return string.IsNullOrWhiteSpace(json) ? null : RouterConfiguration.FromJson(json);
         }
     }
@@ -981,11 +986,9 @@ public sealed class JsonFileRouterConfigurationStore : IRouterConfigurationStore
         ArgumentNullException.ThrowIfNull(configuration);
         lock (_gate)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            string temp = _path + ".tmp";
-            File.WriteAllText(temp, configuration.ToJson());
-            OwnerOnly.Restrict(temp);
-            File.Move(temp, _path, overwrite: true);
+            // A temporary file of its own, flushed and renamed over the file: the desktop app, the service and init may
+            // save at once, and a crash never leaves half a configuration.
+            AtomicFile.WriteAllText(_path, configuration.ToJson());
         }
     }
 }

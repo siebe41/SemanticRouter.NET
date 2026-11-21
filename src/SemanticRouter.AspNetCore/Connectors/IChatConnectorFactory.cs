@@ -14,6 +14,9 @@ namespace SemanticRouter.AspNetCore;
 /// unless <see cref="ConnectorOptions.AllowRemoteClients"/> is set the router does not send it requests from other
 /// machines, so the connector need not check that itself. Limits on concurrent runs and the queue
 /// (<see cref="ConnectorOptions.MaxConcurrency"/>, <see cref="ConnectorOptions.MaxQueue"/>) are the connector's to apply.
+/// A connector that implements <see cref="IDisposable"/> is disposed as soon as another configuration replaces the one
+/// that created it, while requests that started on it may still be running or waiting for it: it must stay usable for
+/// them (for example, by not disposing a <see cref="SemaphoreSlim"/> that limits concurrency).
 /// </remarks>
 public interface IChatConnectorFactory
 {
@@ -35,6 +38,17 @@ public interface IChatConnectorFactory
 
     /// <summary>Creates the connector called <paramref name="name"/> with <paramref name="options"/>.</summary>
     IChatConnector Create(string name, ConnectorOptions options);
+}
+
+/// <summary>
+/// An <see cref="IChatConnectorFactory"/> of one of this repository's packages whose connectors start a process: it is
+/// given the router's secrets as well, to keep them out of that process's environment as <see cref="CliEnvironment"/>
+/// does for the CLI connectors. The router calls this instead of <see cref="IChatConnectorFactory.Create"/>.
+/// </summary>
+internal interface ISecretAwareConnectorFactory
+{
+    /// <summary>Creates the connector called <paramref name="name"/>; <paramref name="secrets"/> holds the resolved secret values of the configuration being applied.</summary>
+    IChatConnector Create(string name, ConnectorOptions options, SecretRedactor secrets);
 }
 
 /// <summary>

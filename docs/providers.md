@@ -240,10 +240,11 @@ Uses your Copilot plan through GitHub's official [Copilot SDK](https://github.co
 ```
 
 - **Package.** `SemanticRouter.Connectors.Copilot` (`.AddCopilotConnector()`), so the core libraries keep their dependencies. The `semantic-router` tool includes it. Without the package, a `Copilot` connector skips every request and says why.
-- **Runtime.** `Executable` is the `copilot` CLI (default: `copilot` on `PATH`). `HomeDirectory` is its `COPILOT_HOME` (default `~/.copilot`, so the CLI's login is reused). One runtime process serves every request and starts on first use. Applying a new configuration keeps it.
+- **Runtime.** `Executable` is the `copilot` CLI (default: `copilot` on `PATH`). `HomeDirectory` is its `COPILOT_HOME` (default `~/.copilot`, so the CLI's login is reused). One runtime process serves every request and starts on first use. Applying a new configuration keeps it, unless the runtime's environment changes: then a new runtime starts, and the old one stops once the requests already running on it are done. If the runtime dies or stops answering, the next request starts a new one.
+- **Environment.** The runtime gets the router's environment without what belongs to the router, as a [CLI connector](#claude-code-cli) does: no `SemanticRouter__…` or `ROUTER_…` variables, no provider keys the setup reads (`OPENAI_API_KEY`, …), and no variable that holds a key or other secret the router resolved. `PATH`, `HOME`, proxy and certificate variables pass, and so do Copilot's own sign-in variables (`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN`), even when a router setting reads the same token. `RemoveEnvironmentVariables` removes more, and `EnvironmentVariables` sets variables for the runtime (both in the configuration file, as for a CLI).
 - **What Copilot is allowed to do.** The SDK runs in its `Empty` mode, so none of Copilot's own tools exist (no shell, file edits or web access). Only the client's tools are declared, without handlers. When the model calls one, the call goes back to the client, which runs it and sends the result with its next request.
 - **History.** The SDK cannot be given earlier assistant turns. Each request runs in a fresh session with the conversation rendered as a transcript, the same way the CLI connectors do it. The session is deleted when the turn ends.
-- **Failures.** Quota and rate limits (`session.error` of type `quota` or `rate_limit`, HTTP 402/429) cool the model down. The runtime's retry-after time is honoured. An exhausted premium-request allowance cools only that model, because Copilot's included models keep working. Weekly and global rate limits cool every model on the connector. A missing sign-in fails over with a hint. The SDK's automatic model switching is declined, so the router's own failover decides.
+- **Failures.** Quota and rate limits (`session.error` of type `quota` or `rate_limit`, HTTP 402/429) cool the model down. The runtime's retry-after time is honoured. An exhausted premium-request allowance cools only that model, because Copilot's included models keep working. Weekly and global rate limits cool every model on the connector. A missing sign-in fails over with a hint. The SDK's automatic model switching is declined, so the router's own failover decides. A runtime that sends nothing for `StallTimeout` once the reply has started is given up on, like a CLI that goes quiet: the client gets an error and the model cools down.
 - **Not carried.** Images, and features the [translation table](#what-survives-translation) lists for CLIs. Reasoning is streamed when the client asks for it.
 - The CLI preset above keeps working and remains the fallback (for example on a machine where only the native `copilot` binary is installed and the SDK's protocol does not match its version).
 
@@ -484,7 +485,7 @@ Both models get the same instructions; only the reading of the reply differs. Th
 
 ## What survives translation
 
-When a backend speaks the client's protocol, the body passes through untouched (only `model` is rewritten). Otherwise the request is translated, and anything the backend cannot carry is listed in the `X-Prompt-Route-Dropped` response header and the activity entry's `dropped` field.
+When a backend speaks the client's protocol, the body passes through untouched (only `model` is rewritten, and a streamed chat-completions request asks for usage with `stream_options.include_usage`, so budgets see it; a backend that answers 400 or 422 to that field gets the request again without it, and the connector stops adding it). Otherwise the request is translated, and anything the backend cannot carry is listed in the `X-Prompt-Route-Dropped` response header and the activity entry's `dropped` field.
 
 | Feature | OpenAI-compatible backend | Anthropic backend | Responses backend | CLI backend |
 |---|---|---|---|---|
@@ -492,22 +493,29 @@ When a backend speaks the client's protocol, the body passes through untouched (
 | Tools and tool results | ✓ | ✓ | ✓ | with `ToolCalling: Prompted` |
 | Codex custom tools and namespaces | as functions | as tools | ✓ | with `ToolCalling: Prompted` |
 | Reasoning request (`reasoning_effort`, `thinking`, `reasoning.effort`) | `reasoning_effort` on models with `reasoning` | `thinking` with a budget on models with `reasoning` | `reasoning.effort` on models with `reasoning` | dropped |
+| Output limit (`max_tokens`, `max_completion_tokens`, `max_output_tokens`) | `max_tokens`; `max_completion_tokens` for a model with `reasoning` on a server that is not local ([`MaxTokensParameter`](#output-limits-on-openai-reasoning-models)) | `max_tokens` (8,192 when the client set none) | `max_output_tokens` | not sent |
 | Reasoning in the reply | read from `reasoning_content` | `thinking` blocks | reasoning summaries | n/a |
 | Structured output (`response_format`, `text.format`) | ✓ | a forced `structured_output` tool for a JSON schema; an instruction for JSON mode | ✓ | dropped |
 | `parallel_tool_calls: false` | ✓ | `disable_parallel_tool_use` | ✓ | dropped |
-| Stop reasons (length, refusal, tool use) | ✓ | ✓ (`refusal`, `pause_turn`) | ✓ (`incomplete`) | end of turn, or tool use with prompted tools |
+| Stop reasons (length, refusal, tool use, stop sequence) | ✓ (the stop sequence when the server names it: vLLM's `stop_reason`, SGLang's `matched_stop`) | ✓ (`refusal`, `pause_turn`) | ✓ (`incomplete`) | end of turn, or tool use with prompted tools |
 | Hosted tools (`web_search`, …) | dropped | dropped | ✓ | dropped |
 | Prompt caching | automatic | markers added above the model's minimum ([`PromptCaching`](#prompt-caching-on-translated-requests)) | automatic | n/a |
 | `cache_control` markers from an Anthropic client | dropped (the backend caches on its own) | ✓ | dropped (the backend caches on its own) | dropped |
 | `prompt_cache_key` | ✓ | not needed (the router adds cache markers) | ✓ | not needed |
 | Cached-token counts in the reply | `prompt_tokens_details.cached_tokens` | `cache_read_input_tokens`, `cache_creation_input_tokens` (also on a streamed `message_delta`) | `input_tokens_details.cached_tokens` | read from the CLI's usage (claude, codex) |
-| Protocol-only features (documents, `logprobs`, `n` > 1, audio, `previous_response_id`, reasoning items) | dropped | dropped | dropped | dropped |
+| Protocol-only features (documents, `logprobs`, `n` > 1, audio, `previous_response_id`, reasoning items, images inside tool results) | dropped | dropped | dropped | dropped |
 
 Notes:
 
 - **Reasoning across protocols.** Reasoning a backend returns is shown to the client in its own format. An Anthropic client gets a `thinking` block signed `semantic-router-relayed`. Anthropic's API would reject that signature, so the router removes such blocks before a native Anthropic backend sees the conversation. Real Anthropic thinking blocks pass through.
 - **Thinking and a schema don't mix.** Anthropic cannot think while a tool is forced, so a JSON-schema request to an Anthropic backend drops the reasoning request. Thinking also needs `max_tokens` above 1,024. While thinking is on, `temperature` and `top_p` are not sent.
 - **Declare `reasoning` only on models that accept it.** Servers that don't know `reasoning_effort` may reject the request.
+- **Empty turns are left out for Anthropic.** A turn with nothing the Messages API takes (an empty assistant message after a cancelled turn, say) is not sent, as the API rejects `"content": []`; the turns around it merge when they then share a role.
+- **A reply cut off during a tool call says so.** When the backend stopped at the output limit, the client gets `length` (`max_tokens`, `incomplete`) rather than a tool-use stop, so it does not run a call whose arguments may be cut short.
+
+### Output limits on OpenAI reasoning models
+
+OpenAI's reasoning models (the o-series and GPT-5) reject `max_tokens` and take the limit as `max_completion_tokens`, while most local servers read only `max_tokens`. A request the router translates for an OpenAI-compatible connector (from Claude Code, say, which always sets `max_tokens`) therefore carries the limit as `max_completion_tokens` when the model declares the `reasoning` capability and the connector's server is not on this machine or the local network, and as `max_tokens` otherwise. Set the connector's `MaxTokensParameter` to `max_tokens` or `max_completion_tokens` to choose one for all its models: `max_completion_tokens` for an OpenAI reasoning model that does not declare `reasoning`, or `max_tokens` for a hosted server that does not know the newer name. Requests from OpenAI clients pass through with the name the client chose. The [judge](routing-quality.md#the-judge)'s grading request follows the same rule, and leaves out `temperature` for a model with `reasoning`, since reasoning models accept only the default.
 
 ## Writing your own connector
 

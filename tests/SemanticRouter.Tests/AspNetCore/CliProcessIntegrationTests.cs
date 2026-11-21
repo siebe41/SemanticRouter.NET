@@ -72,7 +72,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
             ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);
             options.RemoveEnvironmentVariables = ["SR_TEST_SECRET"];
             options.EnvironmentVariables["SR_TEST_SET"] = "yes";
-            using var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
+            var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
 
             (ConnectorResult result, string body) = await SendAsync(connector, "hello there");
 
@@ -102,7 +102,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
         {
             ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);
             options.EnvironmentVariables["SR_TEST_SET"] = "yes";
-            using var connector = new CliChatConnector(
+            var connector = new CliChatConnector(
                 "claude", options, new SystemCliProcessRunner(), NullLogger.Instance, redactor: new SecretRedactor(["sk-resolved-key-0123456789"]));
 
             (ConnectorResult result, string body) = await SendAsync(connector, "hello there");
@@ -139,7 +139,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
     {
         ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);
         options.PromptInput = CliPromptInput.Argument;
-        using var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
+        var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
 
         (_, string body) = await SendAsync(connector, "hello there");
 
@@ -154,7 +154,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
         ConnectorOptions options = Options("claude-echo", CliPreset.ClaudeCode);
         options.PromptInput = CliPromptInput.Argument;
         options.MaxArgumentLength = 50;
-        using var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
+        var connector = new CliChatConnector("claude", options, new SystemCliProcessRunner(), NullLogger.Instance);
         string prompt = string.Concat(Enumerable.Repeat("Grüße, 世界 — ", 400));
 
         (ConnectorResult result, string body) = await SendAsync(connector, prompt, system: "Be terse: \"quoted\" & spaced.");
@@ -173,7 +173,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
         ConnectorOptions options = Options("args-json");
         options.PromptInput = CliPromptInput.Argument;
         options.Arguments = ["--flag", string.Empty, "{prompt}"];
-        using var connector = new CliChatConnector("custom", options, new SystemCliProcessRunner(), NullLogger.Instance);
+        var connector = new CliChatConnector("custom", options, new SystemCliProcessRunner(), NullLogger.Instance);
 
         (ConnectorResult result, string body) = await SendAsync(connector, prompt);
 
@@ -185,7 +185,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
     [Fact]
     public async Task Custom_cli_quota_message_and_exit_code_are_classified()
     {
-        using var connector = new CliChatConnector("custom", Options("quota"), new SystemCliProcessRunner(), NullLogger.Instance);
+        var connector = new CliChatConnector("custom", Options("quota"), new SystemCliProcessRunner(), NullLogger.Instance);
 
         (ConnectorResult result, string body) = await SendAsync(connector, "hi");
 
@@ -195,9 +195,33 @@ public sealed class CliProcessIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task Standard_error_is_kept_to_its_start_and_end_however_much_a_cli_writes()
+    {
+        var invocation = new CliInvocation
+        {
+            Executable = FakeCli,
+            Arguments = [],
+            WorkingDirectory = _scratch,
+            SetEnvironment = new Dictionary<string, string> { ["FAKE_CLI_MODE"] = "noisy-quota" },
+        };
+        await using ICliProcess process = new SystemCliProcessRunner().Start(invocation);
+
+        (await process.WaitForExitAsync(CancellationToken.None)).Should().Be(3);
+
+        string stderr = process.StandardError;
+        stderr.Length.Should().BeLessThan(BoundedText.StandardErrorLimit + 100, "4 MB of standard error are not all kept");
+        stderr.Should().StartWith("xxxx").And.Contain("characters left out");
+        stderr.TrimEnd().Should().EndWith("Error: You have exceeded your daily quota", "the end, where a CLI says why it stopped, is kept");
+
+        var connector = new CliChatConnector("custom", Options("noisy-quota"), new SystemCliProcessRunner(), NullLogger.Instance);
+        (ConnectorResult result, _) = await SendAsync(connector, "hi");
+        result.FailureKind.Should().Be(ModelFailureKind.QuotaExceeded);
+    }
+
+    [Fact]
     public async Task Custom_cli_text_output_is_the_reply()
     {
-        using var connector = new CliChatConnector("custom", Options("cat"), new SystemCliProcessRunner(), NullLogger.Instance);
+        var connector = new CliChatConnector("custom", Options("cat"), new SystemCliProcessRunner(), NullLogger.Instance);
 
         (_, string body) = await SendAsync(connector, "echo me, ça va?");
 
@@ -211,7 +235,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
         ConnectorOptions options = Options("slow");
         options.EnvironmentVariables["FAKE_CLI_MARKER"] = marker;
         options.Timeout = TimeSpan.FromMilliseconds(300);
-        using var connector = new CliChatConnector("slow", options, new SystemCliProcessRunner(), NullLogger.Instance);
+        var connector = new CliChatConnector("slow", options, new SystemCliProcessRunner(), NullLogger.Instance);
 
         var stopwatch = Stopwatch.StartNew();
         (ConnectorResult result, _) = await SendAsync(connector, "hi");
@@ -226,7 +250,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
     public async Task Missing_executable_is_a_failure_that_names_the_setting()
     {
         ConnectorOptions options = Options("cat", CliPreset.Codex, Path.Combine(_scratch, "does-not-exist"));
-        using var connector = new CliChatConnector("codex", options, new SystemCliProcessRunner(), NullLogger.Instance);
+        var connector = new CliChatConnector("codex", options, new SystemCliProcessRunner(), NullLogger.Instance);
 
         (ConnectorResult result, _) = await SendAsync(connector, "hi");
 
@@ -239,7 +263,7 @@ public sealed class CliProcessIntegrationTests : IDisposable
     {
         string shim = Path.Combine(_scratch, "claude.cmd");
         await File.WriteAllTextAsync(shim, "@echo off\r\nnode claude.js %*\r\n");
-        using var connector = new CliChatConnector("claude-cli", Options("cat", CliPreset.ClaudeCode, shim), new SystemCliProcessRunner(), NullLogger.Instance);
+        var connector = new CliChatConnector("claude-cli", Options("cat", CliPreset.ClaudeCode, shim), new SystemCliProcessRunner(), NullLogger.Instance);
 
         (ConnectorResult result, string body) = await SendAsync(connector, "hi & del *");
 

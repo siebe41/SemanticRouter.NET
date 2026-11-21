@@ -226,6 +226,8 @@ public sealed class ModelTrialTests : RouterHostTest
             });
         }
 
+        Services.GetRequiredService<ModelCacheTracker>().RefreshNow(); // as the background refresh would within a minute
+
         JsonElement[] changes = [.. (await RunAsync(client)).GetProperty("changes").EnumerateArray()];
 
         if (cacheReads)

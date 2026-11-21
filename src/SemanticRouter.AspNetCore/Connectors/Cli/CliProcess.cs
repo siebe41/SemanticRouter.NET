@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
 
@@ -102,51 +103,38 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
             startInfo.ArgumentList.Add(argument);
         }
 
-        foreach (string name in invocation.RemoveEnvironment)
-        {
-            startInfo.Environment.Remove(name);
-        }
-
-        // The router's own settings and keys stay with it: what configures the router (SemanticRouter__…, ROUTER_…), the
-        // providers' keys the setup reads (OPENAI_API_KEY, …), and any variable holding a secret the router resolved.
-        // Variables the connector sets itself come back below.
-        HashSet<string> secrets = [.. invocation.SecretValues];
-        foreach ((string name, string? value) in startInfo.Environment.ToArray())
-        {
-            if (CliEnvironment.IsRouterVariable(name) || (value is not null && secrets.Contains(value)))
-            {
-                startInfo.Environment.Remove(name);
-            }
-        }
-
-        foreach ((string name, string value) in invocation.SetEnvironment)
-        {
-            startInfo.Environment[name] = value;
-        }
-
+        CliEnvironment.Apply(startInfo.Environment, invocation.RemoveEnvironment, invocation.SecretValues, invocation.SetEnvironment);
         return startInfo;
     }
 
     private sealed class SystemCliProcess : ICliProcess
     {
         private readonly Process _process;
-        private readonly StringBuilder _stderr = new();
+        private readonly BoundedText _stderr = new(BoundedText.StandardErrorLimit);
+        private readonly Task _stderrReader;
         private readonly Task _stdinWriter;
 
         public SystemCliProcess(Process process, string? standardInput)
         {
             _process = process;
-            _process.ErrorDataReceived += (_, e) =>
+
+            // Read in chunks, not lines, so a child that writes without line breaks cannot grow one line without end.
+            _stderrReader = Task.Run(async () =>
             {
-                if (e.Data is not null)
+                char[] buffer = new char[4096];
+                try
                 {
-                    lock (_stderr)
+                    int read;
+                    while ((read = await _process.StandardError.ReadAsync(buffer.AsMemory()).ConfigureAwait(false)) > 0)
                     {
-                        _stderr.AppendLine(e.Data);
+                        _stderr.Append(buffer.AsSpan(0, read));
                     }
                 }
-            };
-            _process.BeginErrorReadLine();
+                catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+                {
+                    // The process was killed and disposed: what was read so far is what there is.
+                }
+            });
 
             // Write on a background task so a child that produces output before reading its input cannot deadlock us.
             _stdinWriter = Task.Run(async () =>
@@ -175,16 +163,7 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
             });
         }
 
-        public string StandardError
-        {
-            get
-            {
-                lock (_stderr)
-                {
-                    return _stderr.ToString();
-                }
-            }
-        }
+        public string StandardError => _stderr.ToString();
 
         public async IAsyncEnumerable<string> ReadOutputLinesAsync([EnumeratorCancellation] CancellationToken cancellationToken)
         {
@@ -198,6 +177,7 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
         {
             await _process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             await _stdinWriter.ConfigureAwait(false);
+            await _stderrReader.WaitAsync(cancellationToken).ConfigureAwait(false);
             return _process.ExitCode;
         }
 
@@ -221,9 +201,128 @@ internal sealed class SystemCliProcessRunner : ICliProcessRunner
     }
 }
 
-/// <summary>The variables of the router's environment that a CLI child never inherits.</summary>
+/// <summary>
+/// Text that arrives in pieces (a child's standard error), kept to its first and last <c>limit / 2</c> characters with
+/// a note of how many were left out between them, so a child that writes without end cannot fill the router's memory.
+/// The start holds what a tool said first (a usage error), the end what it said last (the error it stopped on).
+/// Thread-safe.
+/// </summary>
+internal sealed class BoundedText(int limit)
+{
+    /// <summary>How much of a CLI's standard error is kept: 64 Ki characters, far more than a diagnostic needs.</summary>
+    public const int StandardErrorLimit = 64 * 1024;
+
+    private readonly int _half = limit / 2;
+    private readonly StringBuilder _head = new();
+    private readonly StringBuilder _tail = new();
+    private readonly Lock _gate = new();
+    private long _omitted;
+
+    public void Append(ReadOnlySpan<char> text)
+    {
+        lock (_gate)
+        {
+            int toHead = Math.Min(text.Length, _half - _head.Length);
+            if (toHead > 0)
+            {
+                _head.Append(text[..toHead]);
+                text = text[toHead..];
+            }
+
+            if (text.IsEmpty)
+            {
+                return;
+            }
+
+            if (text.Length >= _half)
+            {
+                _omitted += _tail.Length + text.Length - _half;
+                _tail.Clear().Append(text[^_half..]);
+                return;
+            }
+
+            _tail.Append(text);
+            if (_tail.Length > _half)
+            {
+                int excess = _tail.Length - _half;
+                _tail.Remove(0, excess);
+                _omitted += excess;
+            }
+        }
+    }
+
+    public override string ToString()
+    {
+        lock (_gate)
+        {
+            return _omitted == 0
+                ? string.Concat(_head.ToString(), _tail.ToString())
+                : string.Create(CultureInfo.InvariantCulture, $"{_head}\n[… {_omitted} characters left out …]\n{_tail}");
+        }
+    }
+}
+
+/// <summary>
+/// The variables of the router's environment that a child it starts (a CLI, or the Copilot SDK's runtime) never inherits,
+/// and the one place that builds such a child's environment.
+/// </summary>
 internal static class CliEnvironment
 {
+    /// <summary>
+    /// Turns <paramref name="environment"/>, a copy of the router's own, into the child's: removes the connector's
+    /// <paramref name="remove"/> list, then what belongs to the router (<see cref="IsRouterVariable"/>, and any variable
+    /// whose value is one of <paramref name="secretValues"/>), then sets the connector's <paramref name="set"/> variables,
+    /// which win. A name in <paramref name="keepSecretValued"/> survives the secret-value check (not the other two): a
+    /// variable that is how the child itself signs in stays the child's even when a router setting reads the same value.
+    /// </summary>
+    public static void Apply(
+        IDictionary<string, string?> environment,
+        IEnumerable<string> remove,
+        IEnumerable<string> secretValues,
+        IEnumerable<KeyValuePair<string, string>> set,
+        IReadOnlyCollection<string>? keepSecretValued = null)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        foreach (string name in remove)
+        {
+            environment.Remove(name);
+        }
+
+        // The router's own settings and keys stay with it: what configures the router (SemanticRouter__…, ROUTER_…), the
+        // providers' keys the setup reads (OPENAI_API_KEY, …), and any variable holding a secret the router resolved.
+        // Variables the connector sets itself come back below.
+        HashSet<string> secrets = [.. secretValues];
+        foreach ((string name, string? value) in environment.ToArray())
+        {
+            bool holdsSecret = value is not null && secrets.Contains(value)
+                               && keepSecretValued?.Contains(name, StringComparer.OrdinalIgnoreCase) != true;
+            if (IsRouterVariable(name) || holdsSecret)
+            {
+                environment.Remove(name);
+            }
+        }
+
+        foreach ((string name, string value) in set)
+        {
+            environment[name] = value;
+        }
+    }
+
+    /// <summary>
+    /// A copy of the router's environment, keyed as the operating system compares names (case-insensitively on Windows),
+    /// for <see cref="Apply"/>.
+    /// </summary>
+    public static Dictionary<string, string?> Inherited()
+    {
+        var environment = new Dictionary<string, string?>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        {
+            environment[(string)entry.Key] = (string?)entry.Value;
+        }
+
+        return environment;
+    }
+
     private static readonly string[] Prefixes = ["SemanticRouter__", "ROUTER_"];
 
     // The API keys the dashboard's provider presets read (SetupApi.Presets), plus ANTHROPIC_API_KEY that Claude Code

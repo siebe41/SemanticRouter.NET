@@ -109,9 +109,12 @@ internal sealed class UsageRecordingWriter(IChatResponseWriter inner, UsageCaptu
 
     public Task EndToolCallAsync(CancellationToken cancellationToken) => inner.EndToolCallAsync(cancellationToken);
 
-    public Task CompleteAsync(ChatStopReason stopReason, ChatUsage usage, CancellationToken cancellationToken)
+    public Task CompleteAsync(ChatStopReason stopReason, ChatUsage usage, CancellationToken cancellationToken) =>
+        CompleteAsync(stopReason, usage, null, cancellationToken);
+
+    public Task CompleteAsync(ChatStopReason stopReason, ChatUsage usage, string? stopSequence, CancellationToken cancellationToken)
     {
         capture.Observe(usage);
-        return inner.CompleteAsync(stopReason, usage, cancellationToken);
+        return inner.CompleteAsync(stopReason, usage, stopSequence, cancellationToken);
     }
 }

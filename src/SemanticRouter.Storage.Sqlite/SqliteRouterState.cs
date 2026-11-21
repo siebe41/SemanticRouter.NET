@@ -126,7 +126,7 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
             // Retention must not depend on traffic: a router that serves a few requests a day, or is restarted every
             // evening, still loses what is past it.
             Prune();
-            _pruning = Time.CreateTimer(_ => Prune(), null, PruneInterval, PruneInterval);
+            _pruning = Time.CreateTimer(_ => PruneOnTimer(), null, PruneInterval, PruneInterval);
         }
         catch (NewerSchemaException ex)
         {
@@ -263,6 +263,29 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         return deleted;
     });
 
+    /// <summary>
+    /// The timer's prune. An exception it does not expect is logged and the next prune tries again: an exception that
+    /// escaped a timer callback would end the process.
+    /// </summary>
+    private void PruneOnTimer()
+    {
+        try
+        {
+            Prune();
+        }
+        catch (Exception ex) when (Survivable(ex))
+        {
+            Warn("deleting state past its retention", ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Whether the background writer and the retention timer carry on after <paramref name="ex"/>: every exception but
+    /// running out of memory or stack. State storage never stops routing, and on those threads an exception that
+    /// escaped would end the process.
+    /// </summary>
+    internal static bool Survivable(Exception ex) => ex is not (OutOfMemoryException or InsufficientExecutionStackException);
+
     private static long TotalChanges(SqliteConnection connection)
     {
         using SqliteCommand command = Command(connection, "SELECT total_changes();");
@@ -303,6 +326,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     private Thread? _writer;
     private long _enqueued;
     private long _written;
+
+    // Set once the router stopped (Dispose); operations on the file under way, which Dispose waits for.
+    private int _closed;
+    private int _operations;
     private long _dropped;
     private string? _lastDrop;
 
@@ -345,18 +372,35 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
 
         if (!queued)
         {
-            bool saved = Execute("saving state", false, connection =>
+            // Counted as written whatever happens, or every later read would wait for it until its deadline.
+            try
             {
-                write.Operation(connection);
-                return true;
-            });
-            if (!saved)
-            {
-                Drop(write.What, "it failed");
-            }
+                bool saved;
+                try
+                {
+                    saved = Execute("saving state", false, connection =>
+                    {
+                        write.Operation(connection);
+                        return true;
+                    });
+                }
+                catch (Exception ex) when (Survivable(ex))
+                {
+                    Warn(write.What, ex.Message);
+                    saved = false;
+                }
 
-            write.Done?.Invoke(saved);
-            Progress(1);
+                if (!saved)
+                {
+                    Drop(write.What, "it failed");
+                }
+
+                Done(write, saved);
+            }
+            finally
+            {
+                Progress(1);
+            }
         }
     }
 
@@ -388,12 +432,18 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         }
     }
 
-    /// <summary>Stops the retention timer, saves what is still waiting, then stops the writer.</summary>
+    /// <summary>
+    /// Stops the retention timer, saves what is still waiting, then stops the writer. From then on the file is not
+    /// touched: an operation under way is waited for, and a later one (background work that outlived the router) gets
+    /// its fallback, as when the database failed.
+    /// </summary>
     public void Dispose()
     {
         _pruning?.Dispose();
         _queue.CompleteAdding();
         _writer?.Join(TimeSpan.FromSeconds(30));
+        Interlocked.Exchange(ref _closed, 1);
+        SpinWait.SpinUntil(() => Volatile.Read(ref _operations) == 0, TimeSpan.FromSeconds(30));
     }
 
     private void StartWriter()
@@ -465,9 +515,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
                         batch[i].Operation(connection);
                         saved[i] = true;
                     }
-                    catch (Exception ex) when (ex is SqliteException or InvalidOperationException or JsonException)
+                    catch (Exception ex) when (Survivable(ex))
                     {
-                        // One bad write (a constraint) does not undo the batch: SQLite rolls back only its statement.
+                        // One bad write (a constraint, or an exception nobody expected) does not undo the batch: SQLite
+                        // rolls back only its statement.
                         Warn(batch[i].What, ex.Message);
                         Drop(batch[i].What, ex.Message);
                         failed[i] = true;
@@ -482,9 +533,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
                 transaction?.Dispose();
             }
         }
-        catch (Exception ex) when (ex is SqliteException or InvalidOperationException)
+        catch (Exception ex) when (Survivable(ex))
         {
-            // The batch could not be saved (the file is locked past the busy timeout, or broken).
+            // The batch could not be saved (the file is locked past the busy timeout, or broken, or opening it failed
+            // in a way nobody expected).
             Warn(batch[0].What, ex.Message);
             for (int i = 0; i < batch.Count; i++)
             {
@@ -500,17 +552,23 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         // writes go on. So a callback must never wait for writes: the ledger reads under its locks with Peek.
         for (int i = 0; i < batch.Count; i++)
         {
-            try
-            {
-                batch[i].Done?.Invoke(saved[i]);
-            }
-            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
-            {
-                Warn(batch[i].What, ex.Message);
-            }
+            Done(batch[i], saved[i]);
         }
 
         Progress(batch.Count);
+    }
+
+    /// <summary>Tells <paramref name="write"/>'s callback whether it was saved; a callback that throws is logged.</summary>
+    private void Done(PendingWrite write, bool saved)
+    {
+        try
+        {
+            write.Done?.Invoke(saved);
+        }
+        catch (Exception ex) when (Survivable(ex))
+        {
+            Warn(write.What, ex.Message);
+        }
     }
 
     private void Progress(int count)
@@ -553,8 +611,15 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
             return fallback;
         }
 
+        // Counted before the look at _closed, so Dispose, which sets it first, waits for an operation that saw it open.
+        Interlocked.Increment(ref _operations);
         try
         {
+            if (Volatile.Read(ref _closed) == 1)
+            {
+                return fallback; // the router stopped: the file may already be closed, moved or deleted
+            }
+
             using SqliteConnection connection = Open();
             int attempts = Volatile.Read(ref _logAttempts);
             T result = operation(connection);
@@ -579,6 +644,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         {
             Warn(what, ex.Message);
             return fallback;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _operations);
         }
     }
 
@@ -1125,26 +1194,73 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
 }
 
 /// <summary>Cooldowns with absolute expiry, so a restart during a quota cooldown keeps the model cooling down.</summary>
+/// <remarks>
+/// Saves go to the background writer, and loads read the file without waiting for it. So a load lays this instance's
+/// changes that are not in the file yet over what it read: otherwise a refresh just after a model hit its limit would
+/// find no cooldown and end it, or one just after a model answered again would bring its old one back (#394).
+/// </remarks>
 internal sealed class SqliteCooldownStore(SqliteRouterDatabase database) : ICooldownStore
 {
-    // Peek: the health tracker reloads these on a request every few seconds, for other routers' cooldowns; its own it
-    // keeps in memory, so it need not wait for them to be saved.
-    public IReadOnlyDictionary<string, DateTimeOffset> LoadCooldowns() =>
-        database.Peek<IReadOnlyDictionary<string, DateTimeOffset>>("reading cooldowns", new Dictionary<string, DateTimeOffset>(), connection =>
+    private readonly Lock _gate = new();
+
+    // Per model, the newest change not saved yet (its number, and the end of the cooldown, or null when removed).
+    private readonly Dictionary<string, (long Change, DateTimeOffset? Until)> _waiting = new(StringComparer.OrdinalIgnoreCase);
+    private long _changes;
+
+    // The number of a clear not saved yet, or 0.
+    private long _clearing;
+
+    // Peek: the health tracker reloads these on a request every few seconds, for other routers' cooldowns; its own
+    // changes are laid over what the file holds, so it need not wait for them to be saved.
+    public IReadOnlyDictionary<string, DateTimeOffset> LoadCooldowns()
+    {
+        // Taken before the file is read: a change saved meanwhile is then in both, and they agree.
+        KeyValuePair<string, (long Change, DateTimeOffset? Until)>[] waiting;
+        bool clearing;
+        lock (_gate)
         {
-            var result = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+            waiting = [.. _waiting];
+            clearing = _clearing != 0;
+        }
+
+        DateTimeOffset now = database.Time.GetUtcNow();
+        Dictionary<string, DateTimeOffset> result = database.Peek("reading cooldowns", new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase), connection =>
+        {
+            var read = new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
             using SqliteCommand command = SqliteRouterDatabase.Command(
-                connection, "SELECT model, until_ticks FROM cooldowns WHERE until_ticks > $now;", ("$now", database.Time.GetUtcNow().UtcTicks));
+                connection, "SELECT model, until_ticks FROM cooldowns WHERE until_ticks > $now;", ("$now", now.UtcTicks));
             using SqliteDataReader reader = command.ExecuteReader();
             while (reader.Read())
             {
-                result[reader.GetString(0)] = new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero);
+                read[reader.GetString(0)] = new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero);
             }
 
-            return result;
+            return read;
         });
 
-    public void SaveCooldown(string model, DateTimeOffset until) =>
+        if (clearing)
+        {
+            result.Clear();
+        }
+
+        foreach ((string model, (long _, DateTimeOffset? until)) in waiting)
+        {
+            if (until is { } end && end > now)
+            {
+                result[model] = end;
+            }
+            else
+            {
+                result.Remove(model);
+            }
+        }
+
+        return result;
+    }
+
+    public void SaveCooldown(string model, DateTimeOffset until)
+    {
+        long change = Waiting(model, until);
         database.Write("saving a cooldown", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
@@ -1153,21 +1269,65 @@ internal sealed class SqliteCooldownStore(SqliteRouterDatabase database) : ICool
                 "DELETE FROM cooldowns WHERE until_ticks <= $now;",
                 ("$model", model), ("$until", until.UtcTicks), ("$now", database.Time.GetUtcNow().UtcTicks));
             command.ExecuteNonQuery();
-        });
+        }, done: _ => Settled(model, change));
+    }
 
-    public void RemoveCooldown(string model) =>
+    public void RemoveCooldown(string model)
+    {
+        long change = Waiting(model, null);
         database.Write("removing a cooldown", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(connection, "DELETE FROM cooldowns WHERE model = $model;", ("$model", model));
             command.ExecuteNonQuery();
-        });
+        }, done: _ => Settled(model, change));
+    }
 
-    public void ClearCooldowns() =>
+    public void ClearCooldowns()
+    {
+        long change;
+        lock (_gate)
+        {
+            _waiting.Clear(); // the clear covers every change made before it
+            _clearing = change = ++_changes;
+        }
+
         database.Write("clearing cooldowns", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(connection, "DELETE FROM cooldowns;");
             command.ExecuteNonQuery();
+        }, done: _ =>
+        {
+            lock (_gate)
+            {
+                if (_clearing == change)
+                {
+                    _clearing = 0;
+                }
+            }
         });
+    }
+
+    private long Waiting(string model, DateTimeOffset? until)
+    {
+        lock (_gate)
+        {
+            long change = ++_changes;
+            _waiting[model] = (change, until);
+            return change;
+        }
+    }
+
+    /// <summary>The change is in the file now, or it failed: the file says what holds again, unless a newer change waits.</summary>
+    private void Settled(string model, long change)
+    {
+        lock (_gate)
+        {
+            if (_waiting.TryGetValue(model, out (long Change, DateTimeOffset? Until) newest) && newest.Change == change)
+            {
+                _waiting.Remove(model);
+            }
+        }
+    }
 }
 
 /// <summary>
@@ -1718,7 +1878,8 @@ internal sealed class SqliteConfigurationHistory(SqliteRouterDatabase database) 
 /// The totals of the ranges asked for most recently (a budget's current period) are also kept in memory: what this
 /// instance records is added to them, and when one is asked for and <see cref="RefreshInterval"/> has passed (or a row
 /// it does not know of was written meanwhile), only the rows added since are read, so instances sharing the file agree
-/// within that time and a budget check does not read the period's usage on every request.
+/// within that time and a budget check does not read the period's usage on every request. Those totals never wait for
+/// the background writer: the records this instance made that it has not saved yet are added to them (#391).
 /// </summary>
 internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageLedger
 {
@@ -1731,6 +1892,11 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
     private readonly InMemoryUsageLedger _fallback = new();
     private readonly RunningUsageTotals<Running> _running = new();
     private readonly Lock _gate = new();
+
+    // Records waiting for the background writer, by the order they were made, so the totals count them without
+    // waiting for it.
+    private readonly ConcurrentDictionary<long, Unsaved> _unsaved = new();
+    private long _made;
     private int _writes;
     private int _reads;
 
@@ -1746,6 +1912,8 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
         DateTimeOffset oldest = record.Timestamp - database.UsageRetention;
         (long? cost, long? reference, long? value) = Picodollars(record.CostUsd, record.ReferenceCostUsd, record.SubscriptionValueUsd);
         long id = -1;
+        var unsaved = new Unsaved(Interlocked.Increment(ref _made), record);
+        _unsaved.TryAdd(unsaved.Order, unsaved);
         database.Write("recording usage", connection =>
         {
             using SqliteCommand command = SqliteRouterDatabase.Command(
@@ -1762,18 +1930,36 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
                 ("$value", record.SubscriptionValueUsd.ToString(CultureInfo.InvariantCulture)),
                 ("$costPico", cost), ("$referencePico", reference), ("$valuePico", value));
             id = (long)command.ExecuteScalar()!;
-        }, done: saved => Saved(saved ? id : -1, record, prune, oldest));
+            unsaved.Row = id; // before the commit: a read that finds the row knows it is this record
+        }, done: saved => Saved(saved ? id : -1, unsaved, prune, oldest));
     }
 
-    /// <summary>Once the background writer saved <paramref name="record"/> as row <paramref name="id"/> (-1: it could not).</summary>
-    private void Saved(long id, UsageRecord record, bool prune, DateTimeOffset oldest)
+    /// <summary>Once the background writer saved <paramref name="unsaved"/> as row <paramref name="id"/> (-1: it could not).</summary>
+    private void Saved(long id, Unsaved unsaved, bool prune, DateTimeOffset oldest)
     {
+        UsageRecord record = unsaved.Record;
         if (id < 0)
         {
+            // Out of the unsaved records first, so it is never counted twice.
+            _unsaved.TryRemove(unsaved.Order, out _);
             _fallback.Record(record);
             return;
         }
 
+        // Into the running totals first, then out of the unsaved records: in between, the totals hold it as a row
+        // they include (Row ≤ their newest), so it is counted once.
+        try
+        {
+            AddToRunning(id, record, prune, oldest);
+        }
+        finally
+        {
+            _unsaved.TryRemove(unsaved.Order, out _);
+        }
+    }
+
+    private void AddToRunning(long id, UsageRecord record, bool prune, DateTimeOffset oldest)
+    {
         KeyValuePair<UsageRange, Running>[] running;
         lock (_gate)
         {
@@ -1789,33 +1975,53 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
     public UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
         ModelTotals(since, until, UsageGrouping.Model, null, model, connector, profile).Aggregate(UsageTotals.Zero, (total, t) => total.Add(t.Totals));
 
-    public IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null) =>
-        UsageSummaries.Group(ModelTotals(since, until, by, zone), by);
+    // The dashboard's summaries: read from the file once this router's own rows are in it.
+    public IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null)
+    {
+        database.WaitForWrites();
+        return UsageSummaries.Group(ModelTotals(since, until, by, zone), by);
+    }
 
     public IReadOnlyList<UsageModelTotals> ModelTotals(
         DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null, string? model = null, string? connector = null, string? profile = null)
     {
-        // Before any lock is taken: this router's own rows are counted once they are in the file.
-        database.WaitForWrites();
         var range = new UsageRange(since, until, model, connector, profile);
         IReadOnlyList<UsageModelTotals> stored;
+        List<UsageRecord>? waiting = null;
         if (by == UsageGrouping.Model && database.Available)
         {
+            // The budget check, on every request: it must not wait for the writer (which can wait for another router
+            // holding the file, or a purge). The records not saved yet are looked at before the totals are: one saved
+            // meanwhile is then either in the totals, with its row, or still counted here. In the order they were
+            // made, as the file would list them.
+            Unsaved[] unsaved = [.. _unsaved.Values.OrderBy(u => u.Order)];
             Running running;
             lock (_gate)
             {
                 running = _running.GetOrAdd(range, _ => new Running());
             }
 
-            stored = running.Current(this, range);
+            (stored, long newest) = running.Current(this, range);
+            foreach (Unsaved item in unsaved)
+            {
+                if (item.Row is not { } row || row > newest)
+                {
+                    if (range.Covers(item.Record))
+                    {
+                        (waiting ??= []).Add(item.Record);
+                    }
+                }
+            }
         }
         else
         {
+            // The dashboard's groupings are read from the file: this router's own rows are counted once they are in it.
+            database.WaitForWrites();
             stored = Read(range, by, zone ?? TimeZoneInfo.Local, after: null)?.Totals ?? [];
         }
 
         IReadOnlyList<UsageModelTotals> unstored = _fallback.ModelTotals(since, until, by, zone, model, connector, profile);
-        if (unstored.Count == 0)
+        if (unstored.Count == 0 && waiting is null)
         {
             return stored;
         }
@@ -1823,7 +2029,28 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
         var merged = new UsageModelTotalsBuilder();
         merged.Add(stored);
         merged.Add(unstored);
+        foreach (UsageRecord record in waiting ?? [])
+        {
+            merged.Add(record.Model, record);
+        }
+
         return merged.ToList();
+    }
+
+    /// <summary>A record waiting for the background writer, and its row once the writer inserted it (before the commit).</summary>
+    private sealed class Unsaved(long order, UsageRecord record)
+    {
+        private long _row = -1;
+
+        public long Order { get; } = order;
+
+        public UsageRecord Record { get; } = record;
+
+        public long? Row
+        {
+            get => Volatile.Read(ref _row) is var row and >= 0 ? row : null;
+            set => Volatile.Write(ref _row, value ?? -1);
+        }
     }
 
     public IReadOnlyList<UsageRecord> Records(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
@@ -2088,14 +2315,15 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
         private bool _stale;
         private DateTimeOffset _readAt;
 
-        public IReadOnlyList<UsageModelTotals> Current(SqliteUsageLedger ledger, UsageRange range)
+        /// <summary>The totals, and the newest row they include (0 when none).</summary>
+        public (IReadOnlyList<UsageModelTotals> Totals, long Newest) Current(SqliteUsageLedger ledger, UsageRange range)
         {
             lock (_lock)
             {
                 DateTimeOffset now = ledger.Database.Time.GetUtcNow();
                 if (_totals is not null && !_stale && now - _readAt < RefreshInterval)
                 {
-                    return _totals.ToList();
+                    return (_totals.ToList(), _newest);
                 }
 
                 // From scratch the first time, and while the range reaches back past the retention: pruning there
@@ -2121,7 +2349,7 @@ internal sealed class SqliteUsageLedger(SqliteRouterDatabase database) : IUsageL
                     _readAt = now;
                 }
 
-                return _totals?.ToList() ?? [];
+                return _totals is null ? ([], 0) : (_totals.ToList(), _newest);
             }
         }
 

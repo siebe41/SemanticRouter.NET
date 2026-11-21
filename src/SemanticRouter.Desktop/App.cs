@@ -46,6 +46,9 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
     private bool _noModel;
     private bool _noModelAnnounced;
     private bool _quitting;
+
+    // QuitAsync has finished and asked Avalonia to shut down.
+    private bool _quit;
     private TrayDigest _digest = TrayDigest.None;
     private DateTimeOffset _digestChecked;
     private readonly HashSet<string> _announced = new(StringComparer.Ordinal);
@@ -78,7 +81,20 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            desktop.ShutdownRequested += (_, _) => _ = QuitAsync();
+            desktop.ShutdownRequested += (_, e) =>
+            {
+                // Signing out, shutting down or the macOS Quit: hold the shutdown until the router has stopped (within
+                // QuitLimits.RouterStop) and a downloaded update was handed over; QuitAsync shuts down when it is done.
+                // Shutdown() does not raise this event again, and a request after QuitAsync finished goes through.
+                // Avalonia documents that a cancelled request holds up a Windows or macOS session end, but 12.1.6 does
+                // not make public which kind of request this is (ShutdownRequestedEventArgs.IsOSShutdown is internal),
+                // so the hold is bounded instead of skipped.
+                if (!_quit)
+                {
+                    e.Cancel = true;
+                    _ = QuitAsync();
+                }
+            };
         }
 
         using (Stream png = AssetLoader.Open(new Uri("avares://SemanticRouter/Assets/icon.png")))
@@ -682,10 +698,22 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         if (_router.State == RouterState.Attached && _service.IsOn)
         {
             _switching = true;
-            ShowProblem(null);
-            UpdateMenu();
-            string? problem = await _service.RestartAsync(_router);
-            _switching = false;
+            string? problem;
+            try
+            {
+                ShowProblem(null);
+                UpdateMenu();
+                problem = await _service.RestartAsync(_router);
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+            {
+                problem = ex.Message;
+            }
+            finally
+            {
+                _switching = false;
+            }
+
             ShowProblem(problem is null ? null : $"Background service: {problem}", notify: true);
             UpdateMenu();
         }
@@ -745,15 +773,92 @@ internal sealed class App(DesktopOptions options, SingleInstance instance, TextW
         }
 
         _quitting = true;
-        _about?.Close();
-        _settings?.Close();
-        _window?.CloseForGood();
-        await _router.DisposeAsync();
-        instance.Dispose();
+        try
+        {
+            // Each step is tried whatever the one before it did: a tray app left without its router and its
+            // single-instance pipe, which a Quit can no longer end, is worse than a step that failed.
+            await QuitStepAsync("closing the windows", () =>
+            {
+                _about?.Close();
+                _settings?.Close();
+                _window?.CloseForGood();
+                return Task.CompletedTask;
+            });
 
-        // A downloaded update is applied as the app exits (the background service stopped and started around it):
-        // when the person chose Restart to update, or on quit unless updates are only announced.
-        _ = _restartForUpdate ? await _updater.ApplyNowAsync(restartApp: true) : await _updater.ApplyOnQuitAsync();
-        (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
+            // A router that does not stop in time (a request that will not end) does not keep the app from quitting.
+            await QuitStepAsync("stopping the router", async () =>
+            {
+                if (!await QuitLimits.StopWithinAsync(() => _router.DisposeAsync().AsTask(), QuitLimits.RouterStop))
+                {
+                    LogQuitting($"the router did not stop within {QuitLimits.RouterStop.TotalSeconds:0} s; quitting without waiting for it");
+                }
+            });
+            await QuitStepAsync("releasing the single-instance pipe and lock", () =>
+            {
+                instance.Dispose();
+                return Task.CompletedTask;
+            });
+
+            // A downloaded update is applied as the app exits (the background service stopped and started around it):
+            // when the person chose Restart to update, or on quit unless updates are only announced.
+            await QuitStepAsync("applying the update", async () =>
+                _ = _restartForUpdate ? await _updater.ApplyNowAsync(restartApp: true) : await _updater.ApplyOnQuitAsync());
+        }
+        finally
+        {
+            _quit = true;
+            (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Shutdown();
+        }
+    }
+
+    private async Task QuitStepAsync(string step, Func<Task> run)
+    {
+        try
+        {
+            await run();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            LogQuitting($"{step} failed: {ex}");
+        }
+    }
+
+    private void LogQuitting(string message)
+    {
+        try
+        {
+            log.WriteLine($"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss} Quitting: {message}");
+        }
+        catch (Exception failed) when (failed is IOException or ObjectDisposedException)
+        {
+            // The log itself failed (a full disk): quitting goes on.
+        }
+    }
+}
+
+/// <summary>How long quitting waits for the app's router to stop before it goes on without it.</summary>
+internal static class QuitLimits
+{
+    /// <summary>Quit from the menu, <c>--quit</c>, the macOS Quit, a sign-out or an OS shutdown.</summary>
+    public static readonly TimeSpan RouterStop = TimeSpan.FromSeconds(10);
+
+    /// <summary>
+    /// Runs <paramref name="stop"/> and waits for it at most <paramref name="limit"/>: <see langword="false"/> when it
+    /// did not finish in time (it carries on, unobserved). A failure of <paramref name="stop"/> within the limit is thrown.
+    /// </summary>
+    public static async Task<bool> StopWithinAsync(Func<Task> stop, TimeSpan limit)
+    {
+        Task stopping = stop();
+        using var timer = new CancellationTokenSource();
+        if (await Task.WhenAny(stopping, Task.Delay(limit, timer.Token)).ConfigureAwait(false) != stopping)
+        {
+            // Observe a later failure, so it is not reported as an unobserved task exception.
+            _ = stopping.ContinueWith(t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            return false;
+        }
+
+        await timer.CancelAsync().ConfigureAwait(false);
+        await stopping.ConfigureAwait(false);
+        return true;
     }
 }

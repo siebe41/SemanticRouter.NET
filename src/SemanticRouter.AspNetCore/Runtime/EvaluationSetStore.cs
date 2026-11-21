@@ -54,7 +54,7 @@ internal sealed class JsonLinesEvaluationSetStore : IEvaluationSetStore
     {
         lock (_gate)
         {
-            return File.Exists(_path) ? EvaluationSet.Parse(File.ReadAllText(_path)) : [];
+            return File.Exists(_path) ? EvaluationSet.Parse(AtomicFile.ReadAllText(_path)) : [];
         }
     }
 
@@ -64,11 +64,7 @@ internal sealed class JsonLinesEvaluationSetStore : IEvaluationSetStore
         ArgumentNullException.ThrowIfNull(cases);
         lock (_gate)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            string temp = _path + ".tmp";
-            File.WriteAllText(temp, EvaluationSet.ToJsonLines(cases));
-            OwnerOnly.Restrict(temp);
-            File.Move(temp, _path, overwrite: true);
+            AtomicFile.WriteAllText(_path, EvaluationSet.ToJsonLines(cases));
         }
     }
 }

@@ -31,7 +31,7 @@ internal sealed class ConnectorCatalog : IDisposable
             }
             else if (extra.FirstOrDefault(f => connector.IsType(f.Type)) is { } factory)
             {
-                IChatConnector created = factory.Create(name, connector);
+                IChatConnector created = Create(factory, name, connector, redactor);
                 if (created is IDisposable disposable)
                 {
                     _owned.Add(disposable);
@@ -45,9 +45,9 @@ internal sealed class ConnectorCatalog : IDisposable
             }
             else if (connector.Type == ConnectorTypes.Cli)
             {
-                var cli = new CliChatConnector(name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity, redactor, metrics, storePrompts);
-                _owned.Add(cli);
-                _connectors[name] = cli;
+                // Not disposable: requests that started on this snapshot keep using it after a configuration change.
+                _connectors[name] = new CliChatConnector(
+                    name, connector, processRunner, loggerFactory.CreateLogger<CliChatConnector>(), affinity, redactor, metrics, storePrompts);
             }
             else
             {
@@ -63,6 +63,15 @@ internal sealed class ConnectorCatalog : IDisposable
     }
 
     public IReadOnlyCollection<string> Names => _connectors.Keys;
+
+    /// <summary>
+    /// Asks <paramref name="factory"/> for a connector, giving it the router's secrets when it is an
+    /// <see cref="ISecretAwareConnectorFactory"/>.
+    /// </summary>
+    internal static IChatConnector Create(IChatConnectorFactory factory, string name, ConnectorOptions options, SecretRedactor? redactor) =>
+        factory is ISecretAwareConnectorFactory secretAware
+            ? secretAware.Create(name, options, redactor ?? SecretRedactor.None)
+            : factory.Create(name, options);
 
     /// <summary>Why a connector of <paramref name="type"/>, which no factory provides, cannot run.</summary>
     internal static string NotInstalled(string type) =>

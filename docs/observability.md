@@ -13,7 +13,7 @@ Every served request records the tokens the backend reported (input, output, pro
 | Backend | Where the numbers come from |
 |---|---|
 | OpenAI-compatible, translated or passed through as JSON | `usage.prompt_tokens` (cached tokens split out of it), `completion_tokens` |
-| OpenAI-compatible, streamed pass-through | The final chunk's `usage`, which servers send only when the client asks with `stream_options.include_usage` |
+| OpenAI-compatible, streamed pass-through | The final chunk's `usage`. Servers send it only when asked with `stream_options.include_usage`, so the router asks for it on every streamed request; when the client did not, that chunk is read but not relayed to it (the other chunks then carry `"usage": null`, as OpenAI's do) |
 | Anthropic, JSON or SSE | `usage` on the message, or on `message_start` plus `message_delta` |
 | OpenAI Responses, JSON or SSE | `usage` on the response, or on `response.completed` (`input_tokens_details.cached_tokens` split out) |
 | Claude Code CLI | The `result` event's `usage`, cache reads and writes included |
@@ -110,7 +110,7 @@ A budget covers one model, every model on one connector, or every request under 
   - The request goes to the next candidate, with the header `X-Prompt-Route-Budget: <name>` and the activity field `budget`.
   - A request that only that model could serve gets a 503 that names the budget: `budget 'daily-openai' is spent ($5.02 of $5.00 this day)`.
 
-Budgets read the usage ledger. With `UseSqliteState`, spend survives restarts. Otherwise a restart starts the period's count again.
+Budgets read the usage ledger. With `UseSqliteState`, spend survives restarts. Otherwise a restart starts the period's count again, and the in-memory ledger keeps 40 days: its newest 100,000 requests one by one, older ones added up per quarter hour (and model, connector, route, client, location and profile), so its memory stays bounded and its totals per day, week or month, in any time zone, stay exact. A budget counts only the usage a backend reports ([Usage and cost](#usage-and-cost)): every backend above does, and for a streamed chat-completions request the router asks for it even when the client did not. A backend that reports none, such as an OpenAI-compatible server that ignores `stream_options`, is not counted. Nor is one that rejects the field: when a backend answers 400 or 422 to a request the router added `stream_options` to, the router sends the client's request again without it, and if that is accepted, logs a warning and leaves the field out of later requests to that connector, whose streamed replies then report no usage.
 
 A budget check does not add up the period's usage on every request. The ledger keeps each budget's totals for the period in memory and adds each request to them as it is recorded, so the check costs the same on the last day of the month as on the first. Routers that share one state file read the rows the others added at most every 2 seconds, so they agree on a budget within that time. The Usage page and the digest add up their window in the database.
 

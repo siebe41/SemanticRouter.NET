@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SemanticRouter.AspNetCore;
@@ -18,7 +19,8 @@ public sealed class EarlyEndTests : RouterHostTest
 
     private readonly CapturingLoggerProvider _logs = new();
 
-    private Task<HttpClient> StartDispatchAsync(TimeSpan? stall = null, bool withCli = false) =>
+    private Task<HttpClient> StartDispatchAsync(
+        TimeSpan? stall = null, bool withCli = false, Action<IServiceCollection>? services = null, Action<IApplicationBuilder>? beforeRouter = null) =>
         StartAsync(
             o =>
             {
@@ -39,8 +41,28 @@ public sealed class EarlyEndTests : RouterHostTest
                         }
                     });
                 }
+
+                services?.Invoke(s);
             },
+            beforeRouter: beforeRouter,
             withCli: withCli);
+
+    /// <summary>The outcome of every entry the activity log hands on (once when added, once when complete), as it was then.</summary>
+    private List<string> WatchActivity()
+    {
+        var outcomes = new List<string>();
+        Services.GetRequiredService<RoutingActivityLog>().Updated += e =>
+        {
+            lock (outcomes)
+            {
+                outcomes.Add(e.Outcome);
+            }
+        };
+        return outcomes;
+    }
+
+    private bool Available(string model) =>
+        Services.GetRequiredService<IModelHealth>().IsAvailable(Services.GetRequiredService<RouterRuntimeProvider>().Current.Router.Models.Single(m => m.Name == model));
 
     private static StubHttpMessageHandler Streams(Ending ending, params string[] chunks) =>
         new((_, _) => new HttpResponseMessage(HttpStatusCode.OK)
@@ -163,10 +185,241 @@ public sealed class EarlyEndTests : RouterHostTest
             .Should().BeTrue("the client went away; the model did nothing wrong");
     }
 
+    [Fact]
+    public async Task A_connector_that_fails_unexpectedly_mid_reply_ends_it_with_an_error_and_keeps_the_entry()
+    {
+        LocalHttp = Streams(Ending.Crash, Chunk);
+        HttpClient client = await StartDispatchAsync();
+        List<string> outcomes = WatchActivity();
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(StreamJson));
+        string body = await response.Content.ReadAsStringAsync();
+
+        body.Should().StartWith(Chunk).And.Contain("local stopped mid-reply: the connector failed (InvalidOperationException: the stub broke)");
+        RoutingActivityEntry entry = Entry(response);
+        (entry.Outcome, entry.ServedBy).Should().Be(("failed", "local"));
+        entry.TotalMilliseconds.Should().NotBeNull();
+        outcomes.Should().Contain("failed", "the finished entry was handed to the store (#390)");
+        Available("local").Should().BeTrue("the fault is the router's, not the model's");
+        _logs.All.Should().Contain("failed unexpectedly");
+    }
+
+    [Fact]
+    public async Task A_connector_that_fails_unexpectedly_before_any_output_fails_over_without_a_cooldown()
+    {
+        LocalHttp = Streams(Ending.Crash);
+        HttpClient client = await StartDispatchAsync();
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(StreamJson));
+
+        (await response.Content.ReadAsStringAsync()).Should().Be("""{"from":"cloud"}""");
+        response.Headers.GetValues("X-Prompt-Route-Attempt").Should().Equal("2");
+        Entry(response).Detail.Should().Contain("local: the connector failed (InvalidOperationException: the stub broke)");
+        Available("local").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task The_entry_is_kept_when_the_client_goes_away_before_the_final_error_is_written()
+    {
+        // Every model fails; the client goes away while the last one is being tried, so the 503 cannot be sent to it.
+        using var gone = new CancellationTokenSource();
+        LocalHttp = new StubHttpMessageHandler((_, _) => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        CloudHttp = new StubHttpMessageHandler((_, _) =>
+        {
+            gone.Cancel();
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+        HttpClient client = await StartDispatchAsync(beforeRouter: app => app.Use((context, next) =>
+        {
+            context.RequestAborted = gone.Token;
+            return next(context);
+        }));
+        List<string> outcomes = WatchActivity();
+
+        HttpResponseMessage response = await client.PostAsync("/v1/messages",
+            Json("""{"model":"auto","max_tokens":10,"messages":[{"role":"user","content":"hello there"}]}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, "the error is written regardless; a client that is really gone just does not read it");
+        RoutingActivityEntry entry = Entry(response);
+        entry.Outcome.Should().Be("failed");
+        entry.TotalMilliseconds.Should().NotBeNull();
+        outcomes.Should().Contain("failed", "the finished entry was handed to the store (#390)");
+        _logs.All.Should().NotContainAny("unhandled", "Unhandled");
+    }
+
+    [Fact]
+    public async Task An_exception_out_of_the_dispatcher_still_finishes_and_stores_the_entry()
+    {
+        LocalHttp = StubHttpMessageHandler.Json("""{"choices":[{"message":{"role":"assistant","content":"Hi"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}""");
+        HttpClient client = await StartDispatchAsync(services: s => s.AddSingleton<IUsageLedger>(new BrokenLedger()));
+        List<string> outcomes = WatchActivity();
+
+        try
+        {
+            HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+            _ = await response.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException)
+        {
+            // The exception reaches the host, which deals with the request as it does with any other.
+        }
+
+        RoutingActivityEntry entry = Services.GetRequiredService<RoutingActivityLog>().Recent().Single();
+        entry.Outcome.Should().Be("failed");
+        entry.Detail.Should().Contain("the router failed (InvalidOperationException)");
+        entry.TotalMilliseconds.Should().NotBeNull();
+        outcomes.Should().Contain("failed", "the finished entry was handed to the store (#390)");
+    }
+
+    [Fact]
+    public async Task Feedback_that_fails_still_finishes_and_stores_the_entry()
+    {
+        LocalHttp = StubHttpMessageHandler.Json("""{"choices":[{"message":{"role":"assistant","content":"Hi"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}""");
+        HttpClient client = await StartDispatchAsync(services: s => s.AddSingleton<IRoutingFeedbackStore>(new BrokenFeedbackStore()));
+        List<string> outcomes = WatchActivity();
+
+        _ = await (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).Content.ReadAsStringAsync();
+        try
+        {
+            // The same prompt again: feedback on the first answer, which the broken store throws on.
+            HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(ChatJson));
+            _ = await response.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException)
+        {
+            // The exception reaches the host, which deals with the request as it does with any other.
+        }
+
+        RoutingActivityEntry retry = Services.GetRequiredService<RoutingActivityLog>().Recent()[0];
+        retry.TotalMilliseconds.Should().NotBeNull("the entry is finished (#390)");
+        outcomes.Count(o => o == "failed").Should().Be(1, "the finished entry was handed to the store");
+    }
+
+    [Fact]
+    public async Task A_request_that_ends_in_an_exception_leaves_the_warm_caches_alone()
+    {
+        // The backend reports its usage (2k tokens read from its cache), then breaks off; writing the error that ends the
+        // reply fails as well, so the request ends in an exception after the model was recorded as serving it.
+        const string WithUsage = """data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hel"}}],"usage":{"prompt_tokens":3000,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":2048}}}""" + "\n\n";
+        LocalHttp = Streams(Ending.Crash, WithUsage);
+        var caches = new RecordingWarmCaches();
+        bool escaped = false;
+        HttpClient client = await StartDispatchAsync(
+            services: s => s.AddSingleton<IWarmCacheStore>(caches),
+            beforeRouter: app => app.Use(async (context, next) =>
+            {
+                context.Response.Body = new BreaksOnError(context.Response.Body);
+                try
+                {
+                    await next(context);
+                }
+                catch (InvalidOperationException)
+                {
+                    escaped = true;
+                    throw;
+                }
+            }));
+
+        try
+        {
+            HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(StreamJson));
+            _ = await response.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException)
+        {
+            // The exception reaches the host.
+        }
+
+        RoutingActivityEntry entry = Services.GetRequiredService<RoutingActivityLog>().Recent().Single();
+        (entry.Outcome, entry.ServedBy, entry.CacheReadTokens).Should().Be(("failed", "local", 2048));
+        escaped.Should().BeTrue("the request ended in an exception");
+        caches.Remembered.Should().BeEmpty("a faulted request updates no warm-cache state (#390)");
+    }
+
+    /// <summary>A response body that fails, in a way nobody expected, when the router writes the error that ends a reply.</summary>
+    private sealed class BreaksOnError(Stream inner) : Stream
+    {
+        public override bool CanRead => false;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => true;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            Encoding.UTF8.GetString(buffer.Span).Contains("mid-reply", StringComparison.Ordinal)
+                ? throw new InvalidOperationException("the response writer broke")
+                : inner.WriteAsync(buffer, cancellationToken);
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override void Write(byte[] buffer, int offset, int count) => WriteAsync(buffer, offset, count, CancellationToken.None).GetAwaiter().GetResult();
+
+        public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+
+        public override void Flush() => inner.Flush();
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    /// <summary>A feedback store that throws, though it should not.</summary>
+    private sealed class BrokenFeedbackStore : IRoutingFeedbackStore
+    {
+        public void Add(RoutingFeedback feedback) => throw new InvalidOperationException("the feedback store is broken");
+
+        public IReadOnlyList<RoutingFeedback> Recent(int limit) => [];
+
+        public IReadOnlyList<RoutingFeedback> Between(DateTimeOffset since, DateTimeOffset until, int limit) => [];
+    }
+
+    /// <summary>Warm caches that record what they are told.</summary>
+    private sealed class RecordingWarmCaches : IWarmCacheStore
+    {
+        public List<(string Conversation, WarmCache Cache)> Remembered { get; } = [];
+
+        public IReadOnlyList<WarmCache> Lookup(string conversation) => [];
+
+        public void Remember(string conversation, WarmCache cache)
+        {
+            lock (Remembered)
+            {
+                Remembered.Add((conversation, cache));
+            }
+        }
+
+        public void Forget(string conversation, string? model = null)
+        {
+        }
+    }
+
+    /// <summary>A usage ledger whose store has failed.</summary>
+    private sealed class BrokenLedger : IUsageLedger
+    {
+        public void Record(UsageRecord record) => throw new InvalidOperationException("the ledger is broken");
+
+        public UsageTotals Total(DateTimeOffset since, DateTimeOffset until, string? model = null, string? connector = null, string? profile = null) =>
+            new InMemoryUsageLedger().Total(since, until, model, connector, profile);
+
+        public IReadOnlyList<UsageGroup> Summarize(DateTimeOffset since, DateTimeOffset until, UsageGrouping by, TimeZoneInfo? zone = null) => [];
+    }
+
     private enum Ending
     {
         Stall,
         Drop,
+        Crash,
     }
 
     /// <summary>A reply body that sends its chunks, then stalls until cancelled or drops the connection.</summary>
@@ -200,6 +453,11 @@ public sealed class EarlyEndTests : RouterHostTest
             if (ending == Ending.Drop)
             {
                 throw new IOException("Connection reset by peer");
+            }
+
+            if (ending == Ending.Crash)
+            {
+                throw new InvalidOperationException("the stub broke");
             }
 
             await Task.Delay(Timeout.Infinite, cancellationToken);

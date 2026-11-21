@@ -48,5 +48,8 @@ internal sealed class StructuredOutputWriter(IChatResponseWriter inner, string t
     }
 
     public Task CompleteAsync(ChatStopReason stopReason, ChatUsage usage, CancellationToken cancellationToken) =>
-        inner.CompleteAsync(stopReason == ChatStopReason.ToolUse ? ChatStopReason.EndTurn : stopReason, usage, cancellationToken);
+        CompleteAsync(stopReason, usage, null, cancellationToken);
+
+    public Task CompleteAsync(ChatStopReason stopReason, ChatUsage usage, string? stopSequence, CancellationToken cancellationToken) =>
+        inner.CompleteAsync(stopReason == ChatStopReason.ToolUse ? ChatStopReason.EndTurn : stopReason, usage, stopSequence, cancellationToken);
 }

@@ -460,6 +460,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `BaseAddress`, `RequestPath` | HTTP | –, `/v1/chat/completions` (`/v1/messages` for Anthropic, `/v1/responses` for Responses) | |
 | `ApiKey`, `Headers` | HTTP | | Bearer token (`x-api-key` for Anthropic) and extra headers. Keep keys in user-secrets or environment variables, or write a reference: `"${env:OPENAI_API_KEY}"`, `"${secret:…}"`. |
 | `ForwardHeaders[]` | HTTP | `[]` | Client request headers to relay upstream (e.g. `anthropic-beta`). Authorization headers never are. |
+| `MaxTokensParameter` | OpenAI-compatible | automatic | `max_tokens` or `max_completion_tokens`: the field that carries the output limit on translated requests. Left out, `max_completion_tokens` for a model with `reasoning` on a server that is not local (OpenAI's reasoning models reject `max_tokens`), `max_tokens` otherwise. See [Output limits on OpenAI reasoning models](docs/providers.md#output-limits-on-openai-reasoning-models). |
 | `AnthropicVersion` | Anthropic | `2023-06-01` | Sent as `anthropic-version`. |
 | `PromptCaching` | Anthropic | `Auto` | `Auto`: requests translated from OpenAI and Responses clients get cache markers (end of the system prompt, plus automatic caching for the conversation) when the prompt is above the model's cacheable minimum. `Off`: none. See [Prompt caching on translated requests](docs/providers.md#prompt-caching-on-translated-requests). |
 | `CacheTtl` | Anthropic | `5m` | `5m` or `1h`: how long those cache entries live, and so how long conversation routing counts them warm. A one-hour entry costs 2× the input price to write instead of 1.25×. |
@@ -472,14 +473,14 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Arguments[]` | CLI | | Custom: the full template (`{model}`, `{prompt}`). Presets: extra arguments appended. |
 | `PromptInput` | CLI | `Stdin` | `Stdin` or `Argument`. `Argument` puts the prompt on the command line (Custom: the `{prompt}` placeholder), where other users of the machine can read it while the CLI runs. Codex always uses stdin. |
 | `QuotaErrorPatterns[]` | CLI | preset patterns | Extra output fragments that mean "quota exhausted". |
-| `EnvironmentVariables`, `RemoveEnvironmentVariables[]` | CLI | preset defaults | The presets remove API-key variables that would switch billing away from your subscription. |
+| `EnvironmentVariables`, `RemoveEnvironmentVariables[]` | CLI, Copilot | preset defaults | The presets remove API-key variables that would switch billing away from your subscription. Every CLI, and the Copilot runtime, also goes without the router's own settings and keys. |
 | `MaxConcurrency` | CLI, Copilot | `2` | Simultaneous processes (Copilot: simultaneous turns). |
 | `MaxQueue` | CLI, Copilot | `16` | When this many requests are already waiting for a process, the next goes to another model. `0`: never wait. |
 | `MaxArgumentLength` | CLI | `24000` | With `PromptInput: Argument`, longer prompts are sent on stdin. Longer Claude Code system prompts are moved into the conversation. |
 | `Executable`, `HomeDirectory` | Copilot | `copilot`, `~/.copilot` | The Copilot CLI the SDK runs as its runtime, and its `COPILOT_HOME`. |
 | `AllowRemoteClients` | CLI, Copilot, other connectors that run a program | `false` | See [Subscription CLI terms](docs/TERMS.md) before changing this. |
 | `Timeout` | all | HTTP 100 s · CLI 5 min | Time to first output. |
-| `StallTimeout` | HTTP, CLI | the `Timeout` | Time allowed between two pieces of a reply once it has started. A backend that stops sending for longer is given up on: before anything reached the client the next model answers; after, the client gets an error event and the model cools down. A reply that keeps coming is never cut off. |
+| `StallTimeout` | HTTP, CLI, Copilot | the `Timeout` | Time allowed between two pieces of a reply once it has started. A backend that stops sending for longer is given up on: before anything reached the client the next model answers; after, the client gets an error event and the model cools down. A reply that keeps coming is never cut off. |
 
 ### `Embeddings`, `Middleware` and the other sections
 
@@ -521,7 +522,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:RetryEscalation:Enabled` / `Window` | `false` / `00:02:00` | A prompt repeated by the same client within the window goes one tier up. See [Retry escalation](docs/routing-quality.md#retry-escalation). |
 | `Middleware:StripSystemReminders` | `true` | Ignore the context blocks clients inject into user messages when classifying: `<system-reminder>`, `<system_reminder>`, `<current_datetime>`, `<copilot_tauri_workspace>` and `Middleware:InjectedTags`. |
 | `Middleware:InjectedTags` | `[]` | More tag names (e.g. `environment_details`) whose blocks are ignored when classifying. |
-| `Middleware:MaxRequestBodyBytes` | `8388608` | Larger bodies get 413. Agentic clients send 100 KB+ requests. |
+| `Middleware:MaxRequestBodyBytes` | `8388608` | Larger bodies get 413. Agentic clients send 100 KB+ requests. Also applies to `/v1/messages/count_tokens`, the dashboard's context analysis and configuration documents, a body sent without a length (chunked) included. |
 | `Middleware:EmitResponseHeaders` / `HeaderPrefix` | `true` / `X-Prompt-Route` | `X-Prompt-Route`, `-Tier`, `-Reason`, `-Similarity`, `-Complexity`, `-Model`, `-Connector`, `-Attempt`, `-Degraded`, `-Budget`, `-Dropped`, `-Profile`, `-Local-Only`, `-Unreliable`. |
 | `Middleware:FailOpen` | `true` | Route with `FallbackTier` if classification fails. |
 | `Middleware:MessageSelection` | `LastUserMessage` | Which messages are classified. |
@@ -546,7 +547,7 @@ Everything binds from the `SemanticRouter` section. `samples/RoutingApiSample/ap
 | `Middleware:LocalOnlyWhen:Secrets` / `FilePaths` | `false` / `false` | Keep a conversation local when it contains a credential or an absolute file path. |
 | `Dashboard:AdminToken`, `Dashboard:ReadOnlyToken` | | Tokens for remote dashboard access (16+ characters). See [Access and security](docs/dashboard.md#access-and-security). |
 | `Dashboard:MetricsToken` | | Token for figures only: status, usage and the digest's counts, never prompt text, the configuration or activity. See [Dashboard roles](docs/dashboard.md#roles). |
-| `Dashboard:SessionLifetime` | `12:00:00` | How long a dashboard sign-in lasts before the token must be entered again; signing out ends the session on the server. Five wrong tokens from one address in 15 minutes make it wait (`429`) until the first is 15 minutes old. |
+| `Dashboard:SessionLifetime` | `12:00:00` | How long a dashboard sign-in lasts before the token must be entered again; signing out ends the session on the server. Five wrong tokens from one address (an IPv6 address counts by its /64) in 15 minutes make it wait (`429`) until the first is 15 minutes old. |
 | `Dashboard:AllowProcessSettings` | `false` | Let the admin API change what a CLI connector runs and which paths memory sources read; otherwise those change only in the configuration file. See [Access and security](docs/dashboard.md#access-and-security). |
 | `Dashboard:RequireLocalClient` | `true` | Loopback only. Turn off together with a token to reach the dashboard from other machines. |
 | `Dashboard:PublicOrigins[]` | `[]` | Addresses the dashboard is reached at besides `localhost` (`https://router.home.lan`): changes are accepted from these origins. |
@@ -647,7 +648,7 @@ The tests cover:
 - in-process `TestServer` runs of both middleware modes, including failover, quota cooldowns, local-only routing and the remote-client guard;
 - all three protocols: parsing, translation in each direction (JSON and SSE), the Anthropic and Responses front doors end to end (with a recorded Codex request against every backend type), thinking, structured output and dropped-feature reporting, tool-turn affinity, model aliases, prompted tool calling, and the dashboard's admin API, configuration store and hot reload.
 
-No network, model or vendor CLI is needed. CI runs the suite on Linux, Windows and macOS, and builds and smoke-tests the container image. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
+No network, model or vendor CLI is needed: the tests that run the real ONNX embedding models (`Category=Model`) download them from huggingface.co (57 MB, once), so `dotnet test` skips them and says why. Run them with `SEMANTIC_ROUTER_MODEL_TESTS=1 dotnet test --filter Category=Model`; `SEMANTIC_ROUTER_TEST_MODELS` sets where the models are kept. CI runs the suite on Linux, Windows and macOS, and builds and smoke-tests the container image. The stack is xUnit, FluentAssertions 7.x (the last Apache-2.0 line) and Moq.
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every pull request, on `main`, and weekly so new advisories surface without a push:
 

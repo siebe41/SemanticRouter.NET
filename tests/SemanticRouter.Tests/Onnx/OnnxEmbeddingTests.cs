@@ -11,8 +11,9 @@ using SemanticRouter.Tests.Support;
 namespace SemanticRouter.Tests.Onnx;
 
 /// <summary>
-/// In-process ONNX embeddings. The model tests download the pinned models once into a shared cache
-/// (<c>SEMANTIC_ROUTER_TEST_MODELS</c>, or the temp directory), which CI keeps between runs.
+/// In-process ONNX embeddings. The model tests (<see cref="ModelFactAttribute"/>, <c>Category=Model</c>) download the
+/// pinned models once into a shared cache (<c>SEMANTIC_ROUTER_TEST_MODELS</c>, or the temp directory), which CI keeps
+/// between runs; they are skipped unless <c>SEMANTIC_ROUTER_MODEL_TESTS=1</c>.
 /// </summary>
 public sealed class OnnxEmbeddingTests : IDisposable
 {
@@ -141,7 +142,8 @@ public sealed class OnnxEmbeddingTests : IDisposable
         new ServiceCollection().AddHttpClient().BuildServiceProvider(),
         Options.Create(new OnnxEmbeddingOptions { ModelsDirectory = ModelCache }));
 
-    [Fact]
+    [ModelFact]
+    [Trait(ModelTests.Category, ModelTests.Model)]
     public async Task MiniLM_embeds_meaning_not_just_shared_words()
     {
         using OnnxEmbeddingProviderFactory factory = RealFactory();
@@ -163,7 +165,8 @@ public sealed class OnnxEmbeddingTests : IDisposable
         single.ToArray().Should().Equal(vectors[0].ToArray(), "a text gets the same vector alone or in a batch");
     }
 
-    [Fact]
+    [ModelFact]
+    [Trait(ModelTests.Category, ModelTests.Model)]
     public async Task With_MiniLM_corrections_in_other_languages_are_recognised_and_next_steps_are_not()
     {
         using OnnxEmbeddingProviderFactory factory = RealFactory();
@@ -204,7 +207,8 @@ public sealed class OnnxEmbeddingTests : IDisposable
         (await detector.MatchesAsync(provider, "klopt niet helemaal", options, CancellationToken.None)).Should().BeTrue("no phrase covers it: the comparison does");
     }
 
-    [Fact]
+    [ModelFact]
+    [Trait(ModelTests.Category, ModelTests.Model)]
     public async Task A_loaded_model_is_shared_by_every_configuration_version()
     {
         using OnnxEmbeddingProviderFactory factory = RealFactory();
@@ -222,7 +226,8 @@ public sealed class OnnxEmbeddingTests : IDisposable
     /// Everyday small questions and edits (#153) reach a tier-2 route with each ONNX model at the threshold <c>init</c>
     /// sets for it, instead of the tier-3 fallback, and the hard work next to them stays on tier 4.
     /// </summary>
-    [Theory]
+    [ModelTheory]
+    [Trait(ModelTests.Category, ModelTests.Model)]
     [InlineData("all-MiniLM-L6-v2")]
     [InlineData("bge-small-en-v1.5")]
     public async Task Short_questions_and_small_edits_stay_on_tier_2_and_hard_work_on_tier_4(string name)
@@ -262,7 +267,8 @@ public sealed class OnnxEmbeddingTests : IDisposable
     }
 
     /// <summary>Prompts the template once misrouted with the default model at the threshold <c>init</c> sets for it.</summary>
-    [Fact]
+    [ModelFact]
+    [Trait(ModelTests.Category, ModelTests.Model)]
     public async Task With_MiniLM_a_question_about_the_assistant_and_an_instruction_above_pasted_code_reach_their_routes()
     {
         RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
@@ -293,7 +299,8 @@ public sealed class OnnxEmbeddingTests : IDisposable
     }
 
     /// <summary>A records table pasted under an instruction is left out of the embedding, but still keeps the prompt local.</summary>
-    [Fact]
+    [ModelFact]
+    [Trait(ModelTests.Category, ModelTests.Model)]
     public async Task With_MiniLM_pasted_customer_records_still_match_the_local_only_route()
     {
         RouterConfiguration template = RouterConfiguration.FromJson(RouterHost.Template());
@@ -328,7 +335,8 @@ public sealed class OnnxEmbeddingTests : IDisposable
     /// The shipped evaluation set (chat and agentic-client turns) against the template routes, with each ONNX model at
     /// the threshold <c>init</c> sets for it: CI fails if routing out of the box regresses below 90%.
     /// </summary>
-    [Theory]
+    [ModelTheory]
+    [Trait(ModelTests.Category, ModelTests.Model)]
     [InlineData("all-MiniLM-L6-v2")]
     [InlineData("bge-small-en-v1.5")]
     public async Task With_no_embedding_server_the_onnx_model_routes_the_sample_prompts_to_their_tiers(string name)

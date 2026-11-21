@@ -77,8 +77,11 @@ public readonly record struct ConnectorResult
 /// <remarks>
 /// Contract: either write a complete response and return <see cref="ConnectorResult.Completed"/>, or return
 /// <see cref="ConnectorResult.Failed"/>/<see cref="ConnectorResult.Skipped"/> <em>without</em> having started the
-/// response, so the router can fail over to the next model. Once output has started, the connector owns the
-/// response and must finish it (even on a mid-stream error).
+/// response, so the router can fail over to the next model. Once output has started there is no failing over: a
+/// backend that fails mid-reply is reported by throwing <see cref="IOException"/>, <see cref="HttpRequestException"/>
+/// or <see cref="TimeoutException"/>, and the router ends the reply with an error in the client's protocol (or breaks
+/// off a reply that is not streamed) and cools the model down. Finishing such a reply as if it were complete would
+/// hand the client a cut-off answer as a whole one.
 /// </remarks>
 public interface IChatConnector
 {
