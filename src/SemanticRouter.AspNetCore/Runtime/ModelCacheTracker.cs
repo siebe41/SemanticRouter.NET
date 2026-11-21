@@ -8,7 +8,7 @@ namespace SemanticRouter.AspNetCore;
 /// (#391). Until the first refresh lands there are no figures; after a configuration is applied, the last ones stay
 /// until the refresh for the new window replaces them.
 /// </summary>
-internal sealed class ModelCacheTracker(RoutingActivityLog activity, TimeProvider? time = null) : IModelCacheShare
+internal sealed class ModelCacheTracker(RoutingActivityLog activity, TimeProvider? time = null) : IModelCacheShare, IDisposable
 {
     private static readonly TimeSpan RefreshEvery = TimeSpan.FromMinutes(1);
 
@@ -16,7 +16,7 @@ internal sealed class ModelCacheTracker(RoutingActivityLog activity, TimeProvide
     private readonly Lock _gate = new();
     private ModelSelectionOptions _options = new();
     private (DateTimeOffset At, Dictionary<string, Shares> Shares) _snapshot = (DateTimeOffset.MinValue, new(StringComparer.OrdinalIgnoreCase));
-    private int _refreshing;
+    private readonly SingleFlight _refresh = new();
 
     /// <summary>Applies a new configuration's window and sample count.</summary>
     public void Configure(ModelSelectionOptions options)
@@ -66,25 +66,10 @@ internal sealed class ModelCacheTracker(RoutingActivityLog activity, TimeProvide
     }
 
     /// <summary>Starts a refresh in the background, unless one is under way (a call after that one lands starts another).</summary>
-    private void StartRefresh(ModelSelectionOptions options)
-    {
-        if (Interlocked.CompareExchange(ref _refreshing, 1, 0) != 0)
-        {
-            return;
-        }
+    private void StartRefresh(ModelSelectionOptions options) => _refresh.TryStart(() => Refresh(options, _time.GetUtcNow()));
 
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                Refresh(options, _time.GetUtcNow());
-            }
-            finally
-            {
-                Volatile.Write(ref _refreshing, 0);
-            }
-        });
-    }
+    /// <summary>Starts no more refreshes, and waits for the one under way: it reads the state store, which closes next.</summary>
+    public void Dispose() => _refresh.Dispose();
 
     /// <summary>Recomputes the figures now, for tests.</summary>
     internal void RefreshNow()

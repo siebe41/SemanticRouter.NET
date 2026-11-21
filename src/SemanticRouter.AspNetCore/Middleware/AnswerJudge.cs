@@ -183,6 +183,8 @@ internal sealed partial class AnswerJudge : IDisposable
 
     public void Dispose()
     {
+        // Today's count is read from the state store, which closes next: wait for it, as for the save.
+        ((IAsyncResult)_loaded).AsyncWaitHandle.WaitOne(SingleFlight.StopWait);
         _saver?.Flush(TimeSpan.FromSeconds(5));
         _queue.Writer.TryComplete();
         _stopping.Cancel();

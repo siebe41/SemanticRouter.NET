@@ -326,6 +326,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     private Thread? _writer;
     private long _enqueued;
     private long _written;
+
+    // Set once the router stopped (Dispose); operations on the file under way, which Dispose waits for.
+    private int _closed;
+    private int _operations;
     private long _dropped;
     private string? _lastDrop;
 
@@ -428,12 +432,18 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         }
     }
 
-    /// <summary>Stops the retention timer, saves what is still waiting, then stops the writer.</summary>
+    /// <summary>
+    /// Stops the retention timer, saves what is still waiting, then stops the writer. From then on the file is not
+    /// touched: an operation under way is waited for, and a later one (background work that outlived the router) gets
+    /// its fallback, as when the database failed.
+    /// </summary>
     public void Dispose()
     {
         _pruning?.Dispose();
         _queue.CompleteAdding();
         _writer?.Join(TimeSpan.FromSeconds(30));
+        Interlocked.Exchange(ref _closed, 1);
+        SpinWait.SpinUntil(() => Volatile.Read(ref _operations) == 0, TimeSpan.FromSeconds(30));
     }
 
     private void StartWriter()
@@ -601,8 +611,15 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
             return fallback;
         }
 
+        // Counted before the look at _closed, so Dispose, which sets it first, waits for an operation that saw it open.
+        Interlocked.Increment(ref _operations);
         try
         {
+            if (Volatile.Read(ref _closed) == 1)
+            {
+                return fallback; // the router stopped: the file may already be closed, moved or deleted
+            }
+
             using SqliteConnection connection = Open();
             int attempts = Volatile.Read(ref _logAttempts);
             T result = operation(connection);
@@ -627,6 +644,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         {
             Warn(what, ex.Message);
             return fallback;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _operations);
         }
     }
 
