@@ -114,7 +114,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
             }
 
             usageAdded = false;
-            if ((int)response.StatusCode is not (400 or 422))
+            if (response.IsSuccessStatusCode)
             {
                 _streamOptionsRejected = true;
                 LogStreamOptionsRejected(_logger, Name, rejected);
