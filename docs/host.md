@@ -127,8 +127,8 @@ A CLI that the [machine-wide policy](enterprise.md) turns off (`DisabledConnecto
 | `semantic-router.json.bak` | The configuration as it was before a newer release's template fixes rewrote it ([Upgrading and going back](#upgrading-and-going-back)). |
 | `semantic-router.db` | Durable state (SQLite): model cooldowns, tool-call affinity, the activity log and every applied configuration, so a restart forgets nothing. See [What the router stores](#what-the-router-stores). |
 | `semantic-router.db.v<N>.bak` | The state database as it was before an upgrade migrated it from schema `N`, so the release that wrote it can be started on it again. See [Upgrading and going back](#upgrading-and-going-back). |
-| `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection. See [Keeping secrets out of the file](dashboard.md#keeping-secrets-out-of-the-file). |
-| `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page. `init` writes a sample set for the starting routes. See [Routing quality](routing-quality.md). |
+| `semantic-router.secrets.json` | Keys typed into the dashboard, encrypted with ASP.NET Core Data Protection, replaced in one step as the configuration is. See [Keeping secrets out of the file](dashboard.md#keeping-secrets-out-of-the-file). |
+| `semantic-router.evaluation.jsonl` | Labelled prompts for the **Evaluate** page, replaced in one step as the configuration is. `init` writes a sample set for the starting routes. See [Routing quality](routing-quality.md). |
 | `semantic-router.instance.json` | The running router's process id, addresses, start time and version, and on Windows the event that stops it. Removed when it stops. |
 | `semantic-router.service.json`, `logs/` | Windows background service only: what the sign-in entry starts (in the configuration directory), and what it logs (in the local data directory). |
 | `models/` | Downloaded ONNX embedding models, one directory per model, in the local data directory. Copy a `models/{name}` directory there to run without internet access. |

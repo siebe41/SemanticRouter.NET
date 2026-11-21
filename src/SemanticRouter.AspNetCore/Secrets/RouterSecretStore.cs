@@ -151,16 +151,7 @@ internal sealed class ProtectedFileSecretStore : IRouterSecretStore
                 JsonSerializer.Deserialize<Dictionary<string, string>>(json, Json) ?? [], StringComparer.Ordinal);
     }
 
-    private void WriteAll(Dictionary<string, string> all)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        string temp = _path + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(all, Json));
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
-
-        File.Move(temp, _path, overwrite: true);
-    }
+    // Owner-only from creation, flushed, and through a temporary name of its own, so another process writing the same
+    // store never shares it (AtomicFile).
+    private void WriteAll(Dictionary<string, string> all) => AtomicFile.WriteAllText(_path, JsonSerializer.Serialize(all, Json));
 }

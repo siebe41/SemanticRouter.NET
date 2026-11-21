@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Host;
 
@@ -101,6 +102,53 @@ public sealed class AtomicFileTests : IDisposable
 
         valid.Should().Contain(File.ReadAllText(file), "the file is one writer's whole document");
         Files().Should().Equal("semantic-router.json");
+    }
+
+    [Fact]
+    public void The_secret_store_and_the_evaluation_set_do_not_write_through_a_fixed_temporary_name()
+    {
+        // Something left at the old fixed name (here a folder) stopped every save; two writers shared it.
+        string secrets = Path.Combine(_directory, "semantic-router.secrets.json");
+        string evaluation = Path.Combine(_directory, "semantic-router.evaluation.jsonl");
+        Directory.CreateDirectory(secrets + ".tmp");
+        Directory.CreateDirectory(evaluation + ".tmp");
+        var protection = new EphemeralDataProtectionProvider();
+
+        new ProtectedFileSecretStore(secrets, protection).SetSecret("connectors/openai/ApiKey", "sk-fake-test-value");
+        new JsonLinesEvaluationSetStore(evaluation).Save([new EvaluationCase { Prompt = "look up the customer record", ExpectedTier = 1 }]);
+
+        new ProtectedFileSecretStore(secrets, protection).GetSecret("connectors/openai/ApiKey").Should().Be("sk-fake-test-value");
+        new JsonLinesEvaluationSetStore(evaluation).Load().Single().Prompt.Should().Be("look up the customer record");
+        Files().Should().Equal("semantic-router.evaluation.jsonl", "semantic-router.secrets.json");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.GetUnixFileMode(secrets).Should().Be(OwnerFile);
+            File.GetUnixFileMode(evaluation).Should().Be(OwnerFile);
+        }
+    }
+
+    [Fact]
+    public async Task Secret_and_evaluation_stores_that_do_not_share_a_lock_never_collide_or_leave_half_a_file()
+    {
+        string secrets = Path.Combine(_directory, "semantic-router.secrets.json");
+        string evaluation = Path.Combine(_directory, "semantic-router.evaluation.jsonl");
+        var protection = new EphemeralDataProtectionProvider();
+
+        await Task.WhenAll(Enumerable.Range(0, 8).Select(i => Task.Run(() =>
+        {
+            var store = new ProtectedFileSecretStore(secrets, protection);
+            var cases = new JsonLinesEvaluationSetStore(evaluation);
+            for (int n = 0; n < 25; n++)
+            {
+                store.SetSecret("gateway/" + i, "gw-fake-" + n);
+                cases.Save([new EvaluationCase { Prompt = $"prompt {i}", ExpectedTier = 1 }]);
+            }
+        })));
+
+        FluentActions.Invoking(() => new ProtectedFileSecretStore(secrets, protection).GetSecret("gateway/0"))
+            .Should().NotThrow("the file is one writer's whole document");
+        new JsonLinesEvaluationSetStore(evaluation).Load().Should().ContainSingle();
+        Files().Should().Equal("semantic-router.evaluation.jsonl", "semantic-router.secrets.json");
     }
 
     [Fact]
