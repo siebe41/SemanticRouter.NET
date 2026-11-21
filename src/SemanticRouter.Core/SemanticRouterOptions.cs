@@ -357,6 +357,7 @@ public class SemanticRouterOptions
             }
 
             if (model.Tier < 0 || model.ContextWindow < 0 || model.InputCostPerMillionTokens < 0 || model.OutputCostPerMillionTokens < 0
+                || model.CacheReadCostPerMillionTokens < 0 || model.CacheWriteCostPerMillionTokens < 0
                 || model.ApiInputCostPerMillionTokens < 0 || model.ApiOutputCostPerMillionTokens < 0
                 || model.ApiCacheReadCostPerMillionTokens < 0 || model.ApiCacheWriteCostPerMillionTokens < 0)
             {
