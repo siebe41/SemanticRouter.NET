@@ -56,6 +56,33 @@ public sealed class ProtocolTranslationEdgeTests
     }
 
     [Fact]
+    public async Task A_call_whose_id_arrives_after_its_first_delta_stays_one_call()
+    {
+        const string sse = """
+            data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"type":"function","function":{"name":"Read","arguments":"{\"path\":"}}]}}]}
+
+            data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"arguments":"\"a\"}"}}]}}]}
+
+            data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_b","type":"function","function":{"name":"Read","arguments":"{}"}}]}}]}
+
+            data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+            data: [DONE]
+
+            """;
+        var writer = new RecordingWriter();
+
+        await OpenAIResponseReader.RelayAsync(Upstream(sse, "text/event-stream"), writer, CancellationToken.None);
+
+        writer.Events.Should().HaveCount(8);
+        writer.Events[0].Should().StartWith("tool:toolu_").And.EndWith(":Read", "the call started without the server's id");
+        writer.Events.Skip(1).Should().Equal(
+            "args:{\"path\":", "args:\"a\"}", "end",
+            "tool:call_b:Read", "args:{}", "end",
+            "done:ToolUse");
+    }
+
+    [Fact]
     public async Task A_streamed_responses_refusal_reaches_the_client()
     {
         const string sse = """

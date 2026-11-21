@@ -127,7 +127,7 @@ internal static class OpenAIResponseReader
             ChatStopReason stop = ChatStopReason.EndTurn;
             ChatUsage usage = default;
             int openToolIndex = -1;
-            string? openToolId = null;
+            string? openServerId = null; // the id the server gave the open call, if it gave one yet
             string? stopSequence = null;
             await foreach (string data in ServerSentEvents.ReadAsync(stream, cancellationToken).ConfigureAwait(false))
             {
@@ -185,8 +185,10 @@ internal static class OpenAIResponseReader
                                 call.TryGetObject("function", out JsonElement function);
                                 string? callId = call.GetString("id") is { Length: > 0 } given ? given : null;
 
-                                // Some servers send parallel calls all at index 0: a new id starts a new call too.
-                                if (index != openToolIndex || (callId is not null && openToolId is not null && callId != openToolId))
+                                // Some servers send parallel calls all at index 0: an id other than the one the server
+                                // sent for the open call starts a new call too. An id that only arrives in a later delta
+                                // of a call that started without one belongs to that call.
+                                if (index != openToolIndex || (callId is not null && openServerId is not null && callId != openServerId))
                                 {
                                     if (openToolIndex >= 0)
                                     {
@@ -194,8 +196,12 @@ internal static class OpenAIResponseReader
                                     }
 
                                     openToolIndex = index;
-                                    openToolId = callId ?? JsonHelpers.NewToolUseId();
-                                    await writer.StartToolCallAsync(openToolId, function.GetString("name") ?? string.Empty, cancellationToken).ConfigureAwait(false);
+                                    openServerId = callId;
+                                    await writer.StartToolCallAsync(callId ?? JsonHelpers.NewToolUseId(), function.GetString("name") ?? string.Empty, cancellationToken).ConfigureAwait(false);
+                                }
+                                else
+                                {
+                                    openServerId ??= callId;
                                 }
 
                                 if (function.GetString("arguments") is { Length: > 0 } arguments)
