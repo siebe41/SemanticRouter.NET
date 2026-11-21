@@ -17,8 +17,11 @@
 # The .NET host's unsigned files (*.runtimeconfig.json, *.deps.json), which UpdatePublisher also checks, are not.
 #
 # With SIGNING=signed every one must pass, or the script exits 1; otherwise it reports which are unsigned. A file
-# that is missing fails either way: then nothing was checked. A list item per check goes to $GITHUB_STEP_SUMMARY when it
-# is set. Only the version's own package is read: the folder can also hold the previous release's, for a delta update.
+# that is missing fails either way: then nothing was checked. So does another executable file with a valid signature by
+# anyone but the publisher or Microsoft: vpk does not re-sign a signed file, so deploy/package-installer.sh removes such
+# signatures first (deploy/strip-third-party-signatures.ps1, #336), and one that is left would fail a signed release.
+# A list item per check goes to $GITHUB_STEP_SUMMARY when it is set. Only the version's own package is read: the folder
+# can also hold the previous release's, for a delta update.
 param(
     [Parameter(Mandatory)] [string] $Installers,
     [Parameter(Mandatory)] [string] $Version,
@@ -150,6 +153,11 @@ try {
             if ($problem) { "$([IO.Path]::GetRelativePath($app, $file.FullName)): $problem" }
         })
     $what = "Other executable files in ``$name``"
+    # Get-Problem says "signed by ..." only for a valid signature by someone else.
+    $foreign = @($refused | Where-Object { $_ -match ': signed by ' })
+    if (-not $signed -and $foreign.Count -gt 0) {
+        Fail "$($foreign.Count) executable files in $name keep a signature by someone other than the publisher or Microsoft, which vpk does not replace (deploy/strip-third-party-signatures.ps1): $(($foreign | Select-Object -First 5) -join '; ')"
+    }
     if ($refused.Count -eq 0) {
         Report $what "$($others.Count), all signed by the publisher or Microsoft, signatures checked"
     } else {

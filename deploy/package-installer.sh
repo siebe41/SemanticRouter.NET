@@ -59,6 +59,16 @@ if [ "$target" != "$host" ]; then
   directive=("[$target]")
 fi
 
+# vpk signs only what is not signed yet, so a library its author signed (Avalonia's av_libglesv2.dll) would keep that
+# signature, which the release's check and the app's update check refuse: they accept the publisher or Microsoft. On a
+# copy, so PUBLISH_DIR stays as it was, every signature but Microsoft's is removed first, and vpk signs those files
+# with the rest (#336). Signing needs Windows, and so does checking a signature; packaged elsewhere, it is unsigned.
+if [ "$target" = win ] && [ "$host" = win ]; then
+  cp -R "$publish" "$work/app"
+  publish="$work/app"
+  pwsh -NoProfile -File "$root/deploy/strip-third-party-signatures.ps1" -Directory "$publish"
+fi
+
 if [ -n "${VPK_PREVIOUS_FROM:-}" ]; then
   vpk ${directive[@]+"${directive[@]}"} download github --repoUrl "$VPK_PREVIOUS_FROM" --token "${GITHUB_TOKEN:-}" --channel "$rid" --outputDir "$out" \
     || echo "No earlier release on channel $rid: no delta package."
