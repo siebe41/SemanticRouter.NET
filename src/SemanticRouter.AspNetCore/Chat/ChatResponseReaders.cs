@@ -499,13 +499,25 @@ internal static class PassThroughToolCallScanner
 {
     private const int ChunkSize = 16 * 1024;
 
+    /// <summary>The most of an event stream that is held back before its first data line: 64 KiB.</summary>
+    internal const int HoldLimit = 64 * 1024;
+
+    /// <summary>How long the start of an event stream is held back at most: 5 seconds, longer than an error takes to come.</summary>
+    internal static readonly TimeSpan HoldTime = TimeSpan.FromSeconds(5);
+
     /// <summary>
     /// Copies the reply, reporting tool-call ids and usage. With <c>stripUsageChunk</c> (the router asked for usage the
     /// client did not, with <c>stream_options.include_usage</c>), the usage-only final chunk is read but not relayed.
     /// </summary>
-    public static async Task CopyAsync(
+    public static Task CopyAsync(
         Stream upstream, Stream downstream, bool sse, ChatProtocol protocol, Action<string> onToolCall, CancellationToken cancellationToken,
-        Action<ChatUsage>? onUsage = null, bool stripUsageChunk = false)
+        Action<ChatUsage>? onUsage = null, bool stripUsageChunk = false) =>
+        CopyAsync(upstream, downstream, sse, protocol, onToolCall, onUsage, stripUsageChunk, TimeProvider.System, cancellationToken);
+
+    /// <summary>As above, with the clock that times how long the start of an event stream is held back.</summary>
+    internal static async Task CopyAsync(
+        Stream upstream, Stream downstream, bool sse, ChatProtocol protocol, Action<string> onToolCall, Action<ChatUsage>? onUsage,
+        bool stripUsageChunk, TimeProvider time, CancellationToken cancellationToken)
     {
         byte[] chunk = new byte[ChunkSize];
         int read;
@@ -537,7 +549,7 @@ internal static class PassThroughToolCallScanner
             return;
         }
 
-        var relay = new EventStreamRelay(downstream, protocol, onToolCall, onUsage, stripUsageChunk);
+        var relay = new EventStreamRelay(downstream, protocol, onToolCall, onUsage, stripUsageChunk, time);
         while ((read = await upstream.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
         {
             await relay.FeedAsync(chunk.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
@@ -548,11 +560,13 @@ internal static class PassThroughToolCallScanner
 
     /// <summary>
     /// Splits an event stream into lines (ended by <c>\n</c>, <c>\r</c> or <c>\r\n</c>), relays each with the bytes it
-    /// came with and scans its data lines. What comes before the first data line is held back until that line shows the
-    /// reply is not an error.
+    /// came with and scans its data lines. What comes before the first data line (an <c>event:</c> line, comments) is held
+    /// back until that line shows the reply is not an error, but no more than <see cref="HoldLimit"/> bytes of it and no
+    /// longer than <see cref="HoldTime"/>: keep-alive comments a backend sends while a model thinks still reach the client,
+    /// so a client that waits for a first byte does not give up.
     /// </summary>
     private sealed class EventStreamRelay(
-        Stream downstream, ChatProtocol protocol, Action<string> onToolCall, Action<ChatUsage>? onUsage, bool stripUsageChunk)
+        Stream downstream, ChatProtocol protocol, Action<string> onToolCall, Action<ChatUsage>? onUsage, bool stripUsageChunk, TimeProvider time)
     {
         // The line being read, its line break included once that has arrived.
         private ArrayBufferWriter<byte> _line = new();
@@ -564,6 +578,8 @@ internal static class PassThroughToolCallScanner
         private bool _tooLong;
 
         private List<byte[]>? _held = [];
+        private long _heldBytes;
+        private long _heldSince;
         private UpstreamReplyException? _failed;
         private bool _skipBlank;
 
@@ -692,10 +708,17 @@ internal static class PassThroughToolCallScanner
                         throw error; // nothing has reached the client yet
                     }
 
+                    if (_held.Count == 0)
+                    {
+                        _heldSince = time.GetTimestamp();
+                    }
+
                     _held.Add(raw.ToArray());
-                    if (data)
+                    _heldBytes += raw.Length;
+                    if (data || _heldBytes > HoldLimit || time.GetElapsedTime(_heldSince) >= HoldTime)
                     {
                         await WriteHeldAsync(cancellationToken).ConfigureAwait(false);
+                        await downstream.FlushAsync(cancellationToken).ConfigureAwait(false);
                     }
 
                     return;

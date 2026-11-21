@@ -203,6 +203,45 @@ public sealed class UpstreamLimitsTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Keep_alives_before_the_first_event_reach_the_client_once_they_were_held_for_the_hold_time()
+    {
+        // A backend that sends comments while a model thinks: the client gets them once they were held for HoldTime, so it
+        // does not give up waiting for a first byte. An error after that can no longer go to another model.
+        var time = new ManualTimeProvider();
+        var downstream = new MemoryStream();
+        Action nothing = () => { };
+        var upstream = new ScriptedStream(
+            (": thinking\n\n", nothing),
+            (": thinking\n\n", () => time.Advance(PassThroughToolCallScanner.HoldTime)),
+            ("data: {\"error\":{\"message\":\"Overloaded\",\"type\":\"server_error\"}}\n\n", nothing));
+
+        Func<Task> copy = () => PassThroughToolCallScanner.CopyAsync(
+            upstream, downstream, sse: true, ChatProtocol.OpenAI, _ => { }, _ => { }, stripUsageChunk: false, time, CancellationToken.None);
+
+        (await copy.Should().ThrowAsync<UpstreamReplyException>()).Which.ClientNotified.Should().BeTrue();
+        Encoding.UTF8.GetString(downstream.ToArray()).Should().StartWith(": thinking\n\n: thinking\n\n");
+    }
+
+    [Fact]
+    public async Task Lines_before_the_first_event_are_held_back_up_to_the_hold_limit()
+    {
+        string comment = ": " + new string('x', 1022) + "\n"; // 1 KiB a line
+        var time = new ManualTimeProvider();
+
+        foreach ((int lines, bool notified) in new[] { (60, false), (70, true) })
+        {
+            var downstream = new MemoryStream();
+            string body = string.Concat(Enumerable.Repeat(comment, lines)) + "data: {\"error\":{\"message\":\"Overloaded\",\"type\":\"server_error\"}}\n\n";
+
+            Func<Task> copy = () => PassThroughToolCallScanner.CopyAsync(
+                new MemoryStream(Encoding.UTF8.GetBytes(body)), downstream, sse: true, ChatProtocol.OpenAI, _ => { }, _ => { }, stripUsageChunk: false, time, CancellationToken.None);
+
+            (await copy.Should().ThrowAsync<UpstreamReplyException>()).Which.ClientNotified.Should().Be(notified, $"{lines} KiB held against a {PassThroughToolCallScanner.HoldLimit / 1024} KiB limit");
+            (downstream.Length > 0).Should().Be(notified);
+        }
+    }
+
+    [Fact]
     public async Task A_pass_through_event_line_too_long_to_hold_releases_what_was_held()
     {
         // The event name before the first data line is held back; a data line too long to hold sends it on, unscanned.
@@ -296,6 +335,46 @@ public sealed class UpstreamLimitsTests : RouterHostTest
     }
 
     /// <summary>Gives its first part, then waits for <paramref name="gate"/> before giving the second.</summary>
+    /// <summary>Returns each part in one read, running its action first.</summary>
+    private sealed class ScriptedStream(params (string Text, Action Before)[] parts) : Stream
+    {
+        private int _next;
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_next == parts.Length)
+            {
+                return ValueTask.FromResult(0);
+            }
+
+            (string text, Action before) = parts[_next++];
+            before();
+            return ValueTask.FromResult(Encoding.UTF8.GetBytes(text, buffer.Span));
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     /// <summary>Returns <c>body</c> at most <c>readSize</c> bytes per read.</summary>
     private sealed class SlowStream(byte[] body, int readSize) : MemoryStream(body)
     {
