@@ -5,6 +5,7 @@ using SemanticRouter.Host;
 // semantic-router doctor     check every connector, model and the embeddings without calling a model
 // semantic-router models     list what each connector offers, with suggested tiers and load state
 // semantic-router service    run it in the background whenever you sign in (systemd, launchd or Windows sign-in)
+// semantic-router triage-misroute   re-run a "Routed to the wrong tier" issue on the built-in template
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 HostSettings settings = HostSettings.Parse(args);
 
@@ -46,6 +47,9 @@ switch (settings.Command)
     case "service" when settings.Error is null:
         return await ServiceCommand.RunAsync(settings, Console.Out);
 
+    case HostSettings.TriageCommand when settings.Error is null:
+        return await MisrouteTriage.RunAsync(settings, Console.In, Console.Out, Console.Error);
+
     default:
         if (settings.Error is not null)
         {
@@ -86,6 +90,12 @@ static string Help() => $"""
           start | stop | restart        Control it. start --no-wait returns without waiting for it to listen.
           status                        Whether it is installed and running, where it listens and where it logs.
           uninstall                     Stop it and stop starting it at sign-in.
+      semantic-router triage-misroute <issue-body-file | -> [--json] [--router-version <x.y.z>]
+                                      [--embeddings Hashing | Onnx[:<model>]] [--issue <number>]
+                                        Re-run a "Routed to the wrong tier" issue on the reported release's
+                                        built-in template, propose an evaluation line and run the template's
+                                        evaluation set with and without it. Prints the triage comment (Markdown)
+                                        or JSON. Calls no model; exit code 1 when the text is not that form.
       semantic-router --version | --help
 
     The guides: {SiteLinks.Root}

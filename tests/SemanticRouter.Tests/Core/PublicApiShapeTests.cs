@@ -6,6 +6,7 @@ using Moq;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Connectors.Copilot;
 using SemanticRouter.Embeddings.Onnx;
+using SemanticRouter.Mcp;
 using SemanticRouter.Storage.Sqlite;
 using SemanticRouter.Tests.Support;
 
@@ -25,6 +26,7 @@ public sealed class PublicApiShapeTests
         typeof(RoutingActivityLog).Assembly,
         typeof(SqliteStateOptions).Assembly,
         typeof(CopilotConnector).Assembly,
+        typeof(RouterMcpOptions).Assembly,
     ];
 
     // Complete by definition, and documented as frozen.

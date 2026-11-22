@@ -301,6 +301,8 @@ The metrics role is an allow-list: it reaches these endpoints and no others (`40
 
 Everything else, including `api/activity`, its export and `api/events`, `api/config` and its history, `api/memory`, `api/tuning`, `api/judge/agreement`, the evaluation set and `api/audit`, is refused. The metrics role changes nothing. The machine policy's `Dashboard: ReadOnly` leaves it as it is. Dashboard tokens are not gateway keys: none of them opens the chat endpoints or `/semantic-router/classify`.
 
+The router's [MCP server](clients.md#the-routers-mcp-server) signs callers in the same way and offers each role the tools whose admin API endpoints it may call: the metrics role gets `usage` and `health`, the read-only role `explain_request` too, the admin role also `classify` and, when allowed, `propose_tuning`.
+
 ### Sessions
 
 Signing in on the dashboard sets a cookie holding the role, the time it was issued and a random session id, signed with the role's token (never the token itself). It lapses after `SessionLifetime` (12 hours), and changing a token signs out everyone who signed in with it.
