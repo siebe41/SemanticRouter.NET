@@ -21,6 +21,7 @@
     <ProjectReference Include="..\SemanticRouter.Storage.Sqlite\SemanticRouter.Storage.Sqlite.csproj" />
     <ProjectReference Include="..\SemanticRouter.Embeddings.Onnx\SemanticRouter.Embeddings.Onnx.csproj" />
     <ProjectReference Include="..\SemanticRouter.Connectors.Copilot\SemanticRouter.Connectors.Copilot.csproj" />
+    <ProjectReference Include="..\SemanticRouter.Mcp\SemanticRouter.Mcp.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,6 @@
 # Public API surface
 
-The public types of the five library packages, with one line on what each is for. This page says what is meant to be public; `src/<Project>/PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` list every member, and the build fails when they and the code disagree ([CONTRIBUTING.md](../CONTRIBUTING.md#public-api-and-package-validation)). A pull request that adds, removes or renames a public type changes this page too: `ApiSurfaceDocumentationTests` checks that every public type is here and nothing else is.
+The public types of the six library packages, with one line on what each is for. This page says what is meant to be public; `src/<Project>/PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` list every member, and the build fails when they and the code disagree ([CONTRIBUTING.md](../CONTRIBUTING.md#public-api-and-package-validation)). A pull request that adds, removes or renames a public type changes this page too: `ApiSurfaceDocumentationTests` checks that every public type is here and nothing else is.
 
 Setup extension classes are in `Microsoft.Extensions.DependencyInjection` and `Microsoft.AspNetCore.Builder`, everything else in the package's own namespace ([Namespaces](architecture.md#namespaces)). The `semantic-router` tool and the desktop app have no public API. For how the pieces fit together, see [Architecture](architecture.md); for the extension points by task, see [Extensibility](../README.md#extensibility).
 
@@ -332,3 +332,11 @@ A connector for GitHub Copilot through its SDK, as the `Copilot` connector type.
 
 - `CopilotConnectorBuilderExtensions`: `AddCopilotConnector`, which registers the connector type (`Microsoft.Extensions.DependencyInjection`).
 - `CopilotConnector`: the connector type name this package adds, for `"Type"`.
+
+## SemanticRouter.Mcp
+
+The router's MCP server: tools that let an agent classify a prompt, explain a routed request, read usage and connector health, and propose tuning for a person to apply. Namespace `SemanticRouter.Mcp`. The tools themselves are internal; the package is used through its extension methods.
+
+- `RouterMcpBuilderExtensions`: `AddRouterMcpServer`, which registers the server and its tools (`Microsoft.Extensions.DependencyInjection`).
+- `RouterMcpEndpoints`: `MapRouterMcp`, which maps the Streamable HTTP endpoint behind the dashboard's sign-in (`Microsoft.AspNetCore.Builder`).
+- `RouterMcpOptions`: options for the server, bound from `SemanticRouter:Mcp`.

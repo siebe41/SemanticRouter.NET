@@ -44,6 +44,8 @@
     <!-- First-party storage and host (the host is not packed): they keep the same file modes. -->
     <InternalsVisibleTo Include="SemanticRouter.Storage.Sqlite" />
     <InternalsVisibleTo Include="SemanticRouter.Hosting" />
+    <!-- First-party MCP server package: it admits callers with the dashboard's access check and reuses the admin API's code. -->
+    <InternalsVisibleTo Include="SemanticRouter.Mcp" />
   </ItemGroup>
 
 </Project>

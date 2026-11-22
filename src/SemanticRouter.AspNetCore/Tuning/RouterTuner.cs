@@ -744,6 +744,113 @@ internal sealed partial class RouterTuner : IDisposable
         }
     }
 
+    /// <summary>
+    /// Records a change someone proposed (the MCP server's <c>propose_tuning</c>, checked by <see cref="Complete"/>) as a
+    /// suggestion, for a person to apply or dismiss on the Router learned page. It changes no configuration, whatever
+    /// <see cref="TuningOptions.Mode"/> is. A suggestion for the same setting that is still waiting is expired, unless it
+    /// suggests the same value, which is returned instead.
+    /// </summary>
+    public TuningChange Propose(TuningChange change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        if (!Matches(_provider.Current.Configuration, change, change.Kind == TuningChangeKind.Utterance ? null : change.OldValue))
+        {
+            throw new TuningConflictException($"The {Setting(change)} changed meanwhile; propose the change again.");
+        }
+
+        TuningChange[] pending = [.. _store.Changes().Where(c => c.State == TuningChangeState.Suggested && c.Setting == change.Setting)];
+        if (pending.FirstOrDefault(p => p.NewValue == change.NewValue && p.OldValue == change.OldValue
+            && string.Equals(p.NewModel, change.NewModel, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(p.OldModel, change.OldModel, StringComparison.OrdinalIgnoreCase)) is { } same)
+        {
+            return same;
+        }
+
+        foreach (TuningChange old in pending)
+        {
+            Save(old with { State = TuningChangeState.Expired });
+        }
+
+        return Save(change with { Id = NextId(), Timestamp = _time.GetUtcNow(), State = TuningChangeState.Suggested, Version = null, Actor = null });
+    }
+
+    /// <summary>
+    /// Checks a proposed change (<see cref="Propose"/>) against <paramref name="configuration"/> and fills in what it
+    /// starts from: the route's name as configured, the old threshold or model. Kind and route, and the new threshold
+    /// (<see cref="TuningChange.NewValue"/>), utterance or model (<see cref="TuningChange.NewModel"/>) are read from
+    /// <paramref name="proposal"/>. Returns why it does not fit instead, when it does not.
+    /// </summary>
+    internal static (TuningChange? Change, string? Problem) Complete(RouterConfiguration configuration, TuningChange proposal)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(proposal);
+        TuningChange plain = proposal with { OldValue = null, Target = null, OldModel = null, Incumbent = null, Examples = [], Fixed = 0, Broken = 0, Gain = 0 };
+        if (proposal.Kind == TuningChangeKind.DefaultThreshold)
+        {
+            if (proposal.NewValue is not (>= 0f and <= 1f) || proposal.NewValue is not { } value)
+            {
+                return (null, "'threshold' must be a similarity from 0 to 1.");
+            }
+
+            return configuration.DefaultSimilarityThreshold == value
+                ? (null, $"The default threshold is {TuningChange.Format(value)} already.")
+                : (plain with { Route = null, Utterance = null, NewModel = null, OldValue = configuration.DefaultSimilarityThreshold }, null);
+        }
+
+        if (Find(configuration, proposal) is not { } route)
+        {
+            return (null, string.IsNullOrWhiteSpace(proposal.Route)
+                ? "'route' is required for this kind of change."
+                : $"There is no route '{proposal.Route}'. Routes: {string.Join(", ", configuration.Routes.Select(r => r.Name))}.");
+        }
+
+        plain = plain with { Route = route.Name };
+        switch (proposal.Kind)
+        {
+            case TuningChangeKind.RouteThreshold:
+                if (proposal.NewValue is { } threshold && threshold is not (>= 0f and <= 1f))
+                {
+                    return (null, "'threshold' must be a similarity from 0 to 1 (or left out, for the route to use the default).");
+                }
+
+                return route.SimilarityThreshold == proposal.NewValue
+                    ? (null, $"The threshold of {route.Name} is {TuningChange.Format(proposal.NewValue)} already.")
+                    : (plain with { Utterance = null, NewModel = null, OldValue = route.SimilarityThreshold }, null);
+
+            case TuningChangeKind.Utterance:
+                string utterance = proposal.Utterance?.Trim() ?? string.Empty;
+                if (utterance.Length is 0 or > MaxUtteranceLength)
+                {
+                    return (null, $"'utterance' must be 1 to {MaxUtteranceLength} characters.");
+                }
+
+                return route.Utterances.Contains(utterance, StringComparer.OrdinalIgnoreCase)
+                    ? (null, $"{route.Name} has that utterance already.")
+                    : (plain with { Utterance = utterance, NewValue = null, NewModel = null }, null);
+
+            case TuningChangeKind.RouteModel:
+                if (configuration.Models.FirstOrDefault(m => m.Enabled && string.Equals(m.Name, proposal.NewModel, StringComparison.OrdinalIgnoreCase)) is not { } model)
+                {
+                    return (null, $"'model' must be an enabled model of the catalog: {string.Join(", ", configuration.Models.Where(m => m.Enabled).Select(m => m.Name))}.");
+                }
+
+                return Same(route.PreferredModel, model.Name)
+                    ? (null, $"{route.Name} prefers {model.Name} already.")
+                    : (plain with { Utterance = null, NewValue = null, NewModel = model.Name, OldModel = route.PreferredModel }, null);
+
+            default:
+                return (null, $"Unknown kind of change '{proposal.Kind}'.");
+        }
+    }
+
+    /// <summary><paramref name="configuration"/> with <paramref name="change"/> (from <see cref="Complete"/>) made, in a copy.</summary>
+    internal static RouterConfiguration WithChange(RouterConfiguration configuration, TuningChange change)
+    {
+        RouterConfiguration copy = configuration.Clone();
+        Set(copy, change, change.NewValue);
+        return copy;
+    }
+
     /// <summary>Turns a suggestion down; the same change is held like an undone one.</summary>
     public TuningChange Dismiss(long id, string actor)
     {
@@ -836,6 +943,10 @@ internal sealed partial class RouterTuner : IDisposable
                 break;
             case TuningChangeKind.RouteThreshold when Find(configuration, change) is { } route:
                 route.SimilarityThreshold = value;
+                break;
+            case TuningChangeKind.RouteModel when Find(configuration, change) is { } route:
+                // A proposed model (Propose) applied as a suggestion; tuning's own trials set and undo it with SetModel.
+                route.PreferredModel = remove ? change.OldModel : change.NewModel;
                 break;
             case TuningChangeKind.Utterance when Find(configuration, change) is { } route:
                 if (remove)

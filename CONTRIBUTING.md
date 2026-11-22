@@ -51,9 +51,9 @@ Every pull request runs CI ([`.github/workflows/ci.yml`](.github/workflows/ci.ym
 
 ## Package versions and dependencies
 
-The five library packages (`SemanticRouter.Core`, `SemanticRouter.AspNetCore`, `SemanticRouter.Storage.Sqlite`, `SemanticRouter.Embeddings.Onnx` and `SemanticRouter.Connectors.Copilot`) and the `semantic-router` tool are versioned together: every release publishes all of them with the same version, built from one commit.
+The six library packages (`SemanticRouter.Core`, `SemanticRouter.AspNetCore`, `SemanticRouter.Storage.Sqlite`, `SemanticRouter.Embeddings.Onnx`, `SemanticRouter.Connectors.Copilot` and `SemanticRouter.Mcp`) and the `semantic-router` tool are versioned together: every release publishes all of them with the same version, built from one commit.
 
-They also depend on each other exactly. `SemanticRouter.AspNetCore` 0.6.0 depends on `SemanticRouter.Core` `[0.6.0]`, and Storage.Sqlite, Embeddings.Onnx and Connectors.Copilot 0.6.0 depend on `SemanticRouter.AspNetCore` `[0.6.0]`, not on 0.6.0 or later. Each is compiled against one build of the package below it, and Storage.Sqlite and Connectors.Copilot use its internals through `InternalsVisibleTo`, which carry no compatibility promise. With an open lower bound NuGet would pair an old package with a newer sibling without a word, and the app would fail at run time with a `MissingMethodException`. With an exact version, two packages that want different versions of a sibling fail the restore (NU1107), and an app that references a newer sibling directly gets warning NU1608. An app updates all the SemanticRouter packages it uses together.
+They also depend on each other exactly. `SemanticRouter.AspNetCore` 0.6.0 depends on `SemanticRouter.Core` `[0.6.0]`, and Storage.Sqlite, Embeddings.Onnx, Connectors.Copilot and Mcp 0.6.0 depend on `SemanticRouter.AspNetCore` `[0.6.0]`, not on 0.6.0 or later. Each is compiled against one build of the package below it, and Storage.Sqlite, Connectors.Copilot and Mcp use its internals through `InternalsVisibleTo`, which carry no compatibility promise. With an open lower bound NuGet would pair an old package with a newer sibling without a word, and the app would fail at run time with a `MissingMethodException`. With an exact version, two packages that want different versions of a sibling fail the restore (NU1107), and an app that references a newer sibling directly gets warning NU1608. An app updates all the SemanticRouter packages it uses together.
 
 [`Directory.Build.targets`](Directory.Build.targets) makes every project reference an exact dependency in the package (`UseExactProjectReferenceVersions`), and `dotnet pack` fails when a generated nuspec gives a `SemanticRouter.*` dependency anything else (`CheckExactSemanticRouterDependencies`). So a new library package depends on its siblings through a `ProjectReference`, never a `PackageReference`.
 
@@ -61,6 +61,7 @@ The internals the sibling packages use are a contract between the packages of on
 
 - Connectors.Copilot: `ChatResponseWriterFactory`, `IChatResponseWriter`, `ChatTranscript`, `CliScratch`, `CliEnvironment`, `DroppedFeatures`, `PromptedToolFormat`, `ISecretAwareConnectorFactory`, `SecretRedactor`, `StallGuard.Duration`, `ConnectorOptions.EffectiveTimeout` and `ConnectorOptions.EffectiveStallTimeout`.
 - Storage.Sqlite: `IStateRetention`, `OwnerOnly`, `UsageSummaries`, `WarmCacheStore`, `ToolCallAffinity`, and the in-memory stores it falls back to or wraps (`InMemoryAuditLog`, `InMemoryUsageLedger`, `InMemoryTuningStore`, `InMemoryRouterConfigurationHistory`).
+- Mcp: `DashboardAccess` (its `FilterAsync`, `RoleOf`, `ActorOf` and `IsLocal`), `DashboardAudit`, `DashboardGate`, `RouterDashboardLocation`, `DashboardMetricsMetadata`, `RouterDashboardEndpoints.ClassifyAsync`, `UsageWindow`, `CopyOf` and `CreateAccess`, `ReplayApi.RunAsync` and `ReplayOutcome` with the replay report types, `RouterTuner` (`Complete`, `WithChange`, `Propose`), `EndpointHealth`, `EndpointStatus`, `ConnectorIncidents`, `EndpointChecks`, `PromptClassificationResponse`, `ClassifyPromptRequest`, `RoutingFeedbackLog`, `BudgetGate` and `RouterRuntimeProvider`.
 
 Do not add `InternalsVisibleTo` for a package outside this repository.
 
@@ -68,7 +69,7 @@ Do not add `InternalsVisibleTo` for a package outside this repository.
 
 ## Public API and package validation
 
-The public API is every public type and member of the five library packages, and every protected member of a public type that can be inherited, as compiled: names, parameter and return types, and members the compiler generates, such as a record's constructor and `Deconstruct`. Internals are not, nor is the code of the `semantic-router` tool and the desktop app. The HTTP endpoints, the configuration and the behaviour are part of what users depend on too, but no tool checks them: the changelog and the review do.
+The public API is every public type and member of the six library packages, and every protected member of a public type that can be inherited, as compiled: names, parameter and return types, and members the compiler generates, such as a record's constructor and `Deconstruct`. Internals are not, nor is the code of the `semantic-router` tool and the desktop app. The HTTP endpoints, the configuration and the behaviour are part of what users depend on too, but no tool checks them: the changelog and the review do.
 
 Adding to the public API is fine. Removing or changing a member breaks every application compiled against the old one, even when its source would still compile: adding an optional parameter, for example, removes the method that had one parameter less. Prefer a new overload, and mark what it replaces `[Obsolete]` rather than removing it.
 

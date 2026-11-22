@@ -1,0 +1,11 @@
+#nullable enable
+Microsoft.AspNetCore.Builder.RouterMcpEndpoints
+Microsoft.Extensions.DependencyInjection.RouterMcpBuilderExtensions
+SemanticRouter.Mcp.RouterMcpOptions
+SemanticRouter.Mcp.RouterMcpOptions.AllowProposals.get -> bool
+SemanticRouter.Mcp.RouterMcpOptions.AllowProposals.set -> void
+SemanticRouter.Mcp.RouterMcpOptions.Enabled.get -> bool
+SemanticRouter.Mcp.RouterMcpOptions.Enabled.set -> void
+SemanticRouter.Mcp.RouterMcpOptions.RouterMcpOptions() -> void
+static Microsoft.AspNetCore.Builder.RouterMcpEndpoints.MapRouterMcp(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder! endpoints, string! pattern = "/router/mcp") -> Microsoft.AspNetCore.Builder.IEndpointConventionBuilder!
+static Microsoft.Extensions.DependencyInjection.RouterMcpBuilderExtensions.AddRouterMcpServer(this SemanticRouter.AspNetCore.SemanticRouterBuilder! builder, System.Action<SemanticRouter.Mcp.RouterMcpOptions!>? configure = null) -> SemanticRouter.AspNetCore.SemanticRouterBuilder!

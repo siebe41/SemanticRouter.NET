@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -69,7 +70,8 @@ public abstract class RouterHostTest : IAsyncDisposable
         Action<IServiceCollection>? services = null,
         Action<IApplicationBuilder>? beforeRouter = null,
         bool mockClassifier = true,
-        bool withCli = false)
+        bool withCli = false,
+        Action<IEndpointRouteBuilder>? endpoints = null)
     {
         _host = await new HostBuilder()
             .ConfigureWebHost(web => web
@@ -138,6 +140,7 @@ public abstract class RouterHostTest : IAsyncDisposable
                         e.MapRouterModels();
                         e.MapAnthropicTokenCount();
                         e.MapRouterDashboard();
+                        endpoints?.Invoke(e);
                         e.MapFallback(EchoAsync);
                     });
                 }))

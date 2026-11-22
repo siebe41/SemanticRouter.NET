@@ -51,6 +51,12 @@ public static partial class RouterDashboardEndpoints
             auditLog,
             endpoints.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System,
             endpoints.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(DashboardAudit.LogCategory));
+        if (endpoints.ServiceProvider.GetService<RouterDashboardLocation>() is { } shared)
+        {
+            // The router's MCP server (SemanticRouter.Mcp) admits callers with this check and audits into this log.
+            shared.Gate = new DashboardGate(access, audit, options);
+        }
+
         RouteGroupBuilder group = endpoints.MapGroup(prefix);
         var themes = new ThemeCatalog(options.ThemesDirectory ?? (endpoints.ServiceProvider.GetService<IRouterConfigurationStore>() is JsonFileRouterConfigurationStore store
             ? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(store.Location))!, "themes")
@@ -489,25 +495,8 @@ public static partial class RouterDashboardEndpoints
 
         api.MapPost("/classify", async (ClassifyPromptRequest request, RouterRuntimeProvider provider, IServiceProvider services, CancellationToken cancellationToken) =>
         {
-            if (string.IsNullOrWhiteSpace(request.Prompt))
-            {
-                return Results.Problem("'prompt' is required.", statusCode: StatusCodes.Status400BadRequest);
-            }
-
-            RouterRuntime runtime = provider.Current;
-            ProfileSelection.ModelChoice choice = ProfileSelection.ResolveModel(runtime, request.Model);
-            string? profile = request.Profile is { Length: > 0 } named ? named : choice.Profile;
-            if (profile is not null && !runtime.Configuration.Profiles.ContainsKey(profile))
-            {
-                return Results.Problem($"Unknown routing profile '{profile}'.", statusCode: StatusCodes.Status400BadRequest);
-            }
-
-            // As the gateway routes a first turn: a leading callout ("@opus …") applies and is not classified.
-            (RoutingPlan plan, string? callout) = await Callouts.RouteAsync(
-                runtime, runtime.Router,
-                new PromptRoutingRequest { Prompt = request.Prompt, Strategy = choice.Strategy, RequestedModel = choice.RequestedModel, Profile = profile },
-                cancellationToken).ConfigureAwait(false);
-            return Results.Ok(PromptClassificationResponse.From(plan, services.GetService<IModelResidency>()) with { Callout = callout });
+            (PromptClassificationResponse? response, string? problem) = await ClassifyAsync(request, provider, services, cancellationToken).ConfigureAwait(false);
+            return response is not null ? Results.Ok(response) : Results.Problem(problem, statusCode: StatusCodes.Status400BadRequest);
         }).WithMetadata(DashboardWriteMetadata.Instance).Audited("classified a prompt"); // classifying embeds the prompt, which can cost an embedding call
 
         api.MapPost("/health/reset", (IModelHealth health) =>
@@ -682,6 +671,34 @@ public static partial class RouterDashboardEndpoints
     }
 
     /// <summary>
+    /// Classifies a prompt as <c>POST api/classify</c> does, and the MCP server's <c>classify</c> tool: as the gateway routes
+    /// a first turn, so a leading callout (<c>@opus …</c>) applies and is not classified. Returns the response, or the
+    /// problem with the request (no prompt, an unknown profile).
+    /// </summary>
+    internal static async Task<(PromptClassificationResponse? Response, string? Problem)> ClassifyAsync(
+        ClassifyPromptRequest request, RouterRuntimeProvider provider, IServiceProvider services, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Prompt))
+        {
+            return (null, "'prompt' is required.");
+        }
+
+        RouterRuntime runtime = provider.Current;
+        ProfileSelection.ModelChoice choice = ProfileSelection.ResolveModel(runtime, request.Model);
+        string? profile = request.Profile is { Length: > 0 } named ? named : choice.Profile;
+        if (profile is not null && !runtime.Configuration.Profiles.ContainsKey(profile))
+        {
+            return (null, $"Unknown routing profile '{profile}'.");
+        }
+
+        (RoutingPlan plan, string? callout) = await Callouts.RouteAsync(
+            runtime, runtime.Router,
+            new PromptRoutingRequest { Prompt = request.Prompt, Strategy = choice.Strategy, RequestedModel = choice.RequestedModel, Profile = profile },
+            cancellationToken).ConfigureAwait(false);
+        return (PromptClassificationResponse.From(plan, services.GetService<IModelResidency>()) with { Callout = callout }, null);
+    }
+
+    /// <summary>
     /// Sends a browser that opens the site's root (exactly <c>/</c>, with GET or HEAD) to the dashboard at
     /// <paramref name="prefix"/>, for an application whose root serves nothing else, such as the <c>semantic-router</c>
     /// tool. It has the lowest precedence: an endpoint the application maps at <c>/</c> itself wins.
@@ -826,7 +843,7 @@ public static partial class RouterDashboardEndpoints
                 "which any program on this machine can reach. To allow it, set SemanticRouter:Dashboard:AllowProcessSettings."));
     }
 
-    private static RouterDashboardOptions CopyOf(RouterDashboardOptions? source)
+    internal static RouterDashboardOptions CopyOf(RouterDashboardOptions? source)
     {
         var copy = new RouterDashboardOptions();
         if (source is not null)
@@ -857,7 +874,7 @@ public static partial class RouterDashboardEndpoints
         return copy;
     }
 
-    private static DashboardAccess CreateAccess(IServiceProvider services, RouterDashboardOptions options, string prefix)
+    internal static DashboardAccess CreateAccess(IServiceProvider services, RouterDashboardOptions options, string prefix)
     {
         IRouterSecretStore? secrets = services.GetService<IRouterSecretStore>();
         var problems = new List<string>();
