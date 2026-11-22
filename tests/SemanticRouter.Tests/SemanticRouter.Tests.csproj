@@ -36,6 +36,9 @@
     <None Include="..\fixtures\update-file-list\*.dll" Link="fixtures\update-file-list\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <!-- GitHub's attestations for the 0.5.0 release's full packages (the API's answer, bundle_url left out), for UpdateAttestationTests. -->
     <None Include="..\fixtures\attestation\*.json" Link="fixtures\attestation\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <!-- A "Routed to the wrong tier" issue body as GitHub renders it, and the form itself, for MisrouteTriageTests. -->
+    <None Include="..\fixtures\misroute\*.md" Link="fixtures\misroute\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\.github\ISSUE_TEMPLATE\misroute.yml" Link="issue-forms\misroute.yml" CopyToOutputDirectory="PreserveNewest" />
     <!-- The desktop app's tray icons, for DesktopTests. -->
     <None Include="..\..\src\SemanticRouter.Desktop\Assets\tray*" Link="tray-icons\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <!-- The intended public API of the library packages, for ApiSurfaceDocumentationTests. -->

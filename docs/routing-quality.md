@@ -251,6 +251,26 @@ When a client sends the same prompt again shortly after it was answered, the ans
 
 It is off by default: a client that legitimately repeats a prompt (a "regenerate" button, a script) pays for a stronger model.
 
+## Misroute reports
+
+A **Routed to the wrong tier** issue (the dashboard's **Report**, or the issue form) gets one automatic comment from the `Misroute triage` workflow. It comes from `semantic-router triage-misroute`, which a maintainer can also run by hand:
+
+```bash
+gh issue view 412 --json body --jq .body > body.md
+semantic-router triage-misroute body.md --issue 412            # the comment, as Markdown
+semantic-router triage-misroute body.md --json                 # the same, for scripts
+semantic-router triage-misroute - --embeddings Hashing < body.md
+```
+
+It reads the form's answers: the decision line (or the `X-Prompt-Route-*` headers, or the classify output), the embedding settings, the router version, what the prompt needed and the paraphrase. Then:
+
+- **Re-run.** It classifies the paraphrase with the built-in template of the reported release (template 1 for 0.1.0–0.2.1, template 2 from 0.3.0), with the reported embeddings and threshold: Hashing, or the ONNX model named. Embeddings it cannot run (an embedding server) are replaced by the default ONNX model, and a version it cannot read (`main at abc1234`) by the current template; the comment says so. `--embeddings` and `--router-version` choose them instead.
+- **Reproduced** means the template gives the reported tier and route; **Same tier, another route** the tier through another route; **Not reproduced** another tier. Not reproduced usually means the reporter's own routes, thresholds or embedding model made the decision (the template is not their configuration), or the paraphrase reads differently from the prompt. A reason that comes from the request or the conversation (`ConversationAffinity`, `ModelOverride`, `RetryEscalation`) is noted, since a single prompt cannot show it.
+- **Proposed evaluation line.** The paraphrase with the tier the report says it needed (`Tier 2`, `T2`, or a tier's name). A report that names no tier gets one tier below a too-high decision or above a too-low one, marked "check it". A template route named in the report is added when its tier matches. `--issue` puts the issue number in the line's `note`.
+- **With and without it.** The template's evaluation set is run as it is and with the new line, and calibrated with it: whether the template already routes the line right (the misroute is likely in the reporter's configuration, and the line guards against a regression), whether a threshold would fix it, or whether it needs an utterance or a route change.
+
+It calls no model, needs no key, and works only from what the form says; it never asks for the original prompt. The workflow comments once, adds `routing-quality`, and leaves `needs-triage` for the maintainer who accepts the report. Everything from the issue is treated as untrusted: it is cut to a length limit, stripped of control and invisible characters, and written back only inside code spans and code blocks, so a report cannot mention people, add links or images, or inject HTML. A body without the form's headings is left alone (exit code 1). With ONNX embeddings, the first run downloads the model as the router does ([Network traffic](network.md)), into the `models` folder of the [local data directory](host.md#where-things-live).
+
 ## API
 
 | Method and path | Purpose |
