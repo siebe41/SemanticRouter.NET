@@ -236,7 +236,10 @@ public sealed class RouterMcpServerTests : RouterHostTest, IAsyncDisposable
         (await ToolNamesAsync(metrics)).Should().Equal(RouterMcpTools.Health, RouterMcpTools.Usage);
         JsonElement usage = await CallAsync(metrics, RouterMcpTools.Usage, new() { ["window"] = "day" });
         usage.GetProperty("totals").ValueKind.Should().Be(JsonValueKind.Object);
-        usage.GetProperty("forecast").ValueKind.Should().Be(JsonValueKind.Null, "the quota forecast (#374) is not wired yet");
+        JsonElement forecast = usage.GetProperty("forecast");
+        forecast.ValueKind.Should().Be(JsonValueKind.Object, "the usage tool carries the quota forecast, as GET api/forecast answers it");
+        forecast.GetProperty("connectors").ValueKind.Should().Be(JsonValueKind.Array);
+        forecast.GetProperty("budgets").ValueKind.Should().Be(JsonValueKind.Array);
     }
 
     [Fact]

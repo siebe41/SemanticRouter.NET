@@ -70,8 +70,11 @@ internal sealed record UsageResult
 
     public required IReadOnlyList<BudgetStatus> Budgets { get; init; }
 
-    /// <summary>When each subscription or budget runs out at the current pace (#374); <see langword="null"/> until then.</summary>
-    public object? Forecast { get; init; }
+    /// <summary>
+    /// When each subscription connector and budget runs out at the current pace, as <c>GET api/forecast</c> answers: for
+    /// now, whatever the window. <see langword="null"/> when the application registers no forecaster.
+    /// </summary>
+    public QuotaForecast? Forecast { get; init; }
 }
 
 /// <summary>The <c>health</c> tool's answer.</summary>
