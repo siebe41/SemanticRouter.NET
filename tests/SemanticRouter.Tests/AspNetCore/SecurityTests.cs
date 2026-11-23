@@ -512,7 +512,10 @@ public sealed class DashboardAccessTests : RouterHostTest
 
         (await client.SendAsync(Put("http://evil.example"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await client.SendAsync(Put(null, "cross-site"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.SendAsync(Put("https://localhost"))).StatusCode.Should().Be(HttpStatusCode.Forbidden, "the dashboard is served over http here (#407)");
+        (await client.SendAsync(Put("http://localhost:8080"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await client.SendAsync(Put("http://localhost"))).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await client.SendAsync(Put("http://LOCALHOST:80"))).StatusCode.Should().Be(HttpStatusCode.OK, "the default port and the case do not matter");
         (await client.SendAsync(Put(null))).StatusCode.Should().Be(HttpStatusCode.OK, "scripts such as curl send no Origin");
 
         // DNS rebinding: a page on evil.example whose name now resolves to 127.0.0.1.
@@ -555,6 +558,7 @@ public sealed class DashboardAccessTests : RouterHostTest
         (await rebound.Content.ReadAsStringAsync()).Should().Contain("is not this machine");
         (await client.SendAsync(Chat(origin: "http://evil.example"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await client.SendAsync(Chat(origin: "null"))).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.SendAsync(Chat(origin: "https://localhost"))).StatusCode.Should().Be(HttpStatusCode.Forbidden, "another scheme is another origin");
         LocalHttp.Requests.Should().BeEmpty("no refused request reaches a backend");
 
         (await client.SendAsync(Chat())).StatusCode.Should().Be(HttpStatusCode.OK, "SDKs and CLIs send no Origin");
@@ -952,6 +956,47 @@ public sealed class KeyedHttpClientTests
             _ => null,
         };
         follows.Should().BeFalse("a redirect would carry x-api-key and other key headers to another host");
+    }
+}
+
+/// <summary>A browser's Origin is the router's own only with the same scheme, host and port (#407).</summary>
+public sealed class OriginCheckTests
+{
+    private static Microsoft.AspNetCore.Http.HttpRequest Request(string scheme, string host)
+    {
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Request.Scheme = scheme;
+        context.Request.Host = new Microsoft.AspNetCore.Http.HostString(host);
+        return context.Request;
+    }
+
+    [Theory]
+    [InlineData("http", "router.example", "http://router.example", true)]
+    [InlineData("http", "router.example", "http://router.example:80", true)]
+    [InlineData("https", "router.example", "https://router.example:443", true)]
+    [InlineData("https", "router.example:8443", "https://router.example:8443", true)]
+    [InlineData("http", "[::1]:5080", "http://[::1]:5080", true)]
+    [InlineData("https", "router.example", "http://router.example", false)]
+    [InlineData("http", "router.example", "https://router.example", false)]
+    [InlineData("http", "router.example:5080", "http://router.example", false)]
+    [InlineData("http", "router.example", "http://evil.example", false)]
+    public void The_scheme_host_and_port_must_all_match(string scheme, string host, string origin, bool same) =>
+        new PublicOriginList([]).IsSameOrigin(Request(scheme, host), new Uri(origin)).Should().Be(same);
+
+    [Fact]
+    public void Public_origins_match_by_scheme_too_and_an_entry_without_one_means_https()
+    {
+        var list = new PublicOriginList(["https://router.home.lan", "router.corp.example:8443", " ", "not a url"]);
+        Microsoft.AspNetCore.Http.HttpRequest behindProxy = Request("http", "localhost:5080");
+
+        list.IsSameOrigin(behindProxy, new Uri("https://router.home.lan")).Should().BeTrue();
+        list.IsSameOrigin(behindProxy, new Uri("http://router.home.lan")).Should().BeFalse("http:// is another origin than the one configured");
+        list.IsSameOrigin(behindProxy, new Uri("https://router.corp.example:8443")).Should().BeTrue();
+        list.IsSameOrigin(behindProxy, new Uri("http://router.corp.example:8443")).Should().BeFalse();
+        list.NamesHost("router.home.lan").Should().BeTrue("the Host header carries no scheme");
+        list.NamesHost("ROUTER.corp.example:8443").Should().BeTrue();
+        list.NamesHost("router.corp.example").Should().BeFalse();
+        list.NamesHost(null).Should().BeFalse();
     }
 }
 

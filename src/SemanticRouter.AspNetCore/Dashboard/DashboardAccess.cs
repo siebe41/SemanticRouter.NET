@@ -131,7 +131,7 @@ internal sealed class DashboardAccess
     private readonly byte[]? _admin;
     private readonly byte[]? _readOnly;
     private readonly byte[]? _metrics;
-    private readonly HashSet<string> _publicAuthorities;
+    private readonly PublicOriginList _public;
     private readonly DashboardPolicy _policy;
     private readonly TimeProvider _time;
     private readonly Dictionary<string, RouterDashboardRole> _identityRoles;
@@ -145,7 +145,7 @@ internal sealed class DashboardAccess
         _admin = string.IsNullOrEmpty(adminToken) ? null : Encoding.UTF8.GetBytes(adminToken);
         _readOnly = string.IsNullOrEmpty(readOnlyToken) ? null : Encoding.UTF8.GetBytes(readOnlyToken);
         _metrics = string.IsNullOrEmpty(metricsToken) ? null : Encoding.UTF8.GetBytes(metricsToken);
-        _publicAuthorities = LocalHosts.Authorities(options.PublicOrigins);
+        _public = new PublicOriginList(options.PublicOrigins);
         _time = time ?? TimeProvider.System;
         _identityRoles = new Dictionary<string, RouterDashboardRole>(options.TrustedIdentityRoles, StringComparer.OrdinalIgnoreCase);
         Throttle = new SignInThrottle(_time);
@@ -204,13 +204,15 @@ internal sealed class DashboardAccess
 
     /// <summary>
     /// Whether the request comes from this machine, from the account the router runs as: a loopback connection that the
-    /// operating system says another account opened is remote (unless <see cref="NetworkOptions.TrustOtherLocalAccounts"/>).
+    /// operating system says another account opened is remote (unless <see cref="NetworkOptions.TrustOtherLocalAccounts"/>),
+    /// and so is one whose account a working lookup could not name (<see cref="LocalAccount.Unknown"/>): a failure does not
+    /// make a request local. Where there is no lookup (<see cref="LocalAccount.Unavailable"/>), loopback is local.
     /// No remote address counts as local (in-process callers, e.g. tests), unless <see cref="MarkRemote"/> said otherwise.
     /// </summary>
     public static bool IsLocal(HttpContext context) =>
         !context.Items.ContainsKey(RemoteKey)
         && (context.Connection.RemoteIpAddress is not { } remote
-            || (IPAddress.IsLoopback(remote) && (TrustsOtherAccounts(context) || LocalAccounts.Of(context) != LocalAccount.Other)));
+            || (IPAddress.IsLoopback(remote) && (TrustsOtherAccounts(context) || LocalAccounts.Of(context) is LocalAccount.Same or LocalAccount.Unavailable)));
 
     /// <summary>Whether the request comes over loopback from another account on this machine, which counts as remote.</summary>
     public static bool IsOtherLocalAccount(HttpContext context) =>
@@ -590,12 +592,11 @@ internal sealed class DashboardAccess
             return false;
         }
 
-        string authority = LocalHosts.Authority(uri);
-        return string.Equals(authority, request.Host.Value, StringComparison.OrdinalIgnoreCase) || _publicAuthorities.Contains(authority);
+        return _public.IsSameOrigin(request, uri);
     }
 
     private bool IsLocalHost(HttpRequest request) =>
-        LocalHosts.IsLocalName(request.Host.Host) || _publicAuthorities.Contains(request.Host.Value!);
+        LocalHosts.IsLocalName(request.Host.Host) || _public.NamesHost(request.Host.Value);
 
     private static bool FixedTimeEquals(byte[] a, byte[] b) =>
         CryptographicOperations.FixedTimeEquals(SHA256.HashData(a), SHA256.HashData(b));

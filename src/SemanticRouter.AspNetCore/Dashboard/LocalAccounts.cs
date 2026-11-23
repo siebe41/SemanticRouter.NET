@@ -14,7 +14,11 @@ namespace SemanticRouter.AspNetCore;
 /// <summary>Which account on this machine opened a loopback connection, as the operating system tells it.</summary>
 internal enum LocalAccount
 {
-    /// <summary>The operating system did not say: the connection is already gone, or the platform has no table to read.</summary>
+    /// <summary>
+    /// The lookup works here, but did not name the client's account: the table lists the router's own end of the
+    /// connection and not the client's (the client closed it, or it is a closed socket no process holds any more), or the
+    /// client's owner could not be read. Not trusted: an error must not make another account's request this machine's.
+    /// </summary>
     Unknown,
 
     /// <summary>The account the router runs as, or the machine's administrator (root, LocalSystem), who can read the router's keys anyway.</summary>
@@ -22,6 +26,13 @@ internal enum LocalAccount
 
     /// <summary>Another account on this machine.</summary>
     Other,
+
+    /// <summary>
+    /// The lookup is not available here: a platform without one, a connection without both addresses, or a table that
+    /// cannot be read or does not list even the router's own end of the connection (WSL 1, some sandboxes). Trusted as
+    /// this machine, as before the check existed, or the router could never be used without a token there.
+    /// </summary>
+    Unavailable,
 }
 
 /// <summary>
@@ -34,13 +45,13 @@ internal static class LocalAccounts
 {
     private static readonly object CacheKey = new();
 
-    /// <summary>The account behind this request's connection; <see cref="LocalAccount.Unknown"/> without both addresses.</summary>
+    /// <summary>The account behind this request's connection; <see cref="LocalAccount.Unavailable"/> without both addresses.</summary>
     public static LocalAccount Of(HttpContext context)
     {
         ConnectionInfo connection = context.Connection;
         if (connection.RemoteIpAddress is not { } remote || connection.LocalIpAddress is not { } local || connection.RemotePort == 0)
         {
-            return LocalAccount.Unknown;
+            return LocalAccount.Unavailable;
         }
 
         // HTTP/2 serves requests of one connection at the same time, so its items are locked.
@@ -89,7 +100,7 @@ internal static class LocalAccounts
 
             if (OperatingSystem.IsMacOS())
             {
-                return MacTable(client, server) is { } owners ? Compare(owners) : LocalAccount.Unknown;
+                return MacTable(client, server) is { } owners ? Compare(owners) : LocalAccount.Unavailable;
             }
 
             if (OperatingSystem.IsWindows())
@@ -100,15 +111,20 @@ internal static class LocalAccounts
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or DllNotFoundException or EntryPointNotFoundException
             or Win32Exception or SecurityException or ArgumentException or OutOfMemoryException)
         {
-            // Unknown: the caller decides as before this check existed.
+            // The table could not be read (a /proc/net the router may not read, a missing library): as on a platform
+            // without one. A failure after the router's own end was found is Unknown instead (Compare, Windows).
         }
 
-        return LocalAccount.Unknown;
+        return LocalAccount.Unavailable;
     }
 
-    /// <summary>Same when both ends belong to one user (or the client is root); Unknown when either end was not found.</summary>
+    /// <summary>
+    /// Same when both ends belong to one user (or the client is root); Unavailable when the router's own end was not
+    /// found (the table is not usable here); Unknown when only the client's end was not.
+    /// </summary>
     internal static LocalAccount Compare((uint? Client, uint? Server) owners) =>
-        owners is not { Client: { } client, Server: { } server } ? LocalAccount.Unknown
+        owners.Server is not { } server ? LocalAccount.Unavailable
+        : owners.Client is not { } client ? LocalAccount.Unknown
         : client == server || client == 0 ? LocalAccount.Same
         : LocalAccount.Other;
 
@@ -139,12 +155,16 @@ internal static class LocalAccounts
         return (clientUid, serverUid);
     }
 
+    // A row whose inode is 0 is a socket no process holds any more (closed, or a TIME_WAIT entry): the kernel prints uid 0
+    // for TIME_WAIT, which would read as root, so such a row names no owner. A client that closed its end right after
+    // sending a request is then not found (Unknown), rather than taken for root.
     internal static (IPEndPoint Local, IPEndPoint Remote, uint Uid)? LinuxRow(string line)
     {
         string[] fields = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return fields.Length >= 8 && fields[0].EndsWith(':')
+        return fields.Length >= 10 && fields[0].EndsWith(':')
             && LinuxEndPoint(fields[1]) is { } local && LinuxEndPoint(fields[2]) is { } remote
             && uint.TryParse(fields[7], NumberStyles.None, CultureInfo.InvariantCulture, out uint uid)
+            && ulong.TryParse(fields[9], NumberStyles.None, CultureInfo.InvariantCulture, out ulong inode) && inode != 0
             ? (local, remote, uid)
             : null;
     }
@@ -275,13 +295,13 @@ internal static class LocalAccounts
             offset += RoundUp(length);
         }
 
-        if (clientSocket is not { } c || serverSocket is not { } s || MacUidOffset(list.Slice(s.Start, s.Length), self, pid) is not { } at
-            || c.Length < at + 4)
+        // Without the router's own end (or its layout) the list is not usable here; without the client's, it is gone.
+        if (serverSocket is not { } s || MacUidOffset(list.Slice(s.Start, s.Length), self, pid) is not { } at)
         {
             return (null, null);
         }
 
-        return (BitConverter.ToUInt32(list[(c.Start + at)..]), self);
+        return clientSocket is { } c && c.Length >= at + 4 ? (BitConverter.ToUInt32(list[(c.Start + at)..]), self) : (null, self);
     }
 
     // xsocket_n: so_uid then so_last_pid follow so_oobmark, at 68 and 72 laid out naturally, at 64 and 68 packed to 4 bytes.
@@ -356,12 +376,39 @@ internal static class LocalAccounts
             (clientPid, serverPid) = (clientPid ?? found.Client, serverPid ?? found.Server);
         }
 
+        return WindowsAccount(clientPid, serverPid, WindowsAccountOf);
+    }
+
+    /// <summary>
+    /// Unavailable when the table does not list the router's own end; Unknown when it does not list the client's, or
+    /// names no process for it (pid 0: TIME_WAIT, a connection the client already closed), or that process cannot be
+    /// read; otherwise the account of the client's process.
+    /// </summary>
+    internal static LocalAccount WindowsAccount(int? clientPid, int? serverPid, Func<int, LocalAccount> accountOf)
+    {
+        if (serverPid is null)
+        {
+            return LocalAccount.Unavailable;
+        }
+
         if (clientPid is not { } pid || pid <= 0)
         {
             return LocalAccount.Unknown;
         }
 
-        return pid == Environment.ProcessId || pid == serverPid ? LocalAccount.Same : WindowsAccountOf(pid);
+        if (pid == Environment.ProcessId || pid == serverPid)
+        {
+            return LocalAccount.Same;
+        }
+
+        try
+        {
+            return accountOf(pid);
+        }
+        catch (Exception ex) when (ex is Win32Exception or SecurityException or UnauthorizedAccessException or ArgumentException)
+        {
+            return LocalAccount.Unknown;
+        }
     }
 
     // MIB_TCPTABLE_OWNER_PID: a count, then rows of state, local address, local port, remote address, remote port and owning

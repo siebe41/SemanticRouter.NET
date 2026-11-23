@@ -106,12 +106,15 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
 
         try
         {
+            // The activity log holds prompt previews. A new database is created owner-only before SQLite opens it (an
+            // empty file is an empty database), and SQLite gives the -wal and -shm files the database's mode, so none of
+            // them is readable by others even for a moment. A file an earlier release created is tightened after.
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+            OwnerOnly.CreateFile(path);
             using SqliteConnection connection = Open();
             int? from = Migrate(connection, path);
             Available = true;
 
-            // The activity log holds prompt previews. SQLite gives the -wal and -shm files the database's mode.
             foreach (string file in new[] { path, path + "-wal", path + "-shm" })
             {
                 OwnerOnly.Restrict(file);
@@ -1049,14 +1052,16 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     /// </summary>
     private static void Backup(SqliteConnection connection, string backup)
     {
+        // SQLite creates the target with the default mode, so it is created owner-only first: VACUUM INTO accepts an
+        // existing file when it is empty.
         string temp = backup + ".tmp";
         File.Delete(temp);
+        OwnerOnly.CreateFile(temp);
         using (SqliteCommand copy = Command(connection, "VACUUM INTO $file;", ("$file", temp)))
         {
             copy.ExecuteNonQuery();
         }
 
-        OwnerOnly.Restrict(temp);
         File.Move(temp, backup, overwrite: true);
     }
 

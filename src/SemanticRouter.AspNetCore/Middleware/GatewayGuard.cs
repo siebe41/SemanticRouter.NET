@@ -17,7 +17,7 @@ internal sealed class GatewayGuard(IEnumerable<string> publicOrigins)
 {
     private static readonly GatewayGuard Default = new([]);
 
-    private readonly HashSet<string> _publicAuthorities = LocalHosts.Authorities(publicOrigins);
+    private readonly PublicOriginList _public = new(publicOrigins);
 
     /// <summary>The registered guard (which knows the dashboard's public origins), or one that knows none.</summary>
     public static GatewayGuard For(HttpContext context) => context.RequestServices.GetService<GatewayGuard>() ?? Default;
@@ -26,7 +26,7 @@ internal sealed class GatewayGuard(IEnumerable<string> publicOrigins)
     public string? Refusal(HttpContext context)
     {
         HttpRequest request = context.Request;
-        if (DashboardAccess.IsLocal(context) && !LocalHosts.IsLocalName(request.Host.Host) && !_publicAuthorities.Contains(request.Host.Value ?? string.Empty))
+        if (DashboardAccess.IsLocal(context) && !LocalHosts.IsLocalName(request.Host.Host) && !_public.NamesHost(request.Host.Value))
         {
             return $"Host '{request.Host.Host}' is not this machine. Use http://localhost:{request.Host.Port ?? 80}, send a gateway key, " +
                    "or add the address to SemanticRouter:Dashboard:PublicOrigins.";
@@ -34,9 +34,7 @@ internal sealed class GatewayGuard(IEnumerable<string> publicOrigins)
 
         string? origin = request.Headers.Origin;
         if (!string.IsNullOrEmpty(origin)
-            && (!Uri.TryCreate(origin, UriKind.Absolute, out Uri? uri)
-                || (!string.Equals(LocalHosts.Authority(uri), request.Host.Value, StringComparison.OrdinalIgnoreCase)
-                    && !_publicAuthorities.Contains(LocalHosts.Authority(uri)))))
+            && (!Uri.TryCreate(origin, UriKind.Absolute, out Uri? uri) || !_public.IsSameOrigin(request, uri)))
         {
             return "Web pages on other sites cannot use the gateway (the request's Origin is not the router's own).";
         }
@@ -58,14 +56,70 @@ internal static class LocalHosts
     /// <summary>The <c>host[:port]</c> a browser puts in the Host header for <paramref name="uri"/>.</summary>
     public static string Authority(Uri uri) => uri.IsDefaultPort ? uri.Host : $"{uri.Host}:{uri.Port}";
 
-    /// <summary>The authorities of absolute origins such as <c>https://router.example.com</c>; anything else is ignored.</summary>
-    public static HashSet<string> Authorities(IEnumerable<string> origins) =>
-        new(
-            origins
-                .Select(o => Uri.TryCreate(o.Trim(), UriKind.Absolute, out Uri? uri) ? Authority(uri) : null)
-                .Where(a => a is not null)
-                .Cast<string>(),
-            StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// The origin (<c>scheme://host:port</c>, lower case, with the scheme's default port written out) of an absolute
+    /// address such as a browser's <c>Origin</c> header.
+    /// </summary>
+    public static string Origin(Uri uri) =>
+        string.Create(CultureInfo.InvariantCulture, $"{uri.Scheme}://{uri.Host}:{uri.Port}").ToLowerInvariant();
+
+    /// <summary>
+    /// The origin the request was sent to: its scheme (as the forwarded headers left it) and the host and port in its
+    /// Host header, the port defaulting to the scheme's.
+    /// </summary>
+    public static string Origin(HttpRequest request)
+    {
+        int port = request.Host.Port ?? (string.Equals(request.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? 443 : 80);
+        return string.Create(CultureInfo.InvariantCulture, $"{request.Scheme}://{request.Host.Host}:{port}").ToLowerInvariant();
+    }
+}
+
+/// <summary>
+/// The addresses in <see cref="RouterDashboardOptions.PublicOrigins"/>. An entry is an origin such as
+/// <c>https://router.home.lan</c>; one written without a scheme (<c>router.home.lan:8443</c>) means <c>https://</c>.
+/// Loopback requests may name an entry's host and port in their Host header, and a browser's <c>Origin</c> must match
+/// an entry's scheme, host and port.
+/// </summary>
+internal sealed class PublicOriginList
+{
+    private readonly HashSet<string> _authorities = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _origins = new(StringComparer.OrdinalIgnoreCase);
+
+    public PublicOriginList(IEnumerable<string> entries)
+    {
+        foreach (string entry in entries)
+        {
+            string value = entry.Trim();
+            if (value.Length == 0)
+            {
+                continue;
+            }
+
+            if (!value.Contains("://", StringComparison.Ordinal))
+            {
+                value = "https://" + value;
+            }
+
+            if (Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) && uri.Host.Length > 0)
+            {
+                _authorities.Add(LocalHosts.Authority(uri));
+                _origins.Add(LocalHosts.Origin(uri));
+            }
+        }
+    }
+
+    /// <summary>Whether a Host header (<c>host[:port]</c>) names one of the entries.</summary>
+    public bool NamesHost(string? host) => !string.IsNullOrEmpty(host) && _authorities.Contains(host);
+
+    /// <summary>
+    /// Whether a browser's <paramref name="origin"/> is the router's own: the scheme, host and port the request was sent
+    /// to, or one of the entries. <c>http://router.example</c> is not <c>https://router.example</c>.
+    /// </summary>
+    public bool IsSameOrigin(HttpRequest request, Uri origin)
+    {
+        string value = LocalHosts.Origin(origin);
+        return string.Equals(value, LocalHosts.Origin(request), StringComparison.Ordinal) || _origins.Contains(value);
+    }
 }
 
 /// <summary>Whether a gateway request may go on, and as which client.</summary>

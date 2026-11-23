@@ -153,6 +153,42 @@ public sealed class MemorySourceTests
         title.Should().NotContain("value");
     }
 
+    [Theory]
+    [InlineData("---\nname: \"Quoted\"\n---\n", "Quoted")]
+    [InlineData("---\r\nname:   Spaced  \r\n---", "Spaced")]
+    [InlineData("---\nname:\nname: Second\n---\n", "Second")]
+    [InlineData("---\nname: Unclosed\n", null)]
+    [InlineData("--- \nname: Not frontmatter\n---\n", null)]
+    [InlineData("text\n---\nname: Late\n---\n", null)]
+    [InlineData("", null)]
+    public void The_frontmatter_name_is_read_line_by_line(string content, string? expected) =>
+        ClaudeCodeMemorySource.FrontmatterName(content).Should().Be(expected);
+
+    [Fact]
+    public async Task Pathological_notes_are_read_in_linear_time()
+    {
+        // #407: from every '[' a backtracking pattern scanned on to the next ']', and the frontmatter pattern looked for
+        // its closing line after every "name:" line, both quadratic in the note's length.
+        string brackets = new('[', 100_000);
+        string links = string.Concat(Enumerable.Repeat("[](a.md", 20_000));
+        string names = "---\n" + string.Concat(Enumerable.Repeat("name:\n", 50_000));
+
+        await Task.Run(() =>
+        {
+            MarkdownNoteParser.Parse("brackets.md", brackets).Links.Should().BeEmpty();
+            MarkdownNoteParser.Parse("links.md", links).Links.Should().BeEmpty();
+            ClaudeCodeMemorySource.TitleFor(new MemoryDocument { Path = "CLAUDE.md", Content = names }).Should().Be("CLAUDE.md (user)");
+        }).WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public void Markdown_links_are_still_found()
+    {
+        ParsedNote parsed = MarkdownNoteParser.Parse("a.md", "See [the plan](plans/Q3%20plan.md#goals), [web](https://x.example/y.md) and [b](B.MD).");
+
+        parsed.Links.Should().Equal(new NoteLink("plans/Q3 plan.md", IsPath: true), new NoteLink("B.MD", IsPath: true));
+    }
+
     [Fact]
     public void Knowledge_graph_source_reads_entities_and_relations_from_jsonl()
     {

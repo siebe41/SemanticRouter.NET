@@ -83,6 +83,37 @@ public sealed class PassThroughUsageTests : RouterHostTest
     }
 
     [Fact]
+    public async Task Backend_headers_that_act_on_the_routers_origin_are_not_relayed()
+    {
+        StubHttpMessageHandler upstream = new((request, body) =>
+        {
+            HttpResponseMessage reply = Upstream().Respond(request, body);
+            reply.Headers.TryAddWithoutValidation("Set-Cookie", "session=backend; Path=/");
+            reply.Headers.TryAddWithoutValidation("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+            reply.Headers.TryAddWithoutValidation("Access-Control-Allow-Origin", "*");
+            reply.Headers.TryAddWithoutValidation("Access-Control-Allow-Credentials", "true");
+            reply.Headers.TryAddWithoutValidation("Clear-Site-Data", "\"cookies\"");
+            reply.Headers.TryAddWithoutValidation("Alt-Svc", "h3=\"evil.example:443\"");
+            reply.Headers.TryAddWithoutValidation("x-request-id", "req-1");
+            return reply;
+        });
+        LocalHttp = upstream;
+        HttpClient client = await StartDispatchAsync();
+
+        HttpResponseMessage response = await client.PostAsync("/v1/chat/completions", Json(Streamed));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string[] names = [.. response.Headers.Select(h => h.Key)];
+        names.Should().NotContain(n =>
+            n.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase)
+            || n.Equals("Strict-Transport-Security", StringComparison.OrdinalIgnoreCase)
+            || n.StartsWith("Access-Control-", StringComparison.OrdinalIgnoreCase)
+            || n.Equals("Clear-Site-Data", StringComparison.OrdinalIgnoreCase)
+            || n.Equals("Alt-Svc", StringComparison.OrdinalIgnoreCase));
+        response.Headers.GetValues("x-request-id").Should().ContainSingle().Which.Should().Be("req-1", "other backend headers still pass through");
+    }
+
+    [Fact]
     public async Task A_client_that_asked_for_usage_gets_the_usage_chunk()
     {
         StubHttpMessageHandler upstream = Upstream();

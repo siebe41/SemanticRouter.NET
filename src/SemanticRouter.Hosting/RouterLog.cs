@@ -29,8 +29,10 @@ internal static class RouterLog
             File.Move(log, log + ".1", overwrite: true);
         }
 
-        var writer = new StreamWriter(new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+        // A new log is created owner-only from the start; one an earlier release created is tightened.
+        OwnerOnly.CreateFile(log);
         OwnerOnly.Restrict(log);
+        var writer = new StreamWriter(new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
         TextWriter synchronized = TextWriter.Synchronized(writer);
         Console.SetOut(synchronized);
         Console.SetError(synchronized);
