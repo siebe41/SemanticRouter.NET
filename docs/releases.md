@@ -211,6 +211,7 @@ Open the run under **Actions > Release** and read the failed job's log. The usua
 3. Delete every `src/*/CompatibilitySuppressions.xml`. The breaks they approved are in the new baseline, and a suppression that no longer matches anything fails the pack ("Unnecessary suppressions found").
 4. In each `src/*/PublicAPI.Unshipped.txt`, move the lines to the project's `PublicAPI.Shipped.txt`: add each new line to it, and for each `*REMOVED*` line delete the line it names from it. Leave `PublicAPI.Unshipped.txt` with only its first line, `#nullable enable` ([CONTRIBUTING.md](../CONTRIBUTING.md#public-api-and-package-validation)).
 5. Run `dotnet build -c Release` and `dotnet pack -c Release`; both must pass, with no RS or CP diagnostic. CI runs the same on the pull request.
+6. In [the state schema table](host.md#upgrading-and-going-back) in `docs/host.md`, extend the last row's range to the version just released, or add a row when it raised `SqliteRouterState.SchemaVersion`.
 
 ## Code signing
 
