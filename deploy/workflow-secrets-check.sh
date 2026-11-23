@@ -15,7 +15,10 @@
 # - only the jobs in oidc_jobs below may ask for an OIDC token (id-token: write, or write-all), and never a whole
 #   workflow: every step of such a job can ask for one. Only the jobs in signing_jobs may run in the windows-signing
 #   environment, whose OIDC token Azure accepts for signing (docs/desktop.md#signing-in-to-azure), and a job that logs
-#   in to Azure (azure/login) must be one of them.
+#   in to Azure (azure/login) must be one of them;
+# - every actions/checkout step sets persist-credentials: false. By default checkout leaves the workflow's token in
+#   .git/config, where every later step of the job, the build's code included, can read it. A step that needs the
+#   token gets it in its env: like any other secret.
 #
 #   deploy/workflow-secrets-check.sh [workflow...]
 #
@@ -95,11 +98,19 @@ for file in "$@"; do
       if (line ~ /^(      - |        )name:/) { l = line; sub(/^[[:space:]]*(- )?name:[[:space:]]*/, "", l); label[key] = trim(l) }
       if (secret) { holds[key] = 1; held[job] = 1 }
       if (line ~ /uses:[[:space:]]*azure\/login@/) { holds[key] = 1; azure[job] = 1 }
+      if (line ~ /uses:[[:space:]]*actions\/checkout@/) checkout[key] = 1
+      if (line ~ /^[[:space:]]+persist-credentials:[[:space:]]*["\047]?false["\047]?[[:space:]]*(#.*)?$/) persisted[key] = 1
       if (line ~ /dotnet[[:space:]]+(restore|build|publish|test|pack)([[:space:]]|$)|deploy\/publish-desktop\.sh/) builds[job] = 1
       if (line ~ /deploy\/package-installer\.sh/ && line !~ /PUBLISH_DIR=/) builds[job] = 1
       if (line ~ /(^|[^[:alnum:]_.\/-])dotnet[[:space:]]/) dotnet[key] = 1
     }
     END {
+      for (key in checkout) {
+        if (!(key in persisted)) {
+          split(key, part, SUBSEP)
+          error("job " part[1] ", step " q label[key] q " checks out the repository and leaves the workflow" q "s token in .git/config for every later step. Add persist-credentials: false under its with:.")
+        }
+      }
       for (job in builds) {
         if (job in held) error("job " job " builds (dotnet, deploy/publish-desktop.sh, or deploy/package-installer.sh without PUBLISH_DIR) and holds a secret. Build in a job without secrets and hand the result on as an artifact.")
         if (job in oidc) error("job " job " builds (dotnet, deploy/publish-desktop.sh, or deploy/package-installer.sh without PUBLISH_DIR) and can ask for an OIDC token. Build in a job without one and hand the result on as an artifact.")
@@ -133,4 +144,4 @@ fi
 if [ "$failed" = true ]; then
   exit 1
 fi
-echo "In $checked workflows, every secret goes to the step that needs it, no step that builds or runs dotnet holds or follows one, and only the jobs allowed to ask for an OIDC token do."
+echo "In $checked workflows, every secret goes to the step that needs it, no step that builds or runs dotnet holds or follows one, only the jobs allowed to ask for an OIDC token do, and no checkout leaves the token behind."

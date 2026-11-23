@@ -10,26 +10,52 @@
 #   jobs have attached them, and attests all of them (id-token and attestations write, actions/attest on release/*);
 # - the app embeds the trust root, and it is Sigstore's, with an authority and an ECDSA log the app can check.
 #
-# With --online, also compares the trust root with the current one in sigstore/root-signing: when Sigstore adds a
-# certificate authority or a log, a release must carry it, or the next releases' attestations may not verify.
+# With --online, also compares the trust root with Sigstore's current one: when Sigstore adds a certificate authority or
+# a log, a release must carry it, or the next releases' attestations may not verify. The current one comes from
+# `gh attestation trusted-root`, which fetches it from Sigstore's TUF repository and verifies it against the TUF root
+# gh carries (signed, versioned metadata that expires, so a stale or altered copy fails), rather than from a branch of
+# a git repository. It prints one trust root per line, Sigstore's public-good one and GitHub's own, and needs no token;
+# the public-good one (with the Fulcio authority https://fulcio.sigstore.dev) is compared, as JSON, with the app's copy.
+# --trusted-root <file> compares with a file that command wrote instead, without the network.
 #
-# Usage: deploy/update-attestation-check.sh [--online] [<release workflow>]
+# With --advisory, a trust root that differs or cannot be fetched is a warning, not a failure: CI's pull request runs
+# use it, since Sigstore changing its trust root is not the pull request's doing. The release runs without it and fails.
+#
+# Usage: deploy/update-attestation-check.sh [--online | --trusted-root <file>] [--advisory] [<release workflow>]
 set -euo pipefail
 
+usage="Usage: $0 [--online | --trusted-root <file>] [--advisory] [<release workflow>]"
 online=false
-if [ "${1:-}" = --online ]; then
-  online=true
-  shift
-fi
+advisory=false
+current_root=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --online) online=true; shift ;;
+    --trusted-root)
+      [ $# -ge 2 ] && [ -f "$2" ] || { echo "--trusted-root needs a file. $usage" >&2; exit 2; }
+      current_root="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
+      shift 2 ;;
+    --advisory) advisory=true; shift ;;
+    -*) echo "Unknown option $1. $usage" >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
 
 cd "$(dirname "$0")/.."
 source=src/SemanticRouter.Desktop/UpdateAttestation.cs
 trust_root=src/SemanticRouter.Desktop/Assets/sigstore-trusted-root.json
-upstream=https://raw.githubusercontent.com/sigstore/root-signing/main/targets/trusted_root.json
 failures=0
 fail() {
   echo "::error::$1"
   failures=$((failures + 1))
+}
+# A problem with Sigstore's current trust root: a warning with --advisory, else a failure.
+trust_root_problem() {
+  if [ "$advisory" = true ]; then
+    echo "::warning::$1"
+  else
+    fail "$1"
+  fi
 }
 
 named="$(sed -n 's/.*const string Workflow = "\([^"]*\)";.*/\1/p' "$source")"
@@ -86,13 +112,63 @@ then
   fail "$trust_root is not a Sigstore trust root the app can check attestations against."
 fi
 
-if [ "$online" = true ]; then
-  current="$(mktemp)"
-  trap 'rm -f "$current"' EXIT
-  if ! curl -fsSL --retry 3 -o "$current" "$upstream"; then
-    fail "Could not download Sigstore's trust root from $upstream."
-  elif ! cmp -s "$current" "$trust_root"; then
-    fail "Sigstore's trust root changed. Run: curl -fsSL -o $trust_root $upstream, check the diff (a new authority or log) and commit it, so the next releases verify."
+if [ "$online" = true ] && [ -z "$current_root" ]; then
+  current_root="$(mktemp)"
+  trap 'rm -f "$current_root"' EXIT
+  if ! command -v gh >/dev/null; then
+    trust_root_problem "Could not check Sigstore's current trust root: the GitHub CLI (gh) is not installed."
+    current_root=""
+  elif ! gh attestation trusted-root >"$current_root"; then
+    trust_root_problem "Could not fetch Sigstore's current trust root (gh attestation trusted-root, from Sigstore's TUF repository)."
+    current_root=""
+  fi
+fi
+
+compared=false
+if [ -n "$current_root" ]; then
+  # The public-good root in the file (one JSON document per line, as gh prints them, or a single trusted_root.json)
+  # against the app's copy, as JSON: exits 0 when they are the same, 1 when they differ (printing what), 2 when the file
+  # has no single public-good root.
+  status=0
+  differences="$("$python" - "$current_root" "$trust_root" <<'EOF'
+import json, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+try:
+    roots = [json.loads(text)]
+except ValueError:
+    try:
+        roots = [json.loads(line) for line in text.splitlines() if line.strip()]
+    except ValueError as error:
+        print(f"it is not JSON ({error})")
+        sys.exit(2)
+public = [r for r in roots if isinstance(r, dict)
+          and any(a.get("uri") == "https://fulcio.sigstore.dev" for a in r.get("certificateAuthorities", []))]
+if len(public) != 1:
+    print(f"it has {len(public)} public-good trust roots (with the authority https://fulcio.sigstore.dev), not one")
+    sys.exit(2)
+current, carried = public[0], json.load(open(sys.argv[2], encoding="utf-8"))
+if current == carried:
+    sys.exit(0)
+def entries(root):
+    found = set()
+    for kind, key in (("certificateAuthorities", "uri"), ("tlogs", "baseUrl"), ("ctlogs", "baseUrl"), ("timestampAuthorities", "uri")):
+        for entry in root.get(kind, []):
+            found.add((kind, entry.get(key), json.dumps(entry, sort_keys=True)))
+    return found
+now, then = entries(current), entries(carried)
+changes = [f"new or changed in {kind}: {name}" for kind, name, _ in sorted(now - then)]
+changes += [f"gone or changed in {kind}: {name}" for kind, name, _ in sorted(then - now)]
+print("; ".join(changes) or "they differ outside the authorities and logs")
+sys.exit(1)
+EOF
+  )" || status=$?
+  fix="gh attestation trusted-root | jq 'select(any(.certificateAuthorities[]?; .uri == \"https://fulcio.sigstore.dev\"))' > $trust_root"
+  if [ "$status" -eq 0 ]; then
+    compared=true
+  elif [ "$status" -eq 1 ]; then
+    trust_root_problem "Sigstore's trust root changed ($differences). Run: $fix, check the diff (a new authority or log) and commit it, so the next releases verify."
+  else
+    trust_root_problem "Could not read Sigstore's current trust root: ${differences:-the comparison failed}."
   fi
 fi
 
@@ -100,4 +176,4 @@ if [ "$failures" -gt 0 ]; then
   echo "$failures problem(s) with the attestations the desktop app checks its updates against."
   exit 1
 fi
-echo "The release workflow attests every update package as the desktop app expects$([ "$online" = true ] && echo ', and the app carries the current Sigstore trust root')."
+echo "The release workflow attests every update package as the desktop app expects$([ "$compared" = true ] && echo ', and the app carries the current Sigstore trust root')."

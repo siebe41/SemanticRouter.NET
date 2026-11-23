@@ -59,6 +59,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Only the repository owner releases: a v* tag pushed by anyone else publishes nothing, since every other job needs
       # this one. The "Cut a release" workflow (cut-release.yml) creates the tag with the owner's token, so its tag is the

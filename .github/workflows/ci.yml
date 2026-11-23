@@ -29,6 +29,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Built from the Go module proxy at a pinned version; the Go checksum database verifies the
       # source, so no third-party action or unverified binary download is involved.
@@ -51,6 +52,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -75,6 +78,8 @@ jobs:
       SEMANTIC_ROUTER_TEST_MODELS: ${{ github.workspace }}/.models
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -166,10 +171,17 @@ jobs:
             "Velopack native binaries" "Rust standard library" "AppImage type2-runtime"
 
       # The release still attests every update package as the desktop app checks it, and the app carries Sigstore's
-      # current trust root: like the weekly advisory run, a new trust root fails CI until it is copied in.
+      # current trust root, fetched through Sigstore's TUF repository (gh attestation trusted-root, no token needed). A
+      # new trust root is not a pull request's doing, so it is a warning there and on main; the weekly run fails on it,
+      # and so does the release.
       - name: Update attestation
         if: runner.os == 'Linux'
-        run: deploy/update-attestation-check.sh --online
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            deploy/update-attestation-check.sh --online
+          else
+            deploy/update-attestation-check.sh --online --advisory
+          fi
 
       # Package validation (Directory.Build.targets) fails the pack when a library package's public API breaks the last
       # release on nuget.org; restore downloaded that release.
@@ -219,6 +231,8 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -266,6 +280,8 @@ jobs:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -328,6 +344,8 @@ jobs:
       AVALONIA_TELEMETRY_OPTOUT: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -373,6 +391,8 @@ jobs:
       AVALONIA_TELEMETRY_OPTOUT: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -416,6 +436,8 @@ jobs:
       DOTNET_CLI_TELEMETRY_OPTOUT: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -445,6 +467,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Built as a version of its own, as the release builds the tag's, to check that the version reaches the router.
       - name: Build the image
