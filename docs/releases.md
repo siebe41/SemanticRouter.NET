@@ -245,6 +245,8 @@ What is checked covers the code that ends up running, not just the installer, an
 
 These are the signature rules the desktop app applies to an update when `Updates:Publisher` is set ([UpdatePublisher](../src/SemanticRouter.Desktop/UpdatePublisher.cs)), with the publisher taken from the release itself: the installer's signer on Windows, the repository's Apple team ID (`APPLE_TEAM_ID`) on macOS. The app's check also refuses .NET host files (`*.runtimeconfig.json`, `*.deps.json`) that point outside the package; the release does not check those.
 
+The app also requires the version in the signed part of the package to be the one its `.nuspec` gives ([Update publisher](enterprise.md#update-publisher)), so the release checks that too, signed or not: on Windows, `deploy/package-installer.sh` runs `deploy/update-file-list.cs check`, which fails unless `SemanticRouter.Files.dll` names the `.nuspec`'s version (`deploy/publish-desktop.sh` passes the release's version to `write`); on macOS, `deploy/installer-signature-check.sh` fails unless the update package's `Info.plist` is an XML property list whose `CFBundleShortVersionString` and `CFBundleVersion` are the release's version, as its `.nuspec` is.
+
 The checks are [`deploy/installer-signature-check.ps1`](../deploy/installer-signature-check.ps1) and [`deploy/installer-signature-check.sh`](../deploy/installer-signature-check.sh). On a platform that is meant to be signed, any check that does not pass fails the release; otherwise each line in the summary says **unsigned**. A file that is missing fails either way. CI runs both on its unsigned installer builds, so a change in what Velopack puts where is caught before a release.
 
 ### The signing dry run
