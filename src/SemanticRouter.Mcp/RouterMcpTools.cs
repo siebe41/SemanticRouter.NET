@@ -125,7 +125,8 @@ internal sealed class RouterMcpTools(
 
     [McpServerTool(Name = Usage, Title = "Usage and cost", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [Description("Tokens, requests and cost at the current prices for a window, in total and by model, connector, route and client, with the " +
-        "budgets and how much of each is spent.")]
+        "budgets and how much of each is spent, and the quota forecast: when each subscription connector and budget runs out at the current " +
+        "pace, against its next reset, and which routes to shift.")]
     public UsageResult GetUsage(
         [Description("day, week or month (the budget periods, in the budget time zone), 30d, or 7d (the default: the last 7 days).")] string? window = null)
     {
@@ -147,7 +148,7 @@ internal sealed class RouterMcpTools(
             ByRoute = By(UsageGrouping.Route),
             ByClient = By(UsageGrouping.Client),
             Budgets = services.GetRequiredService<BudgetGate>().Status(usage),
-            Forecast = QuotaForecast(configuration, since, until), // #374
+            Forecast = services.GetService<QuotaForecaster>()?.Forecast(configuration),
         };
     }
 
@@ -274,16 +275,6 @@ internal sealed class RouterMcpTools(
             Replay = ReplaySummary.From(report, MaxMovesListed),
             Note = "Recorded as a suggestion on the dashboard's Router learned page; nothing was applied. A person applies or dismisses it there.",
         };
-    }
-
-    /// <summary>
-    /// The quota forecast for the usage window: when each subscription or budget runs out at the current pace.
-    /// <see langword="null"/> until the forecast exists. #374: fill this from the quota forecast when it lands.
-    /// </summary>
-    private static object? QuotaForecast(RouterConfiguration configuration, DateTimeOffset since, DateTimeOffset until)
-    {
-        _ = (configuration, since, until);
-        return null;
     }
 
     /// <summary>The request, after checking the caller's role reaches <paramref name="tool"/> (the tool list already says so).</summary>

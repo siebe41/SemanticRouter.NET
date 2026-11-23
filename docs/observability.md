@@ -126,6 +126,56 @@ A provider that reports when its limit ends replaces the fixed `QuotaCooldown` (
 
 A time without a date means the next such time. A time without a zone uses this machine's zone. The dashboard's model table shows "cooling down until …".
 
+## Quota forecast
+
+The Overview's **Quota forecast** card and `GET {dashboard}/api/forecast` say, for each subscription connector (one that runs a program: Claude Code, Codex, Copilot, a custom CLI), each connector with a limit under `Usage:Quotas`, and each [budget](#budgets), when the current pace runs into the limit and how that compares with the next reset: "At this pace claude runs out Thu 26 Nov 15:00 (between 13:10 and 16:50); it resets Tue 1 Dec 09:00." It only reads: nothing is changed, and nothing is sent anywhere.
+
+**What it learns from.** A subscription does not publish its limit, so the forecast learns it from two things the router stores:
+
+- **Limit episodes.** Each time a connector ran out of its usage limit (a request failed as a quota or rate limit): when the first request was refused, when the provider said the limit resets ([the reset times above](#usage-limits-that-say-when-they-reset)), and when the connector served a request again. Refusals until it serves again are one episode. The limit resets at the reported time, or at the first request served when that came sooner or nothing was reported (no usage is lost between the two: the requests meanwhile failed). Episodes hold times only, no message, are kept for 100 days (at most 100 per connector) in the router's state (the SQLite file with `UseSqliteState`), and start with the version that added the forecast: the days-only limit history before it had no reset times.
+- **The usage ledger**: the tokens of every request the connector served.
+
+A **cycle** runs from one reset to the next time the connector ran out. The learned limit is the median of what the router sent through the connector in its last 8 cycles, in tokens (input, output and cache, as budgets count them), or in requests for a connector that reports no tokens. A cycle starts at the reset of the episode before it, so the first episode gives no cycle unless the **period** is known: then a cycle starts a whole period before its own reset. The period is `Usage:Quotas:<connector>:Period`, or learned when at least three reported resets are a whole number of one interval apart (within 2% or 15 minutes), as a weekly limit's are. Without a period, a cycle longer than 8 days is not counted, and the next reset is not known unless the connector is out of its limit now.
+
+**Confidence** is the number of cycles: `none` (no limit known: the card says so), `low` (1), `medium` (2–3), `high` (4 or more), or `configured` for a limit set by hand.
+
+**The pace** is the usage per hour over the cycle length (the period, else the median cycle; between an hour and 7 days), in day-long buckets (seven buckets for a shorter window), each weighing half as much as the one two days newer. The time the connector was out of its limit, and the time before its first request, do not count. **The error band** comes from a back-test over the stored cycles (at least two, or one with a limit set by hand): each is replayed from its midpoint with the limit learned from the others and the pace at that moment, and the run-out it gives is compared with when the connector really ran out. The mean error, as a share of the time from the midpoint to the run-out, sets the band around today's forecast (`backtest.meanRelativeError`, also in hours). The tests hold it to 15% on synthetic weekly cycles used 16 hours a day with ±15% noise per hour.
+
+**States and suggestions.**
+
+| State | When | What the card lists |
+|---|---|---|
+| `Hot` | Runs out before the next reset (without a known reset: within a day) | The routes and gateway clients using the most of it this cycle, and for each route a local model that could take it: one that already serves its tier, else the highest-tier local model below it (lower the route to that tier). Check the change on the **What if** page before applying it |
+| `Cold` | At least 25% of the limit left at the reset at this pace | Routes served last week by models that are not on a subscription, whose tier is below the connector's best model: raising them to its tier would move them to it. Each says whether last week's rate of it would fit in what is left |
+| `Ok` | Neither | — |
+| `Limited` | Out of its limit now | Until when, if the provider said |
+| `Unknown` | No limit known, or no reset to count the current cycle from | Why |
+
+Budgets get `Hot`, `Ok` or `Spent`: the spend or tokens of the period so far, the pace over the last day (for a daily budget) or week, weighted to recent hours, and when that spends whichever limit runs out first.
+
+**Setting the limit by hand.** A limit or period under `Usage:Quotas` (by connector name) overrides the learned one; the learned limit is still reported beside it. It informs the forecast only: the router does not stop at it (a [budget](#budgets) does that).
+
+```jsonc
+"Usage": {
+  "Quotas": {
+    "claude": {
+      "MaxTokens": 40000000,                    // or "MaxRequests" (premium requests, messages); one of them, or neither to only set the period
+      "Period": "7.00:00:00",                   // at least an hour
+      "PeriodStart": "2026-11-17T09:00:00+01:00" // a moment it reset; later resets are whole periods after it (default: the latest reset seen)
+    }
+  }
+}
+```
+
+**What it cannot see.** Usage of the same account outside the router (the CLI or the website used directly) is not in the ledger, so a learned limit is the router's share of it, and a forecast is late by as much as that use. A connector with two limits (Claude Code's 5-hour session and weekly limits) mixes their episodes: set `Period` for the one to forecast. A limit that does not reset at a fixed interval (a session that starts with its first message) is forecast only while the current cycle is no longer than one and a half times the longest learned cycle.
+
+`GET api/forecast` returns `generatedAt`, `timeZone` (the `Usage:TimeZone` the summaries use), `whatIf` (`#/whatif`) and:
+
+- `connectors`: per connector `connector`, `subscription`, `status`, `unit` (`Tokens` or `Requests`), `summary`, `limit` (`value`, `source` (`configured` or `learned`), `learned`, `cycles`, `learnedMin`, `learnedMax`, `confidence`), `period` and `periodSource`, `cycleStart`, `nextReset`, `limitedUntil`, `used` and `usedShare` (this cycle), `pacePerHour`, `runsOutAt` with `runsOutEarliest` and `runsOutLatest`, `shareAtReset`, `backtest` (`cycles`, `meanAbsoluteErrorHours`, `meanRelativeError`), `limitHits` (episodes stored), `routes` and `clients` (`key`, `requests`, `amount`, `share`, and for a route `moveTo`: `route`, `fromTier`, `tier`, `model`, `local`), `upgrades` (`route`, `tier`, `requests`, `amount`, `amountUntilReset`, `fits`, `servedBy`, `moveTo`) and `notes`;
+- `budgets`: per budget `name`, `covers`, `period`, `periodEnd`, `unit` (`Tokens` or `Usd`), `used`, `limit`, `pacePerHour`, `runsOutAt`, `shareAtEnd` and `status`.
+
+The metrics role may read it, as `GET api/usage`: it holds figures and route and client names, never prompt text or an error message.
+
 ## Traces
 
 ```csharp

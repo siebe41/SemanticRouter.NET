@@ -204,7 +204,7 @@ public sealed class DashboardRoleTests : RouterHostTest
 
         allowed.Should().BeEquivalentTo(
             "GET /router/api/themes", "GET /router/api/status", "GET /router/api/usage", "GET /router/api/activity/series",
-            "GET /router/api/feedback/summary", "GET /router/api/reliability", "GET /router/api/digest");
+            "GET /router/api/feedback/summary", "GET /router/api/reliability", "GET /router/api/digest", "GET /router/api/forecast");
 
         HttpResponseMessage signIn = await client.PostAsJsonAsync("/router/api/session", new { token = MetricsToken });
         signIn.StatusCode.Should().Be(HttpStatusCode.OK);

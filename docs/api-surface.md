@@ -226,6 +226,7 @@ The router as ASP.NET Core middleware: connectors, the three chat protocols, the
 
 - `UsageOptions`: usage accounting and budgets (`SemanticRouter:Usage`).
 - `BudgetDefinition`: a spending limit for one model or one connector.
+- `UsageQuota`: one connector's usage limit set by hand for the quota forecast (`Usage:Quotas`).
 - `BudgetPeriod`: the period a budget covers.
 - `UsageRecord`: what one served request used.
 - `UsageTotals`: usage added up, including what the subscriptions' requests would have cost at API prices.

@@ -4,6 +4,7 @@ import { $, $$, actionKey, api, banner, h, isDirty, METRICS_VIEWS, metricsOnly, 
 import { loadDigest } from './digest.js';
 import { draftChanges, itemKeyForPath, rebase } from './draft.js';
 import { endpointPill } from './endpoints.js';
+import { loadForecast } from './forecast.js';
 import { loadTuning } from './learned.js';
 import { activityHeld, scheduleLive, showNewEntries } from './live.js';
 import { graph, mounts, readPalette, unmount } from './memory.js';
@@ -20,7 +21,7 @@ export async function loadAll() {
     // Figures only: no configuration, activity or learned changes to load.
     state.status = await api('GET', '/status');
     setConfig({ config: {} });
-    await loadDigest();
+    await Promise.all([loadDigest(), loadForecast(true)]);
     renderChrome();
     loadThemes();
     return;
@@ -30,7 +31,7 @@ export async function loadAll() {
   setConfig(cfg);
   state.activity = activity.entries;
   state.feedback = activity.feedback || {};
-  await Promise.all([loadTuning(), loadDigest(), loadTemplateDefaults()]);
+  await Promise.all([loadTuning(), loadDigest(), loadTemplateDefaults(), loadForecast(true)]);
   renderChrome();
   loadThemes();
 }
@@ -126,7 +127,7 @@ export async function refreshStatus(opts) {
   try {
     if (metricsOnly()) {
       state.status = await api('GET', '/status');
-      if (state.view === 'overview') { await loadDigest(); state.trends.data = null; render(); } else { loadUsage(true); renderChrome(); }
+      if (state.view === 'overview') { await Promise.all([loadDigest(), loadForecast()]); state.trends.data = null; render(); } else { loadUsage(true); renderChrome(); }
       return;
     }
     const [status, activity] = await Promise.all([api('GET', '/status'), api('GET', '/activity?limit=200')]);
@@ -136,7 +137,7 @@ export async function refreshStatus(opts) {
     state.feedback = activity.feedback || {};
     const reloaded = await checkVersion();
     if (state.view === 'overview' || state.view === 'learned') await loadTuning();
-    if (state.view === 'overview') await loadDigest();
+    if (state.view === 'overview') await Promise.all([loadDigest(), loadForecast()]);
     renderChrome();
     // Fresh trends in the background: the card keeps its last figures meanwhile, rather than shrinking to "Loading…"
     // and back, which made the page jump for anyone scrolled down.

@@ -417,6 +417,44 @@ public sealed class RouterConfiguration : SemanticRouterOptions
             }
         }
 
+        foreach ((string connector, UsageQuota quota) in Usage.Quotas)
+        {
+            string label = $"Usage:Quotas:{connector}";
+            if (!Connectors.ContainsKey(connector))
+            {
+                errors.Add($"{label} names a connector that is not configured.");
+            }
+
+            if (quota is null)
+            {
+                errors.Add($"{label} must not be null.");
+                continue;
+            }
+
+            if (quota.MaxTokens is not null && quota.MaxRequests is not null)
+            {
+                errors.Add($"{label} sets MaxTokens and MaxRequests: set one.");
+            }
+            else if (quota.MaxTokens is null && quota.MaxRequests is null && quota.Period is null)
+            {
+                errors.Add($"{label} needs MaxTokens, MaxRequests or Period.");
+            }
+            else if (quota.MaxTokens < 1 || quota.MaxRequests < 1)
+            {
+                errors.Add($"{label} limit must be at least 1.");
+            }
+
+            if (quota.Period is { } period && period < TimeSpan.FromHours(1))
+            {
+                errors.Add($"{label}:Period must be at least an hour.");
+            }
+
+            if (quota.PeriodStart is not null && quota.Period is null)
+            {
+                errors.Add($"{label}:PeriodStart needs a Period.");
+            }
+        }
+
         if (Usage.WarnAtPercent is < 1 or > 100)
         {
             errors.Add("Usage:WarnAtPercent must be between 1 and 100.");
