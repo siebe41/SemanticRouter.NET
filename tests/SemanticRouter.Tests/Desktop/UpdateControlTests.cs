@@ -601,7 +601,9 @@ public sealed class UpdateControlTests : IDisposable
         // Written by `dotnet run --file deploy/update-file-list.cs -- write` from SemanticRouter.exe ("MZ not really a
         // program\n", not a PE image), SemanticRouter.dll (a copy of fixtures/update-file-list/program.dll, a PE image),
         // SemanticRouter.runtimeconfig.json ({"runtimeOptions":{"tfm":"net10.0"}}) and wwwroot/notes.txt ("notices\n").
-        // So the script computes the digest of a program as the app does.
+        // So the script computes the digest of a program as the app does. The folder also held what vpk leaves out of a
+        // package (createdump.exe, runtimes/win-x64/native/libHarfBuzzSharp.pdb, SemanticRouter.application), which
+        // `write` deletes before it lists the rest: the list names only what the package will hold.
         string fixtures = Path.Combine(AppContext.BaseDirectory, "fixtures", "update-file-list");
         UpdateFileList.Listed listed = UpdateFileList.Read(Path.Combine(fixtures, UpdateFileList.FileName));
         listed.Files.Should().Equal(new Dictionary<string, string>
@@ -614,6 +616,7 @@ public sealed class UpdateControlTests : IDisposable
             ["SemanticRouter.dll"] = UpdateFileList.ImageDigest(File.ReadAllBytes(Path.Combine(fixtures, "program.dll"))),
             ["SemanticRouter.exe"] = Convert.ToHexStringLower(SHA256.HashData("MZ not really a program\n"u8)),
         });
+        listed.Files.Keys.Concat(listed.Executables!.Keys).Should().NotContain(["createdump.exe", "runtimes/win-x64/native/libHarfBuzzSharp.pdb", "SemanticRouter.application"], "vpk leaves them out of the package");
         listed.Executables!["SemanticRouter.dll"].Should().NotBe(Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Path.Combine(fixtures, "program.dll")))), "a PE image's checksum is left out");
     }
 

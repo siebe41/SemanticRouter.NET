@@ -5,7 +5,8 @@
 // an Authenticode signature (vpk signs the images after this runs, and that must not change it). vpk signs that library
 // with the rest of the release, and the desktop app's publisher check (src/SemanticRouter.Desktop/UpdateFileList.cs)
 // refuses an update whose files differ from it, so no program or library can be swapped for another signed one either.
-// `check` reads the list back from a Velopack package and fails unless it matches the package's files exactly, so a
+// `write` first deletes from the publish folder what vpk would leave out of the package (createdump.exe, symbols), so
+// that the list names exactly what the package will hold. `check` reads the list back from a Velopack package and fails unless it matches the package's files exactly, so a
 // file added or changed after `write` ran (other than by signing) is caught before the release, not by every updater in
 // the field. A .NET 10 file-based app, with nothing to install:
 //
@@ -26,6 +27,7 @@ using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 const string ListFile = "SemanticRouter.Files.dll";
@@ -43,14 +45,29 @@ const string VersionFile = "sq.version";
 // (UpdateFileList.Packaged); deploy/installer-signature-check.ps1 checks that they are.
 string[] packaged = ["Squirrel.exe", AppId + "_ExecutionStub.exe"];
 
+// What `vpk pack` (1.2.161) leaves out of the package or replaces, matched against a file's path in the publish folder:
+// its built-in excludes (`.*[\\/]createdump.*|.*\.vshost\..*|.*\.nupkg$`, without --noDefaultExclude), the default of
+// its --exclude option (`.*\.pdb`; package-installer.sh passes none), ClickOnce manifests (`*.application`) on Windows,
+// and the Update.exe and sq.version it writes itself. The .NET runtime's createdump.exe is one: a self-contained
+// publish has it, and vpk drops it. `write` deletes them from the publish folder first, so the list, the package and the
+// zip download hold the same files; matched without case, so the folder never keeps what vpk might drop.
+Regex leftOutByVpk = new(@"(^|/)createdump|\.vshost\.|\.nupkg$|\.pdb$|\.application$|^Update\.exe$|^sq\.version$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
 if (args is ["write", var publish])
 {
     string root = Path.GetFullPath(publish);
     var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
     var executables = new SortedDictionary<string, string>(StringComparer.Ordinal);
-    foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+    foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).ToList())
     {
         string relative = Path.GetRelativePath(root, file).Replace('\\', '/');
+        if (leftOutByVpk.IsMatch(relative))
+        {
+            File.Delete(file);
+            Console.WriteLine($"{relative}: removed, as vpk leaves it out of the package");
+            continue;
+        }
+
         byte[] content = File.ReadAllBytes(file);
         if (relative == ListFile)
         {
