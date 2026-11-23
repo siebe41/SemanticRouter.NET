@@ -38,6 +38,43 @@ public sealed class FileModeTests : IDisposable
     }
 
     [Fact]
+    public void A_file_created_for_another_writer_is_owner_only_from_the_start_and_an_existing_one_is_left_alone()
+    {
+        string created = Path.Combine(_directory, "new.db");
+        OwnerOnly.CreateFile(created);
+        new FileInfo(created).Length.Should().Be(0);
+
+        string existing = Path.Combine(_directory, "existing.db");
+        File.WriteAllText(existing, "kept");
+        OwnerOnly.CreateFile(existing);
+        File.ReadAllText(existing).Should().Be("kept");
+
+        if (!OperatingSystem.IsWindows())
+        {
+            File.GetUnixFileMode(created).Should().Be(OwnerFile, "created with the mode, not restricted after (#407)");
+        }
+    }
+
+    [Fact]
+    public void The_state_database_and_its_log_files_are_owner_only()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string state = Path.Combine(_directory, "semantic-router.db");
+        var database = new SqliteRouterDatabase(
+            Microsoft.Extensions.Options.Options.Create(new SqliteStateOptions { Path = state }), NullLogger<SqliteRouterDatabase>.Instance);
+        database.Available.Should().BeTrue("SQLite takes the empty file created for it as a new database");
+
+        foreach (string file in new[] { state, state + "-wal", state + "-shm" }.Where(File.Exists))
+        {
+            File.GetUnixFileMode(file).Should().Be(OwnerFile, file);
+        }
+    }
+
+    [Fact]
     public void The_configuration_directory_is_tightened_to_its_owner()
     {
         if (OperatingSystem.IsWindows())

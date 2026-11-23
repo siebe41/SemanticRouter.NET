@@ -29,7 +29,7 @@ public sealed class LocalAccountLookupTests
         LocalAccount account = LocalAccounts.Find(clientEnd, serverEnd);
 
         account.Should().Be(
-            OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows() ? LocalAccount.Same : LocalAccount.Unknown,
+            OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows() ? LocalAccount.Same : LocalAccount.Unavailable,
             MacRecords(clientEnd.Port, serverEnd.Port));
     }
 
@@ -52,7 +52,7 @@ public sealed class LocalAccountLookupTests
         var remote = (IPEndPoint)accepted.RemoteEndPoint!;
         var local = (IPEndPoint)accepted.LocalEndPoint!;
         LocalAccounts.Find(remote, local).Should().Be(
-            OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows() ? LocalAccount.Same : LocalAccount.Unknown,
+            OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsWindows() ? LocalAccount.Same : LocalAccount.Unavailable,
             MacRecords(remote.Port, local.Port));
     }
 
@@ -61,7 +61,8 @@ public sealed class LocalAccountLookupTests
     [InlineData(1001u, 1000u, "Other")]
     [InlineData(0u, 1000u, "Same")] // root can read the router's keys anyway
     [InlineData(null, 1000u, "Unknown")]
-    [InlineData(1001u, null, "Unknown")]
+    [InlineData(1001u, null, "Unavailable")] // the router's own end is not listed: no usable table
+    [InlineData(null, null, "Unavailable")]
     public void Both_ends_are_compared(uint? client, uint? server, string expected) =>
         LocalAccounts.Compare((client, server)).ToString().Should().Be(expected);
 
@@ -89,6 +90,45 @@ public sealed class LocalAccountLookupTests
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void A_linux_client_that_already_closed_its_end_is_not_taken_for_root()
+    {
+        // #407: a client that sends a request and closes at once leaves a TIME_WAIT row, which the kernel prints with
+        // uid 0 and inode 0. Read as root, another account's request would have been this machine's.
+        string directory = Directory.CreateTempSubdirectory("router-proc").FullName;
+        try
+        {
+            string tcp = Path.Combine(directory, "tcp");
+            File.WriteAllLines(tcp,
+            [
+                "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode",
+                Row(1, "0100007F:C822", "0100007F:13D8", "06", 0, inode: 0), // the client's end, in TIME_WAIT
+                Row(2, "0100007F:13D8", "0100007F:C822", "08", 1000), // the router's end of it
+            ]);
+
+            LocalAccounts.LinuxOwners([tcp], Client, Server).Should().Be(((uint?)null, (uint?)1000));
+            LocalAccounts.Compare(LocalAccounts.LinuxOwners([tcp], Client, Server)).Should().Be(LocalAccount.Unknown);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Windows_answers_unknown_when_the_client_is_gone_and_unavailable_without_the_routers_own_end()
+    {
+        static LocalAccount Other(int pid) => LocalAccount.Other;
+        static LocalAccount Fails(int pid) => throw new System.ComponentModel.Win32Exception(87);
+
+        LocalAccounts.WindowsAccount(2200, 4100, Other).Should().Be(LocalAccount.Other);
+        LocalAccounts.WindowsAccount(4100, 4100, Other).Should().Be(LocalAccount.Same);
+        LocalAccounts.WindowsAccount(null, 4100, Other).Should().Be(LocalAccount.Unknown);
+        LocalAccounts.WindowsAccount(0, 4100, Other).Should().Be(LocalAccount.Unknown, "TIME_WAIT rows name no process");
+        LocalAccounts.WindowsAccount(2200, 4100, Fails).Should().Be(LocalAccount.Unknown);
+        LocalAccounts.WindowsAccount(2200, null, Other).Should().Be(LocalAccount.Unavailable);
     }
 
     [Fact]
@@ -126,12 +166,14 @@ public sealed class LocalAccountLookupTests
 
         LocalAccounts.MacOwners(list, Client, Server, self: 502, pid: 4242).Should().Be(((uint?)501, (uint?)502));
         LocalAccounts.MacOwners(list, Client, Server, self: 503, pid: 4242).Should().Be(((uint?)null, (uint?)null), "the router's own end must show the layout");
-        LocalAccounts.MacOwners(list, new IPEndPoint(IPAddress.Loopback, 1), Server, self: 502, pid: 4242).Should().Be(((uint?)null, (uint?)null));
+        LocalAccounts.MacOwners(list, new IPEndPoint(IPAddress.Loopback, 1), Server, self: 502, pid: 4242).Should().Be(((uint?)null, (uint?)null), "not this router's connection");
+        byte[] clientGone = MacList(packed, (Server, Client, 502u, 4242), (other6.Item1, other6.Item2, 0u, 1));
+        LocalAccounts.MacOwners(clientGone, Client, Server, self: 502, pid: 4242).Should().Be(((uint?)null, (uint?)502), "the client's end is gone: Unknown");
         LocalAccounts.MacOwners(list.AsSpan(0, 10), Client, Server, self: 502, pid: 4242).Should().Be(((uint?)null, (uint?)null));
     }
 
-    private static string Row(int sl, string local, string remote, string state, uint uid) =>
-        $"   {sl}: {local} {remote} {state} 00000000:00000000 00:00000000 00000000  {uid}        0 1234 1 0000000000000000 20 4 30 10 -1";
+    private static string Row(int sl, string local, string remote, string state, uint uid, ulong inode = 1234) =>
+        $"   {sl}: {local} {remote} {state} 00000000:00000000 00:00000000 00000000  {uid}        0 {inode} 1 0000000000000000 20 4 30 10 -1";
 
     private static byte[] WindowsTable(bool v6, params (IPEndPoint Local, IPEndPoint Remote, int Pid)[] rows)
     {
@@ -284,13 +326,23 @@ public sealed class OtherLocalAccountTests : RouterHostTest
 
     [Theory]
     [InlineData("Same")]
-    [InlineData("Unknown")]
+    [InlineData("Unavailable")] // no lookup here (another platform, WSL 1): loopback stays this machine
     public async Task The_routers_own_account_is_this_machine(string caller)
     {
         HttpClient client = await StartAsync(Enum.Parse<LocalAccount>(caller));
 
         (await client.GetAsync("/router/api/status")).StatusCode.Should().Be(HttpStatusCode.OK);
         (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task A_caller_a_working_lookup_cannot_name_is_not_this_machine()
+    {
+        // #407: an error in the lookup (the client's end is gone, its process cannot be read) used to count as this machine.
+        HttpClient client = await StartAsync(LocalAccount.Unknown);
+
+        (await client.GetAsync("/router/api/status")).StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await client.PostAsync("/v1/chat/completions", Json(ChatJson))).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]

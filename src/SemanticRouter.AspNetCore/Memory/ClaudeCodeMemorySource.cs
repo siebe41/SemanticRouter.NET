@@ -57,9 +57,9 @@ internal sealed partial class ClaudeCodeMemorySource : IMemorySource
     /// </summary>
     internal static string TitleFor(MemoryDocument document)
     {
-        if (FrontmatterName().Match(document.Content) is { Success: true } named)
+        if (FrontmatterName(document.Content) is { } named)
         {
-            return named.Groups["name"].Value.Trim().Trim('"', '\'');
+            return named;
         }
 
         string[] parts = document.Path.Split('/');
@@ -81,10 +81,50 @@ internal sealed partial class ClaudeCodeMemorySource : IMemorySource
         return name.Length > 0 ? name : folder;
     }
 
-    // [^\r\n]* rather than .*: '.' also matches the \r of a CRLF line, so each line could be read two ways and a
-    // frontmatter without a name took time exponential in its length to rule out.
-    [System.Text.RegularExpressions.GeneratedRegex(@"\A---\r?\n(?:(?!---\r?\n)[^\r\n]*\r?\n)*?name:[ \t]*(?<name>[^\r\n]+)\r?\n(?:[^\r\n]*\r?\n)*?---")]
-    private static partial System.Text.RegularExpressions.Regex FrontmatterName();
+    /// <summary>
+    /// The first <c>name:</c> in the frontmatter (between a first line <c>---</c> and the next line <c>---</c>), unquoted;
+    /// <see langword="null"/> when there is none, or the frontmatter is not closed. Read line by line, once: a pattern
+    /// over the whole file took time quadratic (once exponential) in its length to rule a name out.
+    /// </summary>
+    internal static string? FrontmatterName(string content)
+    {
+        int start = 0;
+        bool opened = false;
+        string? name = null;
+        while (start <= content.Length)
+        {
+            int newline = content.IndexOf('\n', start);
+            int end = newline < 0 ? content.Length : newline;
+            ReadOnlySpan<char> line = content.AsSpan(start, end - start).TrimEnd('\r');
+            if (!opened)
+            {
+                if (!line.SequenceEqual("---"))
+                {
+                    return null;
+                }
+
+                opened = true;
+            }
+            else if (line.SequenceEqual("---"))
+            {
+                return name;
+            }
+            else if (name is null && line.StartsWith("name:", StringComparison.Ordinal)
+                     && line["name:".Length..].Trim().Trim("\"'") is { Length: > 0 } value)
+            {
+                name = value.ToString();
+            }
+
+            if (newline < 0)
+            {
+                break;
+            }
+
+            start = newline + 1;
+        }
+
+        return null;
+    }
 
     [System.Text.RegularExpressions.GeneratedRegex(@"^(?:[A-Za-z]--)?(?:home|Users)-[^-]+-")]
     private static partial System.Text.RegularExpressions.Regex HomePrefix();

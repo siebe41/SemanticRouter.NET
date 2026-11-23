@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Moq;
 using SemanticRouter.AspNetCore;
 using SemanticRouter.Tests.Support;
 using static SemanticRouter.Tests.Support.TestEmbeddings;
@@ -225,6 +226,20 @@ public sealed class RuntimeAndDashboardTests : RouterHostTest
         JsonNode probe = await ReadNodeAsync(await client.PostAsJsonAsync("/router/api/embeddings/test", new { text = "x" }));
         probe["ok"]!.GetValue<bool>().Should().BeTrue();
         probe["dimensions"]!.GetValue<int>().Should().Be(HashingEmbeddingProvider.DefaultDimensions);
+    }
+
+    [Fact]
+    public async Task The_embeddings_probe_redacts_secrets_in_its_error()
+    {
+        var failing = new Mock<IEmbeddingProvider>();
+        failing.Setup(p => p.GenerateEmbeddingAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("the embeddings server refused the key sk-test"));
+        HttpClient client = await StartDispatchAsync(s => s.AddSingleton(failing.Object));
+
+        JsonNode probe = await ReadNodeAsync(await client.PostAsJsonAsync("/router/api/embeddings/test", new { text = "x" }));
+
+        probe["ok"]!.GetValue<bool>().Should().BeFalse();
+        probe["error"]!.GetValue<string>().Should().Be("the embeddings server refused the key ***");
     }
 
     [Fact]
