@@ -11,7 +11,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Failed dashboard sign-ins, wrong gateway keys and per-address rate limits count an IPv6 address by its /64 and keep at most 10,000 addresses each, so a client cannot get a fresh allowance per address or grow the tables without end. (#418)
 - The router no longer reads without limit from a backend or a CLI: error bodies are cut at 64 KiB, event-stream lines and events at 16 MiB, translated JSON replies at 64 MiB, and a CLI's standard error is kept to its first and last 32 K characters. (#418)
 - `/v1/messages/count_tokens`, the dashboard's context analysis, and the configuration and draft-connector endpoints enforce `Middleware:MaxRequestBodyBytes`, also for bodies sent without a length. (#418)
-- A release's build provenance attestation and `SHA256SUMS` now cover only the files its own workflow run built and uploaded. The release stops before attesting when its draft holds an asset its jobs did not upload, or one that changed after they did, and when a release for the tag existed before the run. Before, they covered whatever was on the draft at the time, which anyone with write access to the repository could change. (#404)
+- A release's build provenance attestation and `SHA256SUMS` now cover only the files its own workflow run built and uploaded. The release stops before attesting when its draft holds an asset its jobs did not upload, or one that changed after they did, and when a release for the tag existed before the run. Before, they covered whatever was on the draft at the time, which anyone with write access to the repository could change. (#424)
 
 ### Added
 
