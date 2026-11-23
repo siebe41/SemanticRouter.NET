@@ -37,6 +37,8 @@
     <AvaloniaResource Include="Assets\tray-template@2x.png;Assets\tray.ico;Assets\tray.png" />
     <!-- Sigstore's public-good trust root, which an update's attestation is checked against (UpdateAttestation). -->
     <EmbeddedResource Include="Assets\sigstore-trusted-root.json" LogicalName="sigstore-trusted-root.json" />
+    <!-- When that trust root was last known to be current (deploy/publish-desktop.sh sets it; SigstoreTrustRoot.CurrentAt). -->
+    <AssemblyMetadata Include="SigstoreTrustRootCurrentAt" Value="$(SigstoreTrustRootCurrentAt)" Condition="'$(SigstoreTrustRootCurrentAt)' != ''" />
     <!-- The icon a Linux autostart entry points at. -->
     <None Include="Assets\icon.png" Link="semantic-router.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

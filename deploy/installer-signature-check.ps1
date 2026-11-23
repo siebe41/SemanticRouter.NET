@@ -8,7 +8,7 @@
 # - every *-Setup.exe in <dir>;
 # - from the update package SemanticRouter-<version>-<rid>-full.nupkg in <dir>, which Setup.exe installs and the
 #   installed app updates to: SemanticRouter.exe, Squirrel.exe (Velopack's updater) and SemanticRouter_ExecutionStub.exe,
-#   SemanticRouter.Files.dll (the required signed data-file list), and every other executable image in it (a program or library: a file starting with MZ, whatever its name), as the
+#   SemanticRouter.Files.dll (the required signed list of files), and every other executable image in it (a program or library: a file starting with MZ, whatever its name), as the
 #   desktop app checks an update with Updates:Publisher (src/SemanticRouter.Desktop/UpdatePublisher.cs).
 #
 # Who signed counts too, by the same rule as UpdatePublisher: the publisher is the certificate that signed the first

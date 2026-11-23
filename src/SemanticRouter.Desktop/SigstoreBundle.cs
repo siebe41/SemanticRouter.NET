@@ -29,7 +29,9 @@ namespace SemanticRouter.Desktop;
 /// log that is not in the trust root, or of a kind other than <c>dsse</c> 0.0.1 in a log this app checks, fails: neither
 /// the log id nor the kind is signed, so either could be made up. A certificate from an authority the trust root does not
 /// have at all (its authority key identifier names none of the trust root's certificates, as after Sigstore adds a
-/// certificate authority) is reported apart from a chain that does not verify (<see cref="Outcome.UnknownAuthority"/>).
+/// certificate authority) fails like a chain that does not verify, unless its Rekor entry checks out and was logged long
+/// enough after the trust root was current for Sigstore to have added one (<see cref="SigstoreTrustRoot.StaleAfter"/>):
+/// then it is reported apart (<see cref="Outcome.UnknownAuthority"/>).
 /// </summary>
 internal static class SigstoreBundle
 {
@@ -41,7 +43,10 @@ internal static class SigstoreBundle
         /// <summary>The certificate, signature and statement passed; the transparency log entry could not be checked.</summary>
         VerifiedWithoutLog,
 
-        /// <summary>Every other check passed, but the certificate is from an authority the trust root does not have.</summary>
+        /// <summary>
+        /// Every other check passed, but the certificate is from an authority the trust root does not have, and the
+        /// signature was logged long after the trust root was current (<see cref="SigstoreTrustRoot.StaleAfter"/>).
+        /// </summary>
         UnknownAuthority,
 
         /// <summary>A check failed.</summary>
@@ -164,7 +169,7 @@ internal static class SigstoreBundle
         DateTimeOffset at = logged ?? new DateTimeOffset(certificate.NotBefore.ToUniversalTime(), TimeSpan.Zero);
         if (!IssuedByTrustRoot(certificate, trust))
         {
-            return new Result(Outcome.UnknownAuthority, $"signed by {identity}, but its certificate is from a certificate authority this version of the app does not know");
+            return UnknownAuthority(identity, logged, trust);
         }
 
         if (ChainRefuses(certificate, trust, at) is { } chain)
@@ -175,6 +180,36 @@ internal static class SigstoreBundle
         return logged is { } time
             ? new Result(Outcome.Verified, $"signed by {identity}, logged in Rekor at {time.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} UTC")
             : new Result(Outcome.VerifiedWithoutLog, $"signed by {identity}, but {unlogged}");
+    }
+
+    /// <summary>
+    /// A certificate whose issuer the trust root does not have. That is what a certificate made by anyone looks like,
+    /// and every check before this one passes for one made for the expected workflow and logged in Rekor by whoever made
+    /// it, so it counts as an authority Sigstore added (<see cref="Outcome.UnknownAuthority"/>) only when something they
+    /// cannot change says so: Rekor's signed time of the entry is at least <see cref="SigstoreTrustRoot.StaleAfter"/>
+    /// after the time the app's build recorded its trust root as current. Otherwise it fails.
+    /// </summary>
+    private static Result UnknownAuthority(string identity, DateTimeOffset? logged, SigstoreTrustRoot trust)
+    {
+        const string Unknown = "its certificate is from a certificate authority this version of the app does not know";
+        if (logged is not { } time)
+        {
+            return Failed($"{Unknown}, and its transparency log entry cannot be checked");
+        }
+
+        if (trust.CurrentAt is not { } current)
+        {
+            return Failed($"{Unknown}, and this build of the app does not record when its trust root was current");
+        }
+
+        if (time - current < SigstoreTrustRoot.StaleAfter)
+        {
+            return Failed(string.Create(
+                CultureInfo.InvariantCulture,
+                $"{Unknown}, though it was logged at {time.UtcDateTime:yyyy-MM-dd HH:mm:ss} UTC, less than {SigstoreTrustRoot.StaleAfter.Days} days after this version's trust root was Sigstore's current one ({current.UtcDateTime:yyyy-MM-dd})"));
+        }
+
+        return new Result(Outcome.UnknownAuthority, $"signed by {identity}, but {Unknown}");
     }
 
     private static string? StatementRefuses(byte[] payload, string name, string sha256)

@@ -12,7 +12,8 @@
 #   manifest-* artifacts and has an 'Only what this run uploaded' step before it attests; every job that uploads to the
 #   draft leaves a manifest-* artifact (a vpk upload through deploy/release-upload-manifest.sh); and the job that
 #   creates the release refuses one that exists on the run's first attempt (GITHUB_RUN_ATTEMPT);
-# - the app embeds the trust root, and it is Sigstore's, with an authority and an ECDSA log the app can check.
+# - the app embeds the trust root, and it is Sigstore's, with an authority and an ECDSA log the app can check, and its
+#   build records when that trust root was current.
 #
 # With --online, also compares the trust root with the current one in sigstore/root-signing: when Sigstore adds a
 # certificate authority or a log, a release must carry it, or the next releases' attestations may not verify.
@@ -105,6 +106,11 @@ fi
 
 grep -q 'Include="Assets\\sigstore-trusted-root.json" LogicalName="sigstore-trusted-root.json"' src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj \
   || fail "The desktop app must embed $trust_root as sigstore-trusted-root.json."
+# Without the date its trust root was current, the app refuses every certificate from an authority it does not know,
+# even long after Sigstore added one (SigstoreTrustRoot.StaleAfter).
+grep -q -- '-p:SigstoreTrustRootCurrentAt=' deploy/publish-desktop.sh \
+  && grep -q '<AssemblyMetadata Include="SigstoreTrustRootCurrentAt"' src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj \
+  || fail "deploy/publish-desktop.sh must record when the app's trust root was current (-p:SigstoreTrustRootCurrentAt), and the desktop app must carry it as assembly metadata."
 # python3 on Linux and macOS runners; on Windows, python3 can be a stub that only opens the Store.
 python=python3
 "$python" -c "" 2>/dev/null || python=python
