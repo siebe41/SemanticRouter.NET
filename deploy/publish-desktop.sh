@@ -13,11 +13,17 @@ version="$2"
 out="$3"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 
+# When the app's Sigstore trust root was last known to be current: the date of the commit it is built from, which
+# deploy/update-attestation-check.sh --online checked in the release. The app tells an authority Sigstore added after
+# that from a certificate someone made by it (src/SemanticRouter.Desktop/SigstoreTrustRoot.cs); a build without it
+# refuses every certificate from an authority it does not know. The commit date keeps the build reproducible.
+trust_root_current_at="$(git -C "$root" log -1 --format=%cI)"
+
 # Restore is locked: the packages are exactly those in the projects' packages.lock.json files, whose runtime sections
 # cover every <rid> the release publishes (DesktopRuntimeIdentifiers in Directory.Build.props).
 dotnet publish "$root/src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj" \
   --configuration Release --runtime "$rid" --self-contained -p:RestoreLockedMode=true \
-  -p:Version="$version" -p:DebugType=none \
+  -p:Version="$version" -p:DebugType=none -p:SigstoreTrustRootCurrentAt="$trust_root_current_at" \
   --output "$out"
 
 # Fails when a native library the app needs on this platform is missing from the publish.

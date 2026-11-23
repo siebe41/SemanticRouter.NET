@@ -10,5 +10,8 @@ internal static class ProjectLinks
     public const string Documentation = SemanticRouter.Host.SiteLinks.Desktop;
     public const string Issues = Repository + "/issues";
     public const string Releases = Repository + "/releases";
+
+    /// <summary>How to check a download with <c>gh attestation verify</c> (docs/releases.md#check-a-download).</summary>
+    public const string Verifying = SemanticRouter.Host.SiteLinks.Root + "/releases#check-a-download";
     public const string License = Repository + "/blob/main/LICENSE";
 }

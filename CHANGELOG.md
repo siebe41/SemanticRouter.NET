@@ -11,6 +11,8 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Failed dashboard sign-ins, wrong gateway keys and per-address rate limits count an IPv6 address by its /64 and keep at most 10,000 addresses each, so a client cannot get a fresh allowance per address or grow the tables without end. (#418)
 - The router no longer reads without limit from a backend or a CLI: error bodies are cut at 64 KiB, event-stream lines and events at 16 MiB, translated JSON replies at 64 MiB, and a CLI's standard error is kept to its first and last 32 K characters. (#418)
 - `/v1/messages/count_tokens`, the dashboard's context analysis, and the configuration and draft-connector endpoints enforce `Middleware:MaxRequestBodyBytes`, also for bodies sent without a length. (#418)
+- Desktop app: an update whose attestation has a certificate from an authority the app does not know is refused, unless the app's trust root was current more than six months before the attestation was logged; an attestation that fails now outranks one the app cannot check. When the app does say it can no longer check updates, it no longer tells you to install the new version from the releases page, but to check a download with `gh attestation verify` first, since someone who tampered with a release could bring that message about. (#405)
+- Desktop app with `Updates:Publisher`: an update must be this app's (`.nuspec` id `SemanticRouter`, main executable `SemanticRouter.exe`, or `SemanticRouter` on macOS), not whatever its package says, and on Windows its signed list of files now pins every program and library as well, so none can be swapped for another signed one. Packages of releases up to 0.6.1, whose list names only data files, are refused. (#405)
 
 ### Added
 

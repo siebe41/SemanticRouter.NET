@@ -17,15 +17,20 @@ namespace SemanticRouter.Desktop;
 /// <remarks>
 /// <list type="bullet">
 /// <item><see cref="Outcome.Verified"/>: an attestation checks out.</item>
-/// <item><see cref="Outcome.Refused"/>: the check ran and failed. GitHub has no attestation for the package, or none
-/// that checks out (another workflow or tag, a signature or log entry that does not verify).</item>
+/// <item><see cref="Outcome.Refused"/>: the check ran and failed. GitHub has no attestation for the package, or one
+/// that does not check out (another workflow or tag, a signature or log entry that does not verify, a certificate from
+/// an authority the trust root does not have while that trust root is recent). One that fails is enough, whatever the
+/// others are, unless one checks out.</item>
 /// <item><see cref="Outcome.Unchecked"/>: the check could not run. GitHub's API could not be asked (offline,
 /// rate-limited, an error, an answer without a bundle), or the only attestation that otherwise checks out has a
 /// transparency log entry in a log of the trust root whose key this app cannot check. The update is not applied; it is
 /// kept and checked again later.</item>
-/// <item><see cref="Outcome.Outdated"/>: the only attestation that otherwise checks out has a certificate from an
-/// authority the trust root this version carries does not have (Sigstore added one since). This version cannot check
-/// that update, or later ones: it is not applied, and the person has to install the new version themselves.</item>
+/// <item><see cref="Outcome.Outdated"/>: no attestation fails, and one that otherwise checks out has a certificate from
+/// an authority the trust root this version carries does not have, logged more than
+/// <see cref="SigstoreTrustRoot.StaleAfter"/> after that trust root was current (Sigstore may have added one since).
+/// This version cannot check that update, or later ones: it is not applied. Someone who can store an attestation can
+/// bring this about for an app that old, so the app does not tell the person to install that release, only how to
+/// verify a new version before installing it.</item>
 /// </list>
 /// </remarks>
 internal sealed class UpdateAttestation(string repository, string repositoryId, Func<string, CancellationToken, Task<string?>> lookup, SigstoreTrustRoot trust)
@@ -142,9 +147,11 @@ internal sealed class UpdateAttestation(string repository, string repositoryId, 
                 }
             }
 
-            return outdated is not null ? new Verdict(Outcome.Outdated, $"its attestation is {outdated}")
+            // An attestation that fails outranks every other outcome but a verified one: whoever can store an attestation
+            // for a tampered package must not be able to turn its refusal into anything milder.
+            return failed is not null ? new Verdict(Outcome.Refused, $"its attestation does not hold: {failed}")
+                : outdated is not null ? new Verdict(Outcome.Outdated, $"its attestation is {outdated}")
                 : unlogged is not null ? new Verdict(Outcome.Unchecked, $"its attestation is {unlogged}")
-                : failed is not null ? new Verdict(Outcome.Refused, $"its attestation does not hold: {failed}")
                 : unread ? new Verdict(Outcome.Unchecked, "GitHub's attestations API gave no attestation the app can read")
                 : new Verdict(Outcome.Refused, missing);
         }
