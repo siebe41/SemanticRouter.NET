@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Reflection;
 using System.Reflection.Metadata;
@@ -464,6 +465,183 @@ public sealed class UpdateControlTests : IDisposable
     }
 
     [Fact]
+    public void A_package_must_be_the_version_the_feed_offered_its_signed_list_names_and_newer_than_the_installed_one()
+    {
+        // #428: the .nuspec gives the version Velopack installs a package as, and is neither signed nor listed.
+        var check = new UpdatePublisher("Contoso Ltd", UpdatePublisher.Platform.Windows, Signatures(Contoso));
+        string[] files = ["lib/app/SemanticRouter.exe", "lib/app/SemanticRouter.dll", "lib/app/Squirrel.exe", "lib/app/sq.version"];
+        SemanticVersion installed = SemanticVersion.Parse("1.0.0");
+        string? Refuses(string package, string offered, SemanticVersion? from = null) => check.Refuses(package, SemanticVersion.Parse(offered), from ?? installed);
+
+        Refuses(Package("release.nupkg", "SemanticRouter.exe", files), "1.0.1").Should().BeNull("the .nuspec, the feed and the signed list all say 1.0.1, above the installed 1.0.0");
+
+        // An older signed release, its .nuspec (and sq.version, a copy of it) rewritten to a higher version and offered
+        // as that version: every signature and listed file checks out, but the signed list says what it was made for.
+        string rollback = Package("rollback.nupkg", "SemanticRouter.exe", files, version: "9.9.9", madeFor: "0.9.0");
+        Refuses(rollback, "9.9.9").Should().Be("its list of files (SemanticRouter.Files.dll) was made for version 0.9.0, not 9.9.9, the version its .nuspec gives");
+
+        // The feed offers a version the package does not give, or the list names another than the .nuspec.
+        Refuses(Package("release.nupkg", "SemanticRouter.exe", files), "1.0.2").Should().Be("its .nuspec says it is version 1.0.1, not 1.0.2 as the feed offered it");
+        Refuses(Package("listed-other.nupkg", "SemanticRouter.exe", files, madeFor: "1.0.2"), "1.0.1")
+            .Should().Be("its list of files (SemanticRouter.Files.dll) was made for version 1.0.2, not 1.0.1, the version its .nuspec gives");
+        Refuses(Package("listed-metadata.nupkg", "SemanticRouter.exe", files, madeFor: "1.0.1+other"), "1.0.1")
+            .Should().Be("its list of files (SemanticRouter.Files.dll) was made for version 1.0.1+other, not 1.0.1, the version its .nuspec gives");
+
+        // Not newer than the installed version: the same, or an older release with its own version. The app never asks
+        // Velopack for a downgrade, so the publisher check never applies one.
+        string same = Package("same.nupkg", "SemanticRouter.exe", files, version: "1.0.0");
+        Refuses(same, "1.0.0").Should().Be("it is version 1.0.0, not newer than the installed 1.0.0, and an update never goes back");
+        Refuses(Package("older.nupkg", "SemanticRouter.exe", files, version: "0.9.0"), "0.9.0").Should().Be("it is version 0.9.0, not newer than the installed 1.0.0, and an update never goes back");
+        Refuses(Package("prerelease.nupkg", "SemanticRouter.exe", files, version: "1.0.0-rc.1"), "1.0.0-rc.1").Should().Contain("not newer than the installed 1.0.0");
+        Refuses(same, "1.0.0", SemanticVersion.Parse("0.9.0")).Should().BeNull("newer than 0.9.0");
+        check.Refuses(same, SemanticVersion.Parse("1.0.0"), null).Should().Be("the installed version is not known, so the update cannot be told from an older release");
+
+        // A list without a version (the lists of releases before this check had none) could be any release's.
+        Refuses(Package("unversioned-list.nupkg", "SemanticRouter.exe", files, madeFor: null), "1.0.1")
+            .Should().Be("its list of files (SemanticRouter.Files.dll) does not say which version it was made for, so it could be an older release's");
+
+        // A .nuspec without a version is not a package Velopack made.
+        string unversioned = Path.Combine(_directory, "unversioned.nupkg");
+        using (ZipArchive zip = ZipFile.Open(unversioned, ZipArchiveMode.Create))
+        {
+            Nuspec(zip, "SemanticRouter.exe", version: null);
+        }
+
+        Refuses(unversioned, "1.0.1").Should().Be("its package cannot be read (its .nuspec gives no version)");
+    }
+
+    [Fact]
+    public async Task An_older_signed_release_offered_as_a_newer_version_is_refused_and_deleted()
+    {
+        // Whoever can write to the feed republishes 0.9.0's package as 9.9.9: its .nuspec and sq.version rewritten, and
+        // a releases.<channel>.json offering it as 9.9.9 with the rewritten package's size and hash.
+        var updates = new FakeUpdates { Package = Package("rollback.nupkg", "SemanticRouter.exe", ["lib/app/SemanticRouter.exe", "lib/app/SemanticRouter.dll", "lib/app/Squirrel.exe", "lib/app/sq.version"], version: "9.9.9", madeFor: "0.9.0") };
+        updates.Publish("9.9.9");
+        var publisher = new UpdatePublisher("Contoso Ltd", UpdatePublisher.Platform.Windows, Signatures(Contoso));
+        var updater = new DesktopUpdater(updates, null, TextWriter.Null, publisher: publisher);
+
+        (await updater.CheckAsync()).Should().BeNull();
+
+        updater.Problem.Should().Be("Update 9.9.9 was refused: its list of files (SemanticRouter.Files.dll) was made for version 0.9.0, not 9.9.9, the version its .nuspec gives");
+        (await updater.ApplyOnQuitAsync()).Should().BeFalse();
+        updates.Calls.Should().Equal("check", "download", "package", "discard");
+    }
+
+    [Fact]
+    public async Task A_downgrade_is_never_applied_with_a_publisher_in_the_policy()
+    {
+        // Velopack offers a downgrade only when asked to (AllowVersionDowngrade, ExplicitChannel), which the app never
+        // is; were one offered, it would be refused like any package not newer than the installed version.
+        var updates = new FakeUpdates { Package = Package("downgrade.nupkg", "SemanticRouter.exe", ["lib/app/SemanticRouter.exe", "lib/app/SemanticRouter.dll", "lib/app/Squirrel.exe", "lib/app/sq.version"], version: "0.9.0"), Downgrade = true };
+        updates.Publish("0.9.0");
+        var updater = new DesktopUpdater(updates, null, TextWriter.Null, publisher: new UpdatePublisher("Contoso Ltd", UpdatePublisher.Platform.Windows, Signatures(Contoso)));
+
+        await updater.CheckAsync();
+
+        updates.Requested!.IsDowngrade.Should().BeTrue();
+        updater.Problem.Should().Be("Update 0.9.0 was refused: it is version 0.9.0, not newer than the installed 1.0.0, and an update never goes back");
+        (await updater.ApplyNowAsync(restartApp: true)).Should().BeFalse();
+        updates.Calls.Should().NotContain(c => c.StartsWith("apply", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void On_macOS_the_sealed_Info_plist_must_give_the_packages_version()
+    {
+        // codesign seals Contents/Info.plist, so the version it gives is the publisher's; the .nuspec's must match it.
+        string[] files = ["lib/app/Contents/Info.plist", "lib/app/Contents/MacOS/SemanticRouter"];
+        var mac = new UpdatePublisher("A1B2C3D4E5", UpdatePublisher.Platform.MacOS, new FakeSignatures(_ => new CodeSignature(null, TeamId: "A1B2C3D4E5")));
+        SemanticVersion installed = SemanticVersion.Parse("1.0.0");
+
+        mac.Refuses(Package("osx-release.nupkg", "SemanticRouter", files), SemanticVersion.Parse("1.0.1"), installed).Should().BeNull();
+        mac.Refuses(Package("osx-rollback.nupkg", "SemanticRouter", files, version: "9.9.9", bundle: "0.9.0"), SemanticVersion.Parse("9.9.9"), installed)
+            .Should().Be("its Info.plist gives CFBundleShortVersionString 0.9.0, not 9.9.9, the version its .nuspec gives");
+        mac.Refuses(Package("osx-older.nupkg", "SemanticRouter", files, version: "0.9.0"), SemanticVersion.Parse("0.9.0"), installed)
+            .Should().Be("it is version 0.9.0, not newer than the installed 1.0.0, and an update never goes back");
+        mac.Refuses(Package("osx-noplist.nupkg", "SemanticRouter", ["lib/app/Contents/MacOS/SemanticRouter"]), SemanticVersion.Parse("1.0.1"), installed)
+            .Should().Be("its package has no Contents/Info.plist");
+
+        // Both keys, as deploy/package-installer.sh writes them; a property list it cannot read is refused.
+        SemanticVersion version = SemanticVersion.Parse("1.0.1");
+        string plist = Path.Combine(_directory, "Info.plist");
+        File.WriteAllText(plist, InfoPlist("1.0.0", shortVersion: "1.0.1"));
+        UpdatePublisher.BundleVersionRefuses(plist, version).Should().Be("its Info.plist gives CFBundleVersion 1.0.0, not 1.0.1, the version its .nuspec gives");
+        File.WriteAllText(plist, InfoPlist("1.0.1").Replace("<key>CFBundleVersion</key><string>1.0.1</string>", string.Empty, StringComparison.Ordinal));
+        UpdatePublisher.BundleVersionRefuses(plist, version).Should().Be("its Info.plist gives CFBundleVersion no value, not 1.0.1, the version its .nuspec gives");
+        File.WriteAllText(plist, InfoPlist("1.0.1").Replace("<key>LSUIElement</key>", "<key>CFBundleVersion</key><string>9.9.9</string><key>LSUIElement</key>", StringComparison.Ordinal));
+        UpdatePublisher.BundleVersionRefuses(plist, version).Should().Be("its Info.plist names CFBundleVersion twice");
+        File.WriteAllBytes(plist, [.. "bplist00"u8, 0xD1, 0x01, 0x02]);
+        UpdatePublisher.BundleVersionRefuses(plist, version).Should().StartWith("its Info.plist cannot be read (");
+        File.WriteAllText(plist, "<dict/>");
+        UpdatePublisher.BundleVersionRefuses(plist, version).Should().Be("its Info.plist is not a property list");
+    }
+
+    [Fact]
+    public void Deploy_update_file_list_check_refuses_a_list_made_for_another_version()
+    {
+        // The release's own check (deploy/package-installer.sh) of what `write` recorded: run as the release runs it.
+        string? root = AppContext.BaseDirectory;
+        while (root is not null && !File.Exists(Path.Combine(root, "deploy", "update-file-list.cs")))
+        {
+            root = Path.GetDirectoryName(root);
+        }
+
+        root.Should().NotBeNull("the tests run from the repository");
+        string publish = Directory.CreateDirectory(Path.Combine(_directory, "publish")).FullName;
+        File.WriteAllText(Path.Combine(publish, "SemanticRouter.exe"), "MZ not really a program\n");
+        File.WriteAllText(Path.Combine(publish, "SemanticRouter.runtimeconfig.json"), """{"runtimeOptions":{"tfm":"net10.0"}}""");
+        Script(root!, ["write", publish, "v1.0"]).Should().Be(2, "a version vpk would write differently in the .nuspec is not taken");
+        Script(root!, ["write", publish, "1.0.1"]).Should().Be(0);
+
+        string Packed(string name, string version)
+        {
+            string package = Path.Combine(_directory, name);
+            using ZipArchive zip = ZipFile.Open(package, ZipArchiveMode.Create);
+            Nuspec(zip, "SemanticRouter.exe", version: version);
+            foreach (string file in Directory.EnumerateFiles(publish))
+            {
+                zip.CreateEntryFromFile(file, "lib/app/" + Path.GetFileName(file));
+            }
+
+            using StreamWriter writer = new(zip.CreateEntry("lib/app/sq.version").Open());
+            writer.Write(NuspecText("SemanticRouter.exe", version: version));
+            return package;
+        }
+
+        Script(root!, ["check", Packed("SemanticRouter-1.0.1-win-x64-full.nupkg", "1.0.1")]).Should().Be(0);
+        var errors = new StringWriter();
+        Script(root!, ["check", Packed("SemanticRouter-9.9.9-win-x64-full.nupkg", "9.9.9")], errors).Should().Be(1);
+        errors.ToString().Should().Contain("SemanticRouter.Files.dll was made for version 1.0.1, but its .nuspec gives 9.9.9");
+
+        static int Script(string root, string[] arguments, TextWriter? errors = null)
+        {
+            var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } dotnet ? dotnet : "dotnet")
+            {
+                WorkingDirectory = root,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            foreach (string argument in (string[])["run", "--file", Path.Combine(root, "deploy", "update-file-list.cs"), "--", .. arguments])
+            {
+                start.ArgumentList.Add(argument);
+            }
+
+            // As from a shell: none of the test host's MSBuild settings.
+            foreach (string name in start.Environment.Keys.Where(k => k.StartsWith("MSBuild", StringComparison.OrdinalIgnoreCase)).ToArray())
+            {
+                start.Environment.Remove(name);
+            }
+
+            using Process process = Process.Start(start)!;
+            _ = process.StandardOutput.ReadToEndAsync();
+            Task<string> error = process.StandardError.ReadToEndAsync();
+            process.WaitForExit(TimeSpan.FromMinutes(5)).Should().BeTrue("deploy/update-file-list.cs finishes");
+            errors?.Write(error.Result);
+            return process.ExitCode;
+        }
+    }
+
+    [Fact]
     public void A_programs_digest_in_the_list_does_not_change_when_it_is_signed()
     {
         // Microsoft.Data.Sqlite.dll from NuGet carries Microsoft's Authenticode signature. Without it (the certificate
@@ -533,7 +711,7 @@ public sealed class UpdateControlTests : IDisposable
 
         // macOS seals every file in the bundle itself, and the check there is codesign's.
         new UpdatePublisher("TEAM", UpdatePublisher.Platform.MacOS, new FakeSignatures(_ => new CodeSignature(null, null, "TEAM")))
-            .Refuses(Package("osx-hooks.nupkg", "SemanticRouter", ["lib/app/Contents/MacOS/SemanticRouter", "lib/app/Contents/MacOS/SemanticRouter.runtimeconfig.dev.json"])).Should().BeNull();
+            .Refuses(Package("osx-hooks.nupkg", "SemanticRouter", ["lib/app/Contents/Info.plist", "lib/app/Contents/MacOS/SemanticRouter", "lib/app/Contents/MacOS/SemanticRouter.runtimeconfig.dev.json"])).Should().BeNull();
 
         static string RuntimeConfig(string more) => $$"""
             {
@@ -598,14 +776,15 @@ public sealed class UpdateControlTests : IDisposable
     [Fact]
     public void The_list_of_files_is_read_as_deploy_update_file_list_writes_it()
     {
-        // Written by `dotnet run --file deploy/update-file-list.cs -- write` from SemanticRouter.exe ("MZ not really a
-        // program\n", not a PE image), SemanticRouter.dll (a copy of fixtures/update-file-list/program.dll, a PE image),
+        // Written by `dotnet run --file deploy/update-file-list.cs -- write <folder> 1.0.1` from SemanticRouter.exe ("MZ not
+        // really a program\n", not a PE image), SemanticRouter.dll (a copy of fixtures/update-file-list/program.dll, a PE image),
         // SemanticRouter.runtimeconfig.json ({"runtimeOptions":{"tfm":"net10.0"}}) and wwwroot/notes.txt ("notices\n").
         // So the script computes the digest of a program as the app does. The folder also held what vpk leaves out of a
         // package (createdump.exe, runtimes/win-x64/native/libHarfBuzzSharp.pdb, SemanticRouter.application), which
         // `write` deletes before it lists the rest: the list names only what the package will hold.
         string fixtures = Path.Combine(AppContext.BaseDirectory, "fixtures", "update-file-list");
         UpdateFileList.Listed listed = UpdateFileList.Read(Path.Combine(fixtures, UpdateFileList.FileName));
+        listed.Version.Should().Be("1.0.1", "the list names the version it was made for");
         listed.Files.Should().Equal(new Dictionary<string, string>
         {
             ["SemanticRouter.runtimeconfig.json"] = Convert.ToHexStringLower(SHA256.HashData("""{"runtimeOptions":{"tfm":"net10.0"}}"""u8)),
@@ -753,7 +932,10 @@ public sealed class UpdateControlTests : IDisposable
     /// <paramref name="listed"/> says otherwise: the contents a file had when the list was made, or <see langword="null"/>
     /// for a file it leaves out. Velopack's own programs, which vpk adds after the list is made, are not in it. No list
     /// when <paramref name="list"/> is <see langword="false"/>; a list as releases up to 0.6.1 made it, without the
-    /// programs and libraries, when <paramref name="executables"/> is <see langword="false"/>.
+    /// programs and libraries, when <paramref name="executables"/> is <see langword="false"/>. The .nuspec (and
+    /// <c>sq.version</c>) gives <paramref name="version"/>; the list names <paramref name="madeFor"/> (by default the
+    /// same; none when <see langword="null"/>), and a macOS bundle's <c>Info.plist</c> gives <paramref name="bundle"/>
+    /// (by default the same).
     /// </summary>
     private string Package(
         string name,
@@ -763,8 +945,13 @@ public sealed class UpdateControlTests : IDisposable
         IReadOnlyDictionary<string, string?>? listed = null,
         bool list = true,
         bool executables = true,
-        string id = UpdateFileList.AppId)
+        string id = UpdateFileList.AppId,
+        string version = Offered,
+        string? madeFor = SameVersion,
+        string bundle = SameVersion)
     {
+        madeFor = madeFor == SameVersion ? version : madeFor;
+        bundle = bundle == SameVersion ? version : bundle;
         string path = Path.Combine(_directory, name);
         if (File.Exists(path))
         {
@@ -772,15 +959,16 @@ public sealed class UpdateControlTests : IDisposable
         }
 
         using ZipArchive zip = ZipFile.Open(path, ZipArchiveMode.Create);
-        Nuspec(zip, mainExe, id);
+        Nuspec(zip, mainExe, id, version);
         var hashes = new SortedDictionary<string, string>(StringComparer.Ordinal);
         var images = new SortedDictionary<string, string>(StringComparer.Ordinal);
         foreach (string file in files)
         {
             // Programs and libraries start as Windows executable images do; JSON files are as given or an empty object;
-            // sq.version is the .nuspec; the rest is text.
+            // sq.version is the .nuspec; Info.plist gives the bundle's version; the rest is text.
             string content = contents?.GetValueOrDefault(file)
-                ?? (file.EndsWith("/sq.version", StringComparison.Ordinal) ? NuspecText(mainExe, id)
+                ?? (file.EndsWith("/sq.version", StringComparison.Ordinal) ? NuspecText(mainExe, id, version)
+                : file.EndsWith("/Contents/Info.plist", StringComparison.Ordinal) ? InfoPlist(bundle)
                 : file.EndsWith(".json", StringComparison.Ordinal) ? "{}"
                 : (file.EndsWith(".exe", StringComparison.Ordinal) || file.EndsWith(".dll", StringComparison.Ordinal) || file.EndsWith(".bin", StringComparison.Ordinal) ? "MZ" : string.Empty) + "not really " + file);
             using (StreamWriter writer = new(zip.CreateEntry(file).Open()))
@@ -810,7 +998,7 @@ public sealed class UpdateControlTests : IDisposable
         if (list && mainExe.EndsWith(".exe", StringComparison.Ordinal))
         {
             using Stream stream = zip.CreateEntry("lib/app/" + UpdateFileList.FileName).Open();
-            stream.Write(FileList(hashes, executables ? images : null));
+            stream.Write(FileList(hashes, executables ? images : null, madeFor));
         }
 
         return path;
@@ -823,26 +1011,53 @@ public sealed class UpdateControlTests : IDisposable
         }
     }
 
-    private static string NuspecText(string mainExe, string id = UpdateFileList.AppId) => $"""
+    /// <summary>The version <see cref="FakeUpdates"/> offers, and that <see cref="Package"/> packs by default.</summary>
+    private const string Offered = "1.0.1";
+
+    /// <summary>For <see cref="Package"/>: the same version as the .nuspec's.</summary>
+    private const string SameVersion = "the .nuspec's";
+
+    private static string NuspecText(string mainExe, string id = UpdateFileList.AppId, string? version = Offered) => $"""
         <?xml version="1.0" encoding="utf-8"?>
         <package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
-        <metadata><id>{id}</id><version>1.0.1</version><mainExe>{mainExe}</mainExe></metadata>
+        <metadata><id>{id}</id>{(version is null ? string.Empty : $"<version>{version}</version>")}<mainExe>{mainExe}</mainExe></metadata>
         </package>
         """;
 
-    private static void Nuspec(ZipArchive zip, string mainExe, string id = UpdateFileList.AppId)
+    private static void Nuspec(ZipArchive zip, string mainExe, string id = UpdateFileList.AppId, string? version = Offered)
     {
         using StreamWriter writer = new(zip.CreateEntry(id + ".nuspec").Open());
-        writer.Write(NuspecText(mainExe, id));
+        writer.Write(NuspecText(mainExe, id, version));
     }
+
+    /// <summary>A macOS bundle's Info.plist as deploy/package-installer.sh writes it, giving <paramref name="version"/>.</summary>
+    private static string InfoPlist(string version, string? shortVersion = null) => $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>CFBundleIdentifier</key><string>io.github.siebe41.semantic-router</string>
+          <key>CFBundleExecutable</key><string>SemanticRouter</string>
+          <key>CFBundleShortVersionString</key><string>{shortVersion ?? version}</string>
+          <key>CFBundleVersion</key><string>{version}</string>
+          <key>LSUIElement</key><true/>
+        </dict>
+        </plist>
+        """;
 
     /// <summary>
     /// A list of files as deploy/update-file-list.cs writes it: a library whose one resource, files.json, maps each data
-    /// file to its SHA-256 and each program or library to its digest without a signature (none in a list of 0.6.1 or before).
+    /// file to its SHA-256 and each program or library to its digest without a signature (none in a list of 0.6.1 or before),
+    /// and names the version it was made for (none when <paramref name="version"/> is <see langword="null"/>).
     /// </summary>
-    private static byte[] FileList(IReadOnlyDictionary<string, string> hashes, IReadOnlyDictionary<string, string>? executables = null)
+    private static byte[] FileList(IReadOnlyDictionary<string, string> hashes, IReadOnlyDictionary<string, string>? executables, string? version)
     {
         var files = new JsonObject { ["files"] = new JsonObject(hashes.Select(h => KeyValuePair.Create(h.Key, (JsonNode?)h.Value))) };
+        if (version is not null)
+        {
+            files["version"] = version;
+        }
+
         if (executables is not null)
         {
             files["executables"] = new JsonObject(executables.Select(h => KeyValuePair.Create(h.Key, (JsonNode?)h.Value)));
@@ -888,6 +1103,12 @@ public sealed class UpdateControlTests : IDisposable
         /// <summary>The feed has nothing newer.</summary>
         public bool UpToDate { get; set; }
 
+        /// <summary>
+        /// Velopack offers the feed's release as a downgrade (<see cref="UpdateInfo.IsDowngrade"/>), as it does only when
+        /// asked to (<c>AllowVersionDowngrade</c>, <c>ExplicitChannel</c>), which the app never is.
+        /// </summary>
+        public bool Downgrade { get; set; }
+
         /// <summary>Checking fails with this message (offline, rate-limited).</summary>
         public string? CheckError { get; set; }
 
@@ -903,7 +1124,7 @@ public sealed class UpdateControlTests : IDisposable
             Calls.Add("check");
             return CheckError is { } error
                 ? Task.FromException<UpdateInfo?>(new HttpRequestException(error))
-                : Task.FromResult<UpdateInfo?>(UpToDate ? null : Deltas ? new UpdateInfo(_latest, false, Asset("1.0.0", VelopackAssetType.Full), [Asset("1.0.1", VelopackAssetType.Delta)]) : new UpdateInfo(_latest, false));
+                : Task.FromResult<UpdateInfo?>(UpToDate ? null : Deltas ? new UpdateInfo(_latest, false, Asset("1.0.0", VelopackAssetType.Full), [Asset("1.0.1", VelopackAssetType.Delta)]) : new UpdateInfo(_latest, Downgrade));
         }
 
         /// <summary>Downloading fails with this message.</summary>
@@ -954,4 +1175,11 @@ public sealed class UpdateControlTests : IDisposable
             FileName = $"SemanticRouter-{version}-win-x64-{(type == VelopackAssetType.Delta ? "delta" : "full")}.nupkg",
         };
     }
+}
+
+/// <summary>The publisher check as most tests here run it: of an update the feed offers as 1.0.1, to an installed 1.0.0.</summary>
+internal static class UpdatePublisherAsOffered
+{
+    public static string? Refuses(this UpdatePublisher publisher, string package) =>
+        publisher.Refuses(package, SemanticVersion.Parse("1.0.1"), SemanticVersion.Parse("1.0.0"));
 }

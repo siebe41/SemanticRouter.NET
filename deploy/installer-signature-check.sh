@@ -15,7 +15,10 @@
 # - in both apps, the bundle, Contents/MacOS/SemanticRouter and Velopack's Contents/MacOS/UpdateMac are signed with
 #   exactly the entitlements in deploy/macos/SemanticRouter.entitlements (codesign -d --entitlements), not vpk's
 #   defaults, and Info.plist has the NSAppleEventsUsageDescription the apple-events entitlement needs
-#   (docs/desktop.md#signing).
+#   (docs/desktop.md#signing);
+# - the update package's Info.plist (sealed by the signature) gives <version> as CFBundleShortVersionString and
+#   CFBundleVersion, as an XML property list, and its .nuspec gives <version> too: the desktop app refuses an update
+#   whose sealed version differs from its .nuspec's (#428). This fails whether or not the app is signed.
 #
 # The team is TEAM_ID, or the (TEAMID) at the end of APP_IDENTITY ("Developer ID Application: Name (TEAMID)"). With
 # SIGNING=signed one of them must be set.
@@ -149,6 +152,28 @@ if detail="$(codesign --verify --deep --strict -R "=$developer_id" "$bundle" 2>&
 fi
 report "\`SemanticRouter.app\` in \`$(basename "$package")\`" "$ok" "signed, checked" "$detail"
 check_entitlements "$bundle"
+
+# The version, signed or not: the app with Updates:Publisher applies an update only when the sealed Info.plist gives
+# the version its .nuspec gives, as an XML property list it can read (UpdatePublisher.BundleVersionRefuses, #428).
+plist="$bundle/Contents/Info.plist"
+nuspec_version="$(sed -n 's:.*<version>\([^<]*\)</version>.*:\1:p' "$work/update/"*.nuspec | head -n 1)"
+if [ "$nuspec_version" != "$version" ]; then
+  echo "::error::The .nuspec in $(basename "$package") gives version '$nuspec_version', not $version."
+  exit 1
+fi
+if [ "$(head -c 6 "$plist")" = bplist ]; then
+  echo "::error::Info.plist in $(basename "$package") is a binary property list; the desktop app reads only XML ones and would refuse the update."
+  exit 1
+fi
+for key in CFBundleShortVersionString CFBundleVersion; do
+  given="$(plutil -extract "$key" raw -o - "$plist" 2>/dev/null || true)"
+  if [ "$given" != "$version" ]; then
+    echo "::error::Info.plist in $(basename "$package") gives $key '$given', not $version: the desktop app would refuse the update."
+    exit 1
+  fi
+done
+echo "Info.plist in $(basename "$package"): version $version, as its .nuspec gives"
+echo "- \`Info.plist\` in \`$(basename "$package")\`: version $version, as its .nuspec gives" >> "$summary"
 
 if [ "$failed" = true ]; then
   exit 1

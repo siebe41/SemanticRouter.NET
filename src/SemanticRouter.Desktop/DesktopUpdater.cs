@@ -24,7 +24,10 @@ namespace SemanticRouter.Desktop;
 /// Notify (the policy's <see cref="UpdateApply.Notify"/>, or the user's preference): an update is only announced, and
 /// downloaded and applied when the person chooses "Restart to update"; never when the app quits. With the policy's
 /// <see cref="UpdatePolicy.Publisher"/>, a downloaded update is applied only when the app in it is signed by that
-/// publisher (<see cref="UpdatePublisher"/>); one that is not is deleted and not offered again.
+/// publisher (<see cref="UpdatePublisher"/>), is the version the feed offered (the asset's version, from the feed's
+/// <c>releases.&lt;channel&gt;.json</c>) and is newer than the installed one; one that is not is deleted and not offered
+/// again. The app never sets Velopack's <c>AllowVersionDowngrade</c> or <c>ExplicitChannel</c>, so Velopack offers no
+/// downgrade or move to another channel (<see cref="UpdateInfo.IsDowngrade"/>), and none is applied (#428).
 /// </para>
 /// <para>
 /// Without a publisher, an update from GitHub Releases is applied only when this project's release workflow attested its
@@ -402,7 +405,10 @@ internal sealed class DesktopUpdater(
         bool found = package is not null && File.Exists(package);
         if (publisher is not null)
         {
-            string? refused = found ? publisher.Refuses(package!) : "its package is not where the updater keeps it";
+            // The version the feed offered it as (for a package an earlier run downloaded, the version Velopack found
+            // it under) and the one installed, so an older release with a rewritten .nuspec is not taken for a newer one.
+            SemanticVersion? installed = SemanticVersion.TryParse(updates?.CurrentVersion, out SemanticVersion? current) ? current : null;
+            string? refused = found ? publisher.Refuses(package!, update.Version, installed) : "its package is not where the updater keeps it";
             if (refused is null)
             {
                 _verified = update;

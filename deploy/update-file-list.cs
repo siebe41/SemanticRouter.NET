@@ -6,16 +6,19 @@
 // with the rest of the release, and the desktop app's publisher check (src/SemanticRouter.Desktop/UpdateFileList.cs)
 // refuses an update whose files differ from it, so no program or library can be swapped for another signed one either.
 // `write` first deletes from the publish folder what vpk would leave out of the package (createdump.exe, symbols), so
-// that the list names exactly what the package will hold. `check` reads the list back from a Velopack package and fails unless it matches the package's files exactly, so a
-// file added or changed after `write` ran (other than by signing) is caught before the release, not by every updater in
-// the field. A .NET 10 file-based app, with nothing to install:
+// that the list names exactly what the package will hold. The list also records the version it was made for, which vpk
+// gives the package (--packVersion): the app refuses a package whose .nuspec, or the feed, says another version, so an
+// older signed release cannot be offered with its .nuspec rewritten to a newer version (#428). `check` reads the list
+// back from a Velopack package and fails unless it matches the package's files exactly and names the version its
+// .nuspec gives, so a file added or changed after `write` ran (other than by signing) is caught before the release, not
+// by every updater in the field. A .NET 10 file-based app, with nothing to install:
 //
-//   dotnet run --file deploy/update-file-list.cs -- write <publish-dir>
+//   dotnet run --file deploy/update-file-list.cs -- write <publish-dir> <version>
 //   dotnet run --file deploy/update-file-list.cs -- check <SemanticRouter-<version>-<rid>-full.nupkg>
 //
 // The library holds one managed resource, files.json:
-// {"files":{"<path relative to the app folder>":"<sha256 hex>"},"executables":{"<path>":"<image digest hex>"}}, paths
-// with forward slashes, sorted. It is never loaded: no deps.json names it. Same files, same bytes.
+// {"version":"<x.y.z>","files":{"<path relative to the app folder>":"<sha256 hex>"},"executables":{"<path>":"<image digest hex>"}},
+// paths with forward slashes, sorted. It is never loaded: no deps.json names it. Same files and version, same bytes.
 #:property PublishAot=false
 
 using System.Buffers.Binary;
@@ -53,8 +56,18 @@ string[] packaged = ["Squirrel.exe", AppId + "_ExecutionStub.exe"];
 // zip download hold the same files; matched without case, so the folder never keeps what vpk might drop.
 Regex leftOutByVpk = new(@"(^|/)createdump|\.vshost\.|\.nupkg$|\.pdb$|\.application$|^Update\.exe$|^sq\.version$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-if (args is ["write", var publish])
+// A release's version as the release passes it to vpk (the tag without its v): major.minor.patch and an optional
+// prerelease, nothing vpk would write differently in the .nuspec, so `check` can compare the two as text.
+Regex releaseVersion = new(@"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$", RegexOptions.CultureInvariant);
+
+if (args is ["write", var publish, var releasing])
 {
+    if (!releaseVersion.IsMatch(releasing))
+    {
+        Console.Error.WriteLine($"::error::{releasing} is not a release version (major.minor.patch, with an optional -prerelease).");
+        return 2;
+    }
+
     string root = Path.GetFullPath(publish);
     var files = new SortedDictionary<string, string>(StringComparer.Ordinal);
     var executables = new SortedDictionary<string, string>(StringComparer.Ordinal);
@@ -86,11 +99,12 @@ if (args is ["write", var publish])
 
     var json = new JsonObject
     {
+        ["version"] = releasing,
         ["files"] = new JsonObject(files.Select(f => KeyValuePair.Create(f.Key, (JsonNode?)f.Value))),
         ["executables"] = new JsonObject(executables.Select(f => KeyValuePair.Create(f.Key, (JsonNode?)f.Value))),
     };
     File.WriteAllBytes(Path.Combine(root, ListFile), Library(JsonSerializer.SerializeToUtf8Bytes(json)));
-    Console.WriteLine($"{ListFile}: {files.Count} data files and {executables.Count} programs and libraries");
+    Console.WriteLine($"{ListFile}: {files.Count} data files and {executables.Count} programs and libraries of {releasing}");
     return 0;
 }
 
@@ -114,9 +128,21 @@ if (args is ["check", var package])
     XElement? metadata = XDocument.Load(new MemoryStream(nuspec)).Root?.Elements().FirstOrDefault(e => e.Name.LocalName == "metadata");
     string? id = metadata?.Elements().FirstOrDefault(e => e.Name.LocalName == "id")?.Value.Trim();
     string? mainExe = metadata?.Elements().FirstOrDefault(e => e.Name.LocalName == "mainExe")?.Value.Trim();
+    string? version = metadata?.Elements().FirstOrDefault(e => e.Name.LocalName == "version")?.Value.Trim();
     if (id != AppId || mainExe != MainExe)
     {
         problems.Add($"its .nuspec names {id} with main executable {mainExe}; the desktop app accepts only {AppId} with {MainExe}");
+    }
+
+    // The desktop app refuses a package whose list was made for another version than its .nuspec gives.
+    string? listedVersion = listed["version"]?.GetValueKind() == JsonValueKind.String ? listed["version"]!.GetValue<string>() : null;
+    if (listedVersion is null)
+    {
+        problems.Add($"{ListFile} does not say which version it was made for: run deploy/update-file-list.cs write with the release's version");
+    }
+    else if (listedVersion != version)
+    {
+        problems.Add($"{ListFile} was made for version {listedVersion}, but its .nuspec gives {version}: pass deploy/update-file-list.cs write the version vpk packs");
     }
 
     var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -161,11 +187,11 @@ if (args is ["check", var package])
         return 1;
     }
 
-    Console.WriteLine($"{name}: every file but those vpk adds is in {ListFile}");
+    Console.WriteLine($"{name}: every file but those vpk adds is in {ListFile}, made for {version}");
     return 0;
 }
 
-Console.Error.WriteLine("Usage: dotnet run --file deploy/update-file-list.cs -- write <publish-dir> | check <full.nupkg>");
+Console.Error.WriteLine("Usage: dotnet run --file deploy/update-file-list.cs -- write <publish-dir> <version> | check <full.nupkg>");
 return 2;
 
 // A Windows program or library starts with MZ; the desktop app's check tells them apart the same way.

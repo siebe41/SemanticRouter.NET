@@ -2,8 +2,10 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+using System.Xml;
 using System.Xml.Linq;
 using SemanticRouter.AspNetCore;
+using Velopack;
 
 namespace SemanticRouter.Desktop;
 
@@ -17,14 +19,20 @@ namespace SemanticRouter.Desktop;
 /// <item>The package must be this app's: its <c>.nuspec</c> must name the id <c>SemanticRouter</c> and the main
 /// executable <c>SemanticRouter.exe</c> (<c>SemanticRouter</c> on macOS), as <c>deploy/package-installer.sh</c> packs it.
 /// Neither is taken from the package.</item>
+/// <item>The package must be the version the feed offered it as, and newer than the installed one: the version its
+/// <c>.nuspec</c> gives (which Velopack installs it as) must be both, and the signed part of the package must say the
+/// same, so an older signed release whose <c>.nuspec</c> was rewritten to a higher version is refused (#428). The app
+/// never asks Velopack for a downgrade or a move to another channel, so it never applies an older release.</item>
 /// <item>Windows: every executable image in the package (whatever its extension) must have a valid Authenticode
 /// signature (<c>WinVerifyTrust</c>); the main executable, the app's own assemblies (<c>SemanticRouter.*</c>) and the
 /// programs vpk adds (<see cref="UpdateFileList.Packaged"/>) must be signed by the publisher, and the rest by the
 /// publisher or Microsoft. Every file of the app, programs and libraries included, must be as the publisher's signed
-/// list of files says (<see cref="UpdateFileList"/>), and the .NET host's files (<c>*.runtimeconfig.json</c>,
-/// <c>*.deps.json</c>) may not point it at code outside the package (<see cref="HostFileRefuses"/>).</item>
+/// list of files says (<see cref="UpdateFileList"/>), which names the version it was made for, and the .NET host's
+/// files (<c>*.runtimeconfig.json</c>, <c>*.deps.json</c>) may not point it at code outside the package
+/// (<see cref="HostFileRefuses"/>).</item>
 /// <item>macOS: the app bundle must pass <c>codesign --verify --deep --strict</c> with a Developer ID signature, and its
-/// team ID must be the publisher.</item>
+/// team ID must be the publisher. The signature seals the bundle's <c>Info.plist</c>, whose
+/// <c>CFBundleShortVersionString</c> and <c>CFBundleVersion</c> must be the package's version.</item>
 /// <item>Linux: the packages carry no signature, so every update is refused.</item>
 /// </list>
 /// </remarks>
@@ -71,8 +79,13 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
             : new UpdatePublisher(publisher, Platform.Linux, null);
     }
 
-    /// <summary>Why the update in <paramref name="package"/> (a Velopack <c>.nupkg</c>) may not be applied, or <see langword="null"/> when it may.</summary>
-    public string? Refuses(string package)
+    /// <summary>
+    /// Why the update in <paramref name="package"/> (a Velopack <c>.nupkg</c>) may not be applied, or
+    /// <see langword="null"/> when it may. <paramref name="offered"/> is the version the feed offered it as;
+    /// <paramref name="installed"/> the version installed now (<see langword="null"/> when that is not known, and then
+    /// every update is refused).
+    /// </summary>
+    public string? Refuses(string package, SemanticVersion offered, SemanticVersion? installed)
     {
         if (platform == Platform.Linux || signatures is null)
         {
@@ -87,7 +100,7 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
             // The app's identity is this app's, never what the package says: a .nuspec with another id would make the
             // app's own assemblies need only a Microsoft signature, and another main executable could be any program
             // the publisher signed.
-            (string id, string mainExe) = Manifest(zip);
+            (string id, string mainExe, SemanticVersion version) = Manifest(zip);
             string expected = platform == Platform.Windows ? MainExe + ".exe" : MainExe;
             if (!string.Equals(id, UpdateFileList.AppId, StringComparison.Ordinal))
             {
@@ -99,7 +112,24 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
                 return $"its .nuspec names {mainExe} as the app, not {expected}";
             }
 
-            return platform == Platform.Windows ? RefusesWindows(zip, expected, folder) : RefusesMacOS(zip, expected, folder);
+            // The .nuspec is not signed: the version it gives is checked against the feed and the installed version
+            // here, and against the signed part of the package below, so an older release cannot pass for a newer one.
+            if (!SameVersion(version, offered))
+            {
+                return $"its .nuspec says it is version {version.ToFullString()}, not {offered.ToFullString()} as the feed offered it";
+            }
+
+            if (installed is null)
+            {
+                return "the installed version is not known, so the update cannot be told from an older release";
+            }
+
+            if (version.CompareTo(installed) <= 0)
+            {
+                return $"it is version {version.ToFullString()}, not newer than the installed {installed.ToFullString()}, and an update never goes back";
+            }
+
+            return platform == Platform.Windows ? RefusesWindows(zip, expected, version, folder) : RefusesMacOS(zip, expected, version, folder);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Xml.XmlException)
         {
@@ -121,7 +151,7 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
         }
     }
 
-    private string? RefusesWindows(ZipArchive zip, string mainExe, string folder)
+    private string? RefusesWindows(ZipArchive zip, string mainExe, SemanticVersion version, string folder)
     {
         ZipArchiveEntry[] files = [.. zip.Entries.Where(e => e.FullName.StartsWith(AppFolder, StringComparison.Ordinal) && !e.FullName.EndsWith('/'))];
         if (files.GroupBy(e => e.FullName, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1) is { } twice)
@@ -167,13 +197,14 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
 
         // Every file is covered by the signed list: the programs and libraries by their digest without the signature, so
         // none can be swapped for another signed one, and the rest by their SHA-256: the .NET host's runtimeconfig.json
-        // and deps.json, which decide what is loaded and how, and the rest.
+        // and deps.json, which decide what is loaded and how, and the rest. The list names the version it was made for,
+        // which must be the .nuspec's (and so sq.version's, a copy of it).
         if (list is null)
         {
             return $"its package has no {UpdateFileList.FileName}, the list of the files its signature covers";
         }
 
-        if (UpdateFileList.Refuses(list, files.Select(e => (e.FullName[AppFolder.Length..], e, code.Contains(e))), Nuspec(zip)) is { } changed)
+        if (UpdateFileList.Refuses(list, files.Select(e => (e.FullName[AppFolder.Length..], e, code.Contains(e))), Nuspec(zip), version) is { } changed)
         {
             return changed;
         }
@@ -311,7 +342,7 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
         return stream.ReadAtLeast(header, 2, throwOnEndOfStream: false) == 2 && header[0] == (byte)'M' && header[1] == (byte)'Z';
     }
 
-    private string? RefusesMacOS(ZipArchive zip, string mainExe, string folder)
+    private string? RefusesMacOS(ZipArchive zip, string mainExe, SemanticVersion version, string folder)
     {
         // The package holds the bundle's Contents folder: unpack it as an .app and let codesign check the whole bundle.
         const string id = UpdateFileList.AppId;
@@ -339,8 +370,65 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
             return $"{id}.app {problem}";
         }
 
-        return Matches(signature) ? null : $"{id}.app is signed by {Describe(signature)}, not by team {publisher}";
+        if (!Matches(signature))
+        {
+            return $"{id}.app is signed by {Describe(signature)}, not by team {publisher}";
+        }
+
+        // codesign has checked Info.plist (its hash is in the signature), so the version it gives is the publisher's.
+        return BundleVersionRefuses(Path.Combine(bundle, "Contents", "Info.plist"), version);
     }
+
+    /// <summary>
+    /// Why the app bundle's <c>Info.plist</c> at <paramref name="plist"/> does not give <paramref name="version"/> as its
+    /// <c>CFBundleShortVersionString</c> and <c>CFBundleVersion</c>, as <c>deploy/package-installer.sh</c> writes them, or
+    /// <see langword="null"/> when it does. Read as the XML property list vpk packs; one it cannot read is refused.
+    /// </summary>
+    internal static string? BundleVersionRefuses(string plist, SemanticVersion version)
+    {
+        if (!File.Exists(plist))
+        {
+            return "its package has no Contents/Info.plist";
+        }
+
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            using XmlReader reader = XmlReader.Create(plist, new XmlReaderSettings { DtdProcessing = DtdProcessing.Ignore, XmlResolver = null });
+            XElement? dict = XDocument.Load(reader).Root is { Name.LocalName: "plist" } root ? root.Elements("dict").SingleOrDefault() : null;
+            if (dict is null)
+            {
+                return "its Info.plist is not a property list";
+            }
+
+            // A dictionary is a <key> and its value, in turn.
+            foreach (XElement key in dict.Elements("key"))
+            {
+                if (key.ElementsAfterSelf().FirstOrDefault() is { Name.LocalName: "string" } value && !values.TryAdd(key.Value, value.Value))
+                {
+                    return $"its Info.plist names {key.Value} twice";
+                }
+            }
+        }
+        catch (XmlException ex)
+        {
+            return $"its Info.plist cannot be read ({ex.Message})";
+        }
+
+        foreach (string key in (string[])["CFBundleShortVersionString", "CFBundleVersion"])
+        {
+            if (!values.TryGetValue(key, out string? given) || !SemanticVersion.TryParse(given.Trim(), out SemanticVersion? bundle) || !SameVersion(bundle, version))
+            {
+                return $"its Info.plist gives {key} {(given is null ? "no value" : given.Trim())}, not {version.ToFullString()}, the version its .nuspec gives";
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Whether <paramref name="a"/> and <paramref name="b"/> are the same version, build metadata included.</summary>
+    internal static bool SameVersion(SemanticVersion a, SemanticVersion b) =>
+        string.Equals(a.ToFullString(), b.ToFullString(), StringComparison.Ordinal);
 
     /// <summary>Whether <paramref name="signature"/> is the publisher's: the team ID on macOS; the subject, common name or thumbprint on Windows.</summary>
     internal bool Matches(CodeSignature signature)
@@ -402,8 +490,8 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
         : signature.Signer is { } signer ? signer.Subject
         : "an unknown publisher";
 
-    /// <summary>The package's id and main executable, from its <c>.nuspec</c>.</summary>
-    private static (string Id, string MainExe) Manifest(ZipArchive zip)
+    /// <summary>The package's id, main executable and version, from its <c>.nuspec</c>.</summary>
+    private static (string Id, string MainExe, SemanticVersion Version) Manifest(ZipArchive zip)
     {
         using Stream stream = Nuspec(zip).Open();
         XElement? metadata = XDocument.Load(stream).Root?.Elements().FirstOrDefault(e => e.Name.LocalName == "metadata");
@@ -414,7 +502,13 @@ internal sealed class UpdatePublisher(string publisher, UpdatePublisher.Platform
             throw new InvalidDataException("its .nuspec names no id or main executable");
         }
 
-        return (id, mainExe);
+        string? version = metadata!.Elements().FirstOrDefault(e => e.Name.LocalName == "version")?.Value.Trim();
+        if (!SemanticVersion.TryParse(version, out SemanticVersion? parsed))
+        {
+            throw new InvalidDataException("its .nuspec gives no version");
+        }
+
+        return (id, mainExe, parsed);
     }
 
     private static ZipArchiveEntry Nuspec(ZipArchive zip) =>

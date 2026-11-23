@@ -4,6 +4,7 @@ using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Velopack;
 
 namespace SemanticRouter.Desktop;
 
@@ -13,14 +14,16 @@ namespace SemanticRouter.Desktop;
 /// programs and libraries only, each on its own; the files beside them (<c>*.runtimeconfig.json</c>, <c>*.deps.json</c>,
 /// the notices, images) are covered by their SHA-256 in this signed library, and so are the programs and libraries
 /// themselves (<see cref="ImageDigest"/>), so none of them can be changed, added, removed, renamed or swapped for another
-/// signed file without the publisher's certificate.
+/// signed file without the publisher's certificate. It also names the version it was made for, which must be the
+/// version the package's <c>.nuspec</c> gives, so an older release cannot pass for a newer one (#428).
 /// </summary>
 /// <remarks>
 /// The library holds one managed resource, <c>files.json</c>:
-/// <c>{"files":{"&lt;path in the app folder&gt;":"&lt;sha256 hex&gt;"},"executables":{"&lt;path&gt;":"&lt;image digest hex&gt;"}}</c>.
-/// It is never loaded, only read. Lists of releases up to 0.6.1 have no <c>executables</c> and are refused. Only what
-/// vpk adds after the list was made is not in it: <c>sq.version</c>, which must be a copy of the package's
-/// <c>.nuspec</c>, and Velopack's own programs (<see cref="Packaged"/>), which must be signed by the publisher.
+/// <c>{"version":"&lt;x.y.z&gt;","files":{"&lt;path in the app folder&gt;":"&lt;sha256 hex&gt;"},"executables":{"&lt;path&gt;":"&lt;image digest hex&gt;"}}</c>.
+/// It is never loaded, only read. Lists of releases up to 0.6.1 have no <c>executables</c> and no <c>version</c>, and
+/// are refused, as is any list without a <c>version</c>. Only what vpk adds after the list was made is not in it:
+/// <c>sq.version</c>, which must be a copy of the package's <c>.nuspec</c>, and Velopack's own programs
+/// (<see cref="Packaged"/>), which must be signed by the publisher.
 /// </remarks>
 internal static class UpdateFileList
 {
@@ -40,15 +43,19 @@ internal static class UpdateFileList
     /// </summary>
     public static readonly IReadOnlySet<string> Packaged = new HashSet<string>(StringComparer.Ordinal) { "Squirrel.exe", AppId + "_ExecutionStub.exe" };
 
-    /// <summary>What the list names: data files by their SHA-256, executable images by <see cref="ImageDigest"/>.</summary>
-    internal sealed record Listed(Dictionary<string, string> Files, Dictionary<string, string>? Executables);
+    /// <summary>
+    /// What the list names: data files by their SHA-256, executable images by <see cref="ImageDigest"/>, and the version it
+    /// was made for (<see langword="null"/> when it names none).
+    /// </summary>
+    internal sealed record Listed(Dictionary<string, string> Files, Dictionary<string, string>? Executables, string? Version);
 
     /// <summary>
     /// Why the package's files in the app folder (<paramref name="files"/>: zip entries, by path in the app folder, and
-    /// whether each is an executable image) differ from the list in <paramref name="library"/>, or <see langword="null"/>
-    /// when they are exactly the files it names, with the same contents.
+    /// whether each is an executable image) differ from the list in <paramref name="library"/>, or the list was made for
+    /// another version than <paramref name="version"/> (the package's, from its <c>.nuspec</c>); <see langword="null"/>
+    /// when they are exactly the files it names, with the same contents, and it was made for that version.
     /// </summary>
-    public static string? Refuses(string library, IEnumerable<(string Relative, ZipArchiveEntry Entry, bool Executable)> files, ZipArchiveEntry nuspec)
+    public static string? Refuses(string library, IEnumerable<(string Relative, ZipArchiveEntry Entry, bool Executable)> files, ZipArchiveEntry nuspec, SemanticVersion version)
     {
         Listed listed;
         try
@@ -63,6 +70,18 @@ internal static class UpdateFileList
         if (listed.Executables is not { } executables)
         {
             return $"its list of files ({FileName}) does not cover its programs and libraries, as the lists of releases up to 0.6.1 do not";
+        }
+
+        // The .nuspec, which gives the version Velopack installs it as, is neither signed nor listed: the signed list
+        // binds the files to the version, so an older release's files cannot be offered as a newer version.
+        if (listed.Version is not { } made)
+        {
+            return $"its list of files ({FileName}) does not say which version it was made for, so it could be an older release's";
+        }
+
+        if (!SemanticVersion.TryParse(made, out SemanticVersion? madeFor) || !UpdatePublisher.SameVersion(madeFor, version))
+        {
+            return $"its list of files ({FileName}) was made for version {made}, not {version.ToFullString()}, the version its .nuspec gives";
         }
 
         foreach ((string relative, ZipArchiveEntry entry, bool executable) in files)
@@ -129,7 +148,8 @@ internal static class UpdateFileList
 
             return new Listed(
                 Hashes(files),
-                document.RootElement.TryGetProperty("executables", out JsonElement executables) && executables.ValueKind == JsonValueKind.Object ? Hashes(executables) : null);
+                document.RootElement.TryGetProperty("executables", out JsonElement executables) && executables.ValueKind == JsonValueKind.Object ? Hashes(executables) : null,
+                document.RootElement.TryGetProperty("version", out JsonElement version) && version.ValueKind == JsonValueKind.String ? version.GetString() : null);
         }
 
         throw new InvalidDataException($"it has no {Resource}");
