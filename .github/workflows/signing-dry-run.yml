@@ -237,3 +237,12 @@ jobs:
 
       - name: Check the signature
         run: deploy/check-signature-macos.sh --required installers/osx-arm64
+
+      # As the release checks them: the app in the installer and in the update package signed by the team and
+      # notarized, with exactly the entitlements of deploy/macos/SemanticRouter.entitlements and the Apple-events usage
+      # string (#337). Here they run with real certificates before the first signed release does.
+      - name: Check the app's signatures and entitlements
+        env:
+          SIGNING: signed
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: deploy/installer-signature-check.sh installers/osx-arm64 "$VERSION" osx-arm64
