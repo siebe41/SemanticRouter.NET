@@ -11,6 +11,10 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Failed dashboard sign-ins, wrong gateway keys and per-address rate limits count an IPv6 address by its /64 and keep at most 10,000 addresses each, so a client cannot get a fresh allowance per address or grow the tables without end. (#418)
 - The router no longer reads without limit from a backend or a CLI: error bodies are cut at 64 KiB, event-stream lines and events at 16 MiB, translated JSON replies at 64 MiB, and a CLI's standard error is kept to its first and last 32 K characters. (#418)
 - `/v1/messages/count_tokens`, the dashboard's context analysis, and the configuration and draft-connector endpoints enforce `Middleware:MaxRequestBodyBytes`, also for bodies sent without a length. (#418)
+- The router no longer sends a request from another machine to any connector that runs a program on this one (a CLI, Copilot, or a connector type from another package) unless its `AllowRemoteClients` is set. It used to leave that check to each connector, so a package that did not make it could serve your personal sign-in to other machines. (#356)
+- Prompted tool calling: a reply that writes the run's secret tool-call label in another case (` ```TOOL_CALL-… `) has it replaced like any other, so the label never reaches the client. (#354)
+- A prompt a local-only route covers stays on this machine when the conversation continues on a cloud model. The model a conversation started on skipped the local-only check, so such a prompt went to that cloud model. (#349)
+- Rolling back to an earlier configuration (`POST api/config/history/{id}/rollback`) gets the same checks as `PUT api/config`. A rollback could change what a CLI runs, which files a memory source reads, or bring back `${env:}` references, which `SemanticRouter:Dashboard:AllowProcessSettings` and the remote-client rules otherwise refuse over the admin API. (#349)
 
 ### Added
 
@@ -83,13 +87,6 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - A model that hits its limit stays cooling down when the cooldowns are re-read from the state store at that moment, and one that answers again is not put back into cooldown by such a re-read. The re-read could miss the change while it waited to be saved, so the limited model was tried again for a few seconds, or the recovered one skipped. (#418)
 - A failed request no longer writes the connector incidents (the source of the "connector down" and "keeps hitting its usage limit" notices) to the state store while other failing requests wait: they are saved in the background, and only when something a restart would miss changed. A connector that hits its usage limit on every request keeps the latest hit of each day instead of one per request, which grew the saved state by a timestamp per request for a week. State saved by earlier versions is read and trimmed. (#418)
 - Requests no longer wait for the SQLite state writer, for example while another router holds the file or a purge runs. A budget check waited up to twice `BusyTimeout` plus 5 seconds (15 s by default) for every candidate model; it now adds the usage still waiting to be saved to its totals. After a configuration was applied, the latency and cache-share figures were read from the activity by every request until one finished; the last figures are now used until a background refresh replaces them, and the first are worked out in the background after a start. The judge reads and saves its daily count in the background, and a cancellation that is not the router stopping fails one grade instead of stopping the judge for good. An activity or feedback id never waits for the next block of ids, and a reservation that failed no longer fails every later request. (#418)
-
-### Security
-
-- The router no longer sends a request from another machine to any connector that runs a program on this one (a CLI, Copilot, or a connector type from another package) unless its `AllowRemoteClients` is set. It used to leave that check to each connector, so a package that did not make it could serve your personal sign-in to other machines. (#356)
-- Prompted tool calling: a reply that writes the run's secret tool-call label in another case (` ```TOOL_CALL-… `) has it replaced like any other, so the label never reaches the client. (#354)
-- A prompt a local-only route covers stays on this machine when the conversation continues on a cloud model. The model a conversation started on skipped the local-only check, so such a prompt went to that cloud model. (#349)
-- Rolling back to an earlier configuration (`POST api/config/history/{id}/rollback`) gets the same checks as `PUT api/config`. A rollback could change what a CLI runs, which files a memory source reads, or bring back `${env:}` references, which `SemanticRouter:Dashboard:AllowProcessSettings` and the remote-client rules otherwise refuse over the admin API. (#349)
 
 ## [0.6.1] - 2026-10-27
 
