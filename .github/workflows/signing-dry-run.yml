@@ -176,6 +176,16 @@ jobs:
         shell: pwsh
         run: ./deploy/check-signature-windows.ps1 installers/win-x64 -Required
 
+      # As the release checks them: the installer and every program in the update package it installs, signed by the
+      # publisher (or Microsoft, for the runtime's files), by the rule the app's Updates:Publisher check applies, and the
+      # update package's signed list of files (deploy/installer-signature-check.ps1). Here they run with the real
+      # certificate before the first signed release does: a library signed by someone else (#336) fails here first.
+      - name: Check the app's signatures
+        shell: pwsh
+        env:
+          SIGNING: signed
+        run: deploy/installer-signature-check.ps1 -Installers installers/win-x64 -Version $env:VERSION
+
   # As release.yml's installer-macos, for osx-arm64, without the delta download and the upload: sign, notarize and
   # staple, then require the signature and the ticket.
   macos:

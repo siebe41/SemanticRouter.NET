@@ -8,9 +8,11 @@
 #   runs nothing that publishes or uploads (vpk upload or download, with or without a [platform] directive, gh, nuget
 #   push, docker push, cosign, git push); the only artifact it uploads is the unsigned build (publish-*), for its own
 #   signing jobs; and its signature checks require a signature (-Required, --required, and SIGNING: signed for
-#   deploy/installer-signature-check.sh, which also checks the signed macOS app's entitlements);
+#   deploy/installer-signature-check.ps1 and deploy/installer-signature-check.sh, which check the programs the app
+#   installs and the signed macOS app's entitlements), in both the windows and the macos job;
 # - both workflows set up signing and check signatures with the same scripts (deploy/signing-setup.sh,
-#   deploy/check-signature-windows.ps1, deploy/check-signature-macos.sh, deploy/installer-signature-check.sh) and pack
+#   deploy/check-signature-windows.ps1, deploy/check-signature-macos.sh, deploy/installer-signature-check.ps1,
+#   deploy/installer-signature-check.sh) and pack
 #   with deploy/package-installer.sh for Windows and macOS, and no workflow in the directory signs or checks a
 #   signature inline instead (security import, notarytool, stapler, pkgutil --check-signature, codesign, productsign,
 #   signtool, spctl, Get-AuthenticodeSignature, the Trusted Signing metadata), so there is one copy of each signing
@@ -86,9 +88,13 @@ grep -qE 'check-signature-windows\.ps1 .*-Required([[:space:]]|$)' <<<"$dry" \
   || error "$dry_run" "the dry run does not run deploy/check-signature-windows.ps1 with -Required, so an unsigned installer would pass."
 grep -qE 'check-signature-macos\.sh --required' <<<"$dry" \
   || error "$dry_run" "the dry run does not run deploy/check-signature-macos.sh with --required, so an unsigned installer would pass."
-# deploy/installer-signature-check.sh requires its checks (the app's signatures and entitlements) only with SIGNING=signed.
-grep -qE '^[[:space:]]+SIGNING: signed$' <<<"$dry" \
-  || error "$dry_run" "the dry run does not run deploy/installer-signature-check.sh with SIGNING: signed, so an app signed with other entitlements would pass."
+# deploy/installer-signature-check.ps1 and .sh require their checks (the programs' signatures, the macOS app's
+# entitlements) only with SIGNING=signed: each job that runs one sets it.
+for job in windows macos; do
+  awk -v job="$job" '$0 ~ "^  " job ":" { in_job = 1; next } /^  [A-Za-z0-9_-]+:/ { in_job = 0 } in_job' <<<"$dry" \
+    | grep -qE '^[[:space:]]+SIGNING: signed$' \
+    || error "$dry_run" "the dry run's $job job does not run its installer-signature-check with SIGNING: signed, so an app signed by someone else or with other entitlements would pass."
+done
 while IFS= read -r path; do
   [ -n "$path" ] || continue
   if [[ "$path" != publish-* ]]; then
@@ -103,7 +109,8 @@ for file in "$dry_run" "$release"; do
   # shellcheck disable=SC2016 # "$rid" is the workflow's text, not this script's variable.
   if [ "$file" = "$dry_run" ]; then macos_package="deploy/package-installer.sh osx-arm64"; else macos_package='deploy/package-installer.sh "$rid"'; fi
   for call in "deploy/signing-setup.sh windows" "deploy/signing-setup.sh macos" "deploy/check-signature-windows.ps1" \
-    "deploy/check-signature-macos.sh" "deploy/installer-signature-check.sh" "deploy/package-installer.sh win-x64" \
+    "deploy/check-signature-macos.sh" "deploy/installer-signature-check.ps1" "deploy/installer-signature-check.sh" \
+    "deploy/package-installer.sh win-x64" \
     "$macos_package"; do
     grep -qF "$call" <<<"$text" || error "$file" "does not run '$call'. The release and the signing dry run sign and check with the same scripts."
   done
