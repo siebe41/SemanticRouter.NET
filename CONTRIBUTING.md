@@ -65,7 +65,7 @@ The internals the sibling packages use are a contract between the packages of on
 
 Do not add `InternalsVisibleTo` for a package outside this repository.
 
-**Third-party dependencies** have an open lower bound (the version in `Directory.Packages.props`, or later), except when a package uses an API its author marks as experimental or otherwise not covered by their compatibility promise. Then the dependency gets an upper bound up to the next version that may break it, and the bound moves only after the package was tested against that version. Today that is `GitHub.Copilot.SDK` `[1.0.22, 1.1)`: Connectors.Copilot uses its permission API, marked experimental (GHCP001). Raising the bound changes the version range in `Directory.Packages.props`; run `dotnet restore` and commit the lock files as for any version change.
+**Third-party dependencies** have an open lower bound (the version in `Directory.Packages.props`, or later), except when a package uses an API its author marks as experimental or otherwise not covered by their compatibility promise. Then the dependency gets an upper bound up to the next version that may break it, and the bound moves only after the package was tested against that version. Today that is `GitHub.Copilot.SDK`, whose range in `Directory.Packages.props` stops below 1.1: Connectors.Copilot uses its permission API, marked experimental (GHCP001). Raising the bound changes the version range in `Directory.Packages.props`; run `dotnet restore` and commit the lock files as for any version change.
 
 ## Public API and package validation
 

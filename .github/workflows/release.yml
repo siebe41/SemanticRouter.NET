@@ -614,9 +614,18 @@ jobs:
           fi
           printf '%s\n' "$notes" > notes.md
 
+      # What this job uploads, by name and SHA-256, for the checksums job: it attests only assets of the draft that a
+      # job of this run uploaded (docs/releases.md#what-the-attestation-proves).
+      - name: Manifest
+        run: |
+          mkdir -p manifest
+          (cd artifacts && sha256sum -- *) > manifest/desktop.sha256
+
       # The release is created as a draft, which only the publish job makes public, once everything else is done. A
-      # version with a suffix (1.0.0-rc.1) is created as a prerelease: the desktop app's updater skips those. On a
-      # re-run, gh finds the draft by its tag and the archives replace the ones there.
+      # version with a suffix (1.0.0-rc.1) is created as a prerelease: the desktop app's updater skips those. A release
+      # for the tag that is already there on the run's first attempt was not made by this run (someone made or kept a
+      # draft for the version), so the run stops rather than build on it. On a re-run (Re-run failed jobs), gh finds
+      # the draft the first attempt made by its tag and the archives replace the ones there.
       - name: Attach to the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -625,10 +634,26 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             prerelease=(--prerelease)
           fi
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
+          if draft="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            if [ "$GITHUB_RUN_ATTEMPT" = 1 ]; then
+              echo "::error::A release for $GITHUB_REF_NAME already exists, and this run did not create it. Delete it (gh release delete $GITHUB_REF_NAME) and re-run this job; the run then creates its own draft (docs/releases.md#when-a-release-fails)."
+              exit 1
+            fi
+            if [ "$draft" != true ]; then
+              echo "::error::The release $GITHUB_REF_NAME is already published; nothing is attached to it."
+              exit 1
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
               --notes-file notes.md --generate-notes --verify-tag --draft "${prerelease[@]}"
+          fi
           gh release upload "$GITHUB_REF_NAME" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: manifest-desktop
+          path: manifest/desktop.sha256
+          if-no-files-found: error
 
   # The app each installer packages, published on the installer's own OS (as before the split), without secrets. Tar
   # keeps the executable bits that an artifact would lose.
@@ -672,7 +697,9 @@ jobs:
   # vpk, the packaging and signing tool itself, is the one tool installed. The Windows and macOS jobs sign when the
   # packages job found their platform's signing set up, and then check the signature before anything is uploaded
   # (docs/desktop.md#signing). vpk uploads into the draft release (--merge) and leaves it a draft: without --publish,
-  # the update feeds are public only when the publish job publishes the release. Each secret goes to the steps that use
+  # the update feeds are public only when the publish job publishes the release. After uploading, each job reads what
+  # vpk uploaded back from the draft and leaves it, by name and SHA-256, in a manifest artifact for the checksums job
+  # (deploy/release-upload-manifest.sh), which attests only that. Each secret goes to the steps that use
   # it, not to the job (deploy/workflow-secrets-check.sh): the token to the steps that fetch the previous release and
   # upload, the signing credentials to the signing setup. vpk is installed before either, so its restore never runs
   # next to them. Windows signs with an Azure login by OIDC, so no Azure secret is stored; but id-token: write is
@@ -711,7 +738,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends squashfs-tools zstd
           dotnet tool install -g vpk --version 1.2.161
 
-      # The token fetches the previous release's package (for the delta) and uploads.
+      # The token fetches the previous release's package (for the delta) and uploads. What vpk uploaded, read back from
+      # the draft, goes into the job's manifest for the checksums job (deploy/release-upload-manifest.sh).
       - name: Package and attach
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -720,6 +748,13 @@ jobs:
           PUBLISH_DIR=published deploy/package-installer.sh linux-x64 "${GITHUB_REF_NAME#v}" installers/linux-x64
           vpk upload github --outputDir installers/linux-x64 --channel linux-x64 \
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $RELEASE_PRE
+          deploy/release-upload-manifest.sh manifest/linux-x64.sha256 installers/linux-x64 linux-x64 "${GITHUB_REF_NAME#v}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: manifest-linux-x64
+          path: manifest/linux-x64.sha256
+          if-no-files-found: error
 
       # For installer-sbom (with the previous release's full package, when one was downloaded for the delta).
       # Kept 7 days, so a failed installer-sbom can be re-run after the day the release was cut.
@@ -825,6 +860,13 @@ jobs:
         run: |
           vpk upload github --outputDir installers/win-x64 --channel win-x64 \
             --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $RELEASE_PRE
+          deploy/release-upload-manifest.sh manifest/win-x64.sha256 installers/win-x64 win-x64 "${GITHUB_REF_NAME#v}"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: manifest-win-x64
+          path: manifest/win-x64.sha256
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -915,7 +957,14 @@ jobs:
           for rid in osx-arm64 osx-x64; do
             vpk upload github --outputDir "installers/$rid" --channel "$rid" \
               --repoUrl "$VPK_PREVIOUS_FROM" --token "$GITHUB_TOKEN" --tag "$GITHUB_REF_NAME" --merge $RELEASE_PRE
+            deploy/release-upload-manifest.sh manifest/osx.sha256 "installers/$rid" "$rid" "${GITHUB_REF_NAME#v}"
           done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: manifest-osx
+          path: manifest/osx.sha256
+          if-no-files-found: error
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -979,10 +1028,13 @@ jobs:
   # packages (as nuget.org will get them, before nuget.org adds its repository signature) and the packages', image's
   # and installers' SBOMs attached (the archives' came with them); and one build provenance attestation covering every
   # asset and SHA256SUMS, for `gh attestation verify`. The job downloads, hashes and uploads; it builds and runs nothing
-  # from the repository. It first checks that the draft has every channel's update feed and the notices. Nothing has
-  # been pushed or published yet (the image, NuGet and publish jobs come after this one), but the attestation is
-  # public: it goes to the public Sigstore log and the repository's attestations, and stays there if the version is
-  # given up.
+  # from the repository. A draft's assets can be changed by anyone who can write to the repository, so the job first
+  # checks that the draft holds exactly what this run's jobs uploaded: each asset by name and SHA-256 in the manifests
+  # that the desktop and installer jobs left as artifacts of this run, and each update feed naming only those packages
+  # (docs/releases.md#what-the-attestation-proves). It also checks that the draft has every channel's update feed and
+  # the notices. Nothing has been pushed or published yet (the image, NuGet and publish jobs come after this one), but
+  # the attestation is public: it goes to the public Sigstore log and the repository's attestations, and stays there if
+  # the version is given up.
   checksums:
     needs: [ packages, image-sbom, desktop, installers, installer-windows, installer-macos, installer-sbom ]
     runs-on: ubuntu-latest
@@ -1006,13 +1058,93 @@ jobs:
           merge-multiple: true
           path: attach
 
-      - name: Checksums
+      # What the desktop and installer jobs uploaded to the draft, by name and SHA-256.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: manifest-*
+          merge-multiple: true
+          path: manifests
+
+      # SHA256SUMS and the files this job attaches are its own, written again below: a re-run finds the previous
+      # attempt's on the draft.
+      - name: Download the draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir release --clobber
-          cp attach/* release/
           rm -f release/SHA256SUMS
+          for file in attach/*; do
+            rm -f "release/${file##*/}"
+          done
+
+      # Only what this run built is attested. Every asset of the draft must be in a manifest with the same SHA-256,
+      # every file in a manifest must be on the draft, and each update feed may name only those files, with their SHA-256
+      # and size (the installed apps download what a feed names). Anything else (an asset replaced or added after a job
+      # uploaded, or planted on a draft before the run) fails the release before anything is attested.
+      - name: Only what this run uploaded
+        run: |
+          shopt -s nullglob dotglob
+          failed=false
+          error() {
+            echo "::error::$1"
+            failed=true
+          }
+          sha256() {
+            local digest
+            digest="$(sha256sum < "$1")"
+            echo "${digest%% *}"
+          }
+          # The SHA-256 a manifest gives the name, or a failure when none does.
+          uploaded() {
+            awk -F '\t' -v name="$1" '$1 == name { print $2; found = 1 } END { exit !found }' uploaded.tsv
+          }
+
+          for manifest in desktop linux-x64 win-x64 osx; do
+            if [ ! -s "manifests/$manifest.sha256" ]; then
+              echo "::error::This run has no manifest-$manifest artifact, so what that job uploaded cannot be checked."
+              exit 1
+            fi
+          done
+          # One line per name: name <tab> SHA-256. Two manifests that give a name different contents fail.
+          cat manifests/*.sha256 | tr -d '\r' | awk '
+            length($1) != 64 || $1 !~ /^[0-9a-f]+$/ || !/^[^ ]+ [ *][^\/]+$/ { print "::error::Not a manifest line: " $0; bad = 1; next }
+            { name = substr($0, 67); if ((name in seen) && seen[name] != $1) { print "::error::Two jobs uploaded " name " with different contents."; bad = 1 }; seen[name] = $1 }
+            END { for (name in seen) print name "\t" seen[name] > "uploaded.tsv"; exit bad }'
+
+          for path in release/*; do
+            name="${path#release/}"
+            if ! expected="$(uploaded "$name")"; then
+              error "$name is on the draft release, but no job of this run uploaded it. Delete it from the draft, then re-run the failed jobs."
+            elif [ "$(sha256 "$path")" != "$expected" ]; then
+              error "$name on the draft release is not the file this run uploaded (sha256 $(sha256 "$path"), uploaded $expected). Give up the version (docs/releases.md#when-a-release-fails)."
+            fi
+          done
+          while IFS=$'\t' read -r name _; do
+            [ -f "release/$name" ] || error "This run uploaded $name, but the draft release no longer has it."
+          done < uploaded.tsv
+
+          for feed in release/releases.*.json; do
+            if ! entries="$(jq -er '.Assets[] | [.FileName, (.SHA256 | ascii_downcase), (.Size | tostring)] | @tsv' "$feed")"; then
+              error "${feed#release/} is not an update feed that lists packages."
+              continue
+            fi
+            while IFS=$'\t' read -r file digest size; do
+              if [[ "$file" == */* || "$file" == .* ]] || [ ! -f "release/$file" ] || ! expected="$(uploaded "$file")"; then
+                error "${feed#release/} names $file, which is not a file of the draft that this run uploaded."
+              elif [ "$digest" != "$expected" ] || [ "$size" != "$(stat -c %s "release/$file")" ]; then
+                error "${feed#release/} gives $file another SHA-256 or size than the file this run uploaded."
+              fi
+            done <<<"$entries"
+          done
+
+          if [ "$failed" = true ]; then
+            exit 1
+          fi
+          echo "The draft release holds exactly the $(wc -l < uploaded.tsv) files this run's jobs uploaded."
+
+      - name: Checksums
+        run: |
+          cp attach/* release/
           (cd release && sha256sum -- * > SHA256SUMS)
           cat release/SHA256SUMS
 
