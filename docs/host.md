@@ -233,9 +233,9 @@ Install the new version over the old one (`dotnet tool update -g SemanticRouter.
 |---|---|
 | 0.1.0 – 0.3.0 | 2 |
 | 0.4.0 – 0.5.0 | 3 |
-| The next release | 4 |
+| 0.6.0 – 0.6.1 | 4 |
 
-**Going back to an older version.** A version can't use a state database that a newer one migrated: the schema is newer than it knows. From this version on, the router then doesn't start: it says which file it is, its schema, and where the copy from before the upgrade is (exit code 2, so a service manager doesn't restart it). `semantic-router doctor` reports it as `[FAIL] state:`. To go back:
+**Going back to an older version.** A version can't use a state database that a newer one migrated: the schema is newer than it knows. From 0.6.0 on, the router then doesn't start: it says which file it is, its schema, and where the copy from before the upgrade is (exit code 2, so a service manager doesn't restart it). `semantic-router doctor` reports it as `[FAIL] state:`. To go back:
 
 1. Stop the router.
 2. Move `semantic-router.db` aside, and remove any `semantic-router.db-wal` and `semantic-router.db-shm` next to it.
