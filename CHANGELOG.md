@@ -15,6 +15,7 @@ User-visible changes to SemanticRouter.NET: the NuGet packages, the `semantic-ro
 - Prompted tool calling: a reply that writes the run's secret tool-call label in another case (` ```TOOL_CALL-… `) has it replaced like any other, so the label never reaches the client. (#354)
 - A prompt a local-only route covers stays on this machine when the conversation continues on a cloud model. The model a conversation started on skipped the local-only check, so such a prompt went to that cloud model. (#349)
 - Rolling back to an earlier configuration (`POST api/config/history/{id}/rollback`) gets the same checks as `PUT api/config`. A rollback could change what a CLI runs, which files a memory source reads, or bring back `${env:}` references, which `SemanticRouter:Dashboard:AllowProcessSettings` and the remote-client rules otherwise refuse over the admin API. (#349)
+- A release's build provenance attestation and `SHA256SUMS` now cover only the files its own workflow run built and uploaded. The release stops before attesting when its draft holds an asset its jobs did not upload, or one that changed after they did, and when a release for the tag existed before the run. Before, they covered whatever was on the draft at the time, which anyone with write access to the repository could change. (#424)
 
 ### Added
 
