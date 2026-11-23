@@ -8,6 +8,10 @@
 # - the workflow the app names exists, and runs only for v* tags (a branch or a reusable call would sign as another ref);
 # - its checksums job downloads every asset of the release, the *-full.nupkg packages included, after the installer
 #   jobs have attached them, and attests all of them (id-token and attestations write, actions/attest on release/*);
+# - but only after checking them against the manifests of what this run's jobs uploaded (#404): it downloads the
+#   manifest-* artifacts and has an 'Only what this run uploaded' step before it attests; every job that uploads to the
+#   draft leaves a manifest-* artifact (a vpk upload through deploy/release-upload-manifest.sh); and the job that
+#   creates the release refuses one that exists on the run's first attempt (GITHUB_RUN_ATTEMPT);
 # - the app embeds the trust root, and it is Sigstore's, with an authority and an ECDSA log the app can check, and its
 #   build records when that trust root was current.
 #
@@ -68,7 +72,36 @@ if [ -f "$workflow" ]; then
     grep -Eq 'uses: actions/attest(-build-provenance)?@' <<<"$checksums" || fail "The checksums job no longer attests with actions/attest."
     grep -Eq '^ +subject-path: release/\*$' <<<"$checksums" \
       || fail "The checksums job must attest every file in release/ (subject-path: release/*)."
+    # What it attests is what this run uploaded (#404), not whatever is on the draft: it reads the uploading jobs'
+    # manifests and checks the draft against them before it attests.
+    grep -Eq '^ +pattern: manifest-\*$' <<<"$checksums" \
+      || fail "The checksums job must download the uploading jobs' manifests (pattern: manifest-*)."
+    verify="$(grep -nE '^ +- name: Only what this run uploaded$' <<<"$checksums" | head -n 1 | cut -d: -f1 || true)"
+    attest="$(grep -nE 'uses: actions/attest(-build-provenance)?@' <<<"$checksums" | head -n 1 | cut -d: -f1 || true)"
+    if [ -z "$verify" ]; then
+      fail "The checksums job must check the draft against this run's manifests (a step 'Only what this run uploaded') before it attests."
+    elif [ -n "$attest" ] && [ "$verify" -gt "$attest" ]; then
+      fail "The checksums job attests before it checks the draft against this run's manifests."
+    fi
   fi
+
+  # Every job that writes to the draft (gh release upload, vpk upload) leaves a manifest of what it uploaded, and the
+  # release is created by the run, not found: an existing one is used only on a re-run attempt.
+  jobs="$(awk '/^jobs:/ { on = 1; next } on && /^[^ #]/ { exit } on && /^  [A-Za-z0-9_-]+:/ { sub(/^  /, ""); sub(/:.*/, ""); print }' "$workflow")"
+  for job in $jobs; do
+    [ "$job" = checksums ] && continue
+    body="$(awk -v job="  $job:" '$0 == job { on = 1; next } on && /^  [A-Za-z0-9_-]+:/ { exit } on && !/^[[:space:]]*#/' "$workflow")"
+    if grep -Eq 'gh release upload|vpk upload' <<<"$body"; then
+      grep -Eq '^ +name: manifest-' <<<"$body" \
+        || fail "Job $job uploads to the draft release but leaves no manifest-* artifact of what it uploaded, so the checksums job would refuse its files."
+      if grep -q 'vpk upload' <<<"$body" && ! grep -q 'deploy/release-upload-manifest.sh' <<<"$body"; then
+        fail "Job $job uploads with vpk but does not record what vpk uploaded (deploy/release-upload-manifest.sh)."
+      fi
+    fi
+    if grep -q 'gh release create' <<<"$body" && ! grep -q 'GITHUB_RUN_ATTEMPT' <<<"$body"; then
+      fail "Job $job must refuse a release for the tag that exists on the run's first attempt (GITHUB_RUN_ATTEMPT): this run did not make it."
+    fi
+  done
 fi
 
 grep -q 'Include="Assets\\sigstore-trusted-root.json" LogicalName="sigstore-trusted-root.json"' src/SemanticRouter.Desktop/SemanticRouter.Desktop.csproj \
