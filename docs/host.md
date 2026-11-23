@@ -284,7 +284,7 @@ Gateway keys, dashboard tokens and prompts cross the network in clear text over 
   { "SemanticRouter": { "ForwardedHeaders": { "KnownProxies": [ "127.0.0.1" ], "KnownNetworks": [ "10.0.0.0/8" ] } } }
   ```
 
-  Only these proxies are believed; the headers from anyone else are ignored. Without this, every request arrives from the proxy, so clients share one rate limit, and a proxy on this machine makes them all look local: then turn on `RequireGatewayKeyForLocalClients` (and `RequireTokenForLocalClients` for the dashboard). Add the proxy's public address to `Dashboard:PublicOrigins`. A proxy that signs people in can also name them to the dashboard (`Dashboard:TrustedIdentityHeader`, believed only from these proxies); see [Signed-in users from a reverse proxy](dashboard.md#signed-in-users-from-a-reverse-proxy). With Caddy:
+  Only these proxies are believed; the headers from anyone else are ignored. Without this, every request arrives from the proxy, so clients share one rate limit, and a proxy on this machine makes them all look local: then turn on `RequireGatewayKeyForLocalClients` (and `RequireTokenForLocalClients` for the dashboard). Add the proxy's public address, with its scheme (`https://router.example.com`), to `Dashboard:PublicOrigins`. A proxy that signs people in can also name them to the dashboard (`Dashboard:TrustedIdentityHeader`, believed only from these proxies); see [Signed-in users from a reverse proxy](dashboard.md#signed-in-users-from-a-reverse-proxy). With Caddy:
 
   ```
   router.example.com {

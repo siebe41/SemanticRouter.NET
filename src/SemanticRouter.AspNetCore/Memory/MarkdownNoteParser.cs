@@ -143,8 +143,10 @@ internal static partial class MarkdownNoteParser
     [GeneratedRegex(@"!?\[\[(?<target>[^\[\]|#^]+)(?:[#^][^\[\]|]*)?(?:\|[^\[\]]*)?\]\]")]
     private static partial Regex WikiLink();
 
-    // [label](relative/path.md) and [label](path.md#heading); URL-encoded paths are decoded.
-    [GeneratedRegex(@"\[[^\]]*\]\((?<target>[^)\s]+?\.md)(?:#[^)]*)?\)", RegexOptions.IgnoreCase)]
+    // [label](relative/path.md) and [label](path.md#heading); URL-encoded paths are decoded. NonBacktracking, so a note
+    // full of '[' (or of "[](a.md") is read in time linear in its length: a backtracking engine scans to the next ']'
+    // from every '[', quadratic in the note's length.
+    [GeneratedRegex(@"\[[^\]]*\]\((?<target>[^)\s]+?\.md)(?:#[^)]*)?\)", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking)]
     private static partial Regex MarkdownLink();
 
     // #tag and #nested/tag, not headings ("# Title") or anchors inside words.

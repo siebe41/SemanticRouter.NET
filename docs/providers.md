@@ -485,7 +485,7 @@ Both models get the same instructions; only the reading of the reply differs. Th
 
 ## What survives translation
 
-When a backend speaks the client's protocol, the body passes through untouched (only `model` is rewritten, and a streamed chat-completions request asks for usage with `stream_options.include_usage`, so budgets see it; a backend that answers 400 or 422 to that field gets the request again without it, and the connector stops adding it). Otherwise the request is translated, and anything the backend cannot carry is listed in the `X-Prompt-Route-Dropped` response header and the activity entry's `dropped` field.
+When a backend speaks the client's protocol, the body passes through untouched (only `model` is rewritten, and a streamed chat-completions request asks for usage with `stream_options.include_usage`, so budgets see it; a backend that answers 400 or 422 to that field gets the request again without it, and the connector stops adding it). The backend's response headers are relayed too, except hop-by-hop headers and those that would act on the router's whole origin, where the dashboard lives: `Set-Cookie`, `Access-Control-*`, `Strict-Transport-Security`, `Public-Key-Pins`, `Clear-Site-Data` and `Alt-Svc` are dropped. Otherwise the request is translated, and anything the backend cannot carry is listed in the `X-Prompt-Route-Dropped` response header and the activity entry's `dropped` field.
 
 | Feature | OpenAI-compatible backend | Anthropic backend | Responses backend | CLI backend |
 |---|---|---|---|---|

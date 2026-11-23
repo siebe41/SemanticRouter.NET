@@ -31,6 +31,15 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         "Transfer-Encoding", "Upgrade", "Proxy-Connection",
     };
 
+    // Headers that act on the whole origin the browser sees, which is the router's (and its dashboard's), not the
+    // backend's: a backend must not set cookies there, open it to other sites, pin it to HTTPS, wipe its storage or move
+    // its traffic. Access-Control-* is matched by prefix (IsOriginWide).
+    private static readonly HashSet<string> OriginWideHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Set-Cookie", "Set-Cookie2", "Strict-Transport-Security", "Public-Key-Pins", "Public-Key-Pins-Report-Only",
+        "Clear-Site-Data", "Alt-Svc",
+    };
+
     private static readonly HashSet<string> NeverForwarded = new(StringComparer.OrdinalIgnoreCase)
     {
         "Authorization", "x-api-key", "Cookie", "Host", "Content-Length", "Content-Type",
@@ -406,6 +415,10 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
         }
     }
 
+    /// <summary>Whether a backend's response header would act on the router's whole origin, so it is not relayed.</summary>
+    internal static bool IsOriginWide(string header) =>
+        OriginWideHeaders.Contains(header) || header.StartsWith("Access-Control-", StringComparison.OrdinalIgnoreCase);
+
     private async Task CopyResponseAsync(
         HttpContext context, HttpResponseMessage response, string modelName, bool usageAdded, List<string> copied, CancellationToken cancellationToken)
     {
@@ -414,7 +427,7 @@ internal sealed partial class OpenAICompatibleConnector : IChatConnector
 
         foreach (KeyValuePair<string, HeaderStringValues> header in response.Headers.NonValidated.Concat(response.Content.Headers.NonValidated))
         {
-            if (HopByHopHeaders.Contains(header.Key))
+            if (HopByHopHeaders.Contains(header.Key) || IsOriginWide(header.Key))
             {
                 continue;
             }

@@ -41,6 +41,30 @@ internal static class OwnerOnly
         Restrict(path, Folder);
     }
 
+    /// <summary>
+    /// Creates <paramref name="path"/> as an empty file readable and writable by its owner only, 0600 from the start on
+    /// Unix (the umask can only take bits away), so it is never readable by others, not even for a moment. An existing
+    /// file is left as it is. For a file another component then writes into, such as SQLite's database or the target of
+    /// <c>VACUUM INTO</c>; on Windows the file gets the folder's ACL, as any other.
+    /// </summary>
+    public static void CreateFile(string path)
+    {
+        var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.ReadWrite | FileShare.Delete };
+        if (!OperatingSystem.IsWindows())
+        {
+            options.UnixCreateMode = File;
+        }
+
+        try
+        {
+            using var stream = new FileStream(path, options);
+        }
+        catch (IOException) when (System.IO.File.Exists(path))
+        {
+            // Created by someone else in the meantime (another router on the same file): theirs, as it is.
+        }
+    }
+
     /// <summary>Makes an existing file readable and writable by its owner only (0600); a missing file is left alone.</summary>
     public static void Restrict(string path)
     {
