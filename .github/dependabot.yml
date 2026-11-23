@@ -42,9 +42,11 @@ updates:
         patterns: [ "*" ]
 
   # The container's base images are pinned by digest; Dependabot moves the digest when Microsoft republishes a tag
-  # (security fixes in the OS packages included). A new .NET major (sdk:10.0 to 11.0) is not one of these: the SDK
-  # image must satisfy global.json (10.0.4xx, rollForward patch) and the runtime image must match the target framework,
-  # so it moves together with them by hand. #378 took sdk:11.0 alone and every container build failed.
+  # (security fixes in the OS packages included), and the SDK image's tag to a later patch (sdk:10.0.404-noble to
+  # 10.0.405-noble). A new .NET major (sdk:10.0 to 11.0) or SDK feature band (10.0.4xx to 10.0.5xx, which semver counts as
+  # a patch) is not one of these: the SDK image must satisfy global.json (10.0.4xx, rollForward patch) and the runtime
+  # image must match the target framework, so it moves together with them by hand. #378 took sdk:11.0 alone and every
+  # container build failed. When global.json moves to a new band, move the ignored range below with it.
   - package-ecosystem: docker
     directory: /src/SemanticRouter.Host
     schedule:
@@ -52,6 +54,8 @@ updates:
     ignore:
       - dependency-name: "dotnet/*"
         update-types: [ "version-update:semver-major" ]
+      - dependency-name: "dotnet/sdk"
+        versions: [ ">= 10.0.500" ]
 
   # Playwright for the dashboard's end-to-end tests.
   - package-ecosystem: npm

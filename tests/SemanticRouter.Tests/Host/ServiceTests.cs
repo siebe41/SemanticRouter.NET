@@ -438,16 +438,17 @@ public sealed class ServiceTests : IDisposable
         // The test host runs several routers at once, and an event they share wakes only the one listening first.
         static RouterInstance Record(int processId) =>
             new(processId, ["http://localhost:5080"], DateTimeOffset.UtcNow, "1.0.0", RouterInstance.NewStopEventName());
-        var other = new StopRecorder();
+        // Another router in this process has its own event. Nothing waits on it here, so had the request set it, it would
+        // still be set after the named router stopped: no waiting to see whether the other one stops too.
         var target = new StopRecorder();
         RouterInstance named = Record(Environment.ProcessId);
-        using (Record(Environment.ProcessId).ListenForStop(other))
+        RouterInstance other = Record(Environment.ProcessId);
+        using (var otherEvent = new EventWaitHandle(false, EventResetMode.AutoReset, other.StopEvent))
         using (named.ListenForStop(target))
         {
             named.RequestStop().Should().BeTrue();
             await target.Stopped.WaitAsync(TimeSpan.FromSeconds(10));
-            await Task.Delay(500);
-            other.Stopped.IsCompleted.Should().BeFalse("only the router the record names stops");
+            otherEvent.WaitOne(0).Should().BeFalse("only the router the record names stops");
         }
 
         // An earlier release's `service stop` sets the process's event. A made-up process, so no other test's router hears it.

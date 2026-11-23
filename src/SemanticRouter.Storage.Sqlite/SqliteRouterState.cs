@@ -94,6 +94,9 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     // Checkpoints tried, so an operation that tried one itself is not followed by another against the same reader.
     private int _logAttempts;
 
+    // Checkpoints that found the log pinned by a reader and had to wait or give up: for tests, which wait on it.
+    private int _busyCheckpoints;
+
     public SqliteRouterDatabase(IOptions<SqliteStateOptions> options, ILogger<SqliteRouterDatabase> logger, TimeProvider? time = null)
     {
         Options = options.Value;
@@ -407,6 +410,9 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         }
     }
 
+    /// <summary>How many checkpoints have found the write-ahead log pinned by another connection's read.</summary>
+    internal int BusyCheckpoints => Volatile.Read(ref _busyCheckpoints);
+
     /// <summary>
     /// Waits until every write made before this call is in the file, or failed: a read that must see this router's own
     /// writes calls it first (<see cref="Run{T}"/> does). Returns at once when nothing is waiting.
@@ -676,9 +682,10 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
     /// Checkpoints the write-ahead log into the database and truncates it. While another connection is still reading,
     /// its snapshot pins the log. SQLite would then wait the connection's busy timeout before reporting busy, so the
     /// busy timeout is off for the checkpoint and it gives up at once: with <paramref name="wait"/>, it is tried again
-    /// until the log is empty or that time has passed. Returns whether the log was emptied.
+    /// until the log is empty or that time has passed, calling <paramref name="busy"/> after each attempt that could not
+    /// complete. Returns whether the log was emptied.
     /// </summary>
-    public static bool TruncateLog(SqliteConnection connection, TimeSpan wait = default)
+    public static bool TruncateLog(SqliteConnection connection, TimeSpan wait = default, Action? busy = null)
     {
         long busyTimeout;
         using (SqliteCommand current = Command(connection, "PRAGMA busy_timeout;"))
@@ -706,6 +713,8 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
                     }
                 }
 
+                busy?.Invoke();
+
                 if (System.Diagnostics.Stopwatch.GetElapsedTime(started) >= wait)
                 {
                     return false;
@@ -731,7 +740,7 @@ internal sealed partial class SqliteRouterDatabase : IStateRetention, IStateStor
         Interlocked.Increment(ref _logAttempts);
         try
         {
-            bool emptied = TruncateLog(connection, wait);
+            bool emptied = TruncateLog(connection, wait, () => Interlocked.Increment(ref _busyCheckpoints));
             _logOwed = !emptied;
             return emptied;
         }

@@ -9,6 +9,24 @@ const { test: base, expect } = require('@playwright/test');
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'semantic-router.json'), 'utf8')
   .replace(/__STUB__/g, `http://127.0.0.1:${Number(process.env.E2E_PORT || 5190) + 1}`));
 
+// How often the dashboard refreshes the status (the setInterval in app.js), read from the app so the tests that check
+// what a refresh does not do move the page's clock past exactly one refresh, rather than waiting on the wall clock.
+const app = fs.readFileSync(path.join(__dirname, '../../src/SemanticRouter.AspNetCore/Dashboard/wwwroot/js/app.js'), 'utf8');
+const refreshMs = Number((/setInterval\(\(\) => \{[\s\S]*?refreshStatus\(\);\s*\}, (\d+)\);/.exec(app) || [])[1]);
+
+/**
+ * Moves the page's clock (page.clock.install() first) past one status refresh and waits until it has run (`ran`, started
+ * before the clock moves), then until every request the page started before that has reached its route handler:
+ * requests reach them in order, so a request of the page's own after the refresh is the last.
+ */
+async function pastOneRefresh(page, ran) {
+  expect(refreshMs, 'the status refresh interval in app.js').toBeGreaterThan(0);
+  const refreshed = ran();
+  await page.clock.fastForward(refreshMs);
+  await refreshed;
+  await page.evaluate(() => fetch('/router/api/status?after-refresh').then((r) => r.ok));
+}
+
 // As in dashboard.spec.js: a test fails when the page throws or logs an error. Mocked failures (a 500 the test asks
 // for) log a failed resource in the console, which those tests allow.
 const test = base.extend({
@@ -387,9 +405,11 @@ test('a button is busy while its action runs, and a second click is not sent', a
 test('usage that fails to load says why, offers Retry and does not ask again by itself', async ({ page }) => {
   let asked = 0;
   await page.route(/\/router\/api\/usage\?/, (route) => { asked++; return route.fulfill({ status: 500, json: { title: 'The usage store is not available.' } }); });
+  await page.clock.install();
   await open(page, 'usage');
   await expect(page.locator('#view')).toContainText("Couldn't load usage: The usage store is not available.");
-  await page.waitForTimeout(1500);
+  // A status refresh comes and goes (it asks for the activity last) without asking for usage again: it backs off.
+  await pastOneRefresh(page, () => page.waitForResponse(/\/router\/api\/activity\?limit=/));
   expect(asked).toBe(1);
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect.poll(() => asked).toBe(2);
@@ -399,9 +419,13 @@ test('usage that fails to load says why, offers Retry and does not ask again by 
 test('trends that fail to load say why instead of asking again on every render', async ({ page }) => {
   let asked = 0;
   await page.route(/\/router\/api\/activity\/series/, (route) => { asked++; return route.fulfill({ status: 503, json: { title: 'Busy.' } }); });
+  await page.clock.install();
   await open(page, 'overview');
   await expect(page.locator('#view')).toContainText("Couldn't load trends: Busy.");
-  await page.waitForTimeout(6000); // one status refresh: it re-renders the Overview, and backs off the trends
+  // One status refresh: it re-renders the Overview (the heading is a new element), and backs off the trends.
+  await page.locator('#view h1').evaluate((e) => { e.dataset.before = 'yes'; });
+  await pastOneRefresh(page, () => expect(page.locator('#view h1[data-before]')).toHaveCount(0));
+  await expect(page.locator('#view')).toContainText("Couldn't load trends: Busy.");
   expect(asked).toBe(1);
 });
 

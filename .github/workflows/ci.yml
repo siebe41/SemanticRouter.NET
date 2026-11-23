@@ -4,8 +4,8 @@ on:
   push:
     branches: [ main ]
   pull_request:
-  # Weekly run on main so a newly published advisory against an existing dependency fails CI
-  # even when nobody has pushed.
+  # Weekly run on main so a newly published advisory against an existing dependency, or a new Sigstore trust root,
+  # fails CI even when nobody has pushed; report-scheduled-failure then opens an issue.
   schedule:
     - cron: '23 6 * * 1'
   workflow_dispatch:
@@ -29,6 +29,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Built from the Go module proxy at a pinned version; the Go checksum database verifies the
       # source, so no third-party action or unverified binary download is involved.
@@ -51,6 +52,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -75,6 +78,8 @@ jobs:
       SEMANTIC_ROUTER_TEST_MODELS: ${{ github.workspace }}/.models
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -146,6 +151,24 @@ jobs:
           SEMANTIC_ROUTER_MODEL_TESTS: 1
         run: dotnet test --no-build --configuration Release --filter "Category=Model" --logger "trx"
 
+      # The test results (TRX) of both test steps on every OS, and the line and branch coverage of the Linux run
+      # (Cobertura), also when a test failed, to see which tests failed or ran slowly and what the tests reach.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: test-results-${{ runner.os }}
+          path: tests/*/TestResults/*.trx
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && runner.os == 'Linux'
+        with:
+          name: coverage
+          path: tests/*/TestResults/*/coverage.cobertura.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
       # The vpk every workflow installs builds the installers with its own native binaries, which the notices name by
       # the Velopack package's version and list the Rust crates of (deploy/third-party/velopack-crates.json).
       - name: Velopack versions
@@ -166,10 +189,17 @@ jobs:
             "Velopack native binaries" "Rust standard library" "AppImage type2-runtime"
 
       # The release still attests every update package as the desktop app checks it, and the app carries Sigstore's
-      # current trust root: like the weekly advisory run, a new trust root fails CI until it is copied in.
+      # current trust root, fetched through Sigstore's TUF repository (gh attestation trusted-root, no token needed). A
+      # new trust root is not a pull request's doing, so it is a warning there and on main; the weekly run fails on it,
+      # which opens an issue (report-scheduled-failure), and so does the release.
       - name: Update attestation
         if: runner.os == 'Linux'
-        run: deploy/update-attestation-check.sh --online
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+            deploy/update-attestation-check.sh --online
+          else
+            deploy/update-attestation-check.sh --online --advisory
+          fi
 
       # Package validation (Directory.Build.targets) fails the pack when a library package's public API breaks the last
       # release on nuget.org; restore downloaded that release.
@@ -214,11 +244,14 @@ jobs:
   dashboard-e2e:
     name: dashboard end-to-end
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -259,6 +292,7 @@ jobs:
   installer-windows:
     name: installer (windows)
     runs-on: windows-latest
+    timeout-minutes: 30
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -266,6 +300,8 @@ jobs:
       NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -322,12 +358,15 @@ jobs:
   installer-macos:
     name: installer (macos)
     runs-on: macos-latest
+    timeout-minutes: 30
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       AVALONIA_TELEMETRY_OPTOUT: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -367,12 +406,15 @@ jobs:
   installer-linux:
     name: installer (linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
       AVALONIA_TELEMETRY_OPTOUT: 1
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -411,11 +453,14 @@ jobs:
     name: installer SBOMs
     needs: [ installer-windows, installer-macos ]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
@@ -443,8 +488,23 @@ jobs:
   container:
     name: container image
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The build stage's SDK image is in global.json's feature band, at its patch or a later one: global.json rolls
+      # forward only to a later patch, so another band fails the build (src/SemanticRouter.Host/Dockerfile).
+      - name: The image's SDK matches global.json
+        run: |
+          sdk="$(jq -r .sdk.version global.json)"
+          image="$(sed -n 's|^FROM mcr.microsoft.com/dotnet/sdk:\([0-9][0-9.]*\).*|\1|p' src/SemanticRouter.Host/Dockerfile)"
+          if [ -z "$image" ] || [ "${image%??}" != "${sdk%??}" ] || [ $((10#${image: -2})) -lt $((10#${sdk: -2})) ]; then
+            echo "::error file=src/SemanticRouter.Host/Dockerfile::The SDK image is ${image:-not tagged with an SDK version}, but global.json asks for $sdk or a later patch of its feature band. Tag the SDK image with a version in that band."
+            exit 1
+          fi
+          echo "The SDK image ($image) is in global.json's feature band ($sdk, rollForward patch)."
 
       # Built as a version of its own, as the release builds the tag's, to check that the version reaches the router.
       - name: Build the image
@@ -519,3 +579,28 @@ jobs:
       - name: Logs on failure
         if: failure()
         run: docker logs router || true
+
+  # A scheduled run has nobody watching it: when one fails, this opens an issue, or comments on the open one, so the
+  # failure does not go unnoticed. It builds nothing, so the token it gets to do that is safe here
+  # (deploy/workflow-secrets-check.sh).
+  report-scheduled-failure:
+    name: report a scheduled failure
+    needs: [ secret-scan, npm-audit, build-and-test, dashboard-e2e, installer-windows, installer-macos, installer-linux, installer-sbom, container ]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Open or comment on an issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          deploy/report-issue.sh "Scheduled run failed: $GITHUB_WORKFLOW" \
+            "The scheduled run of $GITHUB_WORKFLOW on $(date -u +%F) at ${GITHUB_SHA:0:7} failed: $RUN"

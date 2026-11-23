@@ -156,6 +156,9 @@ test('a CLI found only as a script wrapper says what to do, with no Enable butto
 test('the setup card lists the router\'s own presets, and a gateway refusal says where to fix it', async ({ page, request }) => {
   expects4xx.add(page); // the gateway refuses the Send with a 400
   const setup = await request.get('/router/api/setup');
+  // The current host has the endpoint, so a 404 from it is a failure; only another router (E2E_ROUTER_DLL, an older
+  // release) may lack it.
+  if (!process.env.E2E_ROUTER_DLL) expect(setup.status()).toBe(200);
   test.skip(setup.status() === 404, 'this router has no setup endpoint');
   expect((await request.put('/router/api/config?persist=false', { data: empty })).ok()).toBeTruthy();
   await open(page, 'overview');

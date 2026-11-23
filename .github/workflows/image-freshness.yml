@@ -16,6 +16,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       issues: write
@@ -33,8 +34,9 @@ jobs:
             echo "No release yet."
             exit 0
           fi
-          released="$(git show "$tag:src/SemanticRouter.Host/Dockerfile" | grep '^FROM' || true)"
-          current="$(grep '^FROM' src/SemanticRouter.Host/Dockerfile)"
+          # By digest: a tag renamed for the same image (sdk:10.0 to sdk:10.0.404-noble) changes nothing in it.
+          released="$(git show "$tag:src/SemanticRouter.Host/Dockerfile" | grep '^FROM' | grep -o 'sha256:[0-9a-f]*' || true)"
+          current="$(grep '^FROM' src/SemanticRouter.Host/Dockerfile | grep -o 'sha256:[0-9a-f]*')"
           {
             echo "tag=$tag"
             echo "image=ghcr.io/$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')/semantic-router:${tag#v}"
@@ -74,9 +76,4 @@ jobs:
             body+=$'\n'"- Trivy found a high or critical vulnerability with a fix in it, or could not pull it: see $RUN."
           fi
           body+=$'\n\n'"Tag a patch release from main to publish a rebuilt image under its own version."
-          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label security
-          fi
+          deploy/report-issue.sh "$title" "$body" security

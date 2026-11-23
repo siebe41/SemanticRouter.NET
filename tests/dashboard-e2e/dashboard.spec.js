@@ -401,6 +401,8 @@ test("a connector type in the draft is matched however it is spelled", async ({ 
 test("an installed package's embedding provider offers its models", async ({ page, request }) => {
   const { embeddings } = await (await request.get('/router/api/status')).json();
   const kind = embeddings.runsInProcess.find((k) => !embeddings.unavailable[k]);
+  // CI's runner (Linux x64) runs the ONNX provider the host ships, so there a missing one is a failure, not a skip.
+  if (process.env.CI) expect(kind, `no in-process embedding provider can run: ${JSON.stringify(embeddings.unavailable)}`).toBeTruthy();
   test.skip(!kind, 'no installed in-process embedding provider can run on this machine');
   const models = embeddings.models.filter((m) => m.provider === kind);
   await open(page, 'embeddings');

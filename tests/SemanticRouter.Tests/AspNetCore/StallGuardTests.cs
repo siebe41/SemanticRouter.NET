@@ -49,15 +49,17 @@ public sealed class StallGuardTests
         backend.Send("two");
         backend.End();
 
-        // A limit long enough that a loaded machine can't stall a read that has its data waiting, and a pause past it.
+        // On a clock that moves only when told: the reads find their data waiting, and the pause between them is past
+        // the limit.
         TimeSpan limit = TimeSpan.FromSeconds(1);
-        using var guard = new StallGuard(limit, CancellationToken.None);
+        var time = new ManualTimers();
+        using var guard = new StallGuard(limit, CancellationToken.None, time);
         using HttpContent content = guard.Guard(new StreamContent(backend));
         await using Stream body = await content.ReadAsStreamAsync();
         byte[] buffer = new byte[16];
 
         int first = await body.ReadAsync(buffer);
-        await Task.Delay(limit * 1.5);
+        time.Advance(limit * 1.5);
         int second = await body.ReadAsync(buffer.AsMemory(first));
         int end = await body.ReadAsync(buffer.AsMemory(first + second));
 
@@ -65,6 +67,23 @@ public sealed class StallGuardTests
         end.Should().Be(0);
         guard.Stalled.Should().BeFalse("the timer runs only while a read waits");
         guard.Token.IsCancellationRequested.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_read_that_waits_past_the_limit_on_the_guard_s_clock_is_a_stall()
+    {
+        var time = new ManualTimers();
+        using var guard = new StallGuard(TimeSpan.FromSeconds(30), CancellationToken.None, time);
+        using HttpContent content = guard.Guard(new StreamContent(new Backend()));
+        await using Stream body = await content.ReadAsStreamAsync();
+
+        Task<int> read = body.ReadAsync(new byte[16]).AsTask();
+        time.Advance(TimeSpan.FromSeconds(29));
+        guard.Stalled.Should().BeFalse("the limit has not passed");
+        time.Advance(TimeSpan.FromSeconds(1));
+
+        await FluentActions.Awaiting(() => read).Should().ThrowAsync<OperationCanceledException>();
+        guard.Stalled.Should().BeTrue();
     }
 
     [Fact]
@@ -199,4 +218,75 @@ public sealed class StallGuardTests
             base.Dispose(disposing);
         }
     }
+
+    /// <summary>A clock whose timers fire only when it is advanced past their due time.</summary>
+    private sealed class ManualTimers : TimeProvider
+    {
+        private readonly List<Timer> _timers = [];
+        private long _now;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp() => Volatile.Read(ref _now);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new Timer(this, callback, state);
+            lock (_timers)
+            {
+                _timers.Add(timer);
+            }
+
+            timer.Change(dueTime, period);
+            return timer;
+        }
+
+        public void Advance(TimeSpan by)
+        {
+            long now = Interlocked.Add(ref _now, by.Ticks);
+            Timer[] due;
+            lock (_timers)
+            {
+                due = [.. _timers.Where(t => t.Due is { } at && at <= now)];
+            }
+
+            foreach (Timer timer in due)
+            {
+                timer.Fire();
+            }
+        }
+
+        private sealed class Timer(ManualTimers clock, TimerCallback callback, object? state) : ITimer
+        {
+            public long? Due { get; private set; }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                Due = dueTime == Timeout.InfiniteTimeSpan ? null : clock.GetTimestamp() + dueTime.Ticks;
+                return true;
+            }
+
+            public void Fire()
+            {
+                Due = null; // one-shot: CancellationTokenSource sets no period
+                callback(state);
+            }
+
+            public void Dispose()
+            {
+                Due = null;
+                lock (clock._timers)
+                {
+                    clock._timers.Remove(this);
+                }
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
+    }
+
 }

@@ -8,7 +8,8 @@ using System.Text.RegularExpressions;
 //   cat          Plain-text reply: stdin, then a line "(done)".
 //   quota        Writes a quota message to stderr and exits with code 3.
 //   noisy-quota  Writes 4 MB of stderr without a line break, then the quota message, and exits with code 3.
-//   slow         Sleeps, then creates the file named by FAKE_CLI_MARKER (which must not happen once killed).
+//   slow         Writes its process id to FAKE_CLI_MARKER.pid, sleeps 5 s, then creates the file named by FAKE_CLI_MARKER
+//                (which must not happen once killed).
 //   claude-agent A simulated Claude Code agent for latency benchmarks: after FAKE_CLI_STARTUP_MS (default 1500) it streams
 //                a reply word by word, FAKE_CLI_WORD_MS apart (default 30). Without a tool result in the prompt the reply
 //                explains its plan and ends in a call fenced with the run's tool_call label; with one, it answers.
@@ -103,13 +104,23 @@ switch (mode)
         return 3;
 
     case "slow":
+    {
+        string? marker = Environment.GetEnvironmentVariable("FAKE_CLI_MARKER") is { Length: > 0 } file ? file : null;
+        if (marker is not null)
+        {
+            // Written whole, then renamed, so a reader never sees half of it.
+            await File.WriteAllTextAsync(marker + ".pid.tmp", Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            File.Move(marker + ".pid.tmp", marker + ".pid");
+        }
+
         await Task.Delay(TimeSpan.FromSeconds(5));
-        if (Environment.GetEnvironmentVariable("FAKE_CLI_MARKER") is { Length: > 0 } marker)
+        if (marker is not null)
         {
             await File.WriteAllTextAsync(marker, "still running");
         }
 
         return 0;
+    }
 
     case "claude-agent":
     {

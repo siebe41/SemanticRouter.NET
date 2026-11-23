@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -360,7 +362,9 @@ public sealed class SqliteStateTests : IDisposable
     [Fact]
     public async Task A_purge_empties_the_log_once_a_reader_that_held_it_has_finished()
     {
-        var store = new SqliteActivityStore(Open());
+        // A busy timeout far longer than the test, so the purge is still waiting for the reader when it finishes.
+        SqliteRouterDatabase database = Open(o => o.BusyTimeout = TimeSpan.FromMinutes(5));
+        var store = new SqliteActivityStore(database);
         store.Append(new RoutingActivityEntry { Id = 1, Timestamp = _time.GetUtcNow(), PromptPreview = "purge-me 3f9d: the board minutes" });
         Settle();
 
@@ -376,8 +380,15 @@ public sealed class SqliteStateTests : IDisposable
             ((long)count.ExecuteScalar()!).Should().Be(1);
         }
 
+        int busyBefore = database.BusyCheckpoints;
         Task<ActivityPurgeResult> purge = Task.Run(() => store.PurgeWithResult(_time.GetUtcNow().AddHours(-1), _time.GetUtcNow().AddHours(1)));
-        await Task.Delay(300);
+        // The read finishes once the purge's checkpoint has found the log pinned by it, so the purge is seen to wait.
+        while (database.BusyCheckpoints == busyBefore && !purge.IsCompleted)
+        {
+            await Task.Delay(5);
+        }
+
+        database.BusyCheckpoints.Should().BeGreaterThan(busyBefore, "the purge found the log pinned by the reader");
         read.Commit();
 
         (await purge).Should().Be(new ActivityPurgeResult { Removed = 1, Complete = true });
@@ -1188,7 +1199,8 @@ public sealed class DurableStateHostTests : RouterHostTest
         Action<PromptRouterMiddlewareOptions>? middleware = null,
         Action<SemanticRouterOptions>? routing = null,
         bool withCli = false,
-        Action<IServiceCollection>? services = null) =>
+        Action<IServiceCollection>? services = null,
+        Action<IApplicationBuilder>? beforeRouter = null) =>
         StartAsync(
             o =>
             {
@@ -1198,6 +1210,7 @@ public sealed class DurableStateHostTests : RouterHostTest
             },
             routing: routing,
             withCli: withCli,
+            beforeRouter: beforeRouter,
             services: s =>
             {
                 s.AddSingleton<IRouterConfigurationStore>(new JsonFileRouterConfigurationStore(Path.Combine(_directory, "semantic-router.json")));
@@ -1280,52 +1293,65 @@ public sealed class DurableStateHostTests : RouterHostTest
     public async Task Requests_do_not_wait_for_a_busy_state_writer()
     {
         // Issue #391: the budget check waited for the writer (up to twice the busy timeout plus 5 s), and the latency and
-        // cache-share figures after an apply were read from the file by the request.
-        HttpClient client = await StartDurableAsync(services: s => s.Configure<UsageOptions>(u =>
+        // cache-share figures after an apply were read from the file by the request. The write below is released only
+        // after the requests have returned, and with a busy timeout of 10 minutes a request that waited for it would wait
+        // over 20: so the requests must finish while it is still blocked. The minute they are given is only a watchdog,
+        // far above what they take and far below what waiting would take, so a slow runner does not fail the test.
+        HttpClient client = await StartDurableAsync(services: s =>
         {
-            u.Budgets.Add(new BudgetDefinition { Name = "local-daily", Model = "local", MaxTokens = 1_000_000 });
-            u.Budgets.Add(new BudgetDefinition { Name = "cloud-daily", Connector = "anthropic", MaxCostUsd = 100 });
-        }));
+            s.Configure<UsageOptions>(u =>
+            {
+                u.Budgets.Add(new BudgetDefinition { Name = "local-daily", Model = "local", MaxTokens = 1_000_000 });
+                u.Budgets.Add(new BudgetDefinition { Name = "cloud-daily", Connector = "anthropic", MaxCostUsd = 100 });
+            });
+            s.Configure<SqliteStateOptions>(o => o.BusyTimeout = TimeSpan.FromMinutes(10));
+        });
         (await client.PostAsync("/v1/chat/completions", Chat("hello before"))).StatusCode.Should().Be(HttpStatusCode.OK);
         await WaitForStoredActivityAsync(1);
 
         SqliteRouterDatabase database = Services.GetRequiredService<SqliteRouterDatabase>();
         using var busy = new ManualResetEventSlim();
-        database.Write("a write that takes its time (another router holds the file)", _ => busy.Wait(TimeSpan.FromSeconds(60)));
+        int written = 0;
+        database.Write("a write that takes its time (another router holds the file)", _ =>
+        {
+            busy.Wait();
+            Volatile.Write(ref written, 1);
+        });
+        TimeSpan watchdog = TimeSpan.FromMinutes(1);
         try
         {
             // As after an apply: the figures are worked out afresh.
             Services.GetRequiredService<ModelLatencyTracker>().Configure(new ModelSelectionOptions());
             Services.GetRequiredService<ModelCacheTracker>().Configure(new ModelSelectionOptions());
 
-            var timer = System.Diagnostics.Stopwatch.StartNew();
             for (int i = 0; i < 3; i++)
             {
-                (await client.PostAsync("/v1/chat/completions", Chat("hello " + i))).StatusCode.Should().Be(HttpStatusCode.OK);
+                (await client.PostAsync("/v1/chat/completions", Chat("hello " + i)).WaitAsync(watchdog)).StatusCode.Should().Be(HttpStatusCode.OK);
             }
 
-            timer.Stop();
-            timer.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(4), "no request waits for the writer");
+            Volatile.Read(ref written).Should().Be(0, "no request waits for the writer, which is still blocked");
 
             IUsageLedger ledger = Services.GetRequiredService<IUsageLedger>();
-            timer.Restart();
-            UsageTotals before = ledger.Total(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), model: "local");
-            ledger.Record(new UsageRecord
+            (UsageTotals before, UsageTotals after) = await Task.Run(() =>
             {
-                Timestamp = DateTimeOffset.UtcNow,
-                Model = "local",
-                Connector = "lmstudio",
-                IsLocal = true,
-                InputTokens = 1000,
-                OutputTokens = 500,
-                CacheReadTokens = 0,
-                CacheWriteTokens = 0,
-                CostUsd = 0,
-                ReferenceCostUsd = 0,
-            });
-            ledger.Total(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), model: "local").Requests
-                .Should().Be(before.Requests + 1, "a budget counts what waits to be saved");
-            timer.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(4), "without waiting for it");
+                UsageTotals first = ledger.Total(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), model: "local");
+                ledger.Record(new UsageRecord
+                {
+                    Timestamp = DateTimeOffset.UtcNow,
+                    Model = "local",
+                    Connector = "lmstudio",
+                    IsLocal = true,
+                    InputTokens = 1000,
+                    OutputTokens = 500,
+                    CacheReadTokens = 0,
+                    CacheWriteTokens = 0,
+                    CostUsd = 0,
+                    ReferenceCostUsd = 0,
+                });
+                return (first, ledger.Total(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), model: "local"));
+            }).WaitAsync(watchdog);
+            after.Requests.Should().Be(before.Requests + 1, "a budget counts what waits to be saved");
+            Volatile.Read(ref written).Should().Be(0, "without waiting for the writer");
         }
         finally
         {
@@ -1611,6 +1637,7 @@ public sealed class DurableStateHostTests : RouterHostTest
     [Fact]
     public async Task A_request_still_running_or_waiting_for_the_judge_when_activity_is_deleted_is_not_stored_again()
     {
+        int finished = 0;
         using var answer = new ManualResetEventSlim();
         using var grade = new ManualResetEventSlim();
         LocalHttp = new StubHttpMessageHandler((_, body) =>
@@ -1628,7 +1655,17 @@ public sealed class DurableStateHostTests : RouterHostTest
                 judge.Model = "judge-32b";
                 o.Models.Add(judge);
             },
-            services: s => s.AddSingleton<IModelResidency>(new NotLoaded("judge-32b")));
+            services: s => s.AddSingleton<IModelResidency>(new NotLoaded("judge-32b")),
+            // Counts the chat requests whose pipeline has finished: the router hands the entry to the log and the answer
+            // to the judge on its way out, which can be just after the client has the reply.
+            beforeRouter: app => app.Use(async (context, next) =>
+            {
+                await next(context);
+                if (context.Request.Path.StartsWithSegments("/v1/chat/completions", StringComparison.Ordinal))
+                {
+                    Interlocked.Increment(ref finished);
+                }
+            }));
         RoutingActivityLog activity = Services.GetRequiredService<RoutingActivityLog>();
         IRoutingActivityStore store = Services.GetRequiredService<IRoutingActivityStore>();
 
@@ -1648,8 +1685,11 @@ public sealed class DurableStateHostTests : RouterHostTest
         answer.Set();
         grade.Set();
         (await running).StatusCode.Should().Be(HttpStatusCode.OK);
+        // Both requests are through the router (their entries handed back, their answers queued for the judge), and the
+        // judge has graded what it was given: nothing is left that could store them again.
+        await WaitUntilAsync(() => Volatile.Read(ref finished) == 2);
+        Volatile.Read(ref finished).Should().Be(2);
         await Services.GetRequiredService<AnswerJudge>().WhenIdleAsync(TimeSpan.FromSeconds(10));
-        await Task.Delay(200);
 
         store.Recent(10).Should().BeEmpty();
         activity.Recent(10).Should().BeEmpty();

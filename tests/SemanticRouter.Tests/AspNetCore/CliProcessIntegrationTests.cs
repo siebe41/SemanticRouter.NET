@@ -235,15 +235,50 @@ public sealed class CliProcessIntegrationTests : IDisposable
         ConnectorOptions options = Options("slow");
         options.EnvironmentVariables["FAKE_CLI_MARKER"] = marker;
         options.Timeout = TimeSpan.FromMilliseconds(300);
-        var connector = new CliChatConnector("slow", options, new SystemCliProcessRunner(), NullLogger.Instance);
+        var connector = new CliChatConnector("slow", options, new StartedRunner(marker + ".pid"), NullLogger.Instance);
 
         var stopwatch = Stopwatch.StartNew();
         (ConnectorResult result, _) = await SendAsync(connector, "hi");
 
         result.Should().Be(ConnectorResult.Failed(ModelFailureKind.Unavailable, "timed out"));
         stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(4));
-        await Task.Delay(TimeSpan.FromSeconds(5.5));
+        // The process would sleep 5 s and then write the marker: once the connector has given up, it must be gone
+        // already, rather than waited out.
+        int pid = int.Parse(await File.ReadAllTextAsync(marker + ".pid"), System.Globalization.CultureInfo.InvariantCulture);
+        IsRunning(pid).Should().BeFalse("the process tree is killed on timeout");
         File.Exists(marker).Should().BeFalse("the process tree is killed on timeout");
+    }
+
+    private static bool IsRunning(int pid)
+    {
+        try
+        {
+            using Process process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false; // no process with that id
+        }
+    }
+
+    /// <summary>
+    /// Starts real processes, and returns only once the fake CLI has written its process id (<paramref name="pidFile"/>),
+    /// so the test knows which process to look for, whenever the timeout kills it.
+    /// </summary>
+    private sealed class StartedRunner(string pidFile) : ICliProcessRunner
+    {
+        public ICliProcess Start(CliInvocation invocation)
+        {
+            ICliProcess process = new SystemCliProcessRunner().Start(invocation);
+            long started = Stopwatch.GetTimestamp();
+            while (!File.Exists(pidFile) && Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(60))
+            {
+                Thread.Sleep(10);
+            }
+
+            return process;
+        }
     }
 
     [Fact]
