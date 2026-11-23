@@ -471,4 +471,6 @@ cd tests/dashboard-e2e && npm ci && npx playwright install chromium
 npm test                       # or: npm run update-screenshots after an intended visual change
 ```
 
+With `CI` set, as in CI, a failed test runs once more and the report marks it flaky when the retry passes, but the run still fails (`failOnFlakyTests`), and a `test.only` left in fails it (`forbidOnly`). A test that checks what the dashboard does not do over time (no second request after a load error) moves the page's clock (`page.clock`) past the status refresh, whose interval it reads from `app.js`, instead of waiting on the wall clock.
+
 The page code is plain JavaScript in native ES modules under `wwwroot/js/` (no build step, no dependencies). `app.js` is the entry point, `core.js` holds state and helpers, `shell.js` holds loading, chrome, themes and routing, and there is one module per group of pages.

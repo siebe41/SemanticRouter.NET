@@ -47,6 +47,7 @@ permissions:
 jobs:
   packages:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: release
     env:
       DOTNET_NOLOGO: true
@@ -197,6 +198,7 @@ jobs:
   nuget:
     needs: [ packages, image-sign ]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: release
     permissions:
       contents: read
@@ -243,6 +245,7 @@ jobs:
   image-build:
     needs: packages
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       image: ${{ steps.build.outputs.image }}
       version: ${{ steps.build.outputs.version }}
@@ -290,6 +293,7 @@ jobs:
   image-scan:
     needs: image-build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions: {}
     env:
       IMAGE: ${{ needs.image-build.outputs.image }}
@@ -346,6 +350,7 @@ jobs:
   image-sbom:
     needs: [ image-build, image-scan ]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -389,6 +394,7 @@ jobs:
   image:
     needs: [ image-build, image-scan, image-sbom, checksums ]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: release
     permissions:
       packages: write
@@ -451,6 +457,7 @@ jobs:
   image-sign:
     needs: image
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: release
     permissions:
       contents: read
@@ -504,6 +511,7 @@ jobs:
   desktop-build:
     needs: packages
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -578,6 +586,7 @@ jobs:
   desktop:
     needs: desktop-build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: release
     permissions:
       contents: write
@@ -633,6 +642,7 @@ jobs:
           - { rid: osx-arm64, os: macos-latest }
           - { rid: osx-x64, os: macos-latest }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -672,6 +682,7 @@ jobs:
   installers:
     needs: [ desktop, installer-build ]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: release
     permissions:
       contents: write
@@ -724,6 +735,7 @@ jobs:
     # Not `release`: the federated credential trusts this environment's OIDC token only (docs/desktop.md#signing-in-to-azure).
     environment: windows-signing
     runs-on: windows-latest
+    timeout-minutes: 45
     permissions:
       contents: write
       # For the Azure login: the job's GitHub OIDC token, which Azure exchanges for a short-lived access token under the
@@ -824,6 +836,7 @@ jobs:
   installer-macos:
     needs: [ packages, desktop, installer-build ]
     runs-on: macos-latest
+    timeout-minutes: 60
     environment: release
     permissions:
       contents: write
@@ -918,6 +931,7 @@ jobs:
   installer-sbom:
     needs: [ installers, installer-windows, installer-macos ]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY_OPTOUT: true
@@ -972,6 +986,7 @@ jobs:
   checksums:
     needs: [ packages, image-sbom, desktop, installers, installer-windows, installer-macos, installer-sbom ]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: release
     permissions:
       contents: write
@@ -1031,6 +1046,7 @@ jobs:
   publish:
     needs: [ packages, checksums, image-sign, nuget ]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment: release
     permissions:
       contents: write

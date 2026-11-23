@@ -22,6 +22,11 @@ jobs:
       contents: read
       issues: write
     steps:
+      # For deploy/report-issue.sh.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       # The latest release: never a draft or a pre-release (the `media` release that holds the site's videos is one).
       - name: Download the latest release's SBOMs
         id: release
@@ -121,9 +126,4 @@ jobs:
             body+=$'\n'"- Trivy found a high or critical vulnerability with a fix in the NuGet packages' and the tool's SBOM, or could not scan it: see $RUN."
           fi
           body+=$'\n\n'"Update what it names on main (Directory.Packages.props, or the .NET SDK in global.json for the runtime), then tag a patch release so the desktop app updates and the tool and packages ship the fix under their own version."
-          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')"
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label security
-          fi
+          deploy/report-issue.sh "$title" "$body" security

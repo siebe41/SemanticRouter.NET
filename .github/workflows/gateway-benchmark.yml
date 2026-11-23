@@ -70,3 +70,28 @@ jobs:
           name: gateway-benchmark
           path: gateway.json
           if-no-files-found: ignore
+
+  # A scheduled run has nobody watching it: when one fails, this opens an issue, or comments on the open one, so the
+  # failure does not go unnoticed. It builds nothing, so the token it gets to do that is safe here
+  # (deploy/workflow-secrets-check.sh).
+  report-scheduled-failure:
+    name: report a scheduled failure
+    needs: [ gateway ]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Open or comment on an issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          deploy/report-issue.sh "Scheduled run failed: $GITHUB_WORKFLOW" \
+            "The scheduled run of $GITHUB_WORKFLOW on $(date -u +%F) at ${GITHUB_SHA:0:7} failed: $RUN"

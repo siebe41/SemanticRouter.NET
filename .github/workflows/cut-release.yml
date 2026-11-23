@@ -37,6 +37,7 @@ concurrency:
 jobs:
   tag:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # The same environment as the publishing jobs: its required reviewer approves this run too, and the signing secrets
     # and RELEASE_TAG_TOKEN can be kept there.
     environment: release

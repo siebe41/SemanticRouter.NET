@@ -12,12 +12,16 @@ internal sealed class StallGuard : IDisposable
 {
     private readonly CancellationTokenSource _source;
     private readonly CancellationToken _request;
+    private readonly CancellationTokenRegistration _cancelled;
 
-    public StallGuard(TimeSpan limit, CancellationToken request)
+    /// <summary>A guard whose timer runs on <paramref name="time"/> (the system clock by default).</summary>
+    public StallGuard(TimeSpan limit, CancellationToken request, TimeProvider? time = null)
     {
         Limit = limit;
         _request = request;
-        _source = CancellationTokenSource.CreateLinkedTokenSource(request);
+        // Created on the time provider, so CancelAfter runs on its timers; cancelled with the request as a linked one is.
+        _source = new CancellationTokenSource(Timeout.InfiniteTimeSpan, time ?? TimeProvider.System);
+        _cancelled = request.Register(static source => ((CancellationTokenSource)source!).Cancel(), _source);
     }
 
     /// <summary>How long a read may wait.</summary>
@@ -40,7 +44,11 @@ internal sealed class StallGuard : IDisposable
     /// <summary>Wraps a reply's content so every read of its body is guarded.</summary>
     public HttpContent Guard(HttpContent content) => new GuardedContent(content, this);
 
-    public void Dispose() => _source.Dispose();
+    public void Dispose()
+    {
+        _cancelled.Dispose();
+        _source.Dispose();
+    }
 
     private async ValueTask<int> ReadAsync(Stream inner, Memory<byte> buffer, CancellationToken cancellationToken)
     {

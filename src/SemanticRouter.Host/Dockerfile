@@ -14,7 +14,11 @@
 #
 # Base images are pinned by digest (Dependabot updates them); the runtime is Ubuntu chiseled: no shell or package
 # manager, only what .NET needs. The -extra variant keeps ICU and time zone data, for budgets in a local time zone.
-FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:bef136a371963aaa46ec97882845ef6f54dec15728bb4b128b1c2a400ffbc9b4 AS build
+# The SDK image is tagged with an exact SDK version in global.json's feature band (10.0.4xx), not sdk:10.0, which moves
+# to the next band (10.0.5xx) when one ships: global.json rolls forward only to a later patch, so the build would fail.
+# Dependabot moves it to later patches of the band; a new band comes with global.json, by hand (CI's container job
+# checks that they match).
+FROM mcr.microsoft.com/dotnet/sdk:10.0.404-noble@sha256:bef136a371963aaa46ec97882845ef6f54dec15728bb4b128b1c2a400ffbc9b4 AS build
 WORKDIR /src
 COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props .editorconfig ./
 COPY src/ src/

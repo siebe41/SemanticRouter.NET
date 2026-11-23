@@ -12,7 +12,12 @@ module.exports = defineConfig({
   // One router, one configuration: tests run one after another and each starts from the fixture configuration.
   workers: 1,
   fullyParallel: false,
+  // In CI a stray test.only fails the run instead of quietly skipping every other test. A failed test is run once more,
+  // so its first attempt leaves a trace and the report tells a flake from a regression, but a test that only passed on
+  // its retry (flaky) still fails the run: a retry must not hide a flake in a required check.
+  forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
+  failOnFlakyTests: !!process.env.CI,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]] : 'list',
   use: {
     ...devices['Desktop Chrome'],
