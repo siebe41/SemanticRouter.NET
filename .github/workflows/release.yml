@@ -161,7 +161,7 @@ jobs:
             mkdir -p "sbom/$name" && unzip -q "$package" -d "sbom/$name"
           done
 
-      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
         with:
           path: sbom
           format: cyclonedx-json
@@ -319,7 +319,7 @@ jobs:
 
       # The image's CycloneDX SBOM: completed in image-sbom, then attached to the release, and to the image as an
       # attestation (image-sign).
-      - uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
         with:
           image: ${{ env.IMAGE }}:latest
           format: cyclonedx-json
@@ -473,7 +473,7 @@ jobs:
           name: sbom-image
           path: sbom
 
-      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - uses: sigstore/cosign-installer@881c63bd87e38389154debd8331404ce7ca8a3ab # v4.1.4
 
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
@@ -558,7 +558,7 @@ jobs:
           deploy/third-party-notices-check.sh artifacts/THIRD-PARTY-NOTICES.txt "Inter (font)" "Fira Sans (font)" \
             "Velopack native binaries" "Rust standard library" "AppImage type2-runtime"
 
-      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - uses: anchore/sbom-action/download-syft@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
         id: syft
 
       # One SBOM per platform, SemanticRouter-<version>-<rid>.cdx.json, named after the archive it describes and
@@ -998,7 +998,7 @@ jobs:
           pattern: installer-*
           path: installers
 
-      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+      - uses: anchore/sbom-action/download-syft@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
         id: syft
 
       - name: SBOMs
