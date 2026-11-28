@@ -18,7 +18,7 @@
 # to the next band (10.0.5xx) when one ships: global.json rolls forward only to a later patch, so the build would fail.
 # Dependabot moves it to later patches of the band; a new band comes with global.json, by hand (CI's container job
 # checks that they match).
-FROM mcr.microsoft.com/dotnet/sdk:10.0.404-noble@sha256:2b1e13a22e46b55117f9cdb4b38e73172de08a30370166c8227d06cdaff82473 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0.404-noble@sha256:8c6edfb26c85153f236d26efebd9ad349aec403583f343f201ee67838b23658d AS build
 WORKDIR /src
 COPY global.json nuget.config Directory.Build.props Directory.Build.targets Directory.Packages.props .editorconfig ./
 COPY src/ src/
